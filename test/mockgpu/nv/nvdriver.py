@@ -1,16 +1,9 @@
 import ctypes, mmap, collections, functools, os
-from tinygrad.runtime.autogen import nv_570 as nv_gpu
+from tinygrad.runtime.autogen import nv_570 as nv_gpu, libc
 from typing import cast, Any
 from tinygrad.helpers import to_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
-
-MAP_FIXED = 0x10
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
-libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype = ctypes.c_int
 
 NVSubDevice = collections.namedtuple('NVSubDevice', ['device'])
 NVUserMode = collections.namedtuple('NVUserMode', ['subdevice'])
@@ -258,7 +251,7 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
     elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE:
       st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
-      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, libc.MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
       st = nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS.from_address(argp)
       for gpu_attr_id in range(st.gpuAttributesCount):

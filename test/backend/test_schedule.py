@@ -71,7 +71,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
-    t = x.avg_pool2d(padding=1)
+    t = x.avg_pool2d(padding=1).clone()
     linear, var_vals = t.linear_with_vars()
     self.assertEqual(len(linear.src), kcount)
     run_linear(linear, var_vals)
@@ -85,17 +85,17 @@ class TestSchedule(unittest.TestCase):
   # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
   # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
-    a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
+    a = Tensor.arange(6).reshape(3, 2).sum(axis=1).clone()
     run_linear(*check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
 
   def test_arange_sum_alt(self):
-    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
+    a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2).clone()
     run_linear(*check_schedule(a, 1))
     np.testing.assert_equal(a.numpy(), 20)
 
   def test_permute_arange(self):
-    a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
+    a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1).clone()
     run_linear(*check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [[15]])
 
@@ -230,7 +230,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
   def test_example_matmul_same(self):
-    x = Tensor.eye(64)
+    x = Tensor.eye(64).clone().realize()
     z = x.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -847,7 +847,7 @@ class TestSchedule(unittest.TestCase):
   def test_cast_const_view(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32, buffer=False)
     casted_view = a.cast(dtypes.int32)
-    run_linear(*check_schedule(casted_view, 1))
+    run_linear(*check_schedule(casted_view, 0))
     realized_const_view = casted_view.contiguous()
     run_linear(*check_schedule(realized_const_view, 0))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
@@ -927,7 +927,7 @@ class TestSchedule(unittest.TestCase):
   def test_div_padded_arange(self):
     x = Tensor.full((2,2), 16, buffer=False)
     y = x.div(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2), rounding_mode="trunc").pad(((1,1), (1,1)))
-    out = y.sum(axis=1)
+    out = y.sum(axis=1).clone()
     run_linear(*check_schedule(out, 1))
     self.assertListEqual(out.tolist(), [0, 12, 4, 0])
 
@@ -976,10 +976,10 @@ class TestSchedule(unittest.TestCase):
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
     args = {"dim":32, "end":2048, "theta":10000}
-    fused = precompute_freqs_cis(**args)
+    fused = precompute_freqs_cis(**args).clone()
     run_linear(*check_schedule(fused, 1))
     if getenv("CHECK", 1):
-      ref = precompute_freqs_cis(**args)
+      ref = precompute_freqs_cis(**args).clone()
       run_linear(*check_schedule(ref, 1))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
@@ -1058,6 +1058,12 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(a.tolist(), [0., 0.])
     self.assertEqual(b.tolist(), [False, False])
 
+  def test_const_mul(self):
+    b = Tensor(2) * 4
+    self.assertIsNone(b.uop.device)
+    run_linear(*check_schedule(b, 0, filter_sink=False))
+    assert b.item() == 8
+
   def test_mnist_val(self):
     # from tinygrad.nn.datasets import mnist
     import torch
@@ -1092,6 +1098,12 @@ class TestSchedule(unittest.TestCase):
       a.assign(a / 1)
       run_linear(*check_schedule(a, 0, filter_sink=False))
       self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+
+  def test_deviceless_materialize_localizes_to_target(self):
+    dev = "CPU" if Device.DEFAULT != "CPU" else "CPU:1"
+    t = Tensor.arange(Variable("s", 1, 128).bind(64)).cumsum().clone(dev)
+    self.assertEqual(t.device, dev)
+    np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
 
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
@@ -1271,11 +1283,6 @@ class TestCopyFolding(unittest.TestCase):
     y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     check_schedule(x, 3, filter_sink=False)
-
-  def test_const_copy_multi(self):
-    x = Tensor.ones(1, device="CPU", buffer=False).to_(["CPU", "CPU:1"]) * 2
-    run_linear(*check_schedule(x, 2, filter_sink=False))
-    self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).clone().realize()

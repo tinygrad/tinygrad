@@ -323,7 +323,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_arange_opts(self):
-    a = Tensor.arange(128)
+    a = Tensor.arange(128).clone()
     # NOTE: arange no longer has reduce ops available for opt
     helper_linearizer_opt(a, [
       #[Opt(OptOps.GROUP, 0, 32)],

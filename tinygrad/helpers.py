@@ -29,6 +29,11 @@ def argfix(*x):
 # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
 def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
+def get_shape(x) -> tuple[int, ...]:
+  # NOTE: str is special because iterating it still yields strs
+  if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
+  if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
+  return (len(subs),) + (subs[0] if subs else ())
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st

@@ -124,6 +124,28 @@ __device__ static inline void mfma1616128(      float2 (&D)[2],
     )};
 }
 
+template<int opsel_a, int opsel_b, int cbsz = 0, int blgp = 0>
+__device__ static inline void mfma1616128_scaled(      float2 (&D)[2],
+                                         const fp8e4m3_4 (&A)[8],
+                                         const fp8e4m3_4 (&B)[8],
+                                         const float2 (&C)[2],
+                                         const fp8e8m0_4 *scale_a,
+                                         const fp8e8m0_4 *scale_b) {
+    typedef __attribute__((__vector_size__(8 * sizeof(int)))) int intx8_t;
+    typedef __attribute__((__vector_size__(4 * sizeof(float)))) float floatx4_t;
+
+    *(floatx4_t*)D = {__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
+        *(intx8_t*)A,
+        *(intx8_t*)B,
+        *(floatx4_t*)C,
+        cbsz,         // cbsz: 0=fp8(e4m3) A, 1=bf8(e5m2) A
+        blgp,         // blgp: 0=fp8(e4m3) B, 1=bf8(e5m2) B
+        opsel_a,      // opsel_a
+        *scale_a,     // scale_a
+        opsel_b,      // opsel_b
+        *scale_b      // scale_b
+    )};
+}
 
 /**
  * @brief Base matrix multiply-accumulate operation for row layout.
@@ -216,6 +238,46 @@ __device__ static inline void mma_ABt_base(rt_base<float, ducks::rt_layout::col,
                   B_rows == 32 && B_cols == 64 &&
                   std::is_same_v<C_shape, typename ducks::rt_shape::rt_32x32>) {
         mfma323264(d.data, a.data, b.data, c.data);
+    } else {
+        static_assert(false, "Unsupported shape combination");
+    }
+}
+
+/**
+ * @brief Base dot product operation for row layout.
+ *
+ * This function performs the base dot product operation
+ * for block-scaled matrices in row layout.
+ *
+ * @param[out] d The output rt_base<float, col_layout> accumulator.
+ * @param[in] a The first input rt_base<Operand_T, row_layout> matrix.
+ * @param[in] b The second input rt_base<Operand_T, row_layout> matrix.
+ * @param[in] c The input rt_base<float, col_layout> accumulator matrix.
+ */
+template<int opsel_a, int opsel_b, int cbsz = 0, int blgp = 0, ducks::rt_shape::all D_shape, ducks::rt_shape::all A_shape, ducks::rt_shape::all B_shape, ducks::rt_shape::all C_shape, typename MM_Operand_T>
+__device__ static inline void mma_ABt_base_scaled(rt_base<float, ducks::rt_layout::col, D_shape> &d,
+    const rt_base<MM_Operand_T, ducks::rt_layout::row, A_shape> &a,
+    const rt_base<MM_Operand_T, ducks::rt_layout::row, B_shape> &b,
+    const rt_base<float, ducks::rt_layout::col, C_shape> &c,
+    const fp8e8m0_4 *scale_a,
+    const fp8e8m0_4 *scale_b) {
+
+    static_assert(std::is_same_v<D_shape, C_shape>, "D and C must have the same shape");
+
+    constexpr int A_rows = A_shape::rows;
+    constexpr int A_cols = A_shape::cols;
+    constexpr int B_rows = B_shape::rows;
+    constexpr int B_cols = B_shape::cols;
+
+    constexpr int A_stride = A_shape::stride;
+    constexpr int B_stride = B_shape::stride;
+    static_assert(A_stride == B_stride, "A and B must have the same stride");
+
+    if constexpr (std::is_same_v<D_shape, typename ducks::rt_shape::rt_16x16> &&
+                A_rows == 16 && A_cols == 128 &&
+                B_rows == 16 && B_cols == 128 &&
+                std::is_same_v<C_shape, typename ducks::rt_shape::rt_16x16>) {
+        mfma1616128_scaled<opsel_a, opsel_b, cbsz, blgp>(d.data, a.data, b.data, c.data, scale_a, scale_b);
     } else {
         static_assert(false, "Unsupported shape combination");
     }
@@ -420,6 +482,62 @@ __device__ static inline void mma_ABt(D &d,
         }
     }
 }
+
+/**
+ * @brief Block scaled dot product operation for row layout.
+ *
+ * This function performs the dot product operation
+ * for block-scaled matrices in row layout.
+ *
+ * @tparam N The number of row tiles.
+ * @tparam K The number of column tiles for the A matrix and row tiles for the B matrix.
+ * @tparam M The number of column tiles for the B matrix.
+ * @param[out] d The output rt_fl<N, M, col_layout> accumulator.
+ * @param[in] a The first input rt_bf<N, K, row_layout> matrix.
+ * @param[in] b The second input rt_bf<M, K, row_layout> matrix in row-major mode.
+ * @param[in] c The input rt_fl<N, M, col_layout> accumulator matrix.
+ * @param[in] scale_a Pointer to the packed E8M0 scale for the A matrix.
+ * @param[in] scale_b Pointer to the packed E8M0 scale for the B matrix.
+ */
+template<int cbsz = 0, int blgp = 0, ducks::rt::col_layout D, ducks::rt::row_layout A, ducks::rt::row_layout B, ducks::rt::col_layout C>
+__device__ static inline void mma_ABt_scaled(D &d,
+                                const A &a,
+                                const B &b,
+                                const C &c,
+                                const fp8e8m0_4 *scale_a,
+                                const fp8e8m0_4 *scale_b) {
+
+    static_assert(D::rows == A::rows && D::cols == B::rows);
+    static_assert(A::cols == B::cols);
+    static_assert(D::rows == C::rows && D::cols == C::cols);
+
+    static_assert(
+        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
+            std::is_same_v<typename B::T, bf16> && std::is_same_v<typename C::T, float>) ||
+        (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
+            std::is_same_v<typename B::T, half> && std::is_same_v<typename C::T, half>) ||
+        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
+            std::is_same_v<typename B::T, fp8e4m3> && std::is_same_v<typename C::T, float>)
+    );
+
+    [&]<std::size_t... Ns>(std::index_sequence<Ns...>) {
+        ([&]<std::size_t N>() {
+            [&]<std::size_t... Ms>(std::index_sequence<Ms...>) {
+                ([&]<std::size_t M>() {
+                    mma_ABt_base_scaled<N, M, cbsz, blgp>(
+                        d.tiles[N][M],
+                        a.tiles[N][0],
+                        b.tiles[M][0],
+                        c.tiles[N][M],
+                        scale_a,
+                        scale_b
+                    );
+                }.template operator()<Ms>(), ...);
+            }(std::make_index_sequence<D::width>{});
+        }.template operator()<Ns>(), ...);
+    }(std::make_index_sequence<D::height>{});
+}
+
 /**
  * @brief Matrix multiply-accumulate operation with transposed A.
  *

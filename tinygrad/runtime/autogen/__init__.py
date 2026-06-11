@@ -49,9 +49,10 @@ def load(name, files, **kwargs):
 
 def __getattr__(nm):
   match nm:
-    case "libc": return load("libc", lambda: (
-      [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
-      ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), dll="'c'", errno=True)
+    case "libc":
+      return load("libc", lambda: ([i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'bits/mman-shared.h' in i] +
+                                   ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]),
+                  args=["-D__USE_GNU", "-D_GNU_SOURCE"], dll="'c'", errno=True, recsym=True)
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
     case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", args=["-I{}"], srcs=opencl_src)
     case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'nvcuda' if WIN else 'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False, prolog=["from tinygrad.helpers import WIN"])
@@ -96,8 +97,6 @@ def __getattr__(nm):
       return load("io_uring", ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
                   args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
-    case "ib": return load("ib", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
-                                  "/usr/include/infiniband/ib_user_ioctl_verbs.h", "/usr/include/rdma/ib_user_verbs.h"], dll="'ibverbs'", errno=True)
     case "llvm": return load("llvm", lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"], dll=llvm_lib,
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
@@ -120,7 +119,6 @@ def __getattr__(nm):
                                     *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/inc/{s}.h" for s in [
                                         "hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue", "amd_hsa_kernel_code",
                                         "hsa_ext_finalize", "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
-      dll="[os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64']",
       srcs=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
     case "amdgpu_kd": return load("amdgpu_kd", lambda: [f"{system('llvm-config-20 --includedir')}/llvm/Support/AMDHSAKernelDescriptor.h"],
                                   args=lambda: system("llvm-config-20 --cflags").split() + ["-x", "c++"], recsym=True, macros=False)

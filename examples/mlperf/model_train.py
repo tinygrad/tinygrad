@@ -1447,7 +1447,7 @@ def train_llama3():
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       master = optim.master_params[idx]
       inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
-      master.assign((master * inv.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+      master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
@@ -1476,7 +1476,7 @@ def train_llama3():
     grad_norm = optim.fstep(grads)
     scheduler.step()
 
-    for g in grads: g.assign(g.const_like(0))
+    for g in grads: g.assign(0)
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")

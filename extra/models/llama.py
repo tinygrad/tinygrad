@@ -164,7 +164,7 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
   # softmax
   t = (logits / temp).softmax()
 
-  counter, counter2 = Tensor.arange(t.numel(), device=logits.device).contiguous(), Tensor.arange(t.numel() - 1, -1, -1, device=logits.device).contiguous()
+  counter, counter2 = Tensor.arange(t.numel()).contiguous(), Tensor.arange(t.numel() - 1, -1, -1).contiguous()
   # top k
   if k:
     output, output_indices = Tensor.zeros(k, device=logits.device).contiguous(), Tensor.zeros(k, device=logits.device, dtype=dtypes.int32).contiguous()

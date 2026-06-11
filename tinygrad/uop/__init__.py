@@ -22,6 +22,9 @@ class Ops(FastEnum):
   # define LOCAL/REG allocate things
   DEFINE_LOCAL = auto(); DEFINE_REG = auto()
 
+  # BUFFER is the new LOCAL/REG
+  BUFFER = auto()
+
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
@@ -49,7 +52,7 @@ class Ops(FastEnum):
   # ** 3 -- load/store **
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers
-  INDEX = auto()
+  INDEX = auto(); SHRINK = auto()
 
   # load/store before math
   LOAD = auto(); STORE = auto()
@@ -99,10 +102,10 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  STAGE = auto(); COPY = auto(); BUFFER = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
+  STAGE = auto(); COPY = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
-  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); FLIP = auto()
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
@@ -126,8 +129,6 @@ class GroupOp:
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
-
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.CONST, Ops.DEFINE_VAR}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}

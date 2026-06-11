@@ -366,7 +366,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   return (grad_weight_uop.cast(weight.dtype), None)
 
 def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
-  arange = Tensor.arange(weight.shape[0], device=weight.device)
+  arange = Tensor.arange(weight.shape[0])
   return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
 @functools.cache
@@ -411,7 +411,7 @@ class LSTMCell:
     self.bias_hh: Tensor|None = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
-    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device, buffer=False),)*2
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, buffer=False),)*2
     gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()

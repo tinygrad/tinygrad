@@ -40,7 +40,7 @@
 
 \section*{UOps}
 
-All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op},\;\mathrm{src},\;\mathrm{arg},\;\mathrm{tag})$ where $\mathrm{op}$ is from the set below, $\mathrm{src}$ is a tuple of input UOps, $\mathrm{arg}$ is op-dependent, and $\mathrm{tag}$ is for temporary processing. The full program is a DAG of UOps. Each UOp has five derived properties --- \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{min\_max}, and \textbf{axis} --- determined by the rules at the end of this document.
+All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op},\;\mathrm{src},\;\mathrm{arg},\;\mathrm{tag})$ where $\mathrm{op}$ is from the set below, $\mathrm{src}$ is a tuple of input UOps, $\mathrm{arg}$ is op-dependent, and $\mathrm{tag}$ is for temporary processing. The full program is a DAG of UOps. Each UOp has five derived properties --- \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspace}, and \textbf{min\_max} --- determined by the rules at the end of this document.
 
 %% ============================================================
 \subsection*{Source Ops \normalfont\small--- leaf nodes}
@@ -51,8 +51,8 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \midrule
 \op{Param} & $(\mathbf{s})$ & slot, dtype, device?, addrspace? &
   Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
-\op{Buffer} & () & size, dtype, device, addrspace &
-  Shape $(n \cdot \textit{size},)$ if device is $n$-tuple, else $(\textit{size},)$. \\
+\op{Buffer} & $(\mathbf{s})$ & slot, dtype, device, addrspace &
+  Concrete buffer slot with shape $\mathbf{s}$. If device is a tuple, it creates the fully sized buffer across multiple devices. \\
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
   & & & Form vector consts with \op{Stack} \\
@@ -61,7 +61,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
 
 %% ============================================================
 \subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic; view, indexing, and reinterpretation only}
@@ -74,12 +74,10 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
 \op{Expand} & $(T, \mathbf{s'})$ & --- & Broadcast size-1 axes. $s_k \in \{1, s'_k\}$. \\
-\op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in a zero-filled output of shape $s'_k$. \\
+\op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in an invalid-filled output of shape $s'_k$. \\
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
-\op{Replicated} & $(T,)$ & axes & Mark $T$ as replicated along axes. Collapse axes to $1$. \\
-\op{Slice} & $(T, \mathrm{offset})$ & size, dtype & Zero-copy \textit{size} elems of dtype; offset is elems of $T$ dtype. \\
 \op{Bitcast} & $(T,)$ & dtype & Reinterpret storage as target dtype; preserve total bytes. \\
 \bottomrule
 \end{tabular}
@@ -248,14 +246,14 @@ These ops are not part of the core specification and are subject to change.
 %% ============================================================
 \subsection*{Derived Properties}
 
-Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{min\_max}, and \textbf{axis}, derived from its op, src, and arg:
+Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspace}, and \textbf{min\_max}, derived from its op, src, and arg:
 
 \medskip
 \begin{tabular}{@{}l l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer} & from arg & $(\text{size},)$ from arg & from arg & dtype range \\
+\op{Buffer} & from arg & from $\mathrm{src}[0]$ & from arg & dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
 \op{Param} & from arg & from $\mathrm{src}[0]$ & from arg & from src or dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
