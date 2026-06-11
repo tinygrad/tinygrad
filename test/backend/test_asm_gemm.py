@@ -268,15 +268,88 @@ def run_mxfp8_gemm(M:int, N:int, K:int) -> None:
   assert err_mx < 1e-2, f"kernel vs mxfp8 reference rel err {err_mx}"
   assert err < 6e-2, f"kernel vs fp32 rel err {err}"
 
+def run_mx_gemm_bw(M:int, N:int, K:int, w_post:bool=False) -> None:
+  Tensor.manual_seed(0)
+  a_rand = (Tensor.randn(M, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  b_rand = (Tensor.randn(N, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  w_post_scale = (Tensor.rand(N, dtype=dtypes.float) + 0.5).realize() if w_post else None
+  a, b, a_ref, b_ref = a_rand.clone(), b_rand.clone(), a_rand.clone(), b_rand.clone()
+  tst = asm_gemm(a, b.T, mx=True, w_post_scale=w_post_scale)
+  tst.sum().backward()
+  Tensor.realize(tst, a.grad, b.grad)
+  a_grad, b_grad = a.grad.float().contiguous().realize(), b.grad.float().contiguous().realize()
+  ref = a_ref.float() @ b_ref.float().T
+  if w_post is not None and w_post_scale is not None: ref = ref * w_post_scale.reshape(1, -1)
+  ref.sum().backward()
+  ref_b_grad = b_ref.grad / w_post_scale.reshape(-1, 1) if w_post_scale is not None else b_ref.grad
+  Tensor.realize(ref, a_ref.grad, b_ref.grad)
+  if a.device.startswith("NULL"): return
+  for name, t, r in [("fw", tst, ref), ("grad_a", a_grad, a_ref.grad), ("grad_b", b_grad, ref_b_grad)]:
+    err = ((t.float() - r.float()).abs().mean() / (r.float().abs().mean() + 1e-8)).item()
+    assert err < 6e-2, f"{name} rel err {err}"
+
+def run_mx_gemm_multi(M:int, N:int, K:int, x_shard, w_shard, g_shard, gpus:int=2) -> None:
+  Tensor.manual_seed(0)
+  devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(gpus))
+  x_r = (Tensor.randn(M, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  w_r = (Tensor.randn(N, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  def run(shard):
+    x = (x_r.shard(devs, axis=x_shard) if shard else x_r.clone()); x.requires_grad = True
+    w = (w_r.shard(devs, axis=w_shard) if shard else w_r.clone()); w.requires_grad = True
+    out = asm_gemm(x, w.T, mx=True)
+    gmul = Tensor.ones(M, N).cast(dtypes.bfloat16)
+    (out.float() * (gmul.shard(devs, axis=g_shard) if shard else gmul).float()).sum().backward()
+    Tensor.realize(out, x.grad, w.grad)
+    to = (lambda t: t.to(Device.DEFAULT)) if shard else (lambda t: t)
+    return to(out).float().numpy(), to(x.grad).float().numpy(), to(w.grad).float().numpy()
+  ref = run(False)
+  if Device.DEFAULT.startswith("NULL"): return
+  got = run(True)
+  for name, g, r in zip(("fw", "grad_x", "grad_w"), got, ref):
+    err = ((abs(g - r)).mean() / (abs(r).mean() + 1e-8))
+    assert err < 2e-2, f"{name} sharded vs single rel err {err}"
+
+def run_mx_prequant(M:int, N:int, K:int) -> None:
+  from extra.gemm.cdna_asm_gemm import quantize_mxfp8
+  Tensor.manual_seed(0)
+  x_rand = (Tensor.randn(M, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  w_rand = (Tensor.randn(N, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
+  x, w = x_rand.clone(), w_rand.clone()
+  x_q, x_e8, x_si = quantize_mxfp8(x)
+  w_q, w_e8, w_si = quantize_mxfp8(w)
+  out = asm_gemm(x_q, w_q.T, mx=True, mx_scales=(x_si, x_e8, w_si, w_e8))
+  out.sum().backward()
+  Tensor.realize(out, x.grad, w.grad)
+  if Device.DEFAULT.startswith("NULL"): return
+  ref_out, gx = x_rand.float() @ w_rand.float().T, w_rand.float().sum(0)
+  gw = x_rand.float().sum(0).reshape(1, K).expand(N, K)
+  for name, t, r in [("fw", out, ref_out), ("grad_x", x.grad, gx), ("grad_w", w.grad, gw)]:
+    err = ((t.float() - r.float()).abs().mean() / (r.float().abs().mean() + 1e-8)).item()
+    assert err < 6e-2, f"{name} prequant vs analytic rel err {err}"
+
 @unittest.skipUnless(has_hipcc(), "MXFP8 gemm requires hipcc to compile")
 class TestGemmMXFP8(unittest.TestCase):
   def setUp(self):
     if not is_cdna4() or DEV.interface.startswith("MOCK"): self.skipTest("mxfp8 gemm is only for cdna4")
+  def test_prequant_simple(self): run_mx_prequant(256, 256, 256)
+  def test_prequant_rect(self): run_mx_prequant(512, 256, 512)
   def test_simple(self): run_mxfp8_gemm(N:=getenv("N", 256), N, 2*128)
   def test_rect(self): run_mxfp8_gemm(512, 256, 512)
   def test_llama_ffn(self): run_mxfp8_gemm(8192, 14336, 4096)
   def test_llama_ffn2(self): run_mxfp8_gemm(8192, 4096, 14336)
   def test_llama_qkv(self): run_mxfp8_gemm(8192, 4096, 4096)
+  # backward needs all dims tile-aligned (dgrad reduces N, wgrad reduces M)
+  def test_bw_simple(self): run_mx_gemm_bw(256, 256, 256)
+  def test_bw_rect(self): run_mx_gemm_bw(512, 256, 512)
+  def test_bw_w_post(self): run_mx_gemm_bw(256, 256, 256, w_post=True)
+  def test_bw_llama_qkv(self): run_mx_gemm_bw(8192, 4096, 4096)
+  # MP sharding: col-parallel (w on out axis), row-parallel (x,w on in axis)
+  @needs_second_gpu
+  def test_multi_col_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=None, w_shard=0, g_shard=1)
+  @needs_second_gpu
+  def test_multi_row_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=1, w_shard=1, g_shard=None)
+  @needs_second_gpu
+  def test_multi_data_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=0, w_shard=None, g_shard=0)
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
