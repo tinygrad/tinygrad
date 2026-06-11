@@ -39,7 +39,7 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif (u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id') or (u.op is Ops.PARAM and u.arg.name == 'core_id'): mults *= int(u.vmax) + 1
+      elif (u.op is Ops.DEFINE_VAR or (u.op is Ops.PARAM and u.arg.addrspace is None)) and u.expr == 'core_id': mults *= int(u.vmax) + 1
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.scalar().itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
