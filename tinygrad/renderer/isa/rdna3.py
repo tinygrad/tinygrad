@@ -18,38 +18,13 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 # - Wave front size is set to 32 in amd/elf.py
 # - look at amd/elf.py  for kernel launching semantics/metadata
 # - exec masking??
-
-"""
-First principles thinking:
-
-- regalloc + renderer stubs handles loading register values
-- need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
-- start with pinned pairs
-
-- goal, ensure UOp src operands come in order of instruction encoding to satisfy isa, makes encoding easier
-  - look at vop2()
-  - explicitly emit register moves if necessary
-- where should register fusion happen? at encoding step probably not in izsel_matcher
-
-Target program input AST:
-
-Tensor.empty(3,3) + Tensor.empty(3,3)
-
-c0 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(0))
-c2 = UOp.special(3, 'lidx0', dtype=dtypes.int)
-c3 = UOp.special(3, 'gidx0', dtype=dtypes.int)
-c5 = c2+c3*UOp.const(dtypes.int, 3)
-c7 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(1))
-c9 = c7.index(c5, ptr=True).load()
-c10 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(2))
-c12 = c10.index(c5, ptr=True).load()
-c13 = c9+c12
-c15 = c0.index(c5, ptr=True).store(c13).end(c3, c2)
-
-handwritten asm:
-
-kernel:
-"""
+# - regalloc + renderer stubs handles loading register values
+# - need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
+# - start with pinned pairs
+# - goal, ensure UOp src operands come in order of instruction encoding to satisfy isa, makes encoding easier
+#   - look at vop2()
+#   - explicitly emit register moves if necessary
+# - where should register fusion happen? at encoding step probably not in izsel_matcher
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -122,6 +97,11 @@ V_ADD = {
   dtypes.uint32 : RDNA3Ops.v_add_nc_u32_e32,
 }
 
+V_SUB = {
+  dtypes.float16 : RDNA3Ops.v_sub_f16_e32,  dtypes.float32 : RDNA3Ops.v_sub_f32_e32,
+  dtypes.int32 : RDNA3Ops.v_sub_nc_i32, dtypes.uint32 : RDNA3Ops.v_sub_nc_u32_e32,
+}
+
 V_MUL = {
   dtypes.float16 : RDNA3Ops.v_mul_f16_e32,  dtypes.float32 : RDNA3Ops.v_mul_f32_e32,
   dtypes.float64 : RDNA3Ops.v_mul_f64,      dtypes.int32 : RDNA3Ops.v_mul_i32_i24_e32,
@@ -147,6 +127,7 @@ isel_matcher = PatternMatcher([
   # alu ops
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
+  (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
@@ -160,8 +141,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_vop2),
 ])
 
-from tinygrad.renderer.amd.dsl import Inst
-def encode(x:UOp) -> tuple[Inst, bytes]:
+def fillinsts(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null
   enc, group, opc = x.arg, x.arg.func.__name__, x.arg.args[0].name.lower()
   def _route(r:Register): return dsl_v if r.name[0] == "v" else dsl_s
@@ -173,16 +153,21 @@ def encode(x:UOp) -> tuple[Inst, bytes]:
     if len(rr) > 1: return r[rr[0].index:rr[0].index+len(rr)-1]
     else: return r[rr[0].index]
   oprs, fields = x.src, [_fuse(x.tag)] if x.tag is not None else []
+  suffix = []
   if group == "SMEM":
     assert oprs[-1].op == Ops.CONST
     sbase = oprs[0].tag if len(oprs) == 2 else oprs[0].tag + oprs[1].tag
     fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
     ret = enc(*fields)
+    if "load" in opc:
+      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
   elif group == "GLOBAL":
     vaddr, base, offs = oprs[0], oprs[1], oprs[2]
     kw = dict(addr=_immorreg(vaddr), saddr=_fuse(base.tag), offset=_immorreg(offs))
     if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
-    else: kw["vdst"]=_fuse(x.tag)
+    else:
+      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+      kw["vdst"]=_fuse(x.tag)
     ret = enc(**kw)
   elif "VOP" in group:
     fields.extend([_immorreg(u) for u in oprs])
@@ -192,40 +177,38 @@ def encode(x:UOp) -> tuple[Inst, bytes]:
     ret = enc(*fields)
   else:
     raise NotImplementedError("instruction type encoding unsupported")
-  return ret, ret.to_bytes()
+  nx = x.replace(arg=ret)
+  return nx, [nx] + suffix
 
-# insert s_waitcnt where necessary to sync async ops across wave ex. global load
-def inswaits(uops:list[UOp]):
-  # v1 naive just insert s_waitcnt vmcnt(0) after every s/global load
-  # v2 use s_waitcnt vmcnt(N) on usage boundaries, detect when loaded register is used again
-  nuops = []
-  for u in uops:
-    nuops.append(u)
-    if u.op is not Ops.INS: continue
-    opc = u.arg.args[0].name.lower()
-    if "load" in opc:
-      nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))
-  return nuops
+post_regalloc_matcher = PatternMatcher([
+  # strip everything but Ops.INS to bypass render rewrite
+  (UPat((Ops.SINK, Ops.DEFINE_REG, Ops.CONST), name="x"), lambda ctx,x: (x,[])),
+
+  # final operand legalization and then filling of dsl Inst class partials from autogen
+  (UPat(Ops.INS, name="x"), fillinsts),
+])
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = PatternMatcher([])
   isel_matcher = isel_matcher
-  post_regalloc_matcher = PatternMatcher([])
+  post_regalloc_matcher = post_regalloc_matcher
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-    self.compiler = AMDLLVMCompiler(arch="rdna3")
 
   # hack for now
   def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-1])
   def spill(self, disp:UOp, x:UOp) -> UOp: return x
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
-  def asm(self, prg:UOp, lin:UOp) -> bytes:
-    # TODO: global load flush pass, insert s_waitcnt_vmcnt(0) before first ALU op that consumes result
-    # TODO: before s_load use s_waitcnt lgkmnct(0)
-    pass
 
+  def asm(self, prg:UOp, lin:UOp) -> bytes:
+    from tinygrad.renderer.amd.elf import assemble_linear
+    # expects arg of every op in lin to be filled Inst class
+    for u in lin.src:
+      print(u.arg)
+    return assemble_linear(prg, lin, self.target.arch)
+
+  """
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     asm = [f"{function_name}:"]
     uops = inswaits(uops)
@@ -233,10 +216,4 @@ class RDNA3Renderer(ISARenderer):
       if u.op is not Ops.INS: continue
       asm.append(str(encode(u)[0]))
     return "\n\t".join(asm)
-
-  def render(self, uops:list[UOp]) -> str:
-    binary = bytearray()
-    for u in uops:
-      if u.op is not Ops.INS: continue
-      binary.extend(encode(u)[1])
-    return binary.hex()
+  """

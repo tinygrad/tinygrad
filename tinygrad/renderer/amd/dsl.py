@@ -268,7 +268,7 @@ def _canonical_name(name: str) -> str | None:
   return None
 
 class InsOp(functools.partial):
-  def _key(self): return (self.func.__name__, *[int(a) for a in self.args])
+  def _key(self): return (self.func.__name__, *[str(a) for a in self.args])
   def __lt__(self, other): return self._key() < other._key()
 
 class Inst:
