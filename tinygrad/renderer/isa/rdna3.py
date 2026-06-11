@@ -181,8 +181,10 @@ def fillinsts(x:UOp):
   return nx, [nx] + suffix
 
 post_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
+
   # strip everything but Ops.INS to bypass render rewrite
-  (UPat((Ops.SINK, Ops.DEFINE_REG, Ops.CONST), name="x"), lambda ctx,x: (x,[])),
+  (UPat((Ops.DEFINE_REG, Ops.CONST), name="x"), lambda ctx,x: (x,[])),
 
   # final operand legalization and then filling of dsl Inst class partials from autogen
   (UPat(Ops.INS, name="x"), fillinsts),
@@ -204,8 +206,8 @@ class RDNA3Renderer(ISARenderer):
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
     # expects arg of every op in lin to be filled Inst class
-    for u in lin.src:
-      print(u.arg)
+    print(prg.arg)
+    for u in lin.src: print(u.arg)
     return assemble_linear(prg, lin, self.target.arch)
 
   """
