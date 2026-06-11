@@ -2939,7 +2939,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
         b_q, b_e8, b_si = quantize_mxfp8(b.T)
       has_w_post = w_post_scale is not None
       fxn = functools.partial(custom_hk_mxfp8_gemm, dname=dname)
-      grad_fxn = functools.partial(custom_mx_gemm_bwd, has_w_post=has_w_post)
+      grad_fxn = functools.partial(custom_mx_gemm_bw, has_w_post=has_w_post)
       extra = [w_post_scale] if w_post_scale is not None else []
       out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8, *extra, fxn=fxn, grad_fxn=grad_fxn)[0]
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
