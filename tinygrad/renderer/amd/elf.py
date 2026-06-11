@@ -1,7 +1,7 @@
 # minimal amdgpu elf packer
 import ctypes
 from tinygrad.helpers import ceildiv, round_up
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import ProgramInfo, UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
@@ -12,6 +12,7 @@ from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
 def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
+  prginfo: ProgramInfo = prg.arg
   insts = [u.arg for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
@@ -34,12 +35,10 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  sink, n_bufs, n_vars, lds_size, gids = prg.src[0], 0, 0, 0, set()
+  n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), prginfo.global_size
+  sink, lds_size = prg.src[0], 0
   for u in sink.toposort():
-    if u.op is Ops.PARAM: n_bufs += 1
-    elif u.op is Ops.DEFINE_VAR: n_vars += 1
-    elif u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
-    elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
+    if u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
