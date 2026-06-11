@@ -252,7 +252,7 @@ def DO_POST(self):
     ids: list[int] = tok.prefix()
     for i, msg in enumerate(body["messages"]):
       if "image" in msg:
-        ids.extend([0] * (self.server.vis.toks_per_img + 8))
+        ids.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
         if i == len(body["messages"]) - 1:
           self.server.vis(lang=self.server.model, image=base64.b64decode(msg["image"].split(',')[1]), start_pos=\
           Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
