@@ -35,7 +35,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), prginfo.global_size
+  n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), set(prginfo.globals)
   sink, lds_size = prg.src[0], 0
   for u in sink.toposort():
     if u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize

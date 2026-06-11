@@ -25,6 +25,15 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 #   - look at vop2()
 #   - explicitly emit register moves if necessary
 # - where should register fusion happen? at encoding step probably not in izsel_matcher
+#
+#
+# Timeline:
+# (1) hack together a functional fp32 gemm kernel, first get Tensor.ones add working (kernarg loading/storing)
+# (2) Clean up as much code as possible, especially encoding, abi, post regalloc pass
+# (3) Start the rest of the isa, write some test cases for diverse kernels (.where, casts, ranges, etc...)
+# (4) Pain and suffering
+# (5) perf! (may require hardware)
+
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -68,13 +77,19 @@ dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 
 dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
 
-def is_sgpr(x:UOp) -> bool: return x.tag[0].cons[0].name[0] == "s"
+# def is_sgpr(x:UOp) -> bool: return x.tag[0].cons[0].name[0] == "s"
 def is_imm(x:UOp) -> bool: return x.tag == True
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and (not is_imm(x)) and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(x:UOp):
   if is_vgpr(x): return x
   # TODO: different move instruction based on dtype size?
   return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,), tag=None) # tag=None forces vreg GP_VGPR alloc
+
+def _const(dt, v:int) -> UOp: return UOp.const(dt,v)
+def pre_to_vgpr(x:UOp):
+  if x.op is Ops.DEFINE_REG or isinstance(x.tag, tuple): return x
+  if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
+  return x
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
   if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
@@ -83,13 +98,17 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   base, idx = x.src
   # TODO: handle multi-register index ex. 64 bit SGPR pair
   disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  # really should get stored in sgpr
+  shft = pre_to_vgpr(_const(dtypes.int, disp_scale // 2))
   if idx.op is Ops.CONST: return (UOp(Ops.NOOP), base, _offs(idx.arg * disp_scale))
   # NOTE: dont cast for now so I dont need to impl cast alu
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0], base, _offs(idx.src[1].arg * disp_scale))
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
+
+  # TODO: adressing is in elements not bytes, logical shift needed ex. v_lshlrev_b32 by 2
 
   # For now dont use immediate offset (set to 0x0)
   # lane relative offsets need to be stored in vgpr
-  return (idx, base, _offs(0))
+  return (idx << shft, base, _offs(0))
 
 V_ADD = {
   dtypes.float16 : RDNA3Ops.v_add_f16_e32,  dtypes.float32 : RDNA3Ops.v_add_f32_e32,
@@ -117,6 +136,7 @@ def legalize_vop2(x:UOp):
   if is_vgpr(a): return x.replace(src=(b,a))
   return x.replace(src=((a, to_vgpr(b))))
 
+
 isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
@@ -132,7 +152,11 @@ isel_matcher = PatternMatcher([
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
   # store value b in addr a?
-  (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"), lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, src=fold_address(a) + (b,))),
+  # TODO: ensure b is in a register
+  (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"), lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, src=fold_address(a) + (pre_to_vgpr(b),))),
+
+  # hack
+  ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
 
   # allocate virtual registers
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
@@ -160,7 +184,7 @@ def fillinsts(x:UOp):
     fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
     ret = enc(*fields)
     if "load" in opc:
-      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
   elif group == "GLOBAL":
     vaddr, base, offs = oprs[0], oprs[1], oprs[2]
     kw = dict(addr=_immorreg(vaddr), saddr=_fuse(base.tag), offset=_immorreg(offs))
