@@ -11,6 +11,7 @@ from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
+from tinygrad.uop.winograd_rewrite import try_winograd_rewrite
 
 # creation can recurse a lot
 import sys
@@ -158,6 +159,12 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
+
+  # winograd rewrite (fires before split_reduceop; returns None if pattern doesn't match)
+  # pm_winograd is composed in below
+
+  # winograd rewrite (fires before split_reduceop; returns None if pattern doesn't match)
+  (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)), lambda reduce, x: try_winograd_rewrite(reduce, x, pm_mops)),
 
   # split_reduceop
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)), split_reduceop),
