@@ -24,7 +24,7 @@ class ParamArg:
   slot: int
   vmin_vmax: tuple[PyConst, PyConst]|None = None
   name: str|None = None
-  addrspace: AddrSpace = AddrSpace.GLOBAL
+  addrspace: AddrSpace|None = AddrSpace.GLOBAL
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
   def __repr__(self):
@@ -298,7 +298,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count)) if len(self.src) >= 1 else None
+        return self.src[0].as_shape if len(self.src) >= 1 else None
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
@@ -1139,7 +1139,7 @@ class ProgramInfo:
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
-      if u.op is Ops.PARAM: _globals.append(u.arg.slot)
+      if u.op is Ops.PARAM and u.addrspace is not None: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)

@@ -44,6 +44,9 @@ pm_remove_vec_dtypes = PatternMatcher([
   # replace DEFINE_LOCAL/DEFINE_REG with BUFFER
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
+  # replace DEFINE_VAR with PARAM
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x:
+   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -125,7 +128,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   if ren.new_style:
     sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
-    sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+    num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
+    name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
+    sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
