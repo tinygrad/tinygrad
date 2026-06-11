@@ -496,7 +496,6 @@ class Tensor(RandMixin):
   _seed: int = int(time.time())
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
-
   _device_rng_counter_vals: dict[str, tuple[int, int]] = {}
   
   @staticmethod
@@ -515,7 +514,7 @@ class Tensor(RandMixin):
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
+    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters, Tensor._device_rng_counter_vals = seed, {}, {}, {}
 
   @staticmethod
   def _next_counter(device:str, num:int) -> tuple[Tensor, Tensor]:
