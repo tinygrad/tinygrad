@@ -3,10 +3,10 @@ import struct
 from collections import defaultdict
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
-from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod, unwrap, Target
+from tinygrad.helpers import flatten, prod, unwrap, Target
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -97,18 +97,18 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)),
    lambda ctx, x, a: f"cvt{modifier(x.dtype, a.dtype)}.{ctx.cast_types[x.dtype]}.{ctx.cast_types[a.dtype]} {ctx.r[x]}, {ctx.r[a]};"),
   # store / gated load / load
-  (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc").or_casted(), UPat.var("var"))),
+  (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("var"))),
    lambda ctx, loc, var: f"st.{mem_type(loc)}" + \
     f"{f'.v{cnt}' if ((cnt:=var.max_numel())>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
     f"[{ctx.r[loc]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.max_numel() > 1 else ctx.r[var]};"),
-  (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc").or_casted(), UPat.var("alt"), UPat.var("gate"))),
+  (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("alt"), UPat.var("gate"))),
     lambda ctx, x, loc, alt, gate: flatten([
     [f"mov.{ctx.mem_types[x.dtype.scalar()]} {v}, {render_val(0, x.dtype.scalar())};" for v in ctx.r[x]],
     [f"@{ctx.r[gate]} ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
   ]) if alt.max_numel() > 1 else [
     f"@{ctx.r[gate]} ld.{mem_type(loc)}.{ctx.mem_types[x.dtype.scalar()]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
     f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype.scalar()][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
-  (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc").or_casted(),)),
+  (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"),)),
     lambda ctx, x, loc: f"ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
      if x.max_numel() > 1 else f"ld.{mem_type(loc)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   # simple
@@ -181,7 +181,6 @@ class PTXRenderer(Renderer):
     name = "test"
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP}: continue
-      if u.op is Ops.CAST and isinstance(u.dtype, PtrDType): continue
       if u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
         continue
@@ -191,19 +190,13 @@ class PTXRenderer(Renderer):
       if u.op is Ops.STACK:
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
-      if u.op is Ops.GEP:
-        r[u] = r[u.src[0]][get_single_element(u.arg)]
-        continue
-      if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or u.src[0].addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)):
-        r[u] = r[u.src[0]]
-        continue
       if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG:
         r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD, Ops.STORE} and u.src[0].addrspace == AddrSpace.REG:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           assert u.src[1].op == Ops.CONST, f"index on REG in ptx only supported on CONST, not {u.src[1].op}"
-          r[u] = r[u.src[0]][u.src[1].arg] if isinstance(r[u.src[0]], list) else r[u.src[0]]
+          r[u] = r[u.src[0]][u.src[1].arg]
         else:
           r[u] = r[u.src[0]]
           if u.op is Ops.STORE:
