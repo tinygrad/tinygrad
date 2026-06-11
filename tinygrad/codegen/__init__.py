@@ -38,8 +38,6 @@ pm_remove_vec_dtypes = PatternMatcher([
   (UPat((Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
     if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
-  # no LOADs on register dtypes
-  (UPat(Ops.LOAD, name="x"), lambda x: x.src[0] if x.src[0].addrspace == AddrSpace.REG else None),
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
