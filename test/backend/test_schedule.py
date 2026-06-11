@@ -5,7 +5,7 @@
 import unittest
 import numpy as np
 from typing import cast
-from hypothesis import given, strategies as strat
+from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import UOp, Ops, UPat
@@ -87,9 +87,10 @@ class TestSchedule(unittest.TestCase):
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 1)
 
-  @given(strat.sampled_from(supported_dtypes), strat.sampled_from(supported_dtypes))
+  @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
   @unittest.skip("kernel count depends on input")
   def test_cast_padded_const(self, dt1, dt2):
+    assume(dt1 in supported_dtypes and dt2 in supported_dtypes)
     a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
     casted_view = a.cast(dt2)
     run_linear(*check_schedule(casted_view, 0))
