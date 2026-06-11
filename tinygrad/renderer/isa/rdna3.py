@@ -1,5 +1,6 @@
 from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
 from tinygrad.helpers import Target
+from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
@@ -28,8 +29,8 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 #
 #
 # Timeline:
-# (1) hack together a functional fp32 gemm kernel, first get Tensor.ones add working (kernarg loading/storing)
-# (2) Clean up as much code as possible, especially encoding, abi, post regalloc pass
+# [DONE] hack together a functional fp32 gemm kernel, first get Tensor.ones add working (kernarg loading/storing)
+# (2) Clean up as much code as possible, especially encoding, abi, post regalloc pass, load syncs etc..
 # (3) Start the rest of the isa, write some test cases for diverse kernels (.where, casts, ranges, etc...)
 # (4) Pain and suffering
 # (5) perf! (may require hardware)
@@ -132,15 +133,29 @@ V_MUL = {
   dtypes.uint32 : RDNA3Ops.v_mul_u32_u24_e32,
 }
 
+V_SQRT = {
+  dtypes.float16 : RDNA3Ops.v_sqrt_f16_e32, dtypes.float32 : RDNA3Ops.v_sqrt_f32_e32,
+  dtypes.float64 : RDNA3Ops.v_sqrt_f64_e32
+}
+
+V_CMPLT = {
+  dtypes.float16 : RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32 : RDNA3Ops.v_cmp_lt_f32_e32,
+  dtypes.float64 : RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32 : RDNA3Ops.v_cmp_lt_u32_e32,
+  dtypes.int32 : RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16: RDNA3Ops.v_cmp_lt_i16_e32,
+  dtypes.uint16 : RDNA3Ops.v_cmp_lt_u16_e32
+}
+
 # ensures vsrc1 is a vgpr operand
 def legalize_vop2(x:UOp):
-  if x.arg.func is not RDNA3Ops.VOP2: return None
-  if any(s.tag is None for s in x.src): return None
-  a, b = x.src
+  if x.arg.func not in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]: return None
+  # if x.arg.func not in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]: return None
+  if any(s.tag is None for s in x.src[:2]): return None
+  suffix = x.src[2:] if len(x.src) >2 else ()
+  a, b = x.src[:2]
+  # print(x.arg.args[0].name.lower(), a.op, b.op)
   if is_vgpr(b): return None
-  if is_vgpr(a): return x.replace(src=(b,a))
-  return x.replace(src=((a, to_vgpr(b))))
-
+  if is_vgpr(a): return x.replace(src=(b,a) + suffix)
+  return x.replace(src=((a, to_vgpr(b))) + suffix)
 
 isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -149,10 +164,28 @@ isel_matcher = PatternMatcher([
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
-  # alu ops
+  # unary alu ops
+  (UPat.var(name="y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[x.dtype], src=(y,))),
+
+  # binary alu ops
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
+
+  # cmp ops
+  # ((UPat.var("a") < UPat()).named("x"), foo),
+
+  # where ops
+  # I think the problem is the condition always gets folded into where src?
+  # somehow need to do comparison in same step? doe sit need post regalloc?
+  # (UPat(Ops.WHERE, src=(UPat(), UPat.var("a"), UPat.var("b")), name="x"), bar),
+  (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
+    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(a,b,m.ins(V_CMPLT[a.dtype], dtype=dtypes.void)))),
+
+  # TODO: conditional moves ex. (a < b).where(x, y)
+  # Does conditional move need to be in post regalloc pass?
+  # Store cmp in src and then rewrite line to call cmp instruction right before cndmask
+
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
@@ -170,6 +203,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_vop2),
 ])
 
+# TODO: clean up this slop, use **kw for all op types?
 def fillinsts(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null
   enc, group, opc = x.arg, x.arg.func.__name__, x.arg.args[0].name.lower()
@@ -199,6 +233,8 @@ def fillinsts(x:UOp):
       kw["vdst"]=_fuse(x.tag)
     ret = enc(**kw)
   elif "VOP" in group:
+    # remove stale cmps? find better way to do this
+    if "cndmask" in opc: oprs = oprs[:-1]
     fields.extend([_immorreg(u) for u in oprs])
     ret = enc(*fields)
   elif group == "SOPK":
@@ -211,6 +247,7 @@ def fillinsts(x:UOp):
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
+
 
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST), name="x"), lambda ctx,x: (x,[])),
