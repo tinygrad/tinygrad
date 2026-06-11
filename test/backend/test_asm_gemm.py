@@ -294,8 +294,8 @@ def run_mx_gemm_multi(M:int, N:int, K:int, x_shard, w_shard, g_shard, gpus:int=2
   x_r = (Tensor.randn(M, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
   w_r = (Tensor.randn(N, K, dtype=dtypes.float) * 0.5).cast(dtypes.bfloat16).realize()
   def run(shard):
-    x = (x_r.shard(devs, axis=x_shard) if shard else x_r.clone()); x.requires_grad = True
-    w = (w_r.shard(devs, axis=w_shard) if shard else w_r.clone()); w.requires_grad = True
+    x = (x_r.shard(devs, axis=x_shard) if shard else x_r.clone())
+    w = (w_r.shard(devs, axis=w_shard) if shard else w_r.clone())
     out = asm_gemm(x, w.T, mx=True)
     gmul = Tensor.ones(M, N).cast(dtypes.bfloat16)
     (out.float() * (gmul.shard(devs, axis=g_shard) if shard else gmul).float()).sum().backward()
