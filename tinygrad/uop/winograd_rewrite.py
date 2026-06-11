@@ -1,5 +1,22 @@
 """
-Winograd F(4x4, 3x3) as a generic UOp graph rewrite rule.
+Winograd F(4x4, 3x3) as a generic UOp graph rewrite rule, gated by WINO_GRAPH=1.
+
+Fires on pre-rangeify REDUCE(ADD, axes, MUL(a, b)) nodes that structurally match
+a 2D stride-1 dilation-1 convolution, without consulting any conv metadata.
+
+Matching pipeline (all must pass, else returns None):
+  _probe_input  — verifies sliding-window affine structure (kernel+output axes co-vary)
+  _probe_filter — verifies static kernel access, extracts canonical Y/X axis ordering
+  _find_logical_base — walks movement ops to the allocation-level base tensor
+
+Replacement (_build_winograd):
+  input  : B(x)   via _Bt applied to pooled input tiles  (S,S,bs,cin,ty,tx)
+  filter : G(g)   via _G  applied to filter weights      (S,S,cout,cin)
+  output : A(B(x) * G(g)).sum(cin)  via _At              (bs,cout,H,W)
+  where S=6 (transform domain), tile size M=4, kernel r=3.
+
+Registration: rangeify.py injects pm_mops so the affine simplification
+runs in the same pass without a layering violation.
 """
 from __future__ import annotations
 
