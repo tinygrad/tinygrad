@@ -38,10 +38,14 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 # Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
-WGIDS, WIIDS = tuple(SGPRS[2:5]), tuple(VGPRS[:3])
+# work item ids packed into v[0]? 10 bytes each
+# need to use v_bfe_u32 (bitfield extract)
+# v_bfe vdst, src, field offset, field size
+WGIDS, WIIDS = tuple(SGPRS[2:5]), (VGPRS[0],)
 # s[0:1] reserved for kernarg ptr
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[3:])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[1:])
 
+def _const(dt, v:int) -> UOp: return UOp.const(dt,v)
 # def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
@@ -63,7 +67,8 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
-    return def_reg(dtypes.int, WGIDS[dim] if x.arg[0] == 'g' else WIIDS[dim])
+    if x.arg[0] == 'g': return def_reg(dtypes.int, WGIDS[dim])
+    else: return x.ins(RDNA3Ops.v_bfe_u32, src=(def_reg(dtypes.uint32, WIIDS[0]), _const(dtypes.uint32, 10 * dim), _const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   # pin kernarg ptr and contiguous gp sgprsfor load
   return x.ins(RDNA3Ops.s_load_b64,
@@ -85,12 +90,12 @@ def to_vgpr(x:UOp):
   # TODO: different move instruction based on dtype size?
   return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,), tag=None) # tag=None forces vreg GP_VGPR alloc
 
-def _const(dt, v:int) -> UOp: return UOp.const(dt,v)
 def pre_to_vgpr(x:UOp):
   if x.op is Ops.DEFINE_REG or isinstance(x.tag, tuple): return x
   if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
   return x
 
+# idx may need to be added then shifted?
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
   if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
   def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
