@@ -496,6 +496,9 @@ class Tensor(RandMixin):
   _seed: int = int(time.time())
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
+
+  _device_rng_counter_vals: dict[str, tuple[int, int]] = {}
+  
   @staticmethod
   def manual_seed(seed=0) -> None:
     """
@@ -520,13 +523,19 @@ class Tensor(RandMixin):
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
       Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
-    counter = Tensor._device_rng_counters[device]
-    new_low = counter[0:1] + (num & 0xffffffff)
-    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    if device not in Tensor._device_rng_counter_vals:
+      Tensor._device_rng_counter_vals[device] = (0, 0)
+    low, high = Tensor._device_rng_counter_vals[device]
+    counter_snapshot = Tensor([low, high], device=device, dtype=dtypes.uint32)
+    new_low = low + (num & 0xffffffff)
+    carry = new_low >> 32
+    new_low &= 0xffffffff
+    new_high = (high + (num >> 32) + carry) & 0xffffffff
+    Tensor._device_rng_counter_vals[device] = (new_low, new_high)
+    Tensor._device_rng_counters[device].assign(
+      Tensor([new_low, new_high], device=device, dtype=dtypes.uint32)
+      )
+    return Tensor._device_seeds[device], counter_snapshot
 
   @staticmethod
   def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True) -> Tensor:
