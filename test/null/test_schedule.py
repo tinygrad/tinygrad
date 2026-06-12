@@ -1,6 +1,7 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import gc, unittest, time
-from tinygrad import nn, dtypes, Device, Tensor, Context, getenv
+from typing import cast
+from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import compile_linear, run_linear
@@ -790,6 +791,14 @@ class TestSchedule(unittest.TestCase):
     self.assertIsNone(b.uop.device)
     run_linear(*check_schedule(b, 0, filter_sink=False))
     assert b.item() == 8
+
+  def test_mnist_val(self):
+    # from tinygrad.nn.datasets import mnist
+    Y_train = Tensor.randint(60000, dtype='uchar').realize()
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
+    yt = Tensor.randn(BS, 10).realize()
+    loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+    check_schedule(loss, 4)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.empty(4, 4).realize()

@@ -4,12 +4,11 @@
 
 import unittest
 import numpy as np
-from typing import cast
 from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import DEBUG, DEV, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, DEV, GlobalCounters, Context, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
@@ -165,18 +164,6 @@ class TestSchedule(unittest.TestCase):
     Tensor.realize(a, b)
     self.assertEqual(a.tolist(), [0., 0.])
     self.assertEqual(b.tolist(), [False, False])
-
-  def test_mnist_val(self):
-    # from tinygrad.nn.datasets import mnist
-    import torch
-    Y_train = Tensor.randint(60000, dtype='uchar').realize()
-    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
-    yt = Tensor.randn(BS, 10).realize()
-    loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-    run_linear(*check_schedule(loss, 4))
-    loss_fused = loss.numpy()
-    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
-    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_self_assign_no_empty_kernel(self):
     for shape in [(3, 3), (4, 4)]:
