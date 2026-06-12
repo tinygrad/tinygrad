@@ -5,15 +5,6 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 
-# Goals in progress:
-# (1) impl and verify cmp semantics, cmp vs cmpx depending on if result is used
-#   - .where() move is a weird case
-# (2) get casts working
-# (3) clean up / unify encoding pass in post_regalloc
-# (4) optimize s_waitcnt insertions?
-# (5) unify/clean up to_vgpr*s? 
-# *try not to add too many instructions without being able to verify them
-
 VCC = Register("vcc", 0)
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -87,6 +78,7 @@ V_EXP =   { dtypes.float16:RDNA3Ops.v_exp_f16_e32,  dtypes.float32:RDNA3Ops.v_ex
 V_RCP =   { dtypes.float16:RDNA3Ops.v_rcp_f16_e32,  dtypes.float32:RDNA3Ops.v_rcp_f32_e32,  dtypes.float64:RDNA3Ops.v_rcp_f64_e32   }
 V_SIN =   { dtypes.float16:RDNA3Ops.v_sin_f16_e32,  dtypes.float32:RDNA3Ops.v_sin_f32_e32 }
 V_TRUNC = { dtypes.float16:RDNA3Ops.v_trunc_f16_e32,dtypes.float32:RDNA3Ops.v_trunc_f32_e32,dtypes.float64:RDNA3Ops.v_trunc_f64_e32 }
+V_FMA =   { dtypes.float16:RDNA3Ops.v_fma_f16,      dtypes.float32:RDNA3Ops.v_fma_f32,      dtypes.float64:RDNA3Ops.v_fma_f64       }
 V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e32,
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
 V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e32,
@@ -106,6 +98,8 @@ def legalize_operands(x:UOp):
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
   return None
 
+# TODO: handle unsupported dtypes in pre_isel_matcher by casting?
+# TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
@@ -117,12 +111,15 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[y.dtype])),
   (UPat.var("y").exp2().named("x"), lambda y,x: x.ins(V_EXP[y.dtype])),
   (UPat.var("y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[y.dtype])),
-  (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
   (UPat.var("y").sin().named("x"), lambda y,x: x.ins(V_SIN[y.dtype])),
   (UPat.var("y").trunc().named("x"), lambda y,x: x.ins(V_TRUNC[y.dtype])),
+  (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
+
+  # fused multiply add, use FMAC in the future?
+  ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"),
+    lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
 
   # binary alu ops
-  # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
@@ -133,14 +130,12 @@ isel_matcher = PatternMatcher([
   # need to somehow check if the output of cmp is used, in that case use cmpx ins??
 
   # comparisons
-  ((UPat.var("a", dtype=dt_32bit) > UPat.var("b")).named("m"),
-    lambda a,b,m: m.ins(V_CMPGT[a.dtype], src=(a,b), dtype=dtypes.uint32, tag=(VCC,))),
-  ((UPat.var("a", dtype=dt_32bit) < UPat.var("b")).named("m"),
-    lambda a,b,m: m.ins(V_CMPLT[a.dtype], src=(a,b), dtype=dtypes.uint32, tag=(VCC,))),
+  ((UPat.var("a", dtype=dt_32bit) > UPat.var("b")).named("m"), lambda a,b,m: m.ins(V_CMPGT[a.dtype], src=(a,b), tag=(VCC,))),
+  ((UPat.var("a", dtype=dt_32bit) < UPat.var("b")).named("m"), lambda a,b,m: m.ins(V_CMPLT[a.dtype], src=(a,b), tag=(VCC,))),
 
   # conditional moves
   (UPat(Ops.INS, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
-    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(a,b,m))),
+    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,m))),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
@@ -171,7 +166,6 @@ def fillinsts(x:UOp):
 
   # hacky fixes, find cleaner way to conform to isa
   if "cndmask" in opc: oprs = oprs[:-1]
-  if "cmp" in opc: oprs = oprs[1:]
   if "load" in opc:
       suffix.append(fillinsts(UOp(Ops.INS,
                                   arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt,
@@ -182,7 +176,7 @@ def fillinsts(x:UOp):
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oprs[1].tag), offset=_immorreg(oprs[2]))
     if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
     else: kw["vdst"]=_fuse(x.tag)
-  elif "VOP" in group: args = [_fuse(x.tag)] + [_immorreg(u) for u in x.src]
+  elif "VOP" in group: args = ([_fuse(x.tag)] if group != "VOPC" else []) + [_immorreg(u) for u in x.src]
   elif group == "SOPK": args = [dsl_null, oprs[0].arg]
   else: raise NotImplementedError("instruction type encoding unsupported")
   ret = enc(**kw) if kw is not None else enc(*args)
