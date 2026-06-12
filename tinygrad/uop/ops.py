@@ -279,10 +279,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER:
-        # NOTE: this is the same as PARAM, pointer BUFFERs only exist in the ISA renderers' internal style
-        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        return self.src[0].as_shape if isinstance(self.arg, ParamArg) else (self.arg,)
+      case Ops.BUFFER: return self.src[0].as_shape if isinstance(self.arg, ParamArg) else (self.arg,)
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()

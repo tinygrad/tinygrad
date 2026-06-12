@@ -60,9 +60,9 @@ class TestIselX86(unittest.TestCase):
     # need to move src from gpr to xmm before broadcasting
     self.assertTrue(n.arg is X86Ops.VPBROADCASTD and n.src[0].arg is X86Ops.VMOVD)
     # if we can fuse a load we can skip the move and access memory directly
-    load = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
     n = self.isel_rewrite(load.broadcast(4))
-    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 3)
+    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 4)
 
   def test_vbroadcastss(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
@@ -125,20 +125,20 @@ class TestIselX86(unittest.TestCase):
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
-    load = UOp.param(0, dtypes.int32.ptr()).index(a + 1, ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(a + 1).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
     self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].arg == 4)
 
   def test_fold_load(self):
-    load1 = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
-    load2 = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 1), ptr=True).load()
+    load1 = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
+    load2 = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 1)).load()
     n = self.isel_rewrite(load1 + load2)
-    self.assertTrue(len(n.src) == 4)
+    self.assertTrue(len(n.src) == 5)
 
   # don't fold when used multiple times
   def test_dont_fold_load(self):
-    load = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
     # used by multiple users
     n = self.isel_rewrite(load + 1 + load)
     self.assertTrue(len(n.src) == 2)
