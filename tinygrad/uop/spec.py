@@ -193,7 +193,7 @@ spec_tensor = PatternMatcher([
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
   # no more of these in programs
-  (UPat((Ops.DEFINE_VAR, Ops.GEP)), lambda: False),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.GEP)), lambda: False),
 
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
@@ -206,7 +206,6 @@ spec_program = PatternMatcher([
 
   # REG/LOCAL buffer
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), src=(), name="x"), lambda x: isinstance(x.dtype, PtrDType)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
