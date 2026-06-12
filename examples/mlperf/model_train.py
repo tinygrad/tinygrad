@@ -1815,6 +1815,7 @@ def train_flux():
   BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
   FAKEDATA = getenv("FAKEDATA")
+  BENCHMARK = getenv("BENCHMARK")
 
   train_num_samples, val_num_samples = 1099776, 29696
   target_eval_loss = 0.586
@@ -1937,6 +1938,7 @@ def train_flux():
 
   # training loop
   i = 0
+  step_times = []
 
   while i < NUM_STEPS:
     GlobalCounters.reset()
@@ -1956,6 +1958,8 @@ def train_flux():
     dev_time = (gt - mst) + optim_time
     step_time = et - st
 
+    if BENCHMARK: step_times.append(step_time)
+
     i += 1
 
     mem_gb = GlobalCounters.mem_used / 1e9
@@ -1964,11 +1968,21 @@ def train_flux():
         f"{i:5} {step_time:.3f} s step, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
         f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
 
+    if i == BENCHMARK:
+      median_step_time = sorted(step_times)[BENCHMARK // 2]
+      estimated_total_minutes = int(median_step_time * NUM_STEPS / 60)
+      print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+      print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
+            f"epoch global_mem: {GlobalCounters.global_mem:_}")
+
     # eval loop
-    if i % eval_freq_step == 0:
-      for sample in tqdm(val_iter, total=val_num_samples // BS):
+    if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
+      for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
         eval_loss = eval_step(model, sample)
         tqdm.write(f"eval loss: {eval_loss.float().item():.6f}")
+
+        if BENCHMARK and j + 1 == min(BENCHMARK, val_total):
+          return
 
       if eval_loss <= target_eval_loss:
         tqdm.write(f"target eval loss reached: {eval_loss:.6f} (target: {target_eval_loss:.6f})")
