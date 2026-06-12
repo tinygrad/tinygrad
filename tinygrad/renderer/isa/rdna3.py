@@ -83,6 +83,9 @@ V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
 V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e32,
   dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e32 }
+V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_nlg_f16_e32,dtypes.float32:RDNA3Ops.v_cmp_nlg_f32_e32,dtypes.float64:RDNA3Ops.v_cmp_nlg_f64_e32 }
+V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e32,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e32,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e32,
+  dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e32 }
 
 def legalize_operands(x:UOp):
   group, opc = x.arg.func, geopc(x)
@@ -97,6 +100,15 @@ def legalize_operands(x:UOp):
     if is_vgpr(x.src[-1]): return None
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
   return None
+
+def cmp(x:UOp,vcc:bool=False):
+  dt = x.src[0].dtype
+  if x.op is Ops.CMPLT: ins = V_CMPLT[dt]
+  elif x.op is Ops.CMPEQ: ins = V_CMPEQ[dt]
+  elif x.op is Ops.CMPNE: ins = V_CMPNE[dt]
+  else: ins = V_CMPGT[dt]
+  # else: raise NotImplementedError("comparison type instruction dne")
+  return x.ins(ins, tag=(VCC,) if vcc else True)
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
@@ -129,13 +141,18 @@ isel_matcher = PatternMatcher([
   # OH this is actually a case where I need to load from vcc cause that was the output of cmp
   # need to somehow check if the output of cmp is used, in that case use cmpx ins??
 
-  # comparisons
-  ((UPat.var("a", dtype=dt_32bit) > UPat.var("b")).named("m"), lambda a,b,m: m.ins(V_CMPGT[a.dtype], src=(a,b), tag=(VCC,))),
-  ((UPat.var("a", dtype=dt_32bit) < UPat.var("b")).named("m"), lambda a,b,m: m.ins(V_CMPLT[a.dtype], src=(a,b), tag=(VCC,))),
+  # conditional moves, VCC used immediately after, doesn't need to be stored in register
+  # - folds cmp instruction into src to preserve before discarding in encode
+  (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
+  (UPat(Ops.CMPEQ, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
+  (UPat(Ops.CMPNE, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
+  ((UPat() > UPat()).named("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
 
-  # conditional moves
-  (UPat(Ops.INS, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
-    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,m))),
+  # comparisons
+  ((UPat(dtype=dt_32bit) > UPat()).named("x"), cmp),
+  ((UPat(dtype=dt_32bit) < UPat()).named("x"), cmp),
+  (UPat(Ops.CMPEQ, name="x", src=(UPat(dtype=dt_32bit), UPat())), cmp),
+  (UPat(Ops.CMPNE, name="x", src=(UPat(dtype=dt_32bit), UPat())), cmp),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
@@ -198,7 +215,7 @@ class RDNA3Renderer(ISARenderer):
   pre_isel_matcher = PatternMatcher([])
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE)}
   def __init__(self, target:Target):
     super().__init__(target)
 
