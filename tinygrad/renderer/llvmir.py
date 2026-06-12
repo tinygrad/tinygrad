@@ -120,7 +120,6 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  new_style = True
   supports_float4 = True
   abi: str | None
   string_rewrite: PatternMatcher
