@@ -10,15 +10,15 @@ import numpy as np
 import cv2
 
 #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
-def rotate_half(x):
+def rotate_half(x:Tensor):
   x1 = x[..., : x.shape[-1] // 2]
   x2 = x[..., x.shape[-1] // 2 :]
   ret = Tensor.cat(-x2, x1, dim=-1)
   return ret
 
-def apply_rotary_pos_emb_vision(query, key, cos, sin): return (query * cos) + (rotate_half(query) * sin), (key * cos) + (rotate_half(key) * sin)
+def apply_rotary_pos_emb_vision(query:Tensor, key:Tensor, cos:Tensor, sin:Tensor): return (query * cos) + (rotate_half(query) * sin), (key * cos) + (rotate_half(key) * sin)
 
-def meshgrid(x, y):
+def meshgrid(x:Tensor, y:Tensor):
   grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
   grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
   return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
@@ -71,7 +71,7 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   return pos_ids
 
 class Qwen3VLVis():
-  def __init__(self, tok:SimpleTokenizer, size="2B", res=[640, 640]):
+  def __init__(self, tok:SimpleTokenizer, size:str="2B", res:list=[640, 640]):
     self.res = res
     self.toks_per_img = (self.res[0] * self.res[1]) // (32*32) # 32x32 tokens per pixel https://www.alibabacloud.com/help/en/model-studio/vision
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
@@ -91,7 +91,7 @@ class Qwen3VLVis():
     self.suffix = Tensor(tok.encode("<|vision_end|>\n<|im_end|>\n"))
 
   # https://github.com/huggingface/transformers/blob/15bb519bd4277f4ab5309154aedf3c231e8b4ca8/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L679
-  def forward(self, pixel_values, image_grid_size):
+  def forward(self, pixel_values:Tensor, image_grid_size:list):
     grid_hs, grid_ws = image_grid_size    
     idx_tensor, weight_tensor = get_vision_bilinear_indices_and_weights(h=grid_hs, w=grid_ws, num_grid_per_side=self.v.num_grid_per_side, merge_size=self.merge_size)
     pos_ids = get_vision_position_ids(h=grid_hs, w=grid_ws, merge_size=self.merge_size)
@@ -122,7 +122,7 @@ class Qwen3VLVis():
     image_embeds = self.mm[2](image_embeds)
     return image_embeds, hidden_states, deepstack_feature_lists
 
-  def __call__(self, lang, image, start_pos, end_turn=False):
+  def __call__(self, lang:Transformer, image:Tensor|bytes, start_pos:UOp.variable, end_turn:bool=False):
     if type(image) == bytes: image = cv2.cvtColor(cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     if image.shape[:2] != self.res:
       target_h, target_w = self.res[:2]
@@ -136,13 +136,13 @@ class Qwen3VLVis():
     lang._cached_tokens.extend([0] * (self.toks_per_img + vis.prefix.shape[0] + self.suffix.shape[0]))
 
   @TinyJit
-  def prefill(self, lang, image, start_pos):
+  def prefill(self, lang:Transformer, image, start_pos):
     image = image.permute(2, 0, 1)
     image = image.unsqueeze(0).float()
     image = ((image / 255) - Tensor(self.image_mean).view(1, 3, 1, 1)) / Tensor(self.image_std).view(1, 3, 1, 1)
     channels = 3
     height, width = image.shape[-2:]
-    # https://github.com/huggingface/transformers/blob/4ae05b0fba41860adaaeb708774fc1f48c92c049/src/transformers/models/qwen2_vl/image_processing_qwen2_vl.py#L195
+    #https://github.com/huggingface/transformers/blob/4ae05b0fba41860adaaeb708774fc1f48c92c049/src/transformers/models/qwen2_vl/image_processing_qwen2_vl.py#L195
     grid_h, grid_w = height // self.patch_size, width // self.patch_size
     image = image.reshape(
         channels,
@@ -177,13 +177,13 @@ class Qwen3VLVis():
     hidden_states.realize()
 
 class Qwen3PatchEmbed:
-  def __init__(self, kv=None, weights=None):
+  def __init__(self, kv:dict, weights:dict):
     self.weight = Tensor.zeros(weights["v.patch_embd.weight"].shape)
     self.weight1 = Tensor.zeros(weights["v.patch_embd.weight.1"].shape)
     self.bias = Tensor.zeros(kv["clip.vision.embedding_length"])
     
 class Qwen3VisBlocks:
-  def __init__(self, kv=None, weights=None):
+  def __init__(self, kv:dict, weights:dict):
     self.blk = []
     for _ in range(kv["clip.vision.block_count"]): self.blk.append(Qwen3VisBlock(kv, weights=weights))
     self.patch_embd = Qwen3PatchEmbed(kv=kv, weights=weights)
@@ -201,19 +201,19 @@ class Qwen3VisBlocks:
     self.post_ln = nn.LayerNorm(weights["v.post_ln.weight"].shape[0], eps=1e-6, elementwise_affine=True)
 
 class DeepstackLayer:
-  def __init__(self, index, weights):
+  def __init__(self, index:int, weights:dict):
     self.fc1 = nn.Linear(*weights[f"v.deepstack.{index}.fc1.weight"].shape[::-1])
     self.fc2 = nn.Linear(*weights[f"v.deepstack.{index}.fc2.weight"].shape[::-1])
     self.norm = nn.LayerNorm(weights[f"v.deepstack.{index}.norm.weight"].shape[0], eps=1e-6, elementwise_affine=True)
     self.hidden_size = weights[f"v.deepstack.{index}.norm.weight"].shape[0]
 
   #https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L112
-  def __call__(self, hidden_states):
+  def __call__(self, hidden_states:Tensor):
     deepstack_feature = (hidden_states.view(-1, self.hidden_size)).view(-1, self.hidden_size)
     return self.fc2(Tensor.gelu(self.fc1(deepstack_feature)))
 
 class Qwen3VisBlock:
-  def __init__(self, kv=None, weights=None):
+  def __init__(self, kv:dict, weights:dict):
     self.num_heads = kv["clip.vision.attention.head_count"]
     self.ffn_up = nn.Linear(kv["clip.vision.embedding_length"], kv["clip.vision.feed_forward_length"])
     self.ffn_down = nn.Linear(kv["clip.vision.feed_forward_length"], kv["clip.vision.embedding_length"])
@@ -223,9 +223,9 @@ class Qwen3VisBlock:
     self.attn_qkv = nn.Linear(*weights["v.blk.0.attn_qkv.weight"].shape[::-1])
   
   #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L280
-  def __call__(self, hidden_states: Tensor, position_embeddings: tuple[Tensor, Tensor]):
+  def __call__(self, hidden_states:Tensor, position_embeddings:tuple[Tensor, Tensor]):
     hidden_states_input = self.ln1(hidden_states)
-    # https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L186
+    #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L186
     query, key, value = self.attn_qkv(hidden_states_input).reshape(hidden_states.shape[0], 3, self.num_heads, -1).permute(1, 0, 2, 3)
     cos, sin = position_embeddings
     query, key = apply_rotary_pos_emb_vision(query, key, cos, sin)
