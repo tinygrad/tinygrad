@@ -411,6 +411,14 @@ pm_lift_patches_to_cmdbuf = PatternMatcher([
 ])
 
 # *****************
+# 5.3. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
+
+def hold_call_buffers(call:UOp) -> UOp|None:
+  if not (bufs:=tuple(dedup(u for u in call.src[0].toposort() if u.op is Ops.BUFFER and u not in call.src))): return None
+  return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=bufs),))
+pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), hold_call_buffers)])
+
+# *****************
 # 6. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
@@ -420,15 +428,7 @@ def bufferize_buf(buf:UOp) -> UOp|None:
 pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, name="buf"), bufferize_buf)])
 
 # *****************
-# 7.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
-
-def hold_call_buffers(call:UOp) -> UOp|None:
-  if not (bufs:=tuple(dedup(u for u in call.src[0].toposort() if u.op is Ops.BUFFER and u not in call.src))): return None
-  return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=bufs),))
-pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), hold_call_buffers)])
-
-# *****************
-# 7.2. resolve patches
+# 7. resolve patches
 
 def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
