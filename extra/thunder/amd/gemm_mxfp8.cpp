@@ -28,7 +28,9 @@ using G = kittens::group<NUM_WARPS>;
 
 __global__ __launch_bounds__(512, 2) void mxfp8_gemm_kernel(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr,
     const uint32_t *__restrict__ scale_A_iter,
-    const uint32_t *__restrict__ scale_B_iter) {
+    const uint32_t *__restrict__ scale_B_iter,
+    const uint8_t *__restrict__ a_e8_unused,
+    const uint8_t *__restrict__ b_e8_unused) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
 
     kittens::gl<fp8e4m3, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};

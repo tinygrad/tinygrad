@@ -120,7 +120,6 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  new_style = True
   supports_float4 = True
   abi: str | None
   string_rewrite: PatternMatcher
@@ -148,8 +147,8 @@ class LLVMRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
-        r[u] = f"%data{u.arg.slot}" if u.op is Ops.PARAM else f"%{u.expr}"
+      if u.op is Ops.PARAM:
+        r[u] = f"%data{u.arg.slot}"
         args.append((r[u], u))
       elif u.op is Ops.BUFFER:
         r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
