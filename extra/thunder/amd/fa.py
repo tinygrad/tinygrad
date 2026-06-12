@@ -51,7 +51,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     return None, None, dq.uop, dk.uop, dv.uop
   return grad
 
-def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, flatten_output:bool=False):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -72,7 +72,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
   arch = Device[single_device].renderer.target.arch
 
-  attn = _sharded_empty((B, N, H * D), xq, axis=shard_axis) if flatten_output else _sharded_empty_like(xq, axis=shard_axis)
+  attn = _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
 
   grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch)

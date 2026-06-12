@@ -64,13 +64,10 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
-      gemm_x_scale, x_scale_is_amax = (amax_x, True) if amax_x is not None else (x_scale, False)
       if COLUMNWISE_WEIGHT_SCALE:
-        out = asm_gemm(x_fp8, w, x_scale=gemm_x_scale, grad_amax_state=grad_amax_state, w_post_scale=w_inv_scale,
-                       b_is_weight=True, x_scale_is_amax=x_scale_is_amax)
+        out = asm_gemm(x_fp8, w.T, x_scale=x_scale, grad_amax_state=grad_amax_state, w_post_scale=w_inv_scale)
       else:
-        out = asm_gemm(x_fp8, w, x_scale=gemm_x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state,
-                       b_is_weight=True, x_scale_is_amax=x_scale_is_amax)
+        out = asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state)
       return out, x_new_amax, x_fp8
   return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8
 
@@ -78,8 +75,7 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
   if FUSED_ADD_NORM_MUL_QUANTIZE:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_rmsnorm_mul_quantize_fp8
     x_fp8, x_inv_scale, new_amax, x_normed, rrms = fused_rmsnorm_mul_quantize_fp8(x, norm, amax_x, eps, FP8_DTYPE)
-    out, *ret = matmul(None, w, amax_x=amax_x, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale,
-                       x_new_amax=new_amax, grad_amax_state=grad_amax_state)
+    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax, grad_amax_state=grad_amax_state)
     return out, x_normed, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state)
@@ -90,8 +86,7 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
   if FUSED_ADD_NORM_MUL_QUANTIZE:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8
     x_fp8, x_inv_scale, new_amax, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, norm, amax_x, eps, FP8_DTYPE)
-    out, *ret = matmul(None, w, amax_x=amax_x, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale,
-                       x_new_amax=new_amax, grad_amax_state=grad_amax_state)
+    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax, grad_amax_state=grad_amax_state)
     return out, h, x_normed, rrms, ret
   h = x + residual
   x_normed, rrms = rmsnorm(h, eps)
@@ -104,8 +99,7 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
   if FUSED_SILU_W13:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8, x2_inv_scale, new_amax_x2 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13)
-    out, *ret = matmul(None, w2, amax_x=amax_x2, w_inv_scale=s_2, x_fp8=x2_fp8, x_scale=x2_inv_scale,
-                       x_new_amax=new_amax_x2, grad_amax_state=grad_amax_xout)
+    out, *ret = matmul(None, w2, w_inv_scale=s_2, x_fp8=x2_fp8, x_scale=x2_inv_scale, x_new_amax=new_amax_x2, grad_amax_state=grad_amax_xout)
     return out, ret
   hidden = x_w13.shape[-1] // 2
   x_w1, x_w3 = x_w13[..., :hidden], x_w13[..., hidden:]
@@ -138,8 +132,8 @@ class FlatTransformer:
     self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
 
     self.norm_eps = norm_eps
-    self.attention_norm = [Tensor.ones(dim).contiguous() for _ in range(n_layers)]
-    self.ffn_norm = [Tensor.ones(dim).contiguous() for _ in range(n_layers)]
+    self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
+    self.ffn_norm = Tensor.ones(n_layers, dim).contiguous()
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
@@ -157,10 +151,8 @@ class FlatTransformer:
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
-    self._fp8_inv_scale = {name: s.contiguous().is_param_(False) if MXFP8 else [x.float().contiguous().is_param_(False) for x in s]
-                           for name, s in w_scales}
-    self._fp8_next_inv_scale = {name: s.contiguous().is_param_(False) if MXFP8 else [x.float().contiguous().is_param_(False) for x in s]
-                                for name, s in w_scales}
+    self._fp8_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
+    self._fp8_next_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -173,8 +165,7 @@ class FlatTransformer:
     scale = FP8_MAX / (amax + 1e-8)
     inv_scale = (amax + 1e-8) / FP8_MAX
     scale_b = scale.reshape(self.n_layers, out_features, 1) if COLUMNWISE_WEIGHT_SCALE else scale.reshape(-1, 1, 1)
-    w_fp8 = (w * scale_b).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE)
-    return [w_fp8[i].contiguous() for i in range(self.n_layers)], [inv_scale[i].contiguous() for i in range(self.n_layers)]
+    return (w * scale_b).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
 
   def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
@@ -195,7 +186,7 @@ class FlatTransformer:
     xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn, *save = flash_attention(xq, xk, xv, is_causal=True, flatten_output=True)
+      attn, *save = flash_attention(xq, xk, xv, is_causal=True)
       saves.extend(save)
     else:
       xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
@@ -253,19 +244,11 @@ class FlatTransformer:
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       def _shard_fp8(name:str, axis:int):
-        if MXFP8:
-          getattr(self, name).shard_(device, axis=axis)
-          self._fp8_inv_scale[name] = self._fp8_inv_scale[name].shard(device, axis=axis).contiguous().is_param_(False)
-          self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].shard(device, axis=axis).contiguous().is_param_(False)
-          Tensor.realize(getattr(self, name), self._fp8_inv_scale[name], self._fp8_next_inv_scale[name])
-        else:
-          weights = getattr(self, name)
-          per_layer_axis = axis - 1
-          for i,w in enumerate(weights): weights[i] = w.shard(device, axis=per_layer_axis).contiguous()
-          scale_axis = (0 if axis == 1 else None) if COLUMNWISE_WEIGHT_SCALE else None
-          self._fp8_inv_scale[name] = [s.shard(device, axis=scale_axis).contiguous().is_param_(False) for s in self._fp8_inv_scale[name]]
-          self._fp8_next_inv_scale[name] = [s.shard(device, axis=scale_axis).contiguous().is_param_(False) for s in self._fp8_next_inv_scale[name]]
-          Tensor.realize(*weights, *self._fp8_inv_scale[name], *self._fp8_next_inv_scale[name])
+        getattr(self, name).shard_(device, axis=axis)
+        scale_axis = axis if MXFP8 else (1 if axis == 1 else None) if COLUMNWISE_WEIGHT_SCALE else None
+        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].shard(device, axis=scale_axis).contiguous().is_param_(False)
+        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].shard(device, axis=scale_axis).contiguous().is_param_(False)
+        Tensor.realize(getattr(self, name), self._fp8_inv_scale[name], self._fp8_next_inv_scale[name])
       _shard_fp8("wqkv", 1)          # (n_layers, out, dim) shard out
       _shard_fp8("wo", 2)            # (n_layers, dim, in) shard in
       if SPLIT_W13:
@@ -274,8 +257,8 @@ class FlatTransformer:
       else:
         _shard_fp8("w13", 1)         # (n_layers, hidden*2, dim) shard out
       _shard_fp8("w2", 2)            # (n_layers, dim, hidden) shard in
-      for i,n in enumerate(self.attention_norm): self.attention_norm[i] = n.shard(device, axis=None).contiguous().realize()
-      for i,n in enumerate(self.ffn_norm): self.ffn_norm[i] = n.shard(device, axis=None).contiguous().realize()
+      self.attention_norm.shard_(device, axis=None).realize()
+      self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
@@ -300,11 +283,10 @@ class FlatTransformer:
                           s_1=s["w1"][i], s_3=s["w3"][i], grad_amax_xw1=ga["xw1"][i], grad_amax_xw3=ga["xw3"][i])
       else:
         ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i])
-      amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
       h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
-      if ret:
-        for name, new_val in zip(amax_names, ret[:len(amax_names)]):
-          a[name][i].assign(new_val)
+      amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
+      for name, new_val in zip(amax_names, ret[:len(amax_names)]):
+        a[name][i].assign(new_val)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
     return logits
