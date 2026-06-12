@@ -120,7 +120,7 @@ class Qwen3VLVis():
     image_embeds = self.mm[2](image_embeds)
     return image_embeds, hidden_states, deepstack_feature_lists
 
-  def __call__(self, lang, image, start_pos):
+  def __call__(self, lang, image, start_pos, end_turn=False):
     if type(image) == bytes: image = cv2.cvtColor(cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     if image.shape[:2] != self.res:
       target_h, target_w = self.res[:2]
@@ -128,6 +128,10 @@ class Qwen3VLVis():
       r = cv2.resize(image, (int(image.shape[1] * s), int(image.shape[0] * s)))
       image = cv2.copyMakeBorder(r, (target_h - r.shape[0]) // 2, target_h - r.shape[0] - (target_h - r.shape[0]) // 2, (target_w - r.shape[1]) // 2, target_w - r.shape[1] - (target_w - r.shape[1]) // 2, cv2.BORDER_CONSTANT, value=0)
     self.prefill(lang=lang, image=Tensor(image), start_pos=start_pos)
+
+    # for generate func
+    if end_turn: lang._cached_tokens.extend(tok.end_turn())
+    lang._cached_tokens.extend([0] * (self.toks_per_img + vis.prefix.shape[0] + self.suffix.shape[0]))
 
   @TinyJit
   def prefill(self, lang, image, start_pos):
@@ -255,9 +259,7 @@ def DO_POST(self):
         ids.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
         if i == len(body["messages"]) - 1:
           self.server.vis(lang=self.server.model, image=base64.b64decode(msg["image"].split(',')[1]), start_pos=\
-          Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
-          if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
-          self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
+          Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
       ids += tok.role(msg["role"])
       content = msg["content"]
       if isinstance(content, str): ids += tok.encode(content)
