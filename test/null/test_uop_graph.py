@@ -406,7 +406,7 @@ class TestUOpGraph(unittest.TestCase):
     vc = v+c2
     out = vc+c4
     uops = to_uops_list([out])
-    self.assertEqual(len(uops), 4)  # +1 for SINK
+    self.assertEqual(len(uops), 5)  # +1 for SINK, +1 for the PARAM shape STACK
     out = uops[-2]  # -2 to skip SINK
     self.assertEqual(out.op, Ops.ADD)
     self.assertEqual(out.src[1].op, Ops.CONST)

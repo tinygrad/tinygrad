@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1451,7 +1451,12 @@ def train_llama3():
         idx = next(j for j, p in enumerate(optim.params) if p is w)
         master = optim.master_params[idx]
         inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
-        master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
+        if MXFP8:
+          from extra.gemm.cdna_asm_gemm import _mx_block_scale
+          bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
+          master.assign((master * bs).contiguous())
+        else:
+          master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)

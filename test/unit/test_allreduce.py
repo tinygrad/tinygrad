@@ -40,7 +40,7 @@ class TestRingAllReduce(unittest.TestCase):
     pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
 
     self.assertEqual(len(pairs), N*(N-1))
-    self.assertEqual(len(sinks), N+2)
+    self.assertEqual(len(sinks), 2)
     self.assertTrue(all(dst != src for dst, src in pairs))
 
   def test_correct_ring(self):

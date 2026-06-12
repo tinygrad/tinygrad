@@ -119,7 +119,6 @@ def wmma_args(uops:list[UOp]):
   return dedup((uop.arg[0], uop.arg[1], uop.arg[2], uop.dtype.scalar(), *(uop.arg[4:8])) for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
-  new_style = True
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -167,10 +166,7 @@ class CStyleLanguage(Renderer):
       # this is lane access in C
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
       return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
-    ptr = f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
-    if buf.addrspace != AddrSpace.REG: return ptr
-    # REG buffers have no LOAD, so the access is rendered at the INDEX. the cast handles vector access, same as render_access
-    return f"(*(({self.render_type(x)}*)({ptr})))" if x.max_numel() > 1 else f"(*{ptr})"
+    return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
   def render_buffer(self, x:UOp):
     shp = x.src[0].as_shape
@@ -179,12 +175,13 @@ class CStyleLanguage(Renderer):
     suffix = f"[{shp[0]}]" if len(shp) else ""
     return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
 
-  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
       if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
       if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
+    if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL) or override_ptr:
       suffix = "*"
     if sz > 1:
       return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name).replace(" ", "_") + str(sz) + suffix
@@ -192,10 +189,8 @@ class CStyleLanguage(Renderer):
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace)
   def render_access(self, u:UOp):
-    if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
-      if u.max_numel() > 1: return f"*(({self.render_type(u)})({self[u]}))"
-      else: return f"*{self[u]}"
-    return self[u]
+    if u.max_numel() > 1: return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True)})({self[u]}))"
+    else: return f"*{self[u]}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY
@@ -224,9 +219,8 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
-        if u.op is not Ops.PARAM: r[u] = u.arg[0]
-        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+      if u.op is Ops.PARAM:
+        if isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
         else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
         bufs[u] = (r[u], (u, u in writable_params))
         continue

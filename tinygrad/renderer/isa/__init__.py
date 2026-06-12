@@ -17,7 +17,7 @@ class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
+    arg_order = {Ops.PARAM: 0, Ops.SPECIAL: 1}
     self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
 
   def vreg(self, cons:tuple[Register, ...]|Register):

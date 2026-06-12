@@ -2661,7 +2661,9 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
   block_size = 256
   threads = UOp.special(64 * 8, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
-  sink_inputs = (C.base, A.base, B.base, scale_A.base, scale_B.base, threads, workgroups)
+  e_a = extra[0].base if len(extra) >= 1 else scale_A.base
+  e_b = extra[1].base if len(extra) >= 2 else scale_B.base
+  sink_inputs = (C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, threads, workgroups)
   sink = UOp.sink(*sink_inputs,
                   arg=KernelInfo(f"hk_mxfp8_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
@@ -2882,7 +2884,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
 
 # ** mxfp8 gemm backward
 
-def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool):
+def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=False):
   inputs = kernel.src[1:]  # (out, a_q, b_q, a_si, b_si, a_e8, b_e8, [w_post])
   aq, bq = Tensor(inputs[1], device=inputs[1].device), Tensor(inputs[2], device=inputs[2].device)
   ae8, be8 = Tensor(inputs[5], device=inputs[5].device), Tensor(inputs[6], device=inputs[6].device)
@@ -2896,14 +2898,15 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool):
   grad_b = asm_gemm(g.T, a_phys, mx=True)
 
   grad_a = (grad_a * _mx_block_scale(ae8)).reshape(aq.shape)
-  grad_b = grad_b * _mx_block_scale(be8)
+  if not w_stored: grad_b = grad_b * _mx_block_scale(be8)
   if wp is not None: grad_b = grad_b / wp.reshape(-1, 1)
   return (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
 
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, b_is_weight:bool=False, x_scale_is_amax:bool=False, extra_scale:Tensor|None=None) -> Tensor:
+             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False,
+             b_is_weight:bool=False, x_scale_is_amax:bool=False, extra_scale:Tensor|None=None) -> Tensor:
   b_for_shape = b.T if b_is_weight else b
   assert can_use_asm_gemm(a, b_for_shape), f"{counters['todos'][-1]}"
   counters["used"] += 1
@@ -2946,7 +2949,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
         b_q, b_e8, b_si = quantize_mxfp8(b.T)
       has_w_post = w_post_scale is not None
       fxn = functools.partial(custom_hk_mxfp8_gemm, dname=dname)
-      grad_fxn = functools.partial(custom_mx_gemm_bw, has_w_post=has_w_post)
+      grad_fxn = functools.partial(custom_mx_gemm_bw, has_w_post=has_w_post, w_stored=mx_w_stored)
       extra = [w_post_scale] if w_post_scale is not None else []
       out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8, *extra, fxn=fxn, grad_fxn=grad_fxn)[0]
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store

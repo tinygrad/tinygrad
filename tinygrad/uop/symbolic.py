@@ -86,6 +86,10 @@ propagate_invalid = PatternMatcher([
     lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
+pm_remove_invalid = PatternMatcher([
+  (UPat(Ops.CONST, arg=Invalid, name="i"), lambda i: i.const_like(0) if i.dtype.scalar() is not dtypes.weakint else None),
+])
+
 symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
