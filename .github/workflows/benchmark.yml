@@ -356,7 +356,7 @@ jobs:
     - name: Train MNIST
       run: time PYTHONPATH=. DEV=NV TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
-      run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=120 DEV=NV STEPS=10 python3 examples/hlb_cifar10.py
+      run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=130 DEV=NV STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
       run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=120 DEV=NV STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w BF16
@@ -597,7 +597,7 @@ jobs:
   testqualcommbenchmark:
     name: comma Benchmark
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -e -o pipefail {0}

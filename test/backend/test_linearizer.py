@@ -189,7 +189,7 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[1].max_numel() == 4
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
+    assert any(x.addrspace is AddrSpace.LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[1].max_numel() == 1
     assert stores[1].src[1].dtype == dtypes.float
@@ -210,14 +210,14 @@ class TestLinearizer(unittest.TestCase):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-        local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.DEFINE_REG]
+        local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-      local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.DEFINE_REG]
+      local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
       self.assertEqual(local[0].dtype.base, expected_dtype)
 
     tests = (
@@ -311,12 +311,12 @@ class TestLinearizer(unittest.TestCase):
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 
-    helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
-    helper(Tensor.arange(-1, -100, -5), max_ops=2)
+    helper(Tensor.arange(5.5, (3.5*300), 3.5).clone(), max_ops=2)
+    helper(Tensor.arange(-1, -100, -5).clone(), max_ops=2)
     # NOTE: both of these split the reduce (this just wasn't tracked before)
     #helper(Tensor.arange(-3.2, 6.7, 0.64), max_ops=2)
     #helper(Tensor.arange(256), max_ops=2)
-    helper(Tensor.arange(255), max_ops=2)
+    helper(Tensor.arange(255).clone(), max_ops=2)
 
   @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")

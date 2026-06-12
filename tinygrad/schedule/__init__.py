@@ -39,6 +39,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
             case Ops.MSELECT | Ops.MSTACK:
               for ss in s.src:
                 if ss.op is Ops.MSELECT: ss = ss.src[0]
+                ss = _unwrap_src(ss)
                 if ss.op not in {Ops.BUFFER, Ops.PARAM}:
                   assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
                   for t in _split_after(ss)[0]:

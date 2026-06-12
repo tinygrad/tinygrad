@@ -1,4 +1,4 @@
-import inspect, functools
+import inspect, functools, math
 from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
@@ -32,10 +32,20 @@ class NullAllocator(Allocator['NullDevice']):
 
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
-    # description based on command, copied from HCQ graph
-    if PROFILE: cpu_events.append(ProfileGraphEvent(ents:=[ProfileGraphEntry(runtime.device if runtime is not None else f"{bufs[1].device}:SDMA:0", \
-        runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", i, i+1) \
-        for i,((_,_,bufs,_),runtime) in enumerate(zip(self.calls, self.runtimes))], [], [perf_counter_us() for _ in range(len(ents)+1)]))
+    if PROFILE:
+      st, descs = perf_counter_us(), []
+      event_count:dict[str, int] = {}
+      for (_,_,bufs,_),runtime in zip(self.calls, self.runtimes):
+        # description based on command, copied from HCQ graph
+        device = runtime.device if runtime is not None else f"{bufs[1].device}:SDMA:0"
+        descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", count:=event_count.get(device, 0)))
+        event_count[device] = count+1
+      # pack events evenly per device
+      dur, sigs, ents = max(1, math.ceil((perf_counter_us()-st)/max(event_count.values()))), [], []
+      for i,(device,name,count) in enumerate(descs):
+        sigs += [st+count*dur, st+(count+1)*dur]
+        ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1))
+      cpu_events.append(ProfileGraphEvent(ents, [], sigs))
     return 1e-1
 
 class NullDevice(Compiled):

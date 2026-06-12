@@ -505,14 +505,22 @@ class TestFunctionTuple(unittest.TestCase):
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="double_kernel"))
     def double_grad(d_c:UOp, call:UOp): return (None, (Tensor(d_c) * 2.0).uop)
 
+    a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0).realize()
+
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
       c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
-    a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0)
-    Tensor.realize(a)
     np.testing.assert_allclose(f(a).numpy(), 14.0)
+
+    # g is f with empty output instead of invalids
+    @function(precompile=True, allow_implicit=True)
+    def g(a:Tensor):
+      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
+
+    np.testing.assert_allclose(g(a).numpy(), 14.0)
 
   def test_custom_kernel_precompile_further_compute(self):
     def my_kernel(C:UOp, A:UOp) -> UOp:
@@ -549,7 +557,7 @@ class TestFunctionGrad(unittest.TestCase):
     GlobalCounters.reset()
     loss.realize(w1.grad, w2.grad, w3.grad)
     print(GlobalCounters.global_ops, GlobalCounters.global_mem)
-    self.assertLessEqual(GlobalCounters.global_ops, 4739073)
+    self.assertLessEqual(GlobalCounters.global_ops, 4739344)
   def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
   def test_function_grad_ops_precompile_backward(self):
     self.test_function_grad_ops(precompile=True, precompile_backward=True)

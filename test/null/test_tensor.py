@@ -102,7 +102,7 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
-    a = Tensor.arange(65535)
+    a = Tensor.arange(65535).clone()
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
@@ -171,8 +171,10 @@ class TestTensorConstLike(unittest.TestCase):
     t = Tensor.ones(8, 4).shard(devs, axis=0)
     c = t.const_like(5)
     self.assertEqual(c.shape, (8, 4))
-    self.assertEqual(c.device, t.device)
-    self.assertEqual(c.uop.axis, 0)
+    self.assertIsNone(c.device)
+    out = t+c
+    self.assertEqual(out.device, t.device)
+    self.assertEqual(out.uop.axis, 0)
 
   def test_full_like_device_on_multi_raises(self):
     t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)

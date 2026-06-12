@@ -371,8 +371,8 @@ class TestMainOnnxOps(TestOnnxOps):
     Shape = onnx_ops["Shape"]
     Compress = onnx_ops["Compress"]
     with Context(DEV="CPU"):
-      x = Tensor.arange(4, device="PYTHON").reshape(2,2)
-      self.assertEqual(EyeLike(x).device, x.device)
+      x = Tensor.arange(4).clone("PYTHON").reshape(2,2)
+      self.assertIsNone(EyeLike(x).device)
       self.assertEqual(Shape(x).device, x.device)
       out = Compress(x, [True, False, True, False])
       self.assertEqual(out.device, x.device)

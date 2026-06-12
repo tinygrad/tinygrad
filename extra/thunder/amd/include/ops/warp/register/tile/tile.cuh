@@ -9,5 +9,6 @@
 #include "maps.cuh"
 #include "reductions.cuh"
 #include "mma.cuh"
+#include "scales.cuh"
 
 #include "assembly/tile.cuh"
