@@ -107,6 +107,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
+  # GEP/STACK stuff
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
+
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
@@ -120,9 +123,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
-
-  # GEP/STACK stuff
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
 
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
