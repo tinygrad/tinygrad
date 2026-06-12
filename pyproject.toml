@@ -126,8 +126,8 @@ do_not_mutate = [
   "tinygrad/viz/*",
   "tinygrad/device.py",
   "tinygrad/dtype.py",
-  "tinygrad/gradient.py",
   "tinygrad/helpers.py",
+  "tinygrad/mixin/gradient.py",
   "tinygrad/tensor.py",
 ]
 tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]
