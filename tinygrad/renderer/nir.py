@@ -115,6 +115,7 @@ def nidx(b:mesa.nir_builder, buf, off, space, itemsize, gate=None) -> mesa.nir_d
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
 
 class NIRRenderer(Renderer):
+  new_style = True
   suffix = "NIR"
   nir_options: bytes
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
