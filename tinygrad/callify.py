@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from tinygrad.dtype import dtypes, AddrSpace, PtrDType, ImageDType
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.helpers import VIZ, pluralize, all_int
 
@@ -56,17 +57,21 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return BUFFER_VIEW.reshape(src.shape). Otherwise None."""
+  """If movement ops on src collapse to a contiguous range, return SLICE.reshape(src.shape). Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
-  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.numel(), offset)).reshape(src.shape)
+  if buf.op is Ops.SLICE:
+    byte_offset = buf.src[1].arg * buf.src[0].dtype.itemsize + offset * src.dtype.itemsize
+    buf = buf.src[0]
+    if byte_offset % buf.dtype.itemsize != 0: return None
+    offset = byte_offset // buf.dtype.itemsize
+  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.weakint, offset)), src.numel()).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
+  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(SLICE) when movement ops collapse to a contiguous range."""
   buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+  if buf.op not in {Ops.BUFFER, Ops.SLICE}: return None
+  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
@@ -79,11 +84,11 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   x = src
   while x.op in GroupOp.Movement: x = x.src[0]
-  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
+  # NOTE: this contiguous is removed because this SLICE/RESHAPE has_buffer_identity
   if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
     return view.contiguous(tag=c.tag)
 
-  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
@@ -91,6 +96,14 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     return view.multi(resolved.arg).contiguous(tag=c.tag)
 
+  return None
+
+def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
+  # how output s lands in the caller's buffer t, or None if it must be copied into t
+  # materialize straight into t
+  if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
+  # rebind output storage to t
+  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
@@ -111,9 +124,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     while s.op is Ops.AFTER:
       after_deps.extend(s.src[1:])
       s = s.src[0]
-    base = s.base
-    if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
-      subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
+    if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
+      subs[s] = placed
       items.append(s.after(*after_deps) if after_deps else s)
     else:
       items.append(t.after(t.store(s), *after_deps))
@@ -137,7 +149,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
+  # CONTIGUOUS(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
@@ -171,20 +183,19 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
+                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None,
+                   b.addrspace if isinstance(b.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
-  # remove unique from const. TODO: this is copied in function.py
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
-  # replace BUFFER_VIEW with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="b"), replace_input_buffer),
+  # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
+  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.weakint)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])

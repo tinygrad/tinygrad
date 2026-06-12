@@ -110,10 +110,10 @@ class TestExecALU(unittest.TestCase):
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
-    gmem = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
+    gmem = UOp.param(0, dtypes.float.ptr(8))
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
+    idx = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
@@ -123,14 +123,15 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
+    self.assertEqual(len(gated_uops[-1].src), 2)
 
   def test_gate_some_stores(self):
-    gmem0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
-    gmem1 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 1)
+    gmem0 = UOp.param(0, dtypes.float.ptr(8))
+    gmem1 = UOp.param(1, dtypes.float.ptr(8))
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -140,17 +141,18 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
+    self.assertEqual(len(gated_uops[-1].src), 2)
 
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.skip("we don't merge ifs anymore")
   def test_merge_ifs_alt(self):
-    gmem0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
-    gmem1 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 1)
+    gmem0 = UOp.param(0, dtypes.float.ptr(8))
+    gmem1 = UOp.param(1, dtypes.float.ptr(8))
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0*UOp.const(dtypes.int, 2)
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx.valid(gate)))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx.valid(gate)))
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem0, idx.valid(gate)))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -161,13 +163,14 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(ifs[0])+1:uops.index(endifs[0])])
     self.assertEqual(len(gated_uops), 2)
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
+    for x in gated_uops: self.assertEqual(len(x.src), 2)
 
 @unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      g = UOp.param(0, dt.ptr(3))
       c = UOp.const(dt, 2)
       l = g.index(c)
       a = UOp(Ops.CDIV, dt, (l, c))
@@ -180,7 +183,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_floormod_power_of_two(self):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      g = UOp.param(0, dt.ptr(9))
       c = UOp.const(dt, 8)
       a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -192,7 +195,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_floordiv_power_of_two_uint(self):
     # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
     for dt in (dtypes.uint32, dtypes.uint64):
-      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      g = UOp.param(0, dt.ptr(3))
       c = UOp.const(dt, 2)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -204,7 +207,7 @@ class TestFastIdiv(unittest.TestCase):
   @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
-    g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
+    g = UOp.param(0, dtypes.uint32.ptr(4))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
     a = UOp(Ops.CDIV, dtypes.uint, (l, c))
@@ -239,7 +242,7 @@ class TestFastIdiv(unittest.TestCase):
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
-    g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
+    g = UOp.param(0, dtypes.uint32.ptr(8))
     c = UOp.const(dtypes.uint, 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     a = UOp(Ops.CDIV, dtypes.uint, (l, c))
@@ -250,7 +253,7 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.CDIV, ops)
 
   def test_disable_fast_idiv(self):
-    g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
+    g = UOp.param(0, dtypes.uint32.ptr(4))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
     a = UOp(Ops.CDIV, dtypes.uint, (l, c))
@@ -287,8 +290,8 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
   def test_replace(self):
-    x = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
-    self.assertIs(x.replace(arg=None).arg, None)
+    x = UOp.param(0, dtypes.int.ptr())
+    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int.ptr()).arg).arg.slot, 1)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
   def test_const_zero_neg_zero_different(self):

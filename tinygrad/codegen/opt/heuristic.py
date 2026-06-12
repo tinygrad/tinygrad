@@ -33,8 +33,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       good_tc_opt = True
     except KernelOptError:
       pass
-    # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-    if good_tc_opt and "AMX" not in k.ren.target.arch:
+    if good_tc_opt:
       if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
           szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
@@ -96,10 +95,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
   to_upcast: list[int] = []
+  where_gate_rngs = {r for u in k.ast.backward_slice if u.op is Ops.WHERE for r in u.src[0].ranges}
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
-    is_masked = any(any(o is k.rngs[axis] for o in u.src[0].backward_slice) for u in k.ast.backward_slice if u.op is Ops.WHERE)
+    is_masked = k.rngs[axis] in where_gate_rngs
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)

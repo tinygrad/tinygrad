@@ -2,13 +2,13 @@ import contextlib, unittest, math
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
+from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, DEV
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
-from test.helpers import rand_for_dtype, CI
+from test.helpers import rand_for_dtype
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
@@ -110,7 +110,9 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq((Tensor([1], dtype=a_dtype).cast(b_dtype)+Tensor([1], dtype=a_dtype).cast(b_dtype)).cast(a_dtype), a_dtype, [2])
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
-  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
+  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*np.ones((4,4)))
+  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype).clone(), target_dtype, 2*np.ones((4,4)))
+  _assert_eq(Tensor.ones((4,4), dtype=b_dtype).clone(), b_dtype, np.ones((4,4)))
 
 class TestFp8sConversions(unittest.TestCase):
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
@@ -225,7 +227,7 @@ class TestFloatDType(TestDType):
 @unittest.skipUnless(dtypes.double in supported_dtypes, f"no double on {Device.DEFAULT}")
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
-  @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or \
+  @unittest.skipIf((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"CUDA", "NV"}) or \
    isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on CI CUDA, PTX, and NIR")  # TODO: why not?
   def test_float64_increased_precision(self):
     for func in [

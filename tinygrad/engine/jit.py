@@ -43,7 +43,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
-    if si.src[0].op is Ops.BUFFER_VIEW: continue
+    if si.src[0].op is Ops.SLICE: continue
 
     devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
@@ -69,8 +69,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
@@ -87,6 +87,34 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
+class DepsTracker:
+  def __init__(self):
+    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
+    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+
+  @staticmethod
+  def _buf_key(buf:Buffer) -> int: return id(buf.base)
+
+  def access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
+    wait_nodes = []
+    for i,buf in enumerate(bufs):
+      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
+      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
+    for i,buf in enumerate(bufs):
+      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      if i in write:
+        for dmap in [self.w_dependency_map, self.r_dependency_map]:
+          kept = []
+          for st,en,dep in dmap[key]:
+            if st < min(s, en): kept.append((st, min(s, en), dep))
+            if max(e, st) < en: kept.append((max(e, st), en, dep))
+          dmap[key] = kept
+        self.w_dependency_map[key].append((s, e, new_dependency))
+      else: self.r_dependency_map[key].append((s, e, new_dependency))
+    return list({id(x):x for x in wait_nodes}.values())
+
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
     self.linear = linear.src[0]
@@ -94,7 +122,7 @@ class GraphRunner:
     self.runtimes: list[Any|None] = []
     self.uop_replace: list[list[tuple[int, int]]] = []
     for call in self.linear.src:
-      replace = [(p, b.arg) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
+      replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
       for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
         self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
         self.runtimes.append(get_runtime(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
@@ -123,9 +151,8 @@ class GraphRunner:
 
     estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
-    # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    # used in MultiGraphRunner
+    self.deps = DepsTracker()
 
     self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
 
@@ -142,23 +169,7 @@ class GraphRunner:
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for st,en,dep in dmap[key]:
-            if st < min(s, en): kept.append((st, min(s, en), dep))
-            if max(e, st) < en: kept.append((max(e, st), en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
+    return self.deps.access_resources(bufs, write, new_dependency)
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
@@ -193,7 +204,7 @@ class CapturedJit(Generic[ReturnType]):
       if call.op is not Ops.CALL: continue
       arg_uops = get_call_arg_uops(call)
       outs, ins = get_call_outs_ins(call)
-      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
+      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.SLICE)}
     return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:

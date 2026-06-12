@@ -226,7 +226,8 @@ __device__ inline void load(ST& dst, const GL& src, const COORD& idx, const uint
 
         if (warpid < leftover_warps) {
 
-            uintptr_t lds_addr = lds_base + (memcpy_per_tile * num_warps * bytes_per_warp);
+            const T* lds_elem_ptr = lds_base + (memcpy_per_tile * num_warps * elements_per_warp);
+            uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_elem_ptr);
             as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(lds_addr);
 
             llvm_amdgcn_raw_buffer_load_lds(

@@ -113,17 +113,6 @@ class MovementMixin:
       x = x.shrink_to(tuple(flatten((s, 1) for s in x.shape[::2]))).reshape(x.shape[::2])
     return x
 
-  def __getitem__(self, indices) -> Self:
-    # wrap single index into a list
-    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    indices_parsed, dim = [], 0
-    for index in self._normalize_indices(list(indices)):
-      indices_parsed.append({**self._parse_view_index(index, 1 if index is None else self.shape[dim]), "index":index})
-      if index is not None: dim += 1
-    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
-    # dim injection from None (size 1) and dim collapse from int indices
-    return x.reshape(tuple(p["size"] for p in indices_parsed if not p["collapse_dim"]))
-
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
     if self.shape == new_shape:
       return self
@@ -178,7 +167,7 @@ class MovementMixin:
   def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.PAD, tuple(x if x is not None else (0, 0) for x in arg))
+    ret = self._mop(Ops.PAD, tuple((x[0], s+x[0]+x[1]) if x is not None else (0, s) for x, s in zip(arg, self.shape)))
     return self if ret.shape == self.shape else ret
 
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
@@ -200,7 +189,7 @@ class MovementMixin:
     """
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.SHRINK, arg=[x if x is not None else (0, s) for x, s in zip(arg, self.shape)])
+    ret = self._mop(Ops.SHRINK, arg=[(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)])
     return self if ret.shape == self.shape else ret
 
   def permute(self, order, *args) -> Self:
@@ -251,7 +240,7 @@ class MovementMixin:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    return self._mop(Ops.PAD, tuple([(0, 0 if ns is None else ns-s) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)]))
+    return self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""

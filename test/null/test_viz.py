@@ -1,19 +1,18 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, math
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
 from tinygrad.uop.symbolic import sym
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render
-from tinygrad.codegen import to_program_cache
-from tinygrad.codegen import to_program
+from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
+from tinygrad.codegen import do_to_program
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -41,7 +40,6 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
-  to_program_cache.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -219,32 +217,47 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
       z = UOp.const(a.dtype, 0)
+      y = UOp.const(dtypes.float, math.pi)
       alu = a*z
-      exec_rewrite(alu, [sym])
+      ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
-    # embed const in the parent node when possible
-    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
-    self.assertEqual(list(graphs[1]), [id(z)])
+    # const is always in the graph, client side hides exclude=True nodes by default
+    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertTrue(graphs[0][id(z)]["exclude"])
+    self.assertTrue(graphs[0][id(y)]["exclude"])
+    self.assertFalse(graphs[0][id(alu)]["exclude"])
+    self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
+    self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
-  # TODO: DEFINE_VAR (shape ()) now gets wrapped in RESHAPE+EXPAND when broadcast against a shaped operand
-  # (due to shared OpMixin._binop using _broadcasted). Either extend viz to fold RESHAPE/EXPAND around
-  # DEFINE_VAR/RANGE/SPECIAL the way it does for CONST, or redesign scalar-compiler-op broadcasting.
-  @unittest.expectedFailure
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
-    c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(VizData(), alu)
-    # the RESHAPE and EXPAND nodes from the const should not appear in the graph
-    labels = {v["label"].split("\n")[0] for v in graph.values()}
-    self.assertNotIn("RESHAPE", labels)
-    self.assertNotIn("EXPAND", labels)
-    # the CONST should be inlined into the ALU node's label
-    alu_label = graph[id(alu)]["label"]
-    self.assertIn("CONST", alu_label)
+    with save_viz() as viz:
+      graph_rewrite(alu, PatternMatcher([]))
+    graph = [x["graph"] for x in viz.get_details(0, 0)][0]
+    excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
+    self.assertIn("CONST", excluded_nodes)
+    self.assertIn("STACK", excluded_nodes)
+    self.assertIn("RESHAPE", excluded_nodes)
+    self.assertIn("EXPAND", excluded_nodes)
+    self.assertIn("CONST1 1", graph[id(alu)]["label"])
+
+  def test_stack_movement_not_folded_unless_all_const(self):
+    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+    c = UOp.const(dtypes.int, 1)
+    stack = a.vectorize(c)
+    reshaped = stack.reshape((1, 2))
+    graph = uop_to_json(VizData(), reshaped)
+    self.assertFalse(graph[id(stack)]["exclude"])
+
+    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
+    const_reshaped = const_stack.reshape((1, 2))
+    const_graph = uop_to_json(VizData(), const_reshaped)
+    self.assertTrue(const_graph[id(const_stack)]["exclude"])
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -327,12 +340,15 @@ class TestVizIntegration(unittest.TestCase):
   def test_codegen_tracing(self):
     with save_viz() as viz:
       ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
-      prg = to_program(ast, Device[Device.DEFAULT].renderer)
+      prg = do_to_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
     self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[2]["name"], prg.arg.name)
+    input_ast = next(viz.get_details(2, 0))["graph"].values()
+    for u in input_ast:
+      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
@@ -344,7 +360,7 @@ class TestVizIntegration(unittest.TestCase):
       from tinygrad.engine.realize import compile_linear
       sched = compile_linear(sched)
       with Context(NO_COLOR=0):
-        prgs = [to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
+        prgs = [do_to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -406,9 +422,16 @@ class TestVizIntegration(unittest.TestCase):
       default_test(c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
-    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c+1)])
+    graph = next(viz.get_details(0, 0))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c+1)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertFalse(graph[id(c+1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
-    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c+2)])
+    graph = next(viz.get_details(1, 1))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c.const_like(2)), id(c+2)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertTrue(graph[id(c.const_like(2))]["exclude"])
+    self.assertFalse(graph[id(c+2)]["exclude"])
 
   def test_recurse(self):
     with save_viz() as viz:
@@ -429,6 +452,12 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
     self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+    for graph in out["layout"]["NULL Graph"]["events"]:
+      graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
+      for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
+        events = [e for e in out["layout"][k]["events"] if graph_st <= e["st"] and e["st"]+e["dur"] <= graph_et]
+        self.assertGreater(len(events), 0)
+        self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -744,7 +773,7 @@ class TestCfg(unittest.TestCase):
     with save_viz() as viz:
       with Context(DEV=f"NULL::{self.arch}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-        _ = to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
+        _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
     disasm = next(s for s in codegen_rewrites["steps"] if s["name"] == "View Disassembly")
     return get_render(viz.data, disasm["query"])
@@ -981,8 +1010,9 @@ class TestCLI(unittest.TestCase):
   def test_dedup(self):
     with save_viz() as viz:
       for _ in range(CNT:=4):
-        Tensor.empty(4, device="NULL").add(1).realize()
-        Tensor.empty(8, device="NULL").add(1).realize()
+        # use kernel names unique to this test
+        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k1_test_viz_dedup")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k2_test_viz_dedup")))[0].realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       name = run_cli(*files, "-s", "NULL")[0]["name"]
       with Context(DEBUG=3):
@@ -1007,6 +1037,23 @@ class TestCLI(unittest.TestCase):
     call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+
+  def test_interval(self):
+    def emit_kernel(name:str): Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(name=name)))[0].realize()
+    with save_viz() as viz:
+      emit_kernel("pre_1")
+      emit_kernel("pre_2")
+      profile_marker("interval_start")
+      emit_kernel("target_1")
+      emit_kernel("target_2")
+      profile_marker("interval_end")
+      emit_kernel("post_1")
+      emit_kernel("post_2")
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      flat = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end")
+      aggregate = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end", "-t")
+    self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
+    self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
 
 if __name__ == "__main__":
   unittest.main()

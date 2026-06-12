@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
@@ -53,7 +53,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
     if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: x, after = x.src[0], after.reshape(x.src[0].shape)
     elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
-      x, after = x.src[1].src[0], after.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
+      x, after = x.src[1].src[0], after.shrink(tuple((o, s+o) for (o,_),s in zip(x.src[1].marg, x.src[1].src[0].shape)))
     else: break
   ctx[x] = after
 
@@ -131,15 +131,15 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if c.arg.precompile: return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
-  params = sorted(params, key=lambda x: x.arg)
+  params = sorted(params, key=lambda x: x.arg.slot)
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
   if not allow_param_mismatch:
-    if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+    if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
-  dict_map = {x:args[x.arg] for x in params}
+  dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
     if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
@@ -147,10 +147,6 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # early fixup const copy
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
-   lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
-
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
@@ -188,6 +184,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # COPY and source size need to match
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) else None),
+
+  # copying mselect to same device is just mselect (no NOOP kernel)
+  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
@@ -262,6 +261,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   indexes: list[UOp] = []
   reduces: list[UOp] = []
   def red_gate(x:UOp):
+    if x.op is Ops.AFTER:
+      accessed_buffers.append(x.buf_uop)
+      return False
     if (x.op is Ops.STAGE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
       accessed_buffers.append(x)
       return False
@@ -285,7 +287,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   buffer_in_reduce = False
   def buf_gate(x:UOp):
     nonlocal buffer_in_reduce
-    if x.op in {Ops.PARAM, Ops.STAGE}: buffer_in_reduce = True
+    if x.op in {Ops.PARAM, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
     return not buffer_in_reduce
   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
@@ -314,13 +316,15 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
-  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
+  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
+   remove_noop_bufferize),
   # no buffers for const (ranges don't matter for const - it's the same value everywhere)
   (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
   # indexing a const is a const
@@ -354,11 +358,12 @@ def late_buffer_view(t:UOp, b:UOp):
     assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
     x = x.src[0]
   x = next(u for u in x.src if u.op is Ops.INDEX)
+  assert x.op is Ops.INDEX, "must be INDEX"
 
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
+  return b.replace(src=(UOp(Ops.SLICE, t.dtype, (x.src[0], UOp.const(dtypes.weakint, offset)), size),))
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
@@ -420,7 +425,11 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
-    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
+    if x.src[0].op is Ops.SLICE:
+      # no INDEX on SLICE, this could be cleaner
+      do_store = buf.store(x.src[0]).end(*rngs)
+    else:
+      do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
@@ -451,11 +460,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 
-  # remove MOP on AFTER
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(GroupOp.Movement, name="y"))), lambda x,y: x.after(y.src[0])),
-  # remove double AFTER
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.AFTER, name="y"))), lambda x,y: x.after(*y.src[1:])),
-
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
@@ -479,7 +483,7 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape)), arg=ctx.dg).reshape(buf.max_shape)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape), buf.addrspace), arg=ParamArg(ctx.dg, addrspace=buf.addrspace)).reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
@@ -491,10 +495,8 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
-  if isinstance(after.dtype, PtrDType) and after.ptrdtype.addrspace == AddrSpace.LOCAL: return None
+  if isinstance(after.dtype, PtrDType) and after.addrspace == AddrSpace.LOCAL: return None
   buf = after.buf_uop
-  # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
-  if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   # NOTE: this is bottom up, so we only add it once
   if buf not in ctx.map: ctx.map[buf] = after
   return buf
@@ -513,14 +515,16 @@ def find_bufs(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
-  (UPat(Ops.BUFFER, name="buf"), debuf),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="buf"), debuf),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat.cvar('vmin'), UPat.cvar('vmax'), UPat.var("nm")), name="v"),
-   lambda v, vmin, vmax, nm: UOp.variable(nm.arg, vmin.arg, vmax.arg, v.dtype)),
+  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat(Ops.PARAM, name="v"), lambda v:
+   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
+   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
+   None if isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
   (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
+  (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
@@ -566,11 +570,11 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
-  # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW are cross-device or special hardware ops
+  # SINK requires all buffers on the same device, but COPY/SLICE are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
-  if stored.op in {Ops.COPY, Ops.BUFFER_VIEW}: ret = stored.replace(src=stored.src + ret.ended_ranges)
+  if stored.op in {Ops.COPY, Ops.SLICE}: ret = stored.replace(src=stored.src + ret.ended_ranges)
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())

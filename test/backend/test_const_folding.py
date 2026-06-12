@@ -32,9 +32,9 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
-    schedule = Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
+    schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
-    np.testing.assert_equal(Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
+    np.testing.assert_equal(Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):
     # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
@@ -167,7 +167,7 @@ class TestMultiConstFolding(unittest.TestCase):
 
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
-    x = UOp.const(dtypes.uint64, 5, Device.DEFAULT, ()).threefry(UOp.const(dtypes.uint64, 10, Device.DEFAULT, ()))
+    x = UOp.const(dtypes.uint64, 5).threefry(UOp.const(dtypes.uint64, 10))
     self.assertIs(x.simplify().op, Ops.CONST)
 
 class TestTautologicalCompare(unittest.TestCase):

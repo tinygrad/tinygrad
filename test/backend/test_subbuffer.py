@@ -36,7 +36,7 @@ class TestSubBuffer(unittest.TestCase):
     assert len(mv) == 5
 
   def test_subbuffer_used(self):
-    t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
+    t = Tensor.arange(0, 10, dtype=dtypes.uint8).clone().realize()
     vt = t[2:4].realize()
     out = (vt + 100).tolist()
     assert out == [102, 103]
@@ -44,7 +44,7 @@ class TestSubBuffer(unittest.TestCase):
   @needs_second_gpu
   @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or DEV.interface.startswith("MOCK"), "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
-    t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
+    t = Tensor.arange(0, 10, dtype=dtypes.uint8).clone().realize()
     vt = t[2:5].contiguous().realize()
     out = vt.to(f"{Device.DEFAULT}:1").realize().tolist()
     assert out == [2, 3, 4]

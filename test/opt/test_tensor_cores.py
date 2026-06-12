@@ -18,8 +18,6 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
-AMX = "AMX" in DEV.arch
-
 def run_program(prg:UOp, bufs:list[Buffer]):
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
   for u,b in zip(buf_uops, bufs): buffers[u] = b
@@ -69,15 +67,14 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
-      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+      helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
+      n, m, k = tc.dims
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       prg = to_program(replace_opts(r.schedule_linear().src[-1].src[0],
@@ -127,7 +124,7 @@ class TestTensorCores(unittest.TestCase):
       # check excessive padding doesn't trigger padded TC in TC_OPT=2
       helper_tc_ensure_uops_and_opts_count(tc.dims[0]//4, tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
       helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1]//4, tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      if not AMX and tc not in amd_cdna_1616128: # AMX tc.dims[2] == 1
+      if tc not in amd_cdna_1616128:
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//8, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
   @Context(ALLOW_TF32=1)

@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import llvm
 
-class ClangJITCompiler(Compiler):
+class ClangCompiler(Compiler):
   def __init__(self, arch:list[str], cachekey="compile_clang_jit"):
     assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     self.arch, cpu, *feats = arch
@@ -69,8 +69,8 @@ class LLVMCompiler(Compiler):
     super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self):
-    llvm.LLVMDisposePassBuilderOptions(self.pbo)
-    llvm.LLVMContextDispose(self.context)
+    if hasattr(self, 'pbo'): llvm.LLVMDisposePassBuilderOptions(self.pbo)
+    if hasattr(self, 'context'): llvm.LLVMContextDispose(self.context)
 
   def compile_to_obj(self, src:str) -> bytes:
     self.diag_msgs.clear()
@@ -98,7 +98,7 @@ class CPULLVMCompiler(LLVMCompiler):
     if cpu == "native":
       cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()
       featstr = (featstr + "," if featstr else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ClangCompiler, see comments there for why it's needed on arm osx
     super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + featstr, cache_key)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)

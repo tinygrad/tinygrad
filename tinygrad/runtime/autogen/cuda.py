@@ -4,7 +4,8 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-dll = c.DLL('cuda', 'cuda')
+from tinygrad.helpers import WIN
+dll = c.DLL('cuda', 'nvcuda' if WIN else 'cuda')
 cuuint32_t: TypeAlias = ctypes.c_uint32
 cuuint64_t: TypeAlias = ctypes.c_uint64
 CUdeviceptr_v2: TypeAlias = ctypes.c_uint64

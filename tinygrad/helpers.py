@@ -29,6 +29,11 @@ def argfix(*x):
 # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
 def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
+def get_shape(x) -> tuple[int, ...]:
+  # NOTE: str is special because iterating it still yields strs
+  if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
+  if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
+  return (len(subs),) + (subs[0] if subs else ())
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st
@@ -40,6 +45,7 @@ def size_to_str(s:int) -> str: return next((f"{s / d:.2f} {pr}" for d,pr in [(1<
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
+def to_tuple(x:T|tuple[T, ...]) -> tuple[T, ...]: return x if isinstance(x, tuple) else (x,)
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if not (hasattr(l, "__len__") and hasattr(l, "__getitem__")) or isinstance(l, str): return [l]
@@ -98,8 +104,8 @@ def get_child(obj, key):
 def word_wrap(x, wrap=80):
   if len(ansistrip(x)) <= wrap: return x
   if len(lines:=x.splitlines()) > 1: return "\n".join(word_wrap(line, wrap) for line in lines)
-  i = 0
-  while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
+  i = vis = 0
+  while vis < wrap and i < len(x): i, vis = (i + m.end(), vis) if (m:=re.match('\x1b\\[(K|.*?m)', x[i:])) is not None else (i+1, vis+1)
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
 

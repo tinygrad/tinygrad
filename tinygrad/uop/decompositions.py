@@ -477,7 +477,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
         if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not disable_fast_idiv:
       # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
-      pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d", vec=False))),
+      pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
         lambda ctx, x, d: fast_idiv(ctx, x, d.arg) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
       # rewrite raw CMOD -> x - d*CDIV(x,d) so fast_idiv can pick up the CDIV. only on non-negative inputs;
       # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.CMOD as an implementation detail)
@@ -493,7 +493,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       ((UPat.cvar("c", dtypes.sints) < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
       (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*UPat.cvar("c"), lambda x,y,c: y*(-c)<x),
       (UPat.var("x", dtypes.sints)*-1 < UPat.cvar("c"), lambda x,c:-c<x),
-      ((UPat.cvar("c1",vec=False)<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2",vec=False)),
+      ((UPat.cvar("c1")<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2")),
         lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
   if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]

@@ -58,14 +58,14 @@ class TestMultiRamUsage(unittest.TestCase):
     X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4).realize()
-    self.assertUsed(256 * 4 * 4)  # TODO: can be zero
+    self.assertUsed(0)
 
   def test_sharded_memory_axis_const(self):
     devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
     X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4, axis=0).realize()
-    self.assertUsed(256 * 4)  # TODO: can be zero
+    self.assertUsed(0)
 
   def test_zeros_per_device(self):
     _ = Tensor.zeros(self.N, self.N, device="NULL").contiguous().realize()
@@ -203,6 +203,12 @@ class TestMultiAxis(unittest.TestCase):
     t = Tensor.ones(4, 8).shard(devices, axis=0)
     self.assertEqual(t.reshape(2, 16).uop.axis, 0)
     self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
+
+  def test_uop_shard_axis_none(self):
+    devices = ("NULL:0", "NULL:1")
+    u = Tensor.ones(8).contiguous().realize().uop
+    self.assertIsNone(u.shard(devices).axis)
+    self.assertEqual(u.shard(devices, 0).axis, 0)
 
   def test_empty_like_sharded(self):
     t = Tensor.ones(4, 8).shard(("NULL:0", "NULL:1"), axis=0)

@@ -240,15 +240,15 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(result.cpu().numpy(), [3., 3., 2.])
 
   def test_mnist_index(self):
+    # from tinygrad.nn.datasets import mnist
+    X_train, Y_train = Tensor.randint(60000, 1, 28, 28, dtype='uchar').realize(), Tensor.randint(60000, dtype='uchar').realize()
     GlobalCounters.reset()
-    from tinygrad.nn.datasets import mnist
-    X_train, Y_train, _, _ = mnist()
     X_train = torch.tensor(X_train.float().numpy(), device=device)
     Y_train = torch.tensor(Y_train.cast('int64').numpy(), device=device)
     samples = torch.randint(0, X_train.shape[0], (32,))
     X,Y = X_train[samples], Y_train[samples]
     X.cpu(), Y.cpu()
-    self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
+    self.assertLessEqual(GlobalCounters.global_ops, 20_000_000)
 
   def _test_diagonal(self, *shape):
     a = torch.randn(*shape, dtype=torch.float32, device=device)

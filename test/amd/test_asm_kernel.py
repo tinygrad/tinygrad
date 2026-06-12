@@ -162,7 +162,7 @@ def custom_data_deps(A:UOp) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
-class TestCustomKernel(unittest.TestCase):
+class TestAsmKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
 
   def test_simple(self):
