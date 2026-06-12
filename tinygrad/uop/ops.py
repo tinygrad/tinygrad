@@ -504,12 +504,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.dtype.vcount == 1
     if count == 1: return self
     return UOp(Ops.STACK, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType):
+  def cast(self, dtype:DTypeLike):
+    dtype = to_dtype(dtype)
     # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
     if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
     if self.dtype == dtype: return self
     return UOp(Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType): return self if self.dtype == dtype else UOp(Ops.BITCAST, dtype, (self,))
+  def bitcast(self, dtype:DTypeLike): return self if self.dtype == (dtype:=to_dtype(dtype)) else UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:tuple[int, ...]|int):
     if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
     if isinstance(i, int):
