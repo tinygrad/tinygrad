@@ -95,7 +95,7 @@ def fix_store_hazard(target:UOp, src:UOp):
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
+    if reaches_base[s] and s.op in unsafe: return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
