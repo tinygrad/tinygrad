@@ -60,6 +60,16 @@ class TestAssign(unittest.TestCase):
     self.assertListEqual(X.tolist(), [1,4,5,4])
     self.assertEqual(GlobalCounters.kernel_count, 2)
 
+  def test_assign_flip(self):
+    ref = np.arange(16, dtype=np.float32)
+    X = Tensor(ref, device="CPU").contiguous().realize()
+    GlobalCounters.reset()
+    xs = X[::-1]
+    xs.assign(xs + X)
+    ref = ref + ref[::-1]
+    np.testing.assert_allclose(X.numpy(), ref)
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+
   def test_assign_add(self):
     for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
       x = Tensor([0]).realize()
