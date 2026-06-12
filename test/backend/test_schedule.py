@@ -4,6 +4,7 @@
 
 import unittest
 import numpy as np
+from typing import cast
 from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
