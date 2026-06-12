@@ -80,12 +80,8 @@ spec_shared = PatternMatcher([
   # TODO: remove UNROLL here, it's for SPEC=2
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL, Ops.INS))), lambda: True),
 
-  # TOOD: these should be buffer with different addrspace
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), lambda: True),
-
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI,
-                                                     Ops.BITCAST, Ops.INS})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
@@ -196,7 +192,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -213,7 +209,6 @@ spec_program = PatternMatcher([
 
   # STACK/GEP in program. TODO: this should match Tensor
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 or len(x.src) == 0),
-  (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
@@ -243,6 +238,9 @@ spec_full = PatternMatcher([
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
+
+  # TOOD: these should be buffer with different addrspace
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), lambda: True),
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
