@@ -23,6 +23,7 @@ def meshgrid(x, y):
   grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
   return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
 
+#https://github.com/huggingface/transformers/blob/a14eae2b54c19cb427c919a99c75db07afbeb7a0/src/transformers/vision_utils.py#L147
 def get_vision_bilinear_indices_and_weights(h: int, w: int, num_grid_per_side: int, merge_size: int ) -> tuple[Tensor, Tensor]:
   side = num_grid_per_side
 
@@ -60,6 +61,7 @@ def get_vision_bilinear_indices_and_weights(h: int, w: int, num_grid_per_side: i
   bilinear_weights = corner_weights[:, reorder].reshape(4, -1)
   return bilinear_indices, bilinear_weights
 
+#https://github.com/huggingface/transformers/blob/a14eae2b54c19cb427c919a99c75db07afbeb7a0/src/transformers/vision_utils.py#L53
 def get_vision_position_ids(h: int, w:int, merge_size: int):
   hpos_ids = Tensor.arange(h).unsqueeze(1).expand(-1, w)
   hpos_ids = hpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
@@ -110,7 +112,7 @@ class Qwen3VLVis():
     
     deepstack_feature_lists = []
     for i in range(len(self.v.blk)):
-      hidden_states = self.v.blk[i](hidden_states, cos, sin)
+      hidden_states = self.v.blk[i](hidden_states=hidden_states, position_embeddings=(cos, sin))
       if i in self.v.deepstack_idx: deepstack_feature_lists.append(self.v.deepstack[i](hidden_states))
 
     image_embeds = self.v.post_ln(hidden_states)
@@ -221,10 +223,11 @@ class Qwen3VisBlock:
     self.attn_qkv = nn.Linear(*weights["v.blk.0.attn_qkv.weight"].shape[::-1])
   
   #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L280
-  def __call__(self, hidden_states, cos, sin):
+  def __call__(self, hidden_states: Tensor, position_embeddings: tuple[Tensor, Tensor]):
     hidden_states_input = self.ln1(hidden_states)
     # https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L186
     query, key, value = self.attn_qkv(hidden_states_input).reshape(hidden_states.shape[0], 3, self.num_heads, -1).permute(1, 0, 2, 3)
+    cos, sin = position_embeddings
     query, key = apply_rotary_pos_emb_vision(query, key, cos, sin)
     query = query.transpose(0, 1).unsqueeze(0)
     value = value.transpose(0, 1).unsqueeze(0)
