@@ -80,8 +80,12 @@ spec_shared = PatternMatcher([
   # TODO: remove UNROLL here, it's for SPEC=2
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL, Ops.INS))), lambda: True),
 
+  # TOOD: these should be buffer with different addrspace everywhere.
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), lambda: True),
+
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI,
+                                                     Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
@@ -188,6 +192,9 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # no more of these in programs
+  (UPat((Ops.DEFINE_VAR, Ops.GEP)), lambda: False),
+
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
@@ -199,6 +206,7 @@ spec_program = PatternMatcher([
 
   # REG/LOCAL buffer
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), src=(), name="x"), lambda x: isinstance(x.dtype, PtrDType)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
@@ -238,9 +246,6 @@ spec_full = PatternMatcher([
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
-
-  # TOOD: these should be buffer with different addrspace
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), lambda: True),
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
