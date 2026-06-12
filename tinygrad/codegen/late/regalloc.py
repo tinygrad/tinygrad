@@ -23,11 +23,14 @@ class LinearScanRegallocContext:
     for i,u in enumerate(reversed(uops)):
       if u.op in PSEUDO_OPS: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
-      for v in defs + tuple(s.reg for s in dedup(u.src)):
+      uses = []
+      for s in dedup(u.src): uses.extend(s.regs)
+      for v in defs + tuple(uses):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       for v in defs:
         if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: ranges.append(u.reg)
+      if u.op is Ops.RANGE:
+        for v in u.regs: ranges.append(v)
 
     # allocate registers
     self.stack_size: int = 0
@@ -64,9 +67,10 @@ class LinearScanRegallocContext:
       for s in u.src:
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
-        if not isinstance(v:=s.reg, Register): continue
-        if v not in live: live[v] = fill(v, i)
-        self.reals.setdefault(i, {})[v] = live[v]
+        for v in s.regs:
+          if not isinstance(v, Register): continue
+          if v not in live: live[v] = fill(v, i)
+          self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate defs
       if isinstance(u.tag, tuple):

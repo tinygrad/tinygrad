@@ -603,6 +603,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if isinstance(self.tag, tuple): return self.tag[0]
     return self.tag
 
+  @property
+  def regs(self:UOp):
+    if self.op in (Ops.NOOP, Ops.AFTER) and self.src: return self.src[0].regs
+    if isinstance(self.tag, tuple): return self.tag
+    return (self.tag,)
+
   # *** multi-device helpers ***
 
   def multi(self, axis:int|None):
