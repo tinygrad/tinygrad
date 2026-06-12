@@ -78,12 +78,15 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
-V_ADD =   { dtypes.float16:RDNA3Ops.v_add_f16_e32,  dtypes.float32:RDNA3Ops.v_add_f32_e32, dtypes.float64:RDNA3Ops.v_add_f64,   dtypes.int32:RDNA3Ops.v_add_nc_i32,       dtypes.uint32:RDNA3Ops.v_add_nc_u32_e32,  }
-V_SUB =   { dtypes.float16:RDNA3Ops.v_sub_f16_e32,  dtypes.float32:RDNA3Ops.v_sub_f32_e32, dtypes.int32:RDNA3Ops.v_sub_nc_i32,  dtypes.uint32:RDNA3Ops.v_sub_nc_u32_e32,  }
-V_MUL =   { dtypes.float16:RDNA3Ops.v_mul_f16_e32,  dtypes.float32:RDNA3Ops.v_mul_f32_e32, dtypes.float64:RDNA3Ops.v_mul_f64,   dtypes.int32:RDNA3Ops.v_mul_i32_i24_e32,  dtypes.uint32:RDNA3Ops.v_mul_u32_u24_e32, }
-V_SQRT =  { dtypes.float16:RDNA3Ops.v_sqrt_f16_e32, dtypes.float32:RDNA3Ops.v_sqrt_f32_e32, dtypes.float64:RDNA3Ops.v_sqrt_f64_e32 }
+V_ADD =   { dtypes.float16:RDNA3Ops.v_add_f16_e32,  dtypes.float32:RDNA3Ops.v_add_f32_e32,  dtypes.float64:RDNA3Ops.v_add_f64,   dtypes.int32:RDNA3Ops.v_add_nc_i32,       dtypes.uint32:RDNA3Ops.v_add_nc_u32_e32,  }
+V_SUB =   { dtypes.float16:RDNA3Ops.v_sub_f16_e32,  dtypes.float32:RDNA3Ops.v_sub_f32_e32,  dtypes.int32:RDNA3Ops.v_sub_nc_i32,  dtypes.uint32:RDNA3Ops.v_sub_nc_u32_e32,  }
+V_MUL =   { dtypes.float16:RDNA3Ops.v_mul_f16_e32,  dtypes.float32:RDNA3Ops.v_mul_f32_e32,  dtypes.float64:RDNA3Ops.v_mul_f64,   dtypes.int32:RDNA3Ops.v_mul_i32_i24_e32,  dtypes.uint32:RDNA3Ops.v_mul_u32_u24_e32, }
+V_SQRT =  { dtypes.float16:RDNA3Ops.v_sqrt_f16_e32, dtypes.float32:RDNA3Ops.v_sqrt_f32_e32, dtypes.float64:RDNA3Ops.v_sqrt_f64_e32  }
 V_LOG =   { dtypes.float16:RDNA3Ops.v_log_f16_e32,  dtypes.float32:RDNA3Ops.v_log_f32_e32 }
 V_EXP =   { dtypes.float16:RDNA3Ops.v_exp_f16_e32,  dtypes.float32:RDNA3Ops.v_exp_f32_e32 }
+V_RCP =   { dtypes.float16:RDNA3Ops.v_rcp_f16_e32,  dtypes.float32:RDNA3Ops.v_rcp_f32_e32,  dtypes.float64:RDNA3Ops.v_rcp_f64_e32   }
+V_SIN =   { dtypes.float16:RDNA3Ops.v_sin_f16_e32,  dtypes.float32:RDNA3Ops.v_sin_f32_e32 }
+V_TRUNC = { dtypes.float16:RDNA3Ops.v_trunc_f16_e32,dtypes.float32:RDNA3Ops.v_trunc_f32_e32,dtypes.float64:RDNA3Ops.v_trunc_f64_e32 }
 V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e32,
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
 V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e32,
@@ -111,9 +114,12 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # unary alu ops
-  (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[x.dtype], src=(y,))),
-  (UPat.var("y").exp2().named("x"), lambda y,x: x.ins(V_EXP[x.dtype], src=(y,))),
-  (UPat.var("y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[x.dtype], src=(y,))),
+  (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[y.dtype])),
+  (UPat.var("y").exp2().named("x"), lambda y,x: x.ins(V_EXP[y.dtype])),
+  (UPat.var("y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[y.dtype])),
+  (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
+  (UPat.var("y").sin().named("x"), lambda y,x: x.ins(V_SIN[y.dtype])),
+  (UPat.var("y").trunc().named("x"), lambda y,x: x.ins(V_TRUNC[y.dtype])),
 
   # binary alu ops
   # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
@@ -198,7 +204,7 @@ class RDNA3Renderer(ISARenderer):
   pre_isel_matcher = PatternMatcher([])
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC)}
   def __init__(self, target:Target):
     super().__init__(target)
 
