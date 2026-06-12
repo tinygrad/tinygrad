@@ -121,15 +121,19 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
-  # final rules for the renderer (without sym)
-  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
-  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren, name="final rewrite")
+  # GEP/STACK stuff
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
 
+  # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
   name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+
+  # final rules for the renderer (without sym)
+  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
+  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren, name="final rewrite")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

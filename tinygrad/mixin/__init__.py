@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, prod
 from tinygrad.helpers import resolve_pool_pads, round_up
 
@@ -21,9 +21,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError
   @staticmethod
   def const(dtype, b): raise NotImplementedError
-  @property
-  def _uop(self) -> UOp: raise NotImplementedError
-  def _wrap_uop(self, u:UOp) -> Self: raise NotImplementedError
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
@@ -383,10 +380,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if mode == "circular": return self._pad_circular(pX)
     if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
     raise NotImplementedError(f"{mode=} is not supported")
-
-  def _ufix_keep_dtype(self, x) -> bool:
-    # matches Tensor scalar-wrapping behavior: keep self.dtype for float self, or for int self with int/Invalid scalar
-    return dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType)))
 
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
