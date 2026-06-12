@@ -180,18 +180,12 @@ pm_x86_style = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda x: x.replace(dtype=x.dtype.ptr(x.src[0].arg, x.arg.addrspace), src=()) \
     if not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(dtype=x.src[0].dtype) if x.dtype != x.src[0].dtype else None),
-  # SHRINK is a vectorized INDEX
-  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx"), UPat.cvar("c"))), lambda buf,idx,c: buf.index(idx, ptr=True) \
-    .cast(buf.ptrdtype.base.vec(c.arg).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace)) if isinstance(buf.dtype, PtrDType) else None),
-  # cast of a pointer is a noop in new style (any reinterpreting cast was absorbed into SHRINK)
-  (UPat(Ops.CAST, src=(UPat.var("y"),), name="x"), lambda x,y:
-   y if isinstance(y.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
-  # INDEX on a pointer has pointer dtype, INDEX on a register value extracts an element and keeps its scalar dtype (lowered in isel)
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat()), name="x"), lambda buf,x:
+  # INDEX/SHRINK on a pointer take the pointer dtype (SHRINK is a vectorized INDEX), INDEX on a register value extracts an element (lowered in isel)
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),), allow_any_len=True, name="x"), lambda buf,x:
    x.replace(dtype=buf.dtype) if isinstance(buf.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
   # restore vec dtypes from structure
-  (UPat(Ops.LOAD, src=(UPat(Ops.CAST, name="c"),), allow_any_len=True, name="x"), lambda x,c:
-   x.replace(dtype=x.dtype.scalar().vec(c.ptrdtype.base.count)) if isinstance(c.dtype, PtrDType) and c.ptrdtype.base.count > x.dtype.count else None),
+  (UPat(Ops.SHRINK, src=(UPat(), UPat(), UPat.cvar("c"))).load(allow_any_len=True, name="x"), lambda x,c:
+   x.replace(dtype=x.dtype.scalar().vec(c.arg)) if c.arg > x.dtype.count else None),
   (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
   (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(c)) \
     if not isinstance(x.dtype, PtrDType) and not any(isinstance(s.dtype, PtrDType) for s in x.src) \
@@ -200,16 +194,16 @@ pm_x86_style = PatternMatcher([
 
 # ***** X86 pre instruction selection *****
 
-def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = UOp(Ops.BUFFER, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=ParamArg(next(ctx), addrspace=AddrSpace.LOCAL))
+def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
+  local = UOp(Ops.BUFFER, addr.src[0].dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=ParamArg(next(ctx), addrspace=AddrSpace.LOCAL))
   local_idx = local.index(UOp.const(dtypes.int32, 0), ptr=True)
-  ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
-  return ptr.cast(cast.dtype).load(dtype=x.dtype)
+  ptr = gate.where(addr, local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
+  return ptr.load(dtype=x.dtype)
 
-def gated_store(base:UOp, idx:UOp, cast:UOp, gate:UOp, val:UOp):
-  local = UOp(Ops.BUFFER, base.dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=ParamArg(-1, addrspace=AddrSpace.LOCAL))
-  ptr = gate.where(base.index(idx, ptr=True), local.index(UOp.const(dtypes.int32, 0), ptr=True))
-  return ptr.cast(cast.dtype).store(val)
+def gated_store(addr:UOp, gate:UOp, val:UOp):
+  local = UOp(Ops.BUFFER, addr.src[0].dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=ParamArg(-1, addrspace=AddrSpace.LOCAL))
+  ptr = gate.where(addr, local.index(UOp.const(dtypes.int32, 0), ptr=True))
+  return ptr.store(val)
 
 # these must be done in a separate matcher because they violate the spec
 pre_isel_matcher = pm_x86_style + PatternMatcher([
@@ -230,9 +224,9 @@ pre_isel_matcher = pm_x86_style + PatternMatcher([
   (UPat(Ops.STACK, src=(UPat.var("y").index(UPat()),), allow_any_len=True, name="x"),
    lambda y,x: UOp(Ops.NOOP, x.dtype, (y,)) if all(s.op is Ops.INDEX and len(s.src) == 2 and s.src[0] is y \
      and s.src[1].op is Ops.CONST and s.src[1].arg == i for i,s in enumerate(x.src)) else None),
-  # gated load/store become a conditional move on the index, the load/store are unconditional
-  (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
-  (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").store(UPat.var("val"), UPat.var("gate")), gated_store),
+  # gated load/store become a conditional move on the address, the load/store are unconditional
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
@@ -350,8 +344,8 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), _disp(0))
-  base, idx = x.src
+  if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0))
+  base, idx = x.src[0], x.src[1]
   disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * disp_scale))
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
@@ -580,7 +574,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.ins(X86Ops.VMOVDm)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # index on a pointer is an address computation
-  (UPat(Ops.INDEX, name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x)) if isinstance(x.dtype, PtrDType) else None),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x)) if isinstance(x.dtype, PtrDType) else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
