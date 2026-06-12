@@ -497,6 +497,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _wrap_uop(self, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
+  def vconst_like(self, b:ConstLike, dtype:DType|None=None):
+    # for use after movement ops have been removed
+    ret = UOp.const(dtype or self.dtype.base, b)
+    if self.shape == (): return ret
+    if len(self.shape) == 1: return UOp(Ops.STACK, ret.dtype, (ret,)*self.max_numel())
+    raise RuntimeError(f"vconst_like only works on 0 or 1D shapes, not {self.shape}")
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return self.const_like(x, None if self._ufix_keep_dtype(x) else dtypes.from_py(x).vec(self.dtype.vcount))

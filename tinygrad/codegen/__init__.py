@@ -107,9 +107,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
-  # GEP/STACK stuff
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
@@ -121,14 +118,17 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
 
-  # move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+  # GEP/STACK stuff
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
 
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
   name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+
+  # move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
