@@ -178,6 +178,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) else None),
 
+  # copying mselect to same device is just mselect (no NOOP kernel)
+  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
+
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
 
@@ -251,6 +254,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   indexes: list[UOp] = []
   reduces: list[UOp] = []
   def red_gate(x:UOp):
+    if x.op is Ops.AFTER:
+      accessed_buffers.append(x.buf_uop)
+      return False
     if (x.op is Ops.STAGE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
       accessed_buffers.append(x)
       return False
@@ -274,7 +280,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   buffer_in_reduce = False
   def buf_gate(x:UOp):
     nonlocal buffer_in_reduce
-    if x.op in {Ops.PARAM, Ops.STAGE}: buffer_in_reduce = True
+    if x.op in {Ops.PARAM, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
     return not buffer_in_reduce
   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
@@ -484,8 +490,6 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if isinstance(after.dtype, PtrDType) and after.addrspace == AddrSpace.LOCAL: return None
   buf = after.buf_uop
-  # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
-  if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   # NOTE: this is bottom up, so we only add it once
   if buf not in ctx.map: ctx.map[buf] = after
   return buf
@@ -504,7 +508,7 @@ def find_bufs(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
-  (UPat(Ops.BUFFER, name="buf"), debuf),
+  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
@@ -513,7 +517,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
+  (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),

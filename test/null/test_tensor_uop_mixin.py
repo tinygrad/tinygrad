@@ -209,8 +209,18 @@ class TestTensorUOpAllclose(unittest.TestCase):
     a, b = _t(4).float(), _t(4).float()
     self.assertIs(a.allclose(b).uop, a.uop.allclose(b.uop))
 
+class TestTensorUOpCast(unittest.TestCase):
+  def test_cast_str_dtype(self):
+    t = _t(4)
+    self.assertIs(t.cast("float32").uop, t.uop.cast("float32"))
+    self.assertIs(t.uop.cast("float32").dtype, dtypes.float32)
+
 class TestTensorUOpBitcast(unittest.TestCase):
   def test_bitcast_same_dtype(self): _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.float32))
+  def test_bitcast_str_dtype(self):
+    t = _t(4)
+    self.assertIs(t.bitcast("uint32").uop, t.uop.bitcast("uint32"))
+    self.assertIs(t.uop.bitcast("uint32").dtype, dtypes.uint32)
 
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):

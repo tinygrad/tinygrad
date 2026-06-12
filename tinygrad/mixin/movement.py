@@ -113,17 +113,6 @@ class MovementMixin:
       x = x.shrink_to(tuple(flatten((s, 1) for s in x.shape[::2]))).reshape(x.shape[::2])
     return x
 
-  def __getitem__(self, indices) -> Self:
-    # wrap single index into a list
-    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    indices_parsed, dim = [], 0
-    for index in self._normalize_indices(list(indices)):
-      indices_parsed.append({**self._parse_view_index(index, 1 if index is None else self.shape[dim]), "index":index})
-      if index is not None: dim += 1
-    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
-    # dim injection from None (size 1) and dim collapse from int indices
-    return x.reshape(tuple(p["size"] for p in indices_parsed if not p["collapse_dim"]))
-
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
     if self.shape == new_shape:
       return self

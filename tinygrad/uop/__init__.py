@@ -22,6 +22,9 @@ class Ops(FastEnum):
   # define LOCAL/REG allocate things
   DEFINE_LOCAL = auto(); DEFINE_REG = auto()
 
+  # BUFFER is the new LOCAL/REG
+  BUFFER = auto()
+
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
@@ -49,7 +52,7 @@ class Ops(FastEnum):
   # ** 3 -- load/store **
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers
-  INDEX = auto()
+  INDEX = auto(); SHRINK = auto()
 
   # load/store before math
   LOAD = auto(); STORE = auto()
@@ -99,10 +102,10 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  STAGE = auto(); COPY = auto(); BUFFER = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
+  STAGE = auto(); COPY = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
-  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); FLIP = auto()
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
@@ -138,8 +141,5 @@ class GroupOp:
 
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
-
-  # do not preserve f(0) = 0
-  UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.CDIV, Ops.POW, Ops.FLOORDIV}
 
   All = set(Ops)
