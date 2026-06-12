@@ -49,7 +49,8 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
     from extra.gemm.cdna_asm_gemm import asm_gemm, quantize_mxfp8, mx_pack, can_use_asm_gemm, _mx_block_scale
     x_q, x_e8, x_si = quantize_mxfp8(x.reshape(-1, x.shape[-1]))
     if can_use_asm_gemm(x_q, w.T):
-      out = asm_gemm(x_q, w.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(w_inv_scale), w_inv_scale)).reshape(*x.shape[:-1], w.shape[0])
+      out = asm_gemm(x_q, w.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(w_inv_scale), w_inv_scale),
+                     mx_w_stored=True).reshape(*x.shape[:-1], w.shape[0])
     else:
       x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*x.shape[:-1], x.shape[-1])
       out = x_phys @ (w.cast(dtypes.bfloat16) * _mx_block_scale(w_inv_scale)).T
