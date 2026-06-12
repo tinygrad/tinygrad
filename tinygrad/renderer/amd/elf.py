@@ -38,6 +38,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   for u in sink.toposort():
     if u.op is Ops.PARAM and u.addrspace is not None: n_bufs += 1
     elif u.op is Ops.PARAM and u.addrspace is None: n_vars += 1
+    elif u.op is Ops.DEFINE_VAR: n_vars += 1
     elif u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
