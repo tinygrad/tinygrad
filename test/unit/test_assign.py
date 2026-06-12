@@ -45,15 +45,20 @@ class TestAssign(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 1)
 
   def test_assign_slice(self):
-    ref = np.zeros((4, 4), dtype=np.float32)
-    X = Tensor(ref).contiguous().realize()
+    X = Tensor([1,2,3,4]).realize()
+    xs = X[2:4]
+    xs.assign(xs+1)
     GlobalCounters.reset()
-    xs = X[1:3]
-    xs.assign(xs + 1)
-    X.realize()
-    ref[1:3] = 1
-    np.testing.assert_allclose(X.numpy(), ref)
+    self.assertListEqual(X.tolist(), [1,2,4,5])
     self.assertEqual(GlobalCounters.kernel_count, 1)
+
+  def test_assign_slice_alt(self):
+    X = Tensor([1,2,3,4]).realize()
+    xs1, xs2 = X[1:3], X[2:4]
+    xs1.assign(xs2+1)
+    GlobalCounters.reset()
+    self.assertListEqual(X.tolist(), [1,4,5,4])
+    self.assertEqual(GlobalCounters.kernel_count, 2)
 
   def test_assign_add(self):
     for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
