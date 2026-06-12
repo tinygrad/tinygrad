@@ -1110,11 +1110,6 @@ class Tensor(RandMixin):
 
   # ***** broadcasted elementwise ops *****
 
-  def ufix(self, x) -> Tensor:
-    # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
-    assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
-    return Tensor(self.uop.ufix(x))
-
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
