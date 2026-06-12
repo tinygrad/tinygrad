@@ -627,6 +627,7 @@ jobs:
 
   testcommaold:
     name: comma Benchmark (0.10.1)
+    runs-on: [self-hosted, Linux, comma]
     timeout-minutes: 10
     defaults:
       run:
@@ -655,7 +656,7 @@ jobs:
 
   testqualcommdsp:
     name: DSP Benchmark
-    runs=on: [self-hosted, Linux, comma]
+    runs-on: [self-hosted, Linux, comma]
     timeout-minutes: 5
     defaults:
       run:
