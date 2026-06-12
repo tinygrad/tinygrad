@@ -1814,6 +1814,7 @@ def train_flux():
   BS = config["BS"] = getenv("BS", 16)
   BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
+  FAKEDATA = getenv("FAKEDATA")
 
   train_num_samples, val_num_samples = 1099776, 29696
   target_eval_loss = 0.586
@@ -1879,7 +1880,23 @@ def train_flux():
     return loss
 
   # data iters
+  def get_fake_data(val:bool):
+    num_samples = val_num_samples if val else train_num_samples
+    for _ in range(num_samples // BS):
+      sample = {
+        "t5_encodings": Tensor.randn(BS, 256, 4096, dtype=dtypes.bfloat16),
+        "clip_encodings": Tensor.randn(BS, 768, dtype=dtypes.bfloat16),
+        "mean": Tensor.randn(BS, 16, 32, 32, dtype=dtypes.bfloat16),
+        "logvar": Tensor.randn(BS, 16, 32, 32, dtype=dtypes.bfloat16),
+      }
+
+      if val:
+        sample["timestep"] = Tensor.rand(BS)
+
+      yield sample
+
   def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
+    if FAKEDATA: return get_fake_data(val)
     return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
 
   # helpers
