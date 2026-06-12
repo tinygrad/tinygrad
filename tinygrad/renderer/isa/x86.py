@@ -171,6 +171,35 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
 ])
 
+# ***** X86 new style -> x86 internal style (pointers, vec dtypes, GEP) *****
+
+pm_x86_style = PatternMatcher([
+  # buffers are pointers, scalar PARAMs (variables) drop their shape src
+  (UPat(Ops.PARAM, name="x"), lambda x: x.replace(dtype=x.dtype.ptr(x.src[0].arg), src=()) \
+    if x.arg.addrspace is AddrSpace.GLOBAL and not isinstance(x.dtype, PtrDType) else (x.replace(src=()) if x.src else None)),
+  (UPat(Ops.BUFFER, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG if x.arg.addrspace == AddrSpace.REG else Ops.DEFINE_LOCAL,
+    dtype=x.dtype.ptr(x.src[0].arg, x.arg.addrspace), src=(), arg=x.arg.slot)),
+  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(dtype=x.src[0].dtype) if x.dtype != x.src[0].dtype else None),
+  # SHRINK is a vectorized INDEX
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx"), UPat.cvar("c"))), lambda buf,idx,c: buf.index(idx, ptr=True) \
+    .cast(buf.ptrdtype.base.vec(c.arg).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace)) if isinstance(buf.dtype, PtrDType) else None),
+  # cast of a pointer is a noop in new style (any reinterpreting cast was absorbed into SHRINK)
+  (UPat(Ops.CAST, src=(UPat.var("y"),), name="x"), lambda x,y:
+   y if isinstance(y.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
+  # INDEX on a pointer has pointer dtype, INDEX on a register value is a GEP
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat()), name="x"), lambda buf,x:
+   x.replace(dtype=buf.dtype) if isinstance(buf.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
+  (UPat(Ops.INDEX, src=(UPat.var("y"), UPat.cvar("c")), name="x"), lambda y,c,x:
+   y.gep(c.arg) if not isinstance(y.dtype, PtrDType) and y.op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else None),
+  # restore vec dtypes from structure
+  (UPat(Ops.LOAD, src=(UPat(Ops.CAST, name="c"),), allow_any_len=True, name="x"), lambda x,c:
+   x.replace(dtype=x.dtype.scalar().vec(c.ptrdtype.base.count)) if isinstance(c.dtype, PtrDType) and c.ptrdtype.base.count > x.dtype.count else None),
+  (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
+  (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(c)) \
+    if not isinstance(x.dtype, PtrDType) and not any(isinstance(s.dtype, PtrDType) for s in x.src) \
+      and (c:=max([s.dtype.count for s in x.src], default=1)) > x.dtype.count else None),
+])
+
 # ***** X86 pre instruction selection *****
 
 def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
@@ -185,7 +214,7 @@ def gated_store(base:UOp, idx:UOp, cast:UOp, gate:UOp, val:UOp):
   return ptr.cast(cast.dtype).store(val)
 
 # these must be done in a separate matcher because they violate the spec
-pre_isel_matcher = PatternMatcher([
+pre_isel_matcher = pm_x86_style + PatternMatcher([
   # zero extending scalar 32bit int is a noop
   (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
   # cast between signed and unsigned int is a noop
@@ -379,7 +408,7 @@ isel_matcher = PatternMatcher([
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
     if not x.src or x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
-  (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
+  (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
   (UPat(Ops.DEFINE_REG, name="x"), lambda x:
    x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
@@ -406,7 +435,7 @@ isel_matcher = PatternMatcher([
    a.ins(X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   x.replace(dtype=y.dtype).bitcast(to_int(y.dtype)).bitwise_and(1).f(Ops.NOOP, dtype=dtypes.bool)),
+   UOp(Ops.AND, dt:=to_int(y.dtype), (x.replace(dtype=y.dtype).bitcast(dt), UOp.const(dt, 1))).f(Ops.NOOP, dtype=dtypes.bool)),
   # conditional moves that use flags
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.CMOVL, src=(b, a, cmp(m)))),
@@ -826,6 +855,7 @@ encodings = {
 }
 
 class X86Renderer(ISARenderer):
+  new_style = True
   device = "CPU"
   has_local = False
   has_threads = bool(getenv("THREADS", 1))

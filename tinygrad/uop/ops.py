@@ -298,7 +298,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        return self.src[0].as_shape if len(self.src) >= 1 else None
+        # a srcless scalar PARAM is a variable
+        return self.src[0].as_shape if len(self.src) >= 1 else (() if self.arg.addrspace is None else None)
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
