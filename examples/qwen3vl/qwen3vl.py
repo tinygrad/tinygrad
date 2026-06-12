@@ -220,19 +220,17 @@ class Qwen3VisBlock:
     self.attn_out = nn.Linear(kv["clip.vision.embedding_length"], kv["clip.vision.embedding_length"])
     self.attn_qkv = nn.Linear(*weights["v.blk.0.attn_qkv.weight"].shape[::-1])
   
+  #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L280
   def __call__(self, hidden_states, cos, sin):
     hidden_states_input = self.ln1(hidden_states)
-    qkv = self.attn_qkv(hidden_states_input)
     # https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L186
-    qkv = qkv.reshape(qkv.shape[0], 3, self.num_heads, -1).permute(1, 0, 2, 3)
-    query, key, value = qkv[0], qkv[1], qkv[2]
+    query, key, value = self.attn_qkv(hidden_states_input).reshape(hidden_states.shape[0], 3, self.num_heads, -1).permute(1, 0, 2, 3)
     query, key = apply_rotary_pos_emb_vision(query, key, cos, sin)
     query = query.transpose(0, 1).unsqueeze(0)
     value = value.transpose(0, 1).unsqueeze(0)
     key = key.transpose(0, 1).unsqueeze(0)
 
     attn_output = query.scaled_dot_product_attention(key, value)
-
     attn_output = attn_output.transpose(1, 2)
     attn_output = attn_output.reshape(attn_output.shape[1], -1)
     attn_output = self.attn_out(attn_output)
