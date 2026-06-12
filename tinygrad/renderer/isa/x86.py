@@ -174,9 +174,9 @@ extra_matcher = PatternMatcher([
 # ***** X86 new style -> x86 internal style (pointers, vec dtypes, GEP) *****
 
 pm_x86_style = PatternMatcher([
-  # buffers are pointers, scalar PARAMs (variables) drop their shape src
+  # buffers are pointers, scalar PARAMs (variables) keep their shape src
   (UPat(Ops.PARAM, name="x"), lambda x: x.replace(dtype=x.dtype.ptr(x.src[0].arg), src=()) \
-    if x.arg.addrspace is AddrSpace.GLOBAL and not isinstance(x.dtype, PtrDType) else (x.replace(src=()) if x.src else None)),
+    if x.arg.addrspace is AddrSpace.GLOBAL and not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.BUFFER, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG if x.arg.addrspace == AddrSpace.REG else Ops.DEFINE_LOCAL,
     dtype=x.dtype.ptr(x.src[0].arg, x.arg.addrspace), src=(), arg=x.arg.slot)),
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(dtype=x.src[0].dtype) if x.dtype != x.src[0].dtype else None),
