@@ -158,8 +158,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # winograd rewrite (fires before split_reduceop; returns None if pattern doesn't match)
   # pm_winograd is composed in below
-
-  # winograd rewrite (fires before split_reduceop; returns None if pattern doesn't match)
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)), lambda reduce, x: try_winograd_rewrite(reduce, x, pm_mops)),
 
   # split_reduceop
