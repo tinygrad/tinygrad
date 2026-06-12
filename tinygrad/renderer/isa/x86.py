@@ -4,7 +4,7 @@ import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, ParamArg
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
@@ -12,8 +12,8 @@ from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-  # these aren't real instructions
-  FRAME_INDEX = auto(); LABEL = auto()
+  # these aren't real instructions, DEFINE is a register placeholder that defines a register without emitting an instruction
+  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -171,14 +171,14 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
 ])
 
-# ***** X86 new style -> x86 internal style (pointers, vec dtypes, GEP) *****
+# ***** X86 new style -> x86 internal style (pointers, vec dtypes) *****
 
 pm_x86_style = PatternMatcher([
   # buffers are pointers, scalar PARAMs (variables) keep their shape src
   (UPat(Ops.PARAM, name="x"), lambda x: x.replace(dtype=x.dtype.ptr(x.src[0].arg), src=()) \
     if x.arg.addrspace is AddrSpace.GLOBAL and not isinstance(x.dtype, PtrDType) else None),
-  (UPat(Ops.BUFFER, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG if x.arg.addrspace == AddrSpace.REG else Ops.DEFINE_LOCAL,
-    dtype=x.dtype.ptr(x.src[0].arg, x.arg.addrspace), src=(), arg=x.arg.slot)),
+  (UPat(Ops.BUFFER, name="x"), lambda x: x.replace(dtype=x.dtype.ptr(x.src[0].arg, x.arg.addrspace), src=()) \
+    if not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(dtype=x.src[0].dtype) if x.dtype != x.src[0].dtype else None),
   # SHRINK is a vectorized INDEX
   (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx"), UPat.cvar("c"))), lambda buf,idx,c: buf.index(idx, ptr=True) \
@@ -186,11 +186,9 @@ pm_x86_style = PatternMatcher([
   # cast of a pointer is a noop in new style (any reinterpreting cast was absorbed into SHRINK)
   (UPat(Ops.CAST, src=(UPat.var("y"),), name="x"), lambda x,y:
    y if isinstance(y.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
-  # INDEX on a pointer has pointer dtype, INDEX on a register value is a GEP
+  # INDEX on a pointer has pointer dtype, INDEX on a register value extracts an element and keeps its scalar dtype (lowered in isel)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat()), name="x"), lambda buf,x:
    x.replace(dtype=buf.dtype) if isinstance(buf.dtype, PtrDType) and not isinstance(x.dtype, PtrDType) else None),
-  (UPat(Ops.INDEX, src=(UPat.var("y"), UPat.cvar("c")), name="x"), lambda y,c,x:
-   y.gep(c.arg) if not isinstance(y.dtype, PtrDType) and y.op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else None),
   # restore vec dtypes from structure
   (UPat(Ops.LOAD, src=(UPat(Ops.CAST, name="c"),), allow_any_len=True, name="x"), lambda x,c:
    x.replace(dtype=x.dtype.scalar().vec(c.ptrdtype.base.count)) if isinstance(c.dtype, PtrDType) and c.ptrdtype.base.count > x.dtype.count else None),
@@ -203,13 +201,13 @@ pm_x86_style = PatternMatcher([
 # ***** X86 pre instruction selection *****
 
 def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx))
+  local = UOp(Ops.BUFFER, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=ParamArg(next(ctx), addrspace=AddrSpace.LOCAL))
   local_idx = local.index(UOp.const(dtypes.int32, 0), ptr=True)
   ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
 
 def gated_store(base:UOp, idx:UOp, cast:UOp, gate:UOp, val:UOp):
-  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=-1)
+  local = UOp(Ops.BUFFER, base.dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=ParamArg(-1, addrspace=AddrSpace.LOCAL))
   ptr = gate.where(base.index(idx, ptr=True), local.index(UOp.const(dtypes.int32, 0), ptr=True))
   return ptr.cast(cast.dtype).store(val)
 
@@ -229,8 +227,9 @@ pre_isel_matcher = pm_x86_style + PatternMatcher([
   # noop of a noop is removed
   (UPat(Ops.NOOP, src=(UPat(Ops.NOOP),), name="x"), lambda x: x.replace(src=x.src[0].src)),
   # moving elements of a single register to another without shuffling is a noop
-  (UPat(Ops.STACK, src=(UPat.var("y"),), allow_any_len=True, name="x"),
-   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
+  (UPat(Ops.STACK, src=(UPat.var("y").index(UPat()),), allow_any_len=True, name="x"),
+   lambda y,x: UOp(Ops.NOOP, x.dtype, (y,)) if all(s.op is Ops.INDEX and len(s.src) == 2 and s.src[0] is y \
+     and s.src[1].op is Ops.CONST and s.src[1].arg == i for i,s in enumerate(x.src)) else None),
   # gated load/store become a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").store(UPat.var("val"), UPat.var("gate")), gated_store),
@@ -264,10 +263,10 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 # ***** X86 instruction selection *****
 # if s is used multiple times we don't fold
 def is_foldable(ctx:IselContext, x:UOp, s:UOp) -> bool: return len(ctx.uses[s]) == x.src.count(s) == 1
-def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
+def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
+def lane(x:UOp, i:int) -> int: return s.src[1].arg if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.DEFINE_REG, dt, tag=None if reg is None else (reg,))
+def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, arg=X86Ops.DEFINE, tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
@@ -368,8 +367,8 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   return x.ins(X86Ops.MOV, src=src)
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  # real registers
-  if x.op is Ops.DEFINE_REG and x.tag is not None: return None
+  # register placeholders with real registers
+  if x.arg is X86Ops.DEFINE and x.tag is not None: return None
   # this is an immediate
   if x.arg is X86Ops.FRAME_INDEX: return None
   # no register definition
@@ -395,9 +394,9 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # cast to pointer is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  # float gep(0) is a noop as it just moves the 0th element from one xmm register to another
+  # extracting the 0th float element is a noop as it just moves the 0th element from one xmm register to another
   # this is done here to not interfere with shuffles
-  (UPat(dtype=dtypes.floats).gep(0, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=None)),
+  (UPat(dtype=dtypes.floats).index(UPat(Ops.CONST, arg=0), name="x"), lambda x: x.replace(op=Ops.NOOP, src=x.src[:1])),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
@@ -409,9 +408,6 @@ isel_matcher = PatternMatcher([
     if not x.src or x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
-  # these are treated the same for now
-  (UPat(Ops.DEFINE_REG, name="x"), lambda x:
-   x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
@@ -479,12 +475,17 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
   (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
-  # gep
-  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, x.arg[0])))),
-  (UPat.var("y", dtypes.int16s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, x.arg[0])))),
-  (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, x.arg[0])))),
-  (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, x.arg[0])))),
-  (UPat.var("y", dtypes.floats).gep(name="x"), lambda y,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, x.arg[0] * x.dtype.itemsize)))),
+  # INDEX on a vector register value extracts a single element
+  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).index(UPat.cvar("c"), name="x"),
+   lambda y,c,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, c.arg))) if y.dtype.count > 1 else None),
+  (UPat.var("y", dtypes.int16s).index(UPat.cvar("c"), name="x"),
+   lambda y,c,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, c.arg))) if y.dtype.count > 1 else None),
+  (UPat.var("y", dtypes.int32s).index(UPat.cvar("c"), name="x"),
+   lambda y,c,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, c.arg))) if y.dtype.count > 1 else None),
+  (UPat.var("y", dtypes.int64s).index(UPat.cvar("c"), name="x"),
+   lambda y,c,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, c.arg))) if y.dtype.count > 1 else None),
+  (UPat.var("y", dtypes.floats).index(UPat.cvar("c"), name="x"),
+   lambda y,c,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, c.arg * x.dtype.itemsize))) if y.dtype.count > 1 else None),
   # fused multiply add
   ((UPat(Ops.MUL, dtypes.float32, name="a") + UPat.var("b")).named("c"), lambda ctx,a,b,c:
    a.ins(X86Ops.VFMADD213SS if a.dtype.count == 1 else X86Ops.VFMADD213PS, src=(*a.src, b)) if is_foldable(ctx, c, a) else None),
@@ -578,8 +579,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: x.ins(X86Ops.VMOVQ)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.ins(X86Ops.VMOVDm)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
-  # index
-  (UPat(Ops.INDEX, name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x))),
+  # index on a pointer is an address computation
+  (UPat(Ops.INDEX, name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x)) if isinstance(x.dtype, PtrDType) else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
@@ -608,7 +609,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD, src=(UPat(name="a"),), name="y")), allow_any_len=True, name="x"), lambda ctx,y,a,x:
    x.replace(src=x.src[:2] + fold_address(a) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable(ctx, x, y) else None),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
@@ -907,7 +908,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op is not Ops.INS: continue
+      if u.op is not Ops.INS or u.arg is X86Ops.DEFINE: continue
       if u.arg is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif u.arg is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
@@ -918,7 +919,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS: continue
+      if u.op is not Ops.INS or u.arg is X86Ops.DEFINE: continue
       if u.arg is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
