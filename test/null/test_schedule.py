@@ -1,6 +1,6 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import gc, unittest, time
-from tinygrad import nn, dtypes, Device, Tensor, getenv
+from tinygrad import nn, dtypes, Device, Tensor, Context, getenv
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import compile_linear, run_linear
@@ -145,6 +145,12 @@ class TestSimpleSchedule(unittest.TestCase):
     self.assertEqual(len(Tensor.schedule_linear(a1, a2).src), 1)
 
 class TestSchedule(unittest.TestCase):
+  def setUp(self):
+    self.ctx = Context(SPLIT_REDUCEOP=0)
+    self.ctx.__enter__()
+  def tearDown(self):
+    self.ctx.__exit__(None, None, None)
+
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1).clone()
