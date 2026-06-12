@@ -88,19 +88,8 @@ V_MUL =   { dtypes.float16:RDNA3Ops.v_mul_f16_e32,  dtypes.float32:RDNA3Ops.v_mu
 V_SQRT =  { dtypes.float16:RDNA3Ops.v_sqrt_f16_e32, dtypes.float32:RDNA3Ops.v_sqrt_f32_e32, dtypes.float64:RDNA3Ops.v_sqrt_f64_e32 }
 V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e32,
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
-V_CVT = {
-  dtypes.float32 : {
-    dtypes.float16 : RDNA3Ops.v_cvt_f32_f16_e32,
-    dtypes.uint32 : RDNA3Ops.v_cvt_f32_u32_e32,
-    dtypes.int32  : RDNA3Ops.v_cvt_f32_i32_e32,
-    dtypes.float64 : RDNA3Ops.v_cvt_f32_f64_e32,
-  },
-  dtypes.uint32 : {
-    dtypes.float32 : RDNA3Ops.v_cvt_u32_f32_e32,
-    dtypes.float64 : RDNA3Ops.v_cvt_u32_f64_e32,
-    dtypes.uint16 : RDNA3Ops.v_cvt_u32_u16_e32
-  },
-}
+V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e32,
+  dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e32 }
 
 def legalize_operands(x:UOp):
   group, opc = x.arg.func, _geopc(x)
@@ -124,26 +113,26 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # unary alu ops
-  # (UPat.var(name="y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[x.dtype], src=(y,))),
+  (UPat.var(name="y").sqrt().named("x"), lambda y,x: x.ins(V_SQRT[x.dtype], src=(y,))),
 
   # binary alu ops
   # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
+  (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
 
   # TODO: How to handle bool cast?
   # ex. (a < b, dtype=dtypes.bool).cast(dtypes.uint) ...
   # OH this is actually a case where I need to load from vcc cause that was the output of cmp
   # need to somehow check if the output of cmp is used, in that case use cmpx ins??
 
-  # (UPat(name="a", dtype=dtypes.bool).cast(name="x", dtype=dtypes.uints), lambda a,x: _const(x.dtype, int(a.arg))),
-  (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
-  (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
-
-
-  # conditional moves
+  # comparisons
+  ((UPat.var("a", dtype=dt_32bit) > UPat.var("b")).named("m"),
+    lambda a,b,m: m.ins(V_CMPGT[a.dtype], src=(a,b), dtype=dtypes.uint32, tag=(VCC,))),
   ((UPat.var("a", dtype=dt_32bit) < UPat.var("b")).named("m"),
     lambda a,b,m: m.ins(V_CMPLT[a.dtype], src=(a,b), dtype=dtypes.uint32, tag=(VCC,))),
+
+  # conditional moves
   (UPat(Ops.INS, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
     lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(a,b,m))),
 
@@ -163,46 +152,33 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-# TODO: clean up this slop, use **kw for all op types?
 def fillinsts(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
-  enc, group, opc = x.arg, x.arg.func.__name__, x.arg.args[0].name.lower()
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
-  def _immorreg(x:UOp):
-    if x.op == Ops.CONST: return x.arg
-    else: return _route(x.tag[0])[x.tag[0].index]
+  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(x.tag)
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
-    if len(rr) > 1: return r[rr[0].index:rr[0].index+len(rr)-1]
-    else: return r[rr[0].index]
-  oprs, fields = x.src, [_fuse(x.tag)] if x.tag is not None else []
-  suffix = []
-  if group == "SMEM":
-    assert oprs[-1].op == Ops.CONST
-    sbase = oprs[0].tag if len(oprs) == 2 else oprs[0].tag + oprs[1].tag
-    fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
-    ret = enc(*fields)
-    if "load" in opc:
-      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+    return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
+  enc, group, opc = x.arg, x.arg.func.__name__, x.arg.args[0].name.lower()
+  oprs, suffix = x.src, []
+
+  # hacky fixes, find cleaner way to conform to isa
+  if "cndmask" in opc: oprs = oprs[:-1]
+  if "cmp" in opc: oprs = oprs[1:]
+  if "load" in opc:
+      suffix.append(fillinsts(UOp(Ops.INS,
+                                  arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt,
+                                  src=(UOp.const(dtypes.uint16, 0),)))[0])
+  kw = args = None
+  if group == "SMEM": kw = dict(sdata=_fuse(x.tag), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group == "GLOBAL":
-    vaddr, base, offs = oprs[0], oprs[1], oprs[2]
-    kw = dict(addr=_immorreg(vaddr), saddr=_fuse(base.tag), offset=_immorreg(offs))
+    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oprs[1].tag), offset=_immorreg(oprs[2]))
     if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
-    else:
-      suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
-      kw["vdst"]=_fuse(x.tag)
-    ret = enc(**kw)
-  elif "VOP" in group:
-    # remove stale cmps? find better way to do this
-    if "cndmask" in opc: oprs = oprs[:-1]
-    if "cmp" in opc: oprs = oprs[1:]
-    fields.extend([_immorreg(u) for u in oprs])
-    ret = enc(*fields)
-  elif group == "SOPK":
-    fields.extend([dsl_null, oprs[0].arg])
-    ret = enc(*fields)
-  else:
-    raise NotImplementedError("instruction type encoding unsupported")
+    else: kw["vdst"]=_fuse(x.tag)
+  elif "VOP" in group: args = [_fuse(x.tag)] + [_immorreg(u) for u in x.src]
+  elif group == "SOPK": args = [dsl_null, oprs[0].arg]
+  else: raise NotImplementedError("instruction type encoding unsupported")
+  ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
 
