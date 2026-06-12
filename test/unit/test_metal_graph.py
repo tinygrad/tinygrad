@@ -42,5 +42,25 @@ class TestMetalGraph(unittest.TestCase):
     buf.device = Device.DEFAULT
     self.MetalGraph.supports_uop([self.dev], self.call(buf))
 
+  def test_track_inflight(self):
+    # Partially fixes #16595
+    # TODO: Another unit test to make sure per-step time no longer linearly grows?
+    # Need to make sure auto-cleanup of in-flight command buffers works correctly. This test checks
+    # that the completion handler is called and the command buffer is removed from the in-flight set.
+
+    # track_inflight must: (1) register a block that discards cbuf from the set when fired,
+    # (2) stash the handler on cbuf so the C function pointer stays alive, and
+    # (3) call addCompletedHandler before commit (Metal asserts otherwise)
+    cbuf = self.dev.mtl_queue.commandBuffer().retained()
+    self.dev.track_inflight(cbuf)
+    # (2) CFUNCTYPE stashed on cbuf keeps the C function pointer alive
+    self.assertTrue(callable(cbuf._h))
+    cbuf.commit()
+    cbuf.waitUntilCompleted()
+    # (1) the completion handler discarded cbuf from the in-flight set
+    self.assertNotIn(cbuf, self.dev.mtl_buffers_in_flight)
+    # (3) addCompletedHandler before commit is proven by the fact that the set was cleaned
+    # (Metal should assert in track_inflight if called after commit)
+
 if __name__ == "__main__":
   unittest.main()
