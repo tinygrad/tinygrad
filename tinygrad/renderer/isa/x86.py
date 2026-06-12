@@ -171,17 +171,6 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
 ])
 
-# ***** X86 new style -> x86 internal style (vec dtypes) *****
-
-pm_x86_style = PatternMatcher([
-  # restore vec dtypes from structure
-  (UPat(Ops.SHRINK, src=(UPat(), UPat(), UPat.cvar("c"))).load(allow_any_len=True, name="x"), lambda x,c:
-   x.replace(dtype=x.dtype.scalar().vec(c.arg)) if c.arg > x.dtype.count else None),
-  (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
-  (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(c)) \
-    if (c:=max([s.dtype.count for s in x.src], default=1)) > x.dtype.count else None),
-])
-
 # ***** X86 pre instruction selection *****
 
 def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
@@ -200,8 +189,14 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.const(dtypes.int32, 0), dtype=dtypes.uint64))
   return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
 
-# these must be done in a separate matcher because they violate the spec
-pre_isel_matcher = pm_x86_style + PatternMatcher([
+# legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
+pre_isel_matcher = PatternMatcher([
+  # x86 registers are typed by their width, materialize the structural width of the graph into vec dtypes (this is still valid new style)
+  (UPat(Ops.SHRINK, src=(UPat(), UPat(), UPat.cvar("c"))).load(allow_any_len=True, name="x"), lambda x,c:
+   x.replace(dtype=x.dtype.scalar().vec(c.arg)) if c.arg > x.dtype.count else None),
+  (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
+  (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(c)) \
+    if (c:=max([s.dtype.count for s in x.src], default=1)) > x.dtype.count else None),
   # zero extending scalar 32bit int is a noop
   (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
   # cast between signed and unsigned int is a noop
