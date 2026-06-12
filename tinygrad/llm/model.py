@@ -117,6 +117,9 @@ class FFNBlock:
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
+    if getenv("CUSTOM_MLP") and x.device == "AMD" and self.config.dim == 1024 and self.config.hidden_dim == 3584:
+      from tinygrad.llm.amd_kernels import fused_gate_up
+      return self.ffn_down(fused_gate_up(x, self.ffn_gate.weight, self.ffn_up.weight))
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
@@ -269,17 +272,23 @@ class GatedDeltaNetBlock(FFNBlock):
     v = v.reshape(B, self.num_v_heads, self.head_v_dim)
     q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
 
-    # recurrent
-    recurrent_state = self.recurrent_state * alpha
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
-
     # store the updated state
-    conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
-    recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
-    recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+    if getenv("CUSTOM_GDN") and x.device == "AMD" and B == 1 and self.num_v_heads == 16 and self.head_v_dim == 128 and self.head_k_dim == 128:
+      from tinygrad.llm.amd_kernels import gdn_recurrent_update_conv
+      core_attn_in = gdn_recurrent_update_conv(self.recurrent_state, conv_out, alpha, beta)
+      conv_state_store = self.conv_state.uop.after(core_attn_in.uop).store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
+      core_attn_in = Tensor(core_attn_in.uop.after(conv_state_store))
+    else:
+      conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
+      # recurrent
+      recurrent_state = self.recurrent_state * alpha
+      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
+      recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+      core_attn_in = (recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim)
 
     # output
-    core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    core_attn_out = self.ssm_norm(core_attn_in)
     return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
@@ -313,7 +322,11 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    x = self.output_norm(x)
+    if getenv("CUSTOM_VOCAB_ARGMAX") and x.device == "AMD" and x.shape[0] == 1 and x.shape[-1] == 1024 and self.output.weight.shape[0] == 248320:
+      from tinygrad.llm.amd_kernels import q8_lmhead_gumbel_argmax
+      return q8_lmhead_gumbel_argmax(x[:, -1, :], self.output.weight, temperature)
+    logits = self.output(x)[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
