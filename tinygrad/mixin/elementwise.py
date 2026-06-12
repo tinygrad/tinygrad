@@ -851,7 +851,10 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
     ```
     """
-    return (self + (self.square() + 1).sqrt()).log()
+    # asinh is odd, evaluate on |x| to avoid catastrophic cancellation in x+sqrt(x*x+1) for large negative x
+    ax = self.maximum(-self)
+    out = (ax + (self.square() + 1).sqrt()).log()
+    return (self < 0).where(-out, out)
 
   def acosh(self) -> Self:
     """
