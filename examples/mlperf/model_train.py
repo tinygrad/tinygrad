@@ -1797,7 +1797,6 @@ def train_stable_diffusion():
     t6 = time.perf_counter()
 
 def train_flux():
-  # BS=6 GPUS=6 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 PYTHONPATH=. MODEL=flux python3 examples/mlperf/model_train.py
   from examples.mlperf.dataloader import batch_load_flux
   from examples.mlperf.helpers import (
     generate_labels,
@@ -1847,36 +1846,6 @@ def train_flux():
   for p in optim.params: p.grad = Tensor.zeros_like(p, dtype=optim.param_dtype)
   grads = [p.grad for p in optim.params]
 
-  def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
-    return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
-
-  def prepare_inputs(sample:dict[str, Tensor], timesteps:Tensor|None = None) -> tuple[dict[str, Tensor], Tensor, Tensor, tuple[int, int]]:
-    for k in sample: sample[k].shard_(GPUS, axis=None)
-    labels = generate_labels(sample["mean"], sample["logvar"])
-    clip_enc, t5_enc = sample["clip_encodings"], sample["t5_encodings"]
-
-    if timesteps is not None:
-      timesteps = timesteps / 8.0
-    else:
-      timesteps = Tensor.rand(BS).shard(GPUS, None)
-
-    noise = Tensor.randn_like(labels)
-    sigmas = timesteps.view(-1, 1, 1, 1)
-    latents = (1 - sigmas) * labels + sigmas * noise
-
-    b, _, latent_h, latent_w = latents.shape
-    latent_pos_enc = create_pos_enc_for_latents(b, (latent_dims := (latent_h, latent_w)), GPUS)
-    text_pos_enc = Tensor.zeros(b, t5_enc.shape[1], 3, device=GPUS)
-
-    latents = pack_latents(latents)
-
-    return (
-      {"img": latents, "img_ids": latent_pos_enc, "txt": t5_enc, "txt_ids": text_pos_enc, "y": clip_enc, "timesteps": timesteps},
-      noise,
-      labels,
-      latent_dims
-    )
-
   @TinyJit
   @Tensor.train(mode=True)
   def minibatch(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
@@ -1908,6 +1877,38 @@ def train_flux():
     loss = (pred - tgt).square().mean(axis=[1, 2, 3]).sum()
 
     return loss
+
+  # data iters
+  def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
+    return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
+
+  # helpers
+  def prepare_inputs(sample:dict[str, Tensor], timesteps:Tensor|None = None) -> tuple[dict[str, Tensor], Tensor, Tensor, tuple[int, int]]:
+    for k in sample: sample[k].shard_(GPUS, axis=None)
+    labels = generate_labels(sample["mean"], sample["logvar"])
+    clip_enc, t5_enc = sample["clip_encodings"], sample["t5_encodings"]
+
+    if timesteps is not None:
+      timesteps = timesteps / 8.0
+    else:
+      timesteps = Tensor.rand(BS).shard(GPUS, None)
+
+    noise = Tensor.randn_like(labels)
+    sigmas = timesteps.view(-1, 1, 1, 1)
+    latents = (1 - sigmas) * labels + sigmas * noise
+
+    b, _, latent_h, latent_w = latents.shape
+    latent_pos_enc = create_pos_enc_for_latents(b, (latent_dims := (latent_h, latent_w)), GPUS)
+    text_pos_enc = Tensor.zeros(b, t5_enc.shape[1], 3, device=GPUS)
+
+    latents = pack_latents(latents)
+
+    return (
+      {"img": latents, "img_ids": latent_pos_enc, "txt": t5_enc, "txt_ids": text_pos_enc, "y": clip_enc, "timesteps": timesteps},
+      noise,
+      labels,
+      latent_dims
+    )
 
   # wandb
   wandb = getenv("WANDB")
