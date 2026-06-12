@@ -1,10 +1,13 @@
 import math, functools, operator
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, ConstType, InvalidType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
+
+if TYPE_CHECKING:
+  from tinygrad.uop.ops import UOp
 
 
 class ElementwiseMixin(DTypeMixin, CreationMixin):
@@ -12,12 +15,22 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
 
-  def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
-    raise NotImplementedError
+  @property
+  def _uop(self) -> 'UOp': raise NotImplementedError
+
+  def _wrap_uop(self, u: 'UOp') -> Self: raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x: Self | ConstType) -> Self:
-    return self.const_like(x) if not isinstance(x, ElementwiseMixin) else x
+  def ufix(self, x: 'Self|ConstType|UOp') -> Self:
+    return x if isinstance(x, type(self)) else self._wrap_uop(self._uop.ufix(x))
+
+  def _ufix_keep_dtype(self, x) -> bool:
+    # keep self.dtype for float self, or for int self with int/Invalid scalar
+    return dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType)))
+
+  # implemented in OpMixin, broadcasting needs the movement ops
+  def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
+    raise NotImplementedError
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
