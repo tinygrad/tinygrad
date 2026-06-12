@@ -277,7 +277,7 @@ class TestCustomKernel(unittest.TestCase):
     out.realize()
     self.assertEqual(GlobalCounters.kernel_count, 5)
 
-  def test_add_reshape(self):
+  def test_simple_reshape(self):
     a = Tensor.ones(2,3,4).realize()
     b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_add_one_kernel)[0]
     b2 = b.reshape(2,12)

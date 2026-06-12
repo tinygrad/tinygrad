@@ -51,7 +51,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     return None, None, dq.uop, dk.uop, dv.uop
   return grad
 
-# TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_add_reshape
+# TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_simple_reshape
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
