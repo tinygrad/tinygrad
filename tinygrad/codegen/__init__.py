@@ -50,7 +50,8 @@ pm_remove_vec_dtypes = PatternMatcher([
 ])+pm_clean_up_group_sink
 
 pm_move_regs = PatternMatcher([
-  (UPat(GroupOp.ALU, name="x"), lambda x: x.replace(src=tuple([u.load() if u.addrspace != AddrSpace.REG else u for u in x.src])))
+  (UPat(GroupOp.ALU, name="x"), lambda x:
+   x.replace(src=tuple([u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else u for u in x.src])))
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -65,11 +66,22 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
 
-  # remove all weakints
-  sink = graph_rewrite(sink, pm_lower_index_dtype, name="lower weakints", bottom_up=True)
+  # first we optimize
+  if optimize:
+    # do postrange optimization, BEAM or hand_coded_optimizations
+    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+
+  # rewrite reduce after optimizations
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # add loads
-  sink = graph_rewrite(sink, pm_move_regs, name="move to registers")
+  sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
+
+  # split ends
+  sink = graph_rewrite(sink, pm_split_ends, name="split ends")
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_index_dtype, name="lower weakints", bottom_up=True)
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
