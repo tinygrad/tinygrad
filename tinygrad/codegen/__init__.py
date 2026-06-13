@@ -43,7 +43,7 @@ pm_remove_vec_dtypes = PatternMatcher([
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
   # replace DEFINE_LOCAL/DEFINE_REG with BUFFER
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
-   x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
+   x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.MEMREG))),
   # replace DEFINE_VAR with PARAM
   (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x:
    x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),

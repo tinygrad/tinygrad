@@ -51,7 +51,7 @@ class DTypeMetaClass(type):
 
 class AddrSpace(IntEnum):
   def __repr__(self): return f"{self.__class__.__name__}.{self.name}"
-  GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
+  GLOBAL = auto(); LOCAL = auto(); MEMREG = auto(); REG = auto()  # noqa: E702
 
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
