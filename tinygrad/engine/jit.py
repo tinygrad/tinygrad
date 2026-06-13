@@ -267,6 +267,7 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
+    do_cnt_inc = True
     if not JIT or self.cnt == 0:
       # jit ignore
       assert self.fxn is not None
@@ -289,6 +290,7 @@ class TinyJit(Generic[ReturnType]):
 
       # combine all captured linears into one, memory plan, and graph split
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+      has_random = any(u.op is Ops.THREEFRY for l in self._linears for u in l.toposort())
       del self._linears
 
       if self.prune:
@@ -298,8 +300,15 @@ class TinyJit(Generic[ReturnType]):
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
-      ret = self.captured(input_buf_uops, var_vals)
+      captured = CapturedJit(ret, linear, names, expected_input_info)
+      if has_random:
+        if DEBUG >= 1: print("JIT captured random ops; skipping cache")
+        self.captured = None
+        do_cnt_inc = False
+        captured(input_buf_uops, var_vals)
+      else:
+        self.captured = captured
+        ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
@@ -308,5 +317,5 @@ class TinyJit(Generic[ReturnType]):
         raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
       ret = self.captured(input_buf_uops, var_vals)
 
-    self.cnt += 1
+    if do_cnt_inc: self.cnt += 1
     return ret
