@@ -1,6 +1,7 @@
 from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
+from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
@@ -9,7 +10,7 @@ VCC = Register("vcc", 0)
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[1:])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
 def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
 def const(dt, v:int) -> UOp: return UOp.const(dt,v)
@@ -40,17 +41,16 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   # pin kernarg ptr and contiguous gp sgprs for load
   return x.ins(RDNA3Ops.s_load_b64,
-               src=(def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]),
-                    UOp.const(dtypes.uint32, offs).rtag()),
+               src=(def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]), UOp.const(dtypes.uint32, offs).rtag()),
                tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[2*i+1])))
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
-dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
-dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 and dt not in dtypes.int32s)
-dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
+dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2)
+dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4)
+dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8)
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
 
-def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag[0].cons[0].name[0] == "v"
+def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.op is Ops.CONST else x
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
@@ -79,13 +79,18 @@ V_RCP =   { dtypes.float16:RDNA3Ops.v_rcp_f16_e32,  dtypes.float32:RDNA3Ops.v_rc
 V_SIN =   { dtypes.float16:RDNA3Ops.v_sin_f16_e32,  dtypes.float32:RDNA3Ops.v_sin_f32_e32 }
 V_TRUNC = { dtypes.float16:RDNA3Ops.v_trunc_f16_e32,dtypes.float32:RDNA3Ops.v_trunc_f32_e32,dtypes.float64:RDNA3Ops.v_trunc_f64_e32 }
 V_FMA =   { dtypes.float16:RDNA3Ops.v_fma_f16,      dtypes.float32:RDNA3Ops.v_fma_f32,      dtypes.float64:RDNA3Ops.v_fma_f64       }
-V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e32,
-  dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
-V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e32,
-  dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e32 }
-V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_nlg_f16_e32,dtypes.float32:RDNA3Ops.v_cmp_nlg_f32_e32,dtypes.float64:RDNA3Ops.v_cmp_nlg_f64_e32 }
-V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e32,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e32,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e32,
-  dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e32 }
+V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e64, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e64, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e64,
+  dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e64 }
+V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e64, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e64, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e64,
+  dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e64 }
+V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_nlg_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_nlg_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_nlg_f64_e64 }
+V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
+  dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
+
+V_CVT = {
+  dtypes.uint16:  { dtypes.float16:RDNA3Ops.v_cvt_u16_f16_e32 },
+  dtypes.float16: { dtypes.float32:RDNA3Ops.v_cvt_f16_f32_e32, dtypes.uint16:RDNA3Ops.v_cvt_f16_u16_e32, dtypes.int16:RDNA3Ops.v_cvt_f16_i16_e32}
+}
 
 def legalize_operands(x:UOp):
   group, opc = x.arg.func, geopc(x)
@@ -101,18 +106,22 @@ def legalize_operands(x:UOp):
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
   return None
 
-def cmp(x:UOp,vcc:bool=False):
+def cmp(x:UOp):
   dt = x.src[0].dtype
   if x.op is Ops.CMPLT: ins = V_CMPLT[dt]
   elif x.op is Ops.CMPEQ: ins = V_CMPEQ[dt]
   elif x.op is Ops.CMPNE: ins = V_CMPNE[dt]
   else: ins = V_CMPGT[dt]
   # else: raise NotImplementedError("comparison type instruction dne")
-  return x.ins(ins, tag=(VCC,) if vcc else True)
+  return x.ins(ins, tag=GP_SGPRS)
+
+pre_isel_matcher = PatternMatcher([])
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
+  # noop
+  (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
 
@@ -136,23 +145,23 @@ isel_matcher = PatternMatcher([
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
 
-  # TODO: How to handle bool cast?
-  # ex. (a < b, dtype=dtypes.bool).cast(dtypes.uint) ...
-  # OH this is actually a case where I need to load from vcc cause that was the output of cmp
-  # need to somehow check if the output of cmp is used, in that case use cmpx ins??
-
-  # conditional moves, VCC used immediately after, doesn't need to be stored in register
-  # - folds cmp instruction into src to preserve before discarding in encode
-  (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
-  (UPat(Ops.CMPEQ, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
-  (UPat(Ops.CMPNE, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
-  ((UPat() > UPat()).named("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(b,a,cmp(m)))),
+  # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
+  (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  (UPat(Ops.CMPEQ, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  (UPat(Ops.CMPNE, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  ((UPat() > UPat()).named("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
 
   # comparisons
-  ((UPat(dtype=dt_32bit) > UPat()).named("x"), cmp),
-  ((UPat(dtype=dt_32bit) < UPat()).named("x"), cmp),
-  (UPat(Ops.CMPEQ, name="x", src=(UPat(dtype=dt_32bit), UPat())), cmp),
-  (UPat(Ops.CMPNE, name="x", src=(UPat(dtype=dt_32bit), UPat())), cmp),
+  # ((UPat(dtype=dt_32bit) > UPat()).named("x"), lambda x: cmp(x,True)),
+  # (UPat(Ops.CMPEQ, name="x", src=(UPat(dtype=dt_32bit), UPat())), lambda x: cmp(x,True)),
+  # (UPat(Ops.CMPNE, name="x", src=(UPat(dtype=dt_32bit), UPat())), lambda x: cmp(x,True)),
+  
+  # materialize mask -> 0/1 in VGPR
+  (UPat(GroupOp.Comparison, dtypes.bool, name="x"),
+   lambda x: x.ins(RDNA3Ops.v_cndmask_b32_e64, dtype=dtypes.uint32, src=(const(dtypes.uint32,0), const(dtypes.uint32,1), cmp(x)))),
+  # casts
+  # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
+  # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
@@ -178,25 +187,25 @@ def fillinsts(x:UOp):
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
-  enc, group, opc = x.arg, x.arg.func.__name__, geopc(x)
-  oprs, suffix = x.src, []
+  enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, geopc(x), x.src, []
 
   # hacky fixes, find cleaner way to conform to isa
-  if "cndmask" in opc: oprs = oprs[:-1]
-  if "load" in opc:
-      suffix.append(fillinsts(UOp(Ops.INS,
-                                  arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt,
-                                  src=(UOp.const(dtypes.uint16, 0),)))[0])
+  # if "cndmask" in opc: oprs = oprs[:-1]
   kw = args = None
+  nalu = {"OPC":2, "OP2":2, "OP3":3, "OP1":1}
   if group == "SMEM": kw = dict(sdata=_fuse(x.tag), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group == "GLOBAL":
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oprs[1].tag), offset=_immorreg(oprs[2]))
     if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
     else: kw["vdst"]=_fuse(x.tag)
-  elif "VOP" in group: args = ([_fuse(x.tag)] if group != "VOPC" else []) + [_immorreg(u) for u in x.src]
   elif group == "SOPK": args = [dsl_null, oprs[0].arg]
-  else: raise NotImplementedError("instruction type encoding unsupported")
+  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(x.tag)] + [_immorreg(u) for u in x.src[:nalu[group[1:4]]]]
+  else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
+
+  if "load" in opc: suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+
   ret = enc(**kw) if kw is not None else enc(*args)
+  print(ret)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
 
@@ -212,7 +221,7 @@ post_regalloc_matcher = PatternMatcher([
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
-  pre_isel_matcher = PatternMatcher([])
+  pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE)}
