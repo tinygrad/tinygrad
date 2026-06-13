@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
+import os, ctypes, contextlib, re, functools, mmap, struct, sys, weakref
 assert sys.platform != 'win32'
 from typing import cast
 from dataclasses import dataclass
@@ -116,7 +116,9 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
     else:
       cmdq_addr = dev.cmdq_allocator.alloc(len(self._q) * 4, 16)
       cmdq_wptr = (cmdq_addr - dev.cmdq_page.va_addr) // 4
-      dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
+      # We cannot use array copy to avoid unintentional unaligned access
+      for i in range(len(self._q)):
+        dev.cmdq[cmdq_wptr + i] = self._q[i]
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
     gpfifo.gpput[0] = (gpfifo.put_value + 1) % gpfifo.entries_count
