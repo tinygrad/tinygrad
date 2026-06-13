@@ -249,6 +249,7 @@ class TestRandomness(unittest.TestCase):
     Tensor.rand(1).realize()
 
     Tensor._device_rng_counters[device].assign(Tensor([dtypes.uint32.max - 5, 0], device=device, dtype=dtypes.uint32)).realize()
+    Tensor._device_rng_counter_vals[device] = (int(dtypes.uint32.max) - 5, 0)
 
     Tensor.rand(10).realize()
     c = Tensor._device_rng_counters[device].numpy()
@@ -258,5 +259,19 @@ class TestRandomness(unittest.TestCase):
     c = Tensor._device_rng_counters[device].numpy()
     np.testing.assert_allclose(c, [14, 1])
 
+  def test_rand_order_independent(self):
+    Tensor.manual_seed(0)
+    r1 = Tensor.rand(4)
+    r2 = Tensor.rand(4)
+    v2 = r2.tolist()
+    v1 = r1.tolist()
+    self.assertNotEqual(v1, v2)
+
+  def test_rand_manual_seed_resets_counter_state(self):
+    Tensor.manual_seed(123)
+    v1 = Tensor.rand(4).tolist()
+    Tensor.manual_seed(123)
+    v2 = Tensor.rand(4).tolist()
+    self.assertEqual(v1, v2)
 if __name__ == "__main__":
   unittest.main()
