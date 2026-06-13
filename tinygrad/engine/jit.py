@@ -301,7 +301,7 @@ class TinyJit(Generic[ReturnType]):
       # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
       held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
-      captured = CapturedJit(ret, linear, names, expected_input_info)
+      captured: CapturedJit[ReturnType] = CapturedJit(ret, linear, names, expected_input_info)
       if has_random:
         if DEBUG >= 1: print("JIT captured random ops; skipping cache")
         self.captured = None

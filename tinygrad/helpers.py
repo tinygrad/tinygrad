@@ -416,7 +416,7 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
-_db_tables = set()
+_db_tables: set[str] = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
