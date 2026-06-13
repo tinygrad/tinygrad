@@ -64,6 +64,15 @@ class TestTiny(unittest.TestCase):
       self.assertGreaterEqual(x, 0.0)
       self.assertLess(x, 1.0)
 
+  def test_random_realize_out_of_creation_order(self):
+    # https://github.com/tinygrad/tinygrad/issues/16520
+    Tensor.manual_seed(1337)
+    r1 = Tensor.rand(4)
+    r2 = Tensor.rand(4)
+    v2 = r2.tolist()
+    v1 = r1.tolist()
+    self.assertNotEqual(v1, v2)
+
   # *** JIT (for Python speed) ***
 
   def test_jit(self):
