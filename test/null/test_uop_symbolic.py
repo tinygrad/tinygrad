@@ -375,7 +375,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a//-2)//3, -21, 0, "(a//-6)")
 
   def test_div_const_div_neg_inner_divisor(self):
-    # (x//c+a)//d -> (x+a*c)//(c*d) works for negative c
+    # (x//c+a)//d -> (x+a*c)//(c*d) works for negative c too
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//-2+1)//3, -21, 0, "((a+-2)//-6)")
 
