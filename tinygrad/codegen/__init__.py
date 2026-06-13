@@ -49,7 +49,38 @@ pm_remove_vec_dtypes = PatternMatcher([
    x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
+pm_move_regs = PatternMatcher([
+  (UPat(GroupOp.ALU, name="x"), lambda x: x.replace(src=tuple([u.load() if u.addrspace != AddrSpace.REG else u for u in x.src])))
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
+  if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(ast))
+  if SPEC: type_verify(ast, spec_tensor)
+  sink = ast
+
+  # this is new style
+  sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
+  name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_index_dtype, name="lower weakints", bottom_up=True)
+
+  # add loads
+  sink = graph_rewrite(sink, pm_move_regs, name="move to registers")
+
+  # this was the linearizer
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+  if SPEC: type_verify(sink, spec_program)
+
+  # return the rewritten sink
+  return sink
+
+def old_full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
