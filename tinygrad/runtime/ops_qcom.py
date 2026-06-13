@@ -277,7 +277,7 @@ class QCOMProgram(HCQProgram):
   def _parse_lib(self, lib):
     # Extract image binary
     self.image_size = _read_lib(lib, 0x100)
-    self.image = bytearray(lib[(image_offset:=_read_lib(lib, 0xc0)):image_offset+self.image_size])
+    self.image = bytes(lib[(image_offset:=_read_lib(lib, 0xc0)):image_offset+self.image_size])
 
     # Parse image descriptors
     image_desc_off = _read_lib(lib, 0x110)

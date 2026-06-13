@@ -300,7 +300,7 @@ class TinyJit(Generic[ReturnType]):
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
-      captured = CapturedJit(ret, linear, names, expected_input_info)
+      captured: CapturedJit[ReturnType] = CapturedJit(ret, linear, names, expected_input_info)
       if has_random:
         if DEBUG >= 1: print("JIT captured random ops; skipping cache")
         self.captured = None
