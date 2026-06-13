@@ -108,7 +108,7 @@ def uops_to_dtypes(uops:list[UOp]) -> list[DType]:
   ret = []
   seen = set()
   for u in uops:
-    if u.addrspace in (AddrSpace.REG, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
+    if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
       # TODO: this eventually needs to be removed
       ret.append(u.dtype.vec(u.max_numel()))
       seen.add(key)
@@ -162,7 +162,7 @@ class CStyleLanguage(Renderer):
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
-    if buf.addrspace == AddrSpace.REG and buf.op not in {Ops.AFTER, Ops.BUFFER}:
+    if buf.addrspace == AddrSpace.ALU:
       # this is lane access in C
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
       return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
@@ -175,7 +175,7 @@ class CStyleLanguage(Renderer):
     suffix = f"[{shp[0]}]" if len(shp) else ""
     return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
 
-  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False):
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
