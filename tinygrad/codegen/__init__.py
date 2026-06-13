@@ -49,9 +49,10 @@ pm_remove_vec_dtypes = PatternMatcher([
    x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
+def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_move_regs = PatternMatcher([
-  (UPat(GroupOp.ALU, name="x"), lambda x:
-   x.replace(src=tuple([u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else u for u in x.src])))
+  (UPat(GroupOp.ALU, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
