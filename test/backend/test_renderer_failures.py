@@ -58,6 +58,7 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.int.min+1))
     self.assertEqual(ret[0], 1)
 
+  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need uint64")
   def test_pointer_cast_store(self):
     renderer = Device[Device.DEFAULT].renderer
     buf = UOp.placeholder((16,), dtypes.uint8, 0)
