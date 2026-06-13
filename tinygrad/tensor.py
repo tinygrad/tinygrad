@@ -502,7 +502,6 @@ class Tensor(RandMixin):
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
   _device_rng_counter_vals: dict[str, tuple[int, int]] = {}
-  
   @staticmethod
   def manual_seed(seed=0) -> None:
     """

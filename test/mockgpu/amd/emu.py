@@ -146,10 +146,24 @@ def _init_sqtt_encoder():
     if _VALUT_4_RE.search(op_name): return InstOp.VALUT_4
     return None
 
-  def _mem_op(t, op_name: str) -> InstOp:
+  _NULL_SADDR = 124  # saddr offset value meaning NULL / no scalar base (0x7c)
+  def _mem_op(t, op_name: str, inst=None) -> InstOp:
     is_store = "STORE" in op_name
-    if issubclass(t, _DS): return InstOp.LDS_WR_2 if is_store else InstOp.LDS_RD
-    if issubclass(t, _GLOBAL): return InstOp.SGMEM_WR_2 if is_store else InstOp.SGMEM_RD_1
+    if issubclass(t, _DS):
+      if not is_store: return InstOp.LDS_RD
+      if any(k in op_name for k in ('ADDTID', 'APPEND', 'CONSUME')): return InstOp.LDS_WR_1
+      if 'B128' in op_name or '2ADDR_B64' in op_name: return InstOp.LDS_WR_5
+      if 'B96' in op_name: return InstOp.LDS_WR_4
+      if 'B64' in op_name or '2ADDR_B32' in op_name: return InstOp.LDS_WR_3
+      return InstOp.LDS_WR_2  # B32 and all other single-dword stores
+    if issubclass(t, _GLOBAL):
+      saddr_null = inst is not None and hasattr(inst, 'saddr') and inst.saddr.offset == _NULL_SADDR
+      if not is_store: return InstOp.SGMEM_RD_2 if saddr_null else InstOp.SGMEM_RD_1
+      # WR code depends on (saddr=NULL adds +1) and data width
+      if 'B128' in op_name: return InstOp.SGMEM_WR_6 if saddr_null else InstOp.SGMEM_WR_5
+      if 'B96' in op_name: return InstOp.SGMEM_WR_5 if saddr_null else InstOp.SGMEM_WR_4
+      if 'B64' in op_name: return InstOp.SGMEM_WR_4 if saddr_null else InstOp.SGMEM_WR_3
+      return InstOp.SGMEM_WR_3 if saddr_null else InstOp.SGMEM_WR_2  # B32
     if issubclass(t, _FLAT): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     if issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
@@ -177,7 +191,8 @@ def _init_sqtt_encoder():
       if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
       else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
     elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM_RD)
-    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
+    elif 'SAVEEXEC' in op_name: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU_WR_EXEC)
+    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name, inst))
 
   def finish(wave_id: int):
     """Emit WAVEEND for a completed wave."""
