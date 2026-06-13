@@ -1061,9 +1061,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
-    lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
-    arg = ParamArg(slot, addrspace=addrspace) if addrspace is AddrSpace.GLOBAL else slot
-    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=arg)
+    #lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
+    lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.BUFFER, AddrSpace.REG: Ops.BUFFER}
+    arg = ParamArg(slot, addrspace=addrspace)
+    ret = UOp(lookup[addrspace], dtype, (UOp.const(dtypes.weakint, prod(shape)),), arg=arg)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int):
@@ -1688,7 +1689,7 @@ pm_lower_index_dtype = PatternMatcher([
                         UPat.var("gate").where(UPat.var("idx_x", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx_x,idx_y,gate: buf.index(gate.where(idx_y, idx_y.const_like(Invalid)),
                                           gate.where(idx_x, idx_x.const_like(Invalid)), ptr=True)),
-  (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
+  (UPat((Ops.SINK, Ops.NOOP, Ops.END, Ops.AFTER, Ops.BUFFER), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]

@@ -49,7 +49,55 @@ pm_remove_vec_dtypes = PatternMatcher([
    x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
+def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
+pm_move_regs = PatternMatcher([
+  (UPat(GroupOp.ALU, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
+])
+
+pm_lower_weakints = PatternMatcher([
+  (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int)),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
+  if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(ast))
+  if SPEC: type_verify(ast, spec_tensor)
+  sink = ast
+
+  # this is new style
+  sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
+  name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+
+  # first we optimize
+  if optimize:
+    # do postrange optimization, BEAM or hand_coded_optimizations
+    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+
+  # rewrite reduce after optimizations
+  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
+
+  # add loads
+  sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
+
+  # split ends
+  sink = graph_rewrite(sink, pm_split_ends, name="split ends")
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
+
+  # this was the linearizer
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+  if SPEC: type_verify(sink, spec_program)
+
+  # return the rewritten sink
+  return sink
+
+def old_full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
