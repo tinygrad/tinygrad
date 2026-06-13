@@ -102,9 +102,7 @@ class PythonProgram:
         elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
-          if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}:
-            # INDEX on a register value picks the element (can be different per thread)
-            assert u.src[0].addrspace == AddrSpace.REG, f"INDEX on value must be on REG, not {u.src[0].addrspace}"
+          if u.src[0].addrspace == AddrSpace.ALU:
             ret = [src_values[0][i][t] for t,i in enumerate(src_values[1])]
           elif isinstance(src_dtypes[0], ImageDType):
             assert len(src_values) == 3, "image index must be 3 srcs"
