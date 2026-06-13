@@ -40,9 +40,9 @@ class Estimates:
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.PARAM and u.arg.addrspace is None and u.expr == 'core_id': mults *= int(u.vmax) + 1
-      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
+      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.MEMREG:
         lds += u.max_numel() * u.dtype.scalar().itemsize * mults
-      elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
+      elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.MEMREG:
         lds += u.max_numel() * u.src[1].dtype.scalar().itemsize * mults
       elif u.op in GroupOp.ALU and (not ignore_indexing or u.addrspace is not None):
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()

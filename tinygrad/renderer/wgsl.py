@@ -31,7 +31,7 @@ def is_packed(x:UOp):
   if x.op is Ops.LOAD: dt, addrspace = x.dtype, x.src[0].addrspace
   elif x.op is Ops.STORE: dt, addrspace = x.src[1].dtype, x.src[0].addrspace
   else: dt, addrspace = x.dtype, x.addrspace
-  return dt.itemsize < 4 and dt != dtypes.half and addrspace != AddrSpace.REG
+  return dt.itemsize < 4 and dt != dtypes.half and addrspace != AddrSpace.MEMREG
 def _packed_size(u:UOp): return u.max_numel() // (4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)

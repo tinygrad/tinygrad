@@ -90,7 +90,7 @@ class PythonProgram:
           storage_fmt = storage_fmt_for_dtype(u.dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert storage_fmt != "e"
-          if u.addrspace == AddrSpace.REG:
+          if u.addrspace == AddrSpace.MEMREG:
             # REGs are per thread
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
