@@ -271,7 +271,7 @@ class CustomASM24Controller:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
     self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
-    return self.usb._bulk_in(0x81, nbytes, timeout=30000)
+    return bytes(self.usb._bulk_in(0x81, nbytes, timeout=30000))
 
   # === XDATA read/write (0xE4/0xE5 vendor control transfers) ===
 
