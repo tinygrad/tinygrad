@@ -480,7 +480,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
     # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
-    if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
+    #if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
