@@ -27,12 +27,12 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_buf:UOp,
 @functools.cache
 def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp,
                                 inv_scale_out:UOp, dname:str) -> UOp:
-  # NOTE: grad_amax_state is plumbed through as an unused fwd input so the bwd kernel can read it via kernel.src
+  # NOTE: grad_amax_state is a call input for bwd metadata, but not a fwd kernel argument.
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   mem = n_elems * 2 * 2 + n_elems + NUM_WG * 4 + 4
-  sink = UOp.sink(fp8_out.base, amax_buf.base, xw13.base, amax_state.base, grad_amax_state.base, inv_scale_out.base, threads, workgroups,
+  sink = UOp.sink(fp8_out.base, amax_buf.base, xw13.base, amax_state.base, inv_scale_out.base, threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
