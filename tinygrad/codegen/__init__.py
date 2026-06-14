@@ -4,7 +4,7 @@ import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import ParamArg
+from tinygrad.uop.ops import ParamArg, AxisType
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -61,6 +61,18 @@ pm_lower_weakints = PatternMatcher([
   (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int)),
 ])
 
+def build_range_map(ctx, sink:UOp):
+  for x in sink.toposort():
+    if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
+      ctx[x.arg[0]] = len(ctx)
+
+expander2 = PatternMatcher([
+  (UPat(Ops.SINK, name="sink"), build_range_map),
+  (UPat(Ops.RANGE, name="r"),
+   lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
+    .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
+])+pm_flatten_range
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -81,7 +93,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
-  # TODO: do expander
+  # do expander
+  sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
 
   # add locals (STAGE -> BUFFER)
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
