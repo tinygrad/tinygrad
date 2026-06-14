@@ -97,15 +97,6 @@ using G = kittens::group<NUM_WARPS>;
 #ifndef SCALE_MODE
 #define SCALE_MODE 3
 #endif
-#ifndef X_SCALE_OFFSET
-#define X_SCALE_OFFSET 0
-#endif
-#ifndef W_SCALE_OFFSET
-#define W_SCALE_OFFSET 0
-#endif
-#ifndef Z_SCALE_OFFSET
-#define Z_SCALE_OFFSET 0
-#endif
 #ifndef HAS_GRAD_AMAX
 #define HAS_GRAD_AMAX 0
 #endif
@@ -373,13 +364,13 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     // apply x_scale * w_scale before bf16 store to prevent overflow
 #if SCALE_MODE != 0
 #if SCALE_MODE == 1
-    float scale = x_scale_ptr[X_SCALE_OFFSET];
+    float scale = *x_scale_ptr;
 #elif SCALE_MODE == 2
-    float scale = w_scale_ptr[W_SCALE_OFFSET];
+    float scale = *w_scale_ptr;
 #elif SCALE_MODE == 3
-    float scale = x_scale_ptr[X_SCALE_OFFSET] * w_scale_ptr[W_SCALE_OFFSET];
+    float scale = *x_scale_ptr * *w_scale_ptr;
 #elif SCALE_MODE == 7
-    float scale = x_scale_ptr[X_SCALE_OFFSET] * w_scale_ptr[W_SCALE_OFFSET] * z_scale_ptr[Z_SCALE_OFFSET];
+    float scale = *x_scale_ptr * *w_scale_ptr * *z_scale_ptr;
 #else
 #error "Unsupported SCALE_MODE"
 #endif
