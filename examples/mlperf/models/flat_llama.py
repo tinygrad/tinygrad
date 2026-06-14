@@ -73,13 +73,11 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   w_scale = w_inv_scale if w_scale_idx is None else w_inv_scale[w_scale_idx]
   return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8, x_scale
 
-def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor,
-                         w_scale_idx:int|None=None):
+def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor, w_scale_idx:int|None=None):
   if FUSED_ADD_NORM_MUL_QUANTIZE:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_rmsnorm_mul_quantize_fp8
     x_fp8, x_inv_scale, new_amax, x_normed, rrms = fused_rmsnorm_mul_quantize_fp8(x, norm, amax_x, eps, FP8_DTYPE)
-    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax,
-                       grad_amax_state=grad_amax_state, w_scale_idx=w_scale_idx)
+    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax, grad_amax_state=grad_amax_state, w_scale_idx=w_scale_idx)
     return out, x_normed, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state, w_scale_idx=w_scale_idx)
@@ -90,8 +88,7 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
   if FUSED_ADD_NORM_MUL_QUANTIZE:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8
     x_fp8, x_inv_scale, new_amax, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, norm, amax_x, eps, FP8_DTYPE)
-    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax,
-                       grad_amax_state=grad_amax_state, w_scale_idx=w_scale_idx)
+    out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, x_scale=x_inv_scale, x_new_amax=new_amax, grad_amax_state=grad_amax_state, w_scale_idx=w_scale_idx)
     return out, h, x_normed, rrms, ret
   h = x + residual
   x_normed, rrms = rmsnorm(h, eps)
@@ -99,13 +96,12 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
   return out, h, x_normed, rrms, ret
 
 def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
-                              amax_x2:Tensor,
-                              grad_amax_xw13:Tensor, grad_amax_xout:Tensor, w_scale_idx:int|None=None):
+                             amax_x2:Tensor,
+                             grad_amax_xw13:Tensor, grad_amax_xout:Tensor, w_scale_idx:int|None=None):
   if FUSED_SILU_W13:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8, x2_inv_scale, new_amax_x2 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13)
-    out, *ret = matmul(None, w2, w_inv_scale=s_2, x_fp8=x2_fp8, x_scale=x2_inv_scale, x_new_amax=new_amax_x2,
-                       grad_amax_state=grad_amax_xout, w_scale_idx=w_scale_idx)
+    out, *ret = matmul(None, w2, w_inv_scale=s_2, x_fp8=x2_fp8, x_scale=x2_inv_scale, x_new_amax=new_amax_x2, grad_amax_state=grad_amax_xout, w_scale_idx=w_scale_idx)
     return out, ret
   hidden = x_w13.shape[-1] // 2
   x_w1, x_w3 = x_w13[..., :hidden], x_w13[..., hidden:]
@@ -180,8 +176,7 @@ class FlatTransformer:
     amaxs, saves = [], []
 
     xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                                  amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv,
-                                                                  w_scale_idx=w_scale_idx)
+                                                                  amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv, w_scale_idx=w_scale_idx)
     amaxs.append(new_amax)
     saves.extend([x_normed, rrms, *s, xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
@@ -214,12 +209,10 @@ class FlatTransformer:
       x_normed, rrms = rmsnorm(h, self.norm_eps)
       saves.extend([x_normed, rrms])
       inp = x_normed * kwargs["ffn_norm"]
-      x_w1, new_amax, *s = matmul(inp, kwargs["w1"], amax_x=kwargs["amax_x1"], w_inv_scale=kwargs["s_1"],
-                                  grad_amax_state=kwargs["grad_amax_xw1"], w_scale_idx=w_scale_idx)
+      x_w1, new_amax, *s = matmul(inp, kwargs["w1"], amax_x=kwargs["amax_x1"], w_inv_scale=kwargs["s_1"], grad_amax_state=kwargs["grad_amax_xw1"], w_scale_idx=w_scale_idx)
       amaxs.append(new_amax)
       saves.extend([*s, x_w1])
-      x_w3, new_amax, *s = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"],
-                                  grad_amax_state=kwargs["grad_amax_xw3"], w_scale_idx=w_scale_idx)
+      x_w3, new_amax, *s = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"], grad_amax_state=kwargs["grad_amax_xw3"], w_scale_idx=w_scale_idx)
       amaxs.append(new_amax)
       saves.extend([*s, x_w3])
       out, new_amax, *s = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
@@ -228,13 +221,12 @@ class FlatTransformer:
       saves.extend([*s, out])
     else:
       x_w13, h, x_normed, rrms, (new_amax, *s) = add_norm_quantize_matmul(x, residual, kwargs["ffn_norm"], kwargs["w13"], kwargs["s_13"],
-                                                                           self.norm_eps, amax_x=kwargs["amax_x13"],
-                                                                           grad_amax_state=kwargs["grad_amax_xw13"], w_scale_idx=w_scale_idx)
+                                                                          self.norm_eps, amax_x=kwargs["amax_x13"],
+                                                                          grad_amax_state=kwargs["grad_amax_xw13"], w_scale_idx=w_scale_idx)
       amaxs.append(new_amax)
       saves.extend([x_normed, rrms, *s, x_w13])
       out, (new_amax, *s) = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
-                                                     grad_amax_xw13=kwargs["grad_amax_xw13"], grad_amax_xout=kwargs["grad_amax_xout"],
-                                                     w_scale_idx=w_scale_idx)
+                                                     grad_amax_xw13=kwargs["grad_amax_xw13"], grad_amax_xout=kwargs["grad_amax_xout"], w_scale_idx=w_scale_idx)
       amaxs.append(new_amax)
       saves.extend([*s, out])
     return out, h, amaxs, saves

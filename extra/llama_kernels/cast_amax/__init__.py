@@ -72,6 +72,6 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   amax_buf = alloc_local((NUM_WG,),         dtypes.float32, xw13.device, axis)
   inv_scale = alloc_like((),                dtypes.float32, xw13.device)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
-  fp8_out, amax_buf, inv_scale, _, _, _ = Tensor.custom_kernel(fp8_out, amax_buf, inv_scale, xw13, amax_state, grad_amax_state,
-                                                               fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
+  fp8_out, amax_buf, inv_scale, _, _, _ = Tensor.custom_kernel(fp8_out, amax_buf, inv_scale, xw13, amax_state, grad_amax_state, fxn=fxn,
+                                                               grad_fxn=_fused_quantize_bwd_w13)
   return fp8_out, inv_scale, scalar_amax(amax_buf)

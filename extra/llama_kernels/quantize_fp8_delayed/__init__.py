@@ -86,8 +86,7 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device, axis)
   inv_scale = alloc_like((), dtypes.float32, x.device)
   fxn = _custom_quantize_fp8_with_amax
-  fp8_out, amax_partial, inv_scale, _, _ = Tensor.custom_kernel(fp8_out, amax_partial, inv_scale, x, amax_state,
-                                                                 fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
+  fp8_out, amax_partial, inv_scale, _, _ = Tensor.custom_kernel(fp8_out, amax_partial, inv_scale, x, amax_state, fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
   new_amax = scalar_amax(amax_partial)
   store_effect = amax_state.uop.store(new_amax.uop)
   return fp8_out, inv_scale, new_amax, store_effect

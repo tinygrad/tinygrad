@@ -2646,11 +2646,11 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_fp8.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
-                                  f"-DSCALE_MODE={scale_mode}", f"-DX_SCALE_OFFSET={scale_offsets[0]}",
-                                  f"-DW_SCALE_OFFSET={scale_offsets[1]}", f"-DZ_SCALE_OFFSET={scale_offsets[2]}",
-                                  f"-DHAS_GRAD_AMAX={1 if has_grad_amax else 0}",
-                                  f"-DHAS_W_POST={1 if has_w_post else 0}"]).compile_cached(src)
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DSCALE_MODE={scale_mode}", f"-DX_SCALE_OFFSET={scale_offsets[0]}",
+                                 f"-DW_SCALE_OFFSET={scale_offsets[1]}", f"-DZ_SCALE_OFFSET={scale_offsets[2]}",
+                                 f"-DHAS_GRAD_AMAX={1 if has_grad_amax else 0}",
+                                 f"-DHAS_W_POST={1 if has_w_post else 0}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
