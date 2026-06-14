@@ -28,7 +28,8 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
-    UOp(Ops.SHRINK, dtype=x.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) if isinstance(buf.dtype, PtrDType) else None),
+    UOp(Ops.SHRINK, dtype=x.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) \
+      if isinstance(buf.dtype, PtrDType) and x.dtype.count > 1 else None),
   # rewrite GEP to INDEX
   (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
 ])
@@ -82,11 +83,28 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # add loads
   sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
 
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
+
+  # symbolic
+  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
+
+  # decompositions
+  supported_ops = tuple(ren.code_for_op.keys())
+  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
+  pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions more")
+
+  # ***** make it rendererable *****
+
   # split ends
   sink = graph_rewrite(sink, pm_split_ends, name="split ends")
 
-  # remove all weakints
-  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
+  # move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
