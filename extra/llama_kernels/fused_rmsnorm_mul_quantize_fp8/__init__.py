@@ -3,20 +3,20 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, dname_of, compile_hip
+from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, dname_of, compile_hip
 
 def _src() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8.cpp").read_text()
 def _src_bwd() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8_bwd.cpp").read_text()
 
 @functools.cache
 def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
-                x:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
+                x:UOp, weight:UOp, amax_state:UOp, inv_scale_out:UOp, dname:str, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 + n_elems + MBS * SEQ * 4 + n_elems + HIDDEN * 2 + NUM_WG * 4 + 4
+  mem = n_elems * 2 + n_elems + MBS * SEQ * 4 + n_elems + HIDDEN * 2 + NUM_WG * 4 + 8
   sink = UOp.sink(fp8_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
-                  x.base, weight.base, amax_state.base, threads, workgroups,
+                  x.base, weight.base, amax_state.base, inv_scale_out.base, threads, workgroups,
                   arg=KernelInfo(f"fused_rmsnorm_mul_quantize_fp8_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}",
                                  estimates=Estimates(ops=6*n_elems, mem=mem)))
   defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}",
@@ -27,13 +27,13 @@ def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
 
 @functools.cache
 def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
-                    x:UOp, residual:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
+                    x:UOp, residual:UOp, weight:UOp, amax_state:UOp, inv_scale_out:UOp, dname:str, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 * 4 + MBS * SEQ * 4 + HIDDEN * 2 + NUM_WG * 4 + 4
+  mem = n_elems * 2 * 4 + MBS * SEQ * 4 + HIDDEN * 2 + NUM_WG * 4 + 8
   sink = UOp.sink(fp8_out.base, h_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
-                  x.base, residual.base, weight.base, amax_state.base, threads, workgroups,
+                  x.base, residual.base, weight.base, amax_state.base, inv_scale_out.base, threads, workgroups,
                   arg=KernelInfo(f"fused_add_rmsnorm_mul_quantize_fp8_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}",
                                  estimates=Estimates(ops=7*n_elems, mem=mem)))
   defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}",
@@ -85,10 +85,10 @@ def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_st
   return grad_total.uop, grad_weight_uop
 
 def _fused_bwd(gradient:UOp, kernel:UOp):
-  # NOTE: fwd inputs (fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state)
-  _, x_normed_u, rrms_u, _, x_u, weight_u, amax_state_u = kernel.src[1:]
+  # NOTE: fwd inputs (fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, inv_scale_out)
+  _, x_normed_u, rrms_u, _, x_u, weight_u, amax_state_u, _ = kernel.src[1:]
   grad_x, grad_w = _bwd_common(gradient, None, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
-  return (None, None, None, None, grad_x, grad_w, None)
+  return (None, None, None, None, grad_x, grad_w, None, None)
 
 def _fused_add_bwd(*args, **kwargs):
   # Two invocation modes: 1 grad => positional; >1 grads => kwarg `call=`.
@@ -108,9 +108,9 @@ def _fused_add_bwd(*args, **kwargs):
     g = all_grads[0]
     if g.dtype == dtypes.bfloat16: h_grad_u = g
     else: fp8_grad_u = g
-  _, _, x_normed_u, rrms_u, _, x_u, _, weight_u, amax_state_u = kernel.src[1:]
+  _, _, x_normed_u, rrms_u, _, x_u, _, weight_u, amax_state_u, _ = kernel.src[1:]
   grad_h, grad_w = _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
-  return (None, None, None, None, None, grad_h, grad_h, grad_w, None)
+  return (None, None, None, None, None, grad_h, grad_h, grad_w, None, None)
 
 def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
   # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, inv_scale, new_amax, x_normed, rrms).
@@ -124,10 +124,10 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
   amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
+  inv_scale    = alloc_like((),                 dtypes.float32,  x.device)
   fxn = functools.partial(_custom_fwd, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
-    fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_bwd)
-  inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
+  fp8_out, x_normed_out, rrms_out, amax_buf, _, _, _, inv_scale = Tensor.custom_kernel(
+    fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, inv_scale, fxn=fxn, grad_fxn=_fused_bwd)
   return fp8_out, inv_scale, scalar_amax(amax_buf), x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
@@ -145,9 +145,9 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
   amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
+  inv_scale    = alloc_like((),                 dtypes.float32,  x.device)
   fxn = functools.partial(_custom_fwd_add, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, h_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
-    fp8_out, h_out, x_normed_out, rrms_out, amax_buf, x, residual, weight, amax_state,
+  fp8_out, h_out, x_normed_out, rrms_out, amax_buf, _, _, _, _, inv_scale = Tensor.custom_kernel(
+    fp8_out, h_out, x_normed_out, rrms_out, amax_buf, x, residual, weight, amax_state, inv_scale,
     fxn=fxn, grad_fxn=_fused_add_bwd)
-  inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   return fp8_out, inv_scale, scalar_amax(amax_buf), h_out, x_normed_out, rrms_out

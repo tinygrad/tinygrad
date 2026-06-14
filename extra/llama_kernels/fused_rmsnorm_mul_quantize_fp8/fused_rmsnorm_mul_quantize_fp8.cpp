@@ -6,6 +6,7 @@
 //   y = rmsnorm(x) * weight            (reduce-mean-square + rsqrt + per-elem mul)
 //   fp8 = fp8_sat(y * (FP8_MAX / amax_state))
 // Also writes:
+//   inv_scale       — reciprocal quantization scale consumed by the fp8 matmul
 //   rrms[row]        — saved for the rmsnorm backward
 //   amax_buf[wg]     — per-WG |y| partials, reduced later to update amax_state
 //
@@ -52,7 +53,8 @@ fused_add_rmsnorm_mul_quantize_fp8(
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ residual,        // bf16, ROWS*HIDDEN — added into x before rmsnorm
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state,      // fp32 scalar
+    float*                __restrict__ inv_scale_out)   // fp32 scalar
 {
 #else
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
@@ -63,7 +65,8 @@ fused_rmsnorm_mul_quantize_fp8(
     float*                __restrict__ amax_buf,        // fp32, NUM_WG per-WG partials
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN (per-hidden scale)
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state,      // fp32 scalar
+    float*                __restrict__ inv_scale_out)   // fp32 scalar
 {
 #endif
   __shared__ float sdata[THREADS_PER_WG];
@@ -71,9 +74,12 @@ fused_rmsnorm_mul_quantize_fp8(
   const int tid = threadIdx.x;
   const int wg  = blockIdx.x;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+  const float amax = static_cast<float>(*amax_state) + 1e-8f;
+  const float scale = FP8_MAX / amax;
   const float inv_hidden = 1.0f / static_cast<float>(HIDDEN);
   float local_max = 0.0f;
+
+  if (tid == 0 && wg == 0) inv_scale_out[0] = amax / FP8_MAX;
 
   // Grid-stride over rows. Each WG processes rows (wg, wg+NUM_WG, wg+2*NUM_WG, ...).
   for (int row = wg; row < ROWS; row += NUM_WG) {
