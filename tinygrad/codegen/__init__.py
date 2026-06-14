@@ -67,6 +67,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
   sink = ast
 
+  # preprocess. we need to simplify these
+  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
@@ -78,34 +81,43 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
+  # TODO: do expander
+
+  # add locals (STAGE -> BUFFER)
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
+
   # rewrite reduce after optimizations
   sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # add loads
   sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
 
-  # remove all weakints
-  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
-
   # symbolic (note: this does POW decomp)
   sink = graph_rewrite(sink, sym, name="post index symbolic")
+
+  # ***** make it rendererable (within spec, tighten) *****
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
 
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions")
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="*** decompositions")
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions more")
 
-  # ***** make it rendererable *****
-
   # split ends
   sink = graph_rewrite(sink, pm_split_ends, name="split ends")
 
+  # ***** make it rendererable (outside spec, transform) *****
+
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+
+  # TODO: put devectorizer here
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

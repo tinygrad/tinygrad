@@ -1,11 +1,12 @@
 import unittest
 import functools
-from tinygrad import Tensor, Variable, UOp
+from tinygrad import Tensor, Variable, UOp, dtypes
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.schedule import schedule_cache
 
 def custom_set0_kernel(A:UOp, num:int) -> UOp:
-  return A[0].set(num).sink(arg=KernelInfo(f"custom_set0_{num}"))
+  # TODO: A[0] should be index 0, not RESHAPE
+  return A.index(UOp.const(dtypes.weakint, 0)).set(num).sink(arg=KernelInfo(f"custom_set0_{num}"))
 
 class TestScheduleCache(unittest.TestCase):
   def test_bound_variable_reuses_cache(self):
