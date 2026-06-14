@@ -106,6 +106,12 @@ using G = kittens::group<NUM_WARPS>;
 #ifndef Z_SCALE_OFFSET
 #define Z_SCALE_OFFSET 0
 #endif
+#ifndef HAS_GRAD_AMAX
+#define HAS_GRAD_AMAX 0
+#endif
+#ifndef HAS_W_POST
+#define HAS_W_POST 0
+#endif
 
 __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr
 #if SCALE_MODE == 1
@@ -118,6 +124,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     , float *x_scale_ptr, float *w_scale_ptr, float *z_scale_ptr
 #elif SCALE_MODE != 0
 #error "Unsupported SCALE_MODE"
+#endif
+#if HAS_GRAD_AMAX
+    , float *grad_amax_state_ptr
+#endif
+#if HAS_W_POST
+    , float *w_post_scale_ptr
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;

@@ -2628,17 +2628,19 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
 # ** FP8 GEMM custom kernel
 
 @functools.cache
-def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3, scale_offsets:tuple[int,int,int]=(0,0,0)) -> UOp:
+def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3, scale_offsets:tuple[int,int,int]=(0,0,0),
+                       has_grad_amax:bool=False, has_w_post:bool=False) -> UOp:
   # scale_mode: 0=no scale, 1=x only, 2=w only, 3=x*w, 7=x*w*extra
   n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0) + (1 if scale_mode & 4 else 0)
   scales, extra = args[:n_scales], args[n_scales:]
+  assert len(extra) == int(has_grad_amax) + int(has_w_post), f"unexpected fp8 gemm metadata args: {len(extra)}"
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
   block_size = 256
   threads = UOp.special(64 * 8, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
-  sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
+  sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + tuple(e.base for e in extra) + (threads, workgroups)
   sink = UOp.sink(*sink_inputs,
                   arg=KernelInfo(f"hk_fp8_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
@@ -2646,7 +2648,9 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                   "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
                                   f"-DSCALE_MODE={scale_mode}", f"-DX_SCALE_OFFSET={scale_offsets[0]}",
-                                  f"-DW_SCALE_OFFSET={scale_offsets[1]}", f"-DZ_SCALE_OFFSET={scale_offsets[2]}"]).compile_cached(src)
+                                  f"-DW_SCALE_OFFSET={scale_offsets[1]}", f"-DZ_SCALE_OFFSET={scale_offsets[2]}",
+                                  f"-DHAS_GRAD_AMAX={1 if has_grad_amax else 0}",
+                                  f"-DHAS_W_POST={1 if has_w_post else 0}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
@@ -2962,7 +2966,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0) | (4 if extra_scale is not None else 0)
       scale_offsets = (x_scale_offset, w_scale_offset, extra_scale_offset)
       extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
-      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode, scale_offsets=scale_offsets)
+      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode, scale_offsets=scale_offsets,
+                              has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       bw = functools.partial(custom_gemm_bw, scale_mode=scale_mode, scale_offsets=scale_offsets,
                              has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]

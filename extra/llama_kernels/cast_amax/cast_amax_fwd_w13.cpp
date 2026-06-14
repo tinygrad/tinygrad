@@ -27,6 +27,7 @@ fused_silu_mul_cast_amax_w13(
     float*                __restrict__ amax_buf,        // fp32, NUM_WG (per-WG amaxes)
     const __hip_bfloat16* __restrict__ xw13,            // bf16, 2*N_ELEMS
     const float*          __restrict__ amax_state,      // fp32 scalar
+    const float*          __restrict__ grad_amax_state, // fp32 scalar, kept as fwd ABI arg for bwd metadata
     float*                __restrict__ inv_scale_out)   // fp32 scalar
 {
   __shared__ float sdata[THREADS_PER_WG];
