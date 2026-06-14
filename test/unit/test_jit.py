@@ -368,6 +368,28 @@ class TestJit(unittest.TestCase):
       c = f(a, b)
       self.assertEqual(c.item(), i+1)
 
+  def test_jit_lazy_grad_after_replay(self):
+    # the lazy .grad created during capture is read outside the JIT, the memory planner must not suballocate its buffers (issue #16571)
+    from tinygrad import nn
+    def step(conv, x, y):
+      out = conv(x.permute(0, 3, 1, 2).contiguous()).relu().flatten(1)
+      loss = (out * y).sum(axis=1)  # per-example loss
+      loss.sum().backward()
+      conv.weight.grad = None
+      (loss * 0.5).sum().backward()
+      return loss.mean().realize()
+
+    Tensor.manual_seed(42)
+    conv = nn.Conv2d(3, 4, kernel_size=3, padding=1)
+    x, y = Tensor.randn(4, 8, 8, 3).realize(), Tensor.randn(4, 4*8*8).realize()
+
+    step(conv, x, y)
+    ref = conv.weight.grad.numpy()
+    jit_step = TinyJit(step)
+    for _ in range(4):
+      jit_step(conv, x, y)
+      np.testing.assert_allclose(conv.weight.grad.numpy(), ref, atol=1e-4, rtol=1e-5)
+
 class TestJitPrune(unittest.TestCase):
   def test_simple_prune(self):
     weights = Tensor.rand(16).realize()

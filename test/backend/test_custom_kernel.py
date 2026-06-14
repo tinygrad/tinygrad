@@ -277,6 +277,16 @@ class TestCustomKernel(unittest.TestCase):
     out.realize()
     self.assertEqual(GlobalCounters.kernel_count, 5)
 
+  def test_simple_reshape(self):
+    a = Tensor.ones(2,3,4).realize()
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_add_one_kernel)[0]
+    b2 = b.reshape(2,12)
+    c = Tensor.custom_kernel(Tensor.empty_like(b2), b2, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    c.realize()
+    assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
+    self.assertEqual(GlobalCounters.kernel_count, 3)
+
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
 
