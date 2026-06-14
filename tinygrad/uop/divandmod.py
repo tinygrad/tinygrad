@@ -7,10 +7,7 @@ from tinygrad.helpers import floordiv, floormod, unwrap
 @functools.cache
 def fold_divmod_general(d: UOp) -> UOp|None:
   x, y = d.src
-
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
-  # x//y is constant
-  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -107,7 +104,8 @@ div_and_mod_symbolic = PatternMatcher([
   # (x+c)//d -> (x+c%d)//d + c//d for d>0 (split out the multiple of d in the constant)
   ((UPat.var("x", dtypes.weakint)+UPat.cvar("c"))//UPat.cvar("d"),
     lambda x,c,d: (x+c.arg%d.arg)//d + c.arg//d.arg if c.arg%d.arg!=c.arg and d.arg>0 else None),
-
+  # x%y -> x - (x//y)*y if x//y is a const
+  (UPat.var("x")%UPat.var("y"), lambda x,y: x - xdiv.vmin*y if (xdiv:=x//y).vmin == xdiv.vmax else None),
   # ** 2. Slow Rules **
   (UPat((Ops.FLOORDIV, Ops.FLOORMOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d)),
 ])
