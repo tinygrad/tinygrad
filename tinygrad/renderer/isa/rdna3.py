@@ -6,16 +6,26 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 
+EXEC_LO = Register("exec_lo", 0)
 VCC = Register("vcc", 0)
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
+# contiguous multi-register constraint tuples, ex. v[4:5], v[6:9]
+VGPR_PAIRS = tuple((VGPRS[i],VGPRS[i+1]) for i in range(0, 256, 2))
+VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, 256//2, 2))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
+# How to represent register slices ex. global_load_b128 v[4:7], ..
+# or s_load_b64 s[5:6], s[0:1], ...
+
+# Ned some way to cleanly update regalloc to understand:
+# - multi register constraints ex. cons := tuple[tuple[Register],...]
+
 def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
 def const(dt, v:int) -> UOp: return UOp.const(dt,v)
 
-# def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
+# def map_addrspace(x:UOp, local_ins, global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
@@ -23,11 +33,13 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
-  if isinstance(x.tag, tuple) and x.tag[0]._cons: return None
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0]._cons: return None
   # allocate vreg definitions
   defs = []
   # don't generally allocate to SGPRS, only works wave uniform possible future optim
-  if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
+  if isinstance(x.tag, tuple):
+    vr = ctx.vreg(x.tag)
+    defs = [vr] if isinstance(vr, Register) else [*vr]
   else: defs = [ctx.vreg(GP_VGPRS)]
   return x.replace(tag=tuple(defs))
 
@@ -62,7 +74,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
   # really should get stored in sgpr
   shft = to_vgpr(const(dtypes.int, disp_scale // 2))
-  if idx.op is Ops.CONST: return (UOp(Ops.NOOP), base, _offs(idx.arg * disp_scale))
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, _offs(idx.arg * disp_scale))
   # NOTE: dont cast for now so I dont need to impl cast alu
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
   # For now dont use immediate offset (set to 0x0)
@@ -75,6 +87,8 @@ V_MUL =   { dtypes.float16:RDNA3Ops.v_mul_f16_e32,  dtypes.float32:RDNA3Ops.v_mu
 V_SQRT =  { dtypes.float16:RDNA3Ops.v_sqrt_f16_e32, dtypes.float32:RDNA3Ops.v_sqrt_f32_e32, dtypes.float64:RDNA3Ops.v_sqrt_f64_e32  }
 V_LOG =   { dtypes.float16:RDNA3Ops.v_log_f16_e32,  dtypes.float32:RDNA3Ops.v_log_f32_e32 }
 V_EXP =   { dtypes.float16:RDNA3Ops.v_exp_f16_e32,  dtypes.float32:RDNA3Ops.v_exp_f32_e32 }
+V_MAX =   { dtypes.float16:RDNA3Ops.v_max_f16_e32,  dtypes.float32:RDNA3Ops.v_max_f32_e32,  dtypes.uint16:RDNA3Ops.v_max_u16,     dtypes.int16:RDNA3Ops.v_max_i16,          dtypes.uint32:RDNA3Ops.v_max_u32_e32,
+              dtypes.int32:RDNA3Ops.v_max_i32_e32}
 V_RCP =   { dtypes.float16:RDNA3Ops.v_rcp_f16_e32,  dtypes.float32:RDNA3Ops.v_rcp_f32_e32,  dtypes.float64:RDNA3Ops.v_rcp_f64_e32   }
 V_SIN =   { dtypes.float16:RDNA3Ops.v_sin_f16_e32,  dtypes.float32:RDNA3Ops.v_sin_f32_e32 }
 V_TRUNC = { dtypes.float16:RDNA3Ops.v_trunc_f16_e32,dtypes.float32:RDNA3Ops.v_trunc_f32_e32,dtypes.float64:RDNA3Ops.v_trunc_f64_e32 }
@@ -86,10 +100,13 @@ V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e64, dtypes.float32:RDNA3Ops.v_
 V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_nlg_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_nlg_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_nlg_f64_e64 }
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
-
 V_CVT = {
   dtypes.uint16:  { dtypes.float16:RDNA3Ops.v_cvt_u16_f16_e32 },
-  dtypes.float16: { dtypes.float32:RDNA3Ops.v_cvt_f16_f32_e32, dtypes.uint16:RDNA3Ops.v_cvt_f16_u16_e32, dtypes.int16:RDNA3Ops.v_cvt_f16_i16_e32}
+  dtypes.float16: { dtypes.float32:RDNA3Ops.v_cvt_f16_f32_e32,  dtypes.uint16:RDNA3Ops.v_cvt_f16_u16_e32, dtypes.int16:RDNA3Ops.v_cvt_f16_i16_e32   },
+  dtypes.float32: { dtypes.uint32:RDNA3Ops.v_cvt_f32_u32_e32,   dtypes.int32:RDNA3Ops.v_cvt_f32_i32_e32,  dtypes.float16:RDNA3Ops.v_cvt_f32_f16_e32,
+    dtypes.float64:RDNA3Ops.v_cvt_f32_f64_e32 },
+  dtypes.uint32:  { dtypes.float32:RDNA3Ops.v_cvt_u32_f32_e32,  dtypes.float64:RDNA3Ops.v_cvt_u32_f64_e32,dtypes.uint16:RDNA3Ops.v_cvt_u32_u16_e32  },
+  dtypes.int32:   { dtypes.float32:RDNA3Ops.v_cvt_i32_f32_e32,  dtypes.float64:RDNA3Ops.v_cvt_i32_f64_e32,dtypes.int16:RDNA3Ops.v_cvt_i32_i16_e32   },
 }
 
 def legalize_operands(x:UOp):
@@ -106,6 +123,22 @@ def legalize_operands(x:UOp):
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
   return None
 
+# casting utility function, auto converts between compatible/unsupported hardware dtypes
+# if mapping dt_a -> dt_b does not exist automatically search for cvt chain path, else raise exception
+def cvt(a:UOp, x:UOp):
+  implct = {
+    (dtypes.uint16, dtypes.uint8, dtypes.bool): dtypes.uint16,
+    (dtypes.uint, dtypes.uint32) : dtypes.uint32,
+    (dtypes.float, dtypes.float32) : dtypes.float32,
+    (dtypes.float16,) : dtypes.float16,
+    (dtypes.int16,) : dtypes.int16
+  }
+  try:
+    for match, dt in implct.items():
+      if a.dtype in match: return x.ins(V_CVT[dt][x.dtype])
+  except:
+    raise NotImplementedError(f"no cast instruction for target dtype mapping: {a.dtype} -> {x.dtype}")
+
 def cmp(x:UOp):
   dt = x.src[0].dtype
   if x.op is Ops.CMPLT: ins = V_CMPLT[dt]
@@ -115,11 +148,23 @@ def cmp(x:UOp):
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
-pre_isel_matcher = PatternMatcher([])
+def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
+  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx)).rtag()
+  local_idx = local.index(const(dtypes.int32, 0), ptr=True)
+  ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
+  return ptr.cast(cast.dtype).load(dtype=x.dtype)
+
+pre_isel_matcher = PatternMatcher([
+  # (UPat.var("y").gep(name="x"), lambda y,x: x.replace(dtype=dtypes.void)),
+  # (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
+  # cast to ptr is noop
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+])
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
+
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -136,6 +181,16 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").trunc().named("x"), lambda y,x: x.ins(V_TRUNC[y.dtype])),
   (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
 
+  # gep
+  # kind hacky, would be nice to avoid extract mov ins later
+  # (UPat.var("y", dt_128bit).gep(name="x", dt_32bit), lambda y,x: x.ins(RDNA3Ops.v_mov_b32)),
+
+  # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
+
+  # proper register fusion / extraction is lazily evaluated in encoding pass
+  # (UPat.var("y").gep(name="x"), lambda y,x: x.replace(dtype=dtypes.void)),
+  # (UPat(Ops.STACK, dtypes.float32.vec(4), name="x"), lambda x: x.replace(dtype=dtypes.void)),
+
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
@@ -144,12 +199,11 @@ isel_matcher = PatternMatcher([
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
+  (UPat(Ops.MAX, name="x"), lambda x: x.ins(V_MAX[x.dtype])),
 
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
-  (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
-  (UPat(Ops.CMPEQ, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
-  (UPat(Ops.CMPNE, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
-  ((UPat() > UPat()).named("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
+    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
 
   # comparisons
   # ((UPat(dtype=dt_32bit) > UPat()).named("x"), lambda x: cmp(x,True)),
@@ -159,15 +213,22 @@ isel_matcher = PatternMatcher([
   # materialize mask -> 0/1 in VGPR
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"),
    lambda x: x.ins(RDNA3Ops.v_cndmask_b32_e64, dtype=dtypes.uint32, src=(const(dtypes.uint32,0), const(dtypes.uint32,1), cmp(x)))),
+
   # casts
   # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
 
   # mem ops
+  (UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))),
+    lambda x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=VGPR_QUADS)),
+  (UPat.var("a").store(UPat.var("b", dtype=dt_128bit), name="x"),
+    lambda a,b,x: x.ins(RDNA3Ops.global_store_b128, dtype=dtypes.void, src=fold_address(a) + (b,))),
+
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
     lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
   (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"),
     lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, dtype=dtypes.void, src=fold_address(a) + (b,))),
+
 
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
@@ -180,32 +241,40 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-def fillinsts(x:UOp):
+# problem with this is register live range invariance is not visible for regalloc
+# it doesn't know that STACK and GEP use their src registers this way at this point prg execution
+# ....
+def oregs(u:UOp) -> tuple[Register,...]:
+  if u.op is Ops.GEP: return tuple(u.src[0].regs[i] for i in u.arg)
+  if u.op is Ops.STACK:
+    rs = ()
+    for v in u.src: rs += v.regs
+    return rs
+  return u.regs
+def encode(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
-  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(x.tag)
+  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(oregs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, geopc(x), x.src, []
 
   # hacky fixes, find cleaner way to conform to isa
-  # if "cndmask" in opc: oprs = oprs[:-1]
   kw = args = None
-  nalu = {"OPC":2, "OP2":2, "OP3":3, "OP1":1}
-  if group == "SMEM": kw = dict(sdata=_fuse(x.tag), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
+  if group == "SMEM": kw = dict(sdata=_fuse(oregs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group == "GLOBAL":
-    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oprs[1].tag), offset=_immorreg(oprs[2]))
-    if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
-    else: kw["vdst"]=_fuse(x.tag)
+    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oregs(oprs[1])), offset=_immorreg(oprs[2]))
+    if x.tag is None: kw["data"]=_fuse(oregs(oprs[3]))
+    else: kw["vdst"]=_fuse(oregs(x))
   elif group == "SOPK": args = [dsl_null, oprs[0].arg]
-  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(x.tag)] + [_immorreg(u) for u in x.src[:nalu[group[1:4]]]]
+  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(oregs(x))] + [_immorreg(u) for u in x.src]
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-  if "load" in opc: suffix.append(fillinsts(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+  # sync loads across wave
+  if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
   ret = enc(**kw) if kw is not None else enc(*args)
-  print(ret)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
 
@@ -213,10 +282,10 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
 
   # strip everything but Ops.INS to bypass render rewrite
-  (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP), name="x"), lambda ctx,x: (x,[])),
+  (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP), name="x"), lambda ctx,x: (x,[])),
 
   # final operand legalization and then filling of dsl Inst class partials from autogen
-  (UPat(Ops.INS, name="x"), fillinsts),
+  (UPat(Ops.INS, name="x"), encode),
 ])
 
 class RDNA3Renderer(ISARenderer):
