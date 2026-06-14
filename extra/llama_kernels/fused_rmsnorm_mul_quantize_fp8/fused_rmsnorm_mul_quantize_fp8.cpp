@@ -46,7 +46,6 @@ constexpr int VECS_PER_THREAD = ELEMS_PER_THREAD / VEC;    // number of 8-wide v
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_add_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
-    float*                __restrict__ inv_scale_out,   // fp32 scalar
     __hip_bfloat16*       __restrict__ h_out,           // bf16, ROWS*HIDDEN — x + residual (saved for downstream)
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN
     float*                __restrict__ rrms_out,        // fp32, ROWS
@@ -54,19 +53,20 @@ fused_add_rmsnorm_mul_quantize_fp8(
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ residual,        // bf16, ROWS*HIDDEN — added into x before rmsnorm
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state,      // fp32 scalar
+    float*                __restrict__ inv_scale_out)   // fp32 scalar
 {
 #else
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
-    float*                __restrict__ inv_scale_out,   // fp32 scalar
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN (saved for rmsnorm bwd)
     float*                __restrict__ rrms_out,        // fp32, ROWS (fp32 to match rmsnorm_bwd.cpp expectation)
     float*                __restrict__ amax_buf,        // fp32, NUM_WG per-WG partials
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN (per-hidden scale)
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state,      // fp32 scalar
+    float*                __restrict__ inv_scale_out)   // fp32 scalar
 {
 #endif
   __shared__ float sdata[THREADS_PER_WG];
