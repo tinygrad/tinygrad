@@ -409,6 +409,19 @@ class TestJitCorrectBehavior(unittest.TestCase):
       f(a)
     self.assertEqual(a.item(), 5)
 
+  def test_assign_to_jit_input_raises(self):
+    """Tensor.assign() to a JIT input that is not in the return value is silently dropped on replay.
+    See #16618"""
+    @TinyJit
+    def step(w):
+      r = w.sum()        # depends on w BEFORE the assign
+      w.assign(w + 1)    # orphaned: not connected to the return
+      return r
+    w = Tensor([0])
+    step(w)  # warmup (eager) — works
+    with self.assertRaises(JitError):
+      step(w)  # capture — orphaned assign raises
+
 
 if __name__ == '__main__':
   unittest.main()

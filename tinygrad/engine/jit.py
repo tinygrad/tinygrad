@@ -87,6 +87,24 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
+# JIT inputs/outputs can be plain Tensors or nested in tuples/lists/dicts (e.g. model params).
+# We need to find every Tensor object so we can compare identity before/after capture.
+def _collect_tensors(obj):
+  if obj.__class__ is Tensor: yield obj
+  elif isinstance(obj, (tuple, list)): yield from (t for x in obj for t in _collect_tensors(x))
+  elif isinstance(obj, dict): yield from (t for v in obj.values() for t in _collect_tensors(v))
+
+# All UOps reachable from the given Tensors (used to detect orphaned assigns during JIT capture).
+def _reachable_uops(tensors):
+  seen: set[UOp] = set()
+  stack = [t.uop for t in _collect_tensors(tensors)]
+  while stack:
+    u = stack.pop()
+    if u in seen: continue
+    seen.add(u)
+    stack.extend(u.src)
+  return seen
+
 class DepsTracker:
   def __init__(self):
     # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
@@ -278,9 +296,21 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
+      # snapshot input tensor uops before capture so we can detect in-place mutations after fxn returns
+      # (Tensor.assign replaces self.uop, so a changed uop means an assign happened)
+      input_tensors = list(_collect_tensors((args, kwargs)))
+      orig_uops = {id(t): t.uop for t in input_tensors}
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
+        # orphaned assign to a JIT input is silently dropped on replay (see #16618).
+        # the JIT only captures kernels reachable from the return value; if an input tensor's uop
+        # changed (assign) but the new uop is not reachable from the return, the assignment was not
+        # captured and will not be replayed. must check before realize() replaces ret uops.
+        reachable = _reachable_uops(ret)
+        if any(t.uop is not orig_uops[id(t)] and t.uop not in reachable for t in input_tensors):
+          raise JitError("Tensor.assign() to a JIT input inside @TinyJit is not replay-safe; "
+                         "return the new tensor and assign it outside (see #16618)")
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
       finally: capturing.clear()
       if not len(self._linears): raise JitError("didn't JIT anything!")
