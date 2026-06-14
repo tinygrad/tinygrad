@@ -14,7 +14,7 @@ print(f"Seed: {seed}", flush=True)
 random.seed(seed)
 
 unary_ops = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
-            lambda a: a//random.randint(1, 9), lambda a: a%random.randint(1, 9),
+            lambda a: a//random.choice(list(range(-9, 0)) + list(range(1, 10))), lambda a: a%random.randint(1, 9),
             lambda a:a.maximum(random.randint(-10, 10)), lambda a:a.minimum(random.randint(-10, 10))]
 binary_ops = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda a,b:a.minimum(b)]
 comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]

@@ -8,12 +8,9 @@ from tinygrad.helpers import floordiv, floormod, unwrap
 def fold_divmod_general(d: UOp) -> UOp|None:
   x, y = d.src
 
-  # cancel_divmod: simple cancel div/mod case when the range of the numerator lies within a single denominator interval
-  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
-  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
-  if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
-  if y_min*y_max > 0 and (qv:=floordiv(x_min,y_min)) == floordiv(x_min,y_max) == floordiv(x_max,y_min) == floordiv(x_max,y_max):
-    return x - qv*y if d.op is Ops.FLOORMOD else d.const_like(qv)
+  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
+  # x//y is constant
+  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -106,7 +103,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if c.vmin>0 and d.vmin>0 else None),
+  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if d.vmin>0 else None),
   # (x+c)//d -> (x+c%d)//d + c//d for d>0 (split out the multiple of d in the constant)
   ((UPat.var("x", dtypes.weakint)+UPat.cvar("c"))//UPat.cvar("d"),
     lambda x,c,d: (x+c.arg%d.arg)//d + c.arg//d.arg if c.arg%d.arg!=c.arg and d.arg>0 else None),

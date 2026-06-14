@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, prod
 from tinygrad.helpers import resolve_pool_pads, round_up
 
@@ -17,8 +17,6 @@ ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
-  @staticmethod
-  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError
   @staticmethod
   def const(dtype, b): raise NotImplementedError
 
@@ -139,18 +137,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
     return (type(self).uprod(*per_dim) if per_dim else type(self).const(dtypes.bool, True)).where(vb, self)
-
-  @classmethod
-  def invalids(cls, *shape, **kwargs) -> Self:
-    """
-    Creates a tensor with the given shape, filled with Invalid.
-
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
-    """
-    new_shape = argfix(*shape)
-    return cls.unique_const(Invalid, **kwargs).reshape((1,)*len(new_shape)).expand(new_shape)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
