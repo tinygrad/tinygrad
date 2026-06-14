@@ -24,12 +24,14 @@ static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC");
 // fused silu*mul backward, two outputs in a single HBM pass:
 //   1) fp8  grad_xw13_fp8  — delayed-scale quantize using grad_amax_state (mailbox to matmul bwd)
 //   2) fp32 grad_amax_buf  — per-WG partial |grad_xw13|, reduced into next step's grad_amax_state
+//   3) fp32 inv_scale_out  — delayed grad inv_scale used by matmul bwd
 // grad_amax_state is read for the fp8 scale. The store of new_grad_amax into grad_amax_state's
 // buffer is built in Python as a separate effect and threaded into grad_a via .after(store).
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_bwd_w13(
     __hip_fp8_storage_t*  __restrict__ grad_xw13_fp8_out,    // fp8,  2*N_ELEMS
     float*                __restrict__ grad_amax_buf,        // fp32, NUM_WG per-WG partials
+    float*                __restrict__ inv_scale_out,        // fp32 scalar
     const __hip_bfloat16* __restrict__ xw13,                 // bf16, 2*N_ELEMS
     const __hip_bfloat16* __restrict__ grad_x2,              // bf16, N_ELEMS
     const float*          __restrict__ amax_state,           // fp32 scalar (fwd x2 amax)
@@ -43,8 +45,11 @@ fused_silu_mul_bwd_w13(
   const int stride_elems = NUM_WG * THREADS_PER_WG * VEC;
 
   const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
-  const float g_scale = FP8_MAX / (static_cast<float>(*grad_amax_state) + 1e-8f);
+  const float g_inv_scale = (static_cast<float>(*grad_amax_state) + 1e-8f) / FP8_MAX;
+  const float g_scale = 1.0f / g_inv_scale;
   float local_max = 0.0f;
+
+  if (tid == 0 && wg == 0) inv_scale_out[0] = g_inv_scale;
 
   for (int base = gid * VEC; base < N_ELEMS; base += stride_elems) {
     const int outer = base / HIDDEN;
