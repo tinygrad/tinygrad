@@ -95,7 +95,7 @@ def fix_store_hazard(target:UOp, src:UOp):
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe: return target.store(src.contiguous())
+    if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -177,6 +177,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # COPY and source size need to match
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) else None),
+
+  # copying mselect to same device is just mselect (no NOOP kernel)
+  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
@@ -487,8 +490,6 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if isinstance(after.dtype, PtrDType) and after.addrspace == AddrSpace.LOCAL: return None
   buf = after.buf_uop
-  # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
-  if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   # NOTE: this is bottom up, so we only add it once
   if buf not in ctx.map: ctx.map[buf] = after
   return buf
@@ -507,7 +508,7 @@ def find_bufs(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
-  (UPat(Ops.BUFFER, name="buf"), debuf),
+  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
@@ -516,7 +517,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
+  (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),

@@ -1,6 +1,6 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
@@ -298,7 +298,8 @@ class TinyJit(Generic[ReturnType]):
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
         run_linear(onetime_linear, var_vals)
 
-      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
+      held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
       captured: CapturedJit[ReturnType] = CapturedJit(ret, linear, names, expected_input_info)
       if has_random:

@@ -209,8 +209,18 @@ class TestTensorUOpAllclose(unittest.TestCase):
     a, b = _t(4).float(), _t(4).float()
     self.assertIs(a.allclose(b).uop, a.uop.allclose(b.uop))
 
+class TestTensorUOpCast(unittest.TestCase):
+  def test_cast_str_dtype(self):
+    t = _t(4)
+    self.assertIs(t.cast("float32").uop, t.uop.cast("float32"))
+    self.assertIs(t.uop.cast("float32").dtype, dtypes.float32)
+
 class TestTensorUOpBitcast(unittest.TestCase):
   def test_bitcast_same_dtype(self): _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.float32))
+  def test_bitcast_str_dtype(self):
+    t = _t(4)
+    self.assertIs(t.bitcast("uint32").uop, t.uop.bitcast("uint32"))
+    self.assertIs(t.uop.bitcast("uint32").dtype, dtypes.uint32)
 
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):
@@ -451,7 +461,7 @@ class TestTensorUOpCreation(unittest.TestCase):
   def test_ones(self):
     self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
   def test_invalids(self):
-    self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids(2, 3, dtype=dtypes.int8)))
+    self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids((2, 3), dtype=dtypes.int8)))
   def test_arange(self):
     self.assertIs(Tensor.arange(5).uop, UOp.arange(5))
   def test_arange_empty(self):

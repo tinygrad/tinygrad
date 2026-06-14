@@ -95,7 +95,7 @@ class WGSLRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_cast(self, u:UOp, val: str) -> str: return f"{self.type_map[u.dtype]}({val})"
-  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True): return "var"
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False): return "var"
   def render_load(self, x:str, u:UOp) -> str: return f"atomicLoad(&{x})" if is_packed(u) else x
   def buf_map(self, u:UOp) -> str: return "atomic<u32>" if is_packed(u) else self.type_map[u.dtype.base]
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:

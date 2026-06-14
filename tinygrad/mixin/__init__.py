@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, prod
 from tinygrad.helpers import resolve_pool_pads, round_up
 
@@ -18,12 +18,7 @@ ReductionStr = Literal["mean", "sum", "none"]
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
-  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError
-  @staticmethod
   def const(dtype, b): raise NotImplementedError
-  @property
-  def _uop(self) -> UOp: raise NotImplementedError
-  def _wrap_uop(self, u:UOp) -> Self: raise NotImplementedError
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
@@ -142,18 +137,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
     return (type(self).uprod(*per_dim) if per_dim else type(self).const(dtypes.bool, True)).where(vb, self)
-
-  @classmethod
-  def invalids(cls, *shape, **kwargs) -> Self:
-    """
-    Creates a tensor with the given shape, filled with Invalid.
-
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
-    """
-    new_shape = argfix(*shape)
-    return cls.unique_const(Invalid, **kwargs).reshape((1,)*len(new_shape)).expand(new_shape)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
@@ -384,10 +367,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
     raise NotImplementedError(f"{mode=} is not supported")
 
-  def _ufix_keep_dtype(self, x) -> bool:
-    # matches Tensor scalar-wrapping behavior: keep self.dtype for float self, or for int self with int/Invalid scalar
-    return dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType)))
-
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
@@ -460,7 +439,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
-    from tinygrad.gradient import compute_gradient
+    from tinygrad.mixin.gradient import compute_gradient
     if gradient is None: gradient = self.const_like(1.0)
     target_uops = [t._uop for t in targets]
     grads = compute_gradient(self._uop, gradient._uop, set(target_uops))
