@@ -6,6 +6,7 @@
 //   y = rmsnorm(x) * weight            (reduce-mean-square + rsqrt + per-elem mul)
 //   fp8 = fp8_sat(y * (FP8_MAX / amax_state))
 // Also writes:
+//   inv_scale       — reciprocal quantization scale consumed by the fp8 matmul
 //   rrms[row]        — saved for the rmsnorm backward
 //   amax_buf[wg]     — per-WG |y| partials, reduced later to update amax_state
 //
@@ -45,6 +46,7 @@ constexpr int VECS_PER_THREAD = ELEMS_PER_THREAD / VEC;    // number of 8-wide v
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_add_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
+    float*                __restrict__ inv_scale_out,   // fp32 scalar
     __hip_bfloat16*       __restrict__ h_out,           // bf16, ROWS*HIDDEN — x + residual (saved for downstream)
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN
     float*                __restrict__ rrms_out,        // fp32, ROWS
@@ -58,6 +60,7 @@ fused_add_rmsnorm_mul_quantize_fp8(
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
+    float*                __restrict__ inv_scale_out,   // fp32 scalar
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN (saved for rmsnorm bwd)
     float*                __restrict__ rrms_out,        // fp32, ROWS (fp32 to match rmsnorm_bwd.cpp expectation)
     float*                __restrict__ amax_buf,        // fp32, NUM_WG per-WG partials
@@ -71,9 +74,12 @@ fused_rmsnorm_mul_quantize_fp8(
   const int tid = threadIdx.x;
   const int wg  = blockIdx.x;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+  const float amax = static_cast<float>(*amax_state) + 1e-8f;
+  const float scale = FP8_MAX / amax;
   const float inv_hidden = 1.0f / static_cast<float>(HIDDEN);
   float local_max = 0.0f;
+
+  if (tid == 0 && wg == 0) inv_scale_out[0] = amax / FP8_MAX;
 
   // Grid-stride over rows. Each WG processes rows (wg, wg+NUM_WG, wg+2*NUM_WG, ...).
   for (int row = wg; row < ROWS; row += NUM_WG) {
