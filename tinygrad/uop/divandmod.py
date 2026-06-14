@@ -8,12 +8,9 @@ from tinygrad.helpers import floordiv, floormod, unwrap
 def fold_divmod_general(d: UOp) -> UOp|None:
   x, y = d.src
 
-  # cancel_divmod: simple cancel div/mod case when the range of the numerator lies within a single denominator interval
-  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
-  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
-  if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
-  if y_min*y_max > 0 and (qv:=floordiv(x_min,y_min)) == floordiv(x_min,y_max) == floordiv(x_max,y_min) == floordiv(x_max,y_max):
-    return x - qv*y if d.op is Ops.FLOORMOD else d.const_like(qv)
+  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
+  # x//y is constant
+  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
