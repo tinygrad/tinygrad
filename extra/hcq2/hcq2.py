@@ -396,7 +396,7 @@ def add_global_sync(ctx:set[tuple[str, ...]], submit:UOp, q:UOp) -> UOp|None:
 pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_global_sync)])
 
 # *****************
-# 4.3. anotate devs
+# 4.3. annotate exec devs
 
 pm_annotate_devs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"),
   lambda call: call.replace(arg=replace(call.arg, aux=replace(call.arg.aux, devs=get_submit(call.src[0]).src[0].arg[0]))))])
@@ -407,11 +407,14 @@ pm_annotate_devs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"),
 def replace_params(call:UOp) -> UOp|None:
   if not (params:={u:u.arg.slot for u in call.src[0].toposort() if u.op is Ops.PARAM and u.addrspace is not None}): return None
 
-  slots = tuple(sorted(set(params.values())))
-  slot_idx = {s:i for i,s in enumerate(slots)}
-  inputs = UOp.new_buffer(get_submit(call.src[0]).src[0].arg[0], len(slots), dtypes.uint64).rtag("inputs")
-  body = call.src[0].substitute({u:inputs.index(UOp.const(dtypes.int, slot_idx[s])).load() for u,s in params.items()})
-  hcqinfo = replace(call.arg.aux, params=slots, inputs=len(get_call_arg_uops(call)))
+  # fill new info
+  hcqinfo = replace(call.arg.aux, params=tuple(sorted(set(params.values()))), inputs=len(get_call_arg_uops(call)))
+
+  inputs = UOp.new_buffer(get_submit(call.src[0]).src[0].arg[0], len(hcqinfo.params), dtypes.uint64).rtag("inputs")
+
+  slot2idx = {s:i for i,s in enumerate(hcqinfo.params)}
+  body = call.src[0].substitute({u:inputs.index(UOp.const(dtypes.int, slot2idx[s])).load() for u,s in params.items()})
+
   return call.replace(src=(body, *call.src[1:], inputs), arg=replace(call.arg, aux=hcqinfo))
 pm_replace_params = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), replace_params)])
 
