@@ -41,6 +41,20 @@ class LinearScanRegallocContext:
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
 
+    def alloc_group(members:tuple[Register,...], i:int) -> tuple[Register,...]:
+      n = len(members[0].cons)
+      live_inv = {v:k for k,v in live.items()}
+      # compute worst case cost (min distance till next use) for each row of cons
+      def _cost(rrv): return min(next((j-i for j in ([] if rv[1] is None else lr[rv[1]]) if j >= i), len(uops)) for rv in rrv)
+      best_cost, best_row = float('-inf'), 0
+      for i in range(n):
+        if (c := _cost(tuple((m.cons[i], live_inv.get(m.cons[i])) for m in members))) > best_cost:
+          best_cost = c
+          best_row = i
+      def _proc(m):
+        return live.pop(vreg) if (vreg := live_inv.get(m.cons[best_row])) is not None else m.cons[best_row]
+      return tuple(_proc(m) for m in members)
+
     def alloc(cons:tuple[Register, ...], i:int) -> Register:
       live_inv = {v:k for k,v in live.items()}
       # allocate the best register. Registers not in live or not used again are free and have priority,
@@ -61,6 +75,7 @@ class LinearScanRegallocContext:
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
+
     for i,u in enumerate(uops):
       if u.op in PSEUDO_OPS: continue
       # allocate uses
@@ -74,17 +89,22 @@ class LinearScanRegallocContext:
 
       # allocate defs
       if isinstance(u.tag, tuple):
-        for j,v in enumerate(u.tag):
-          # register should only be defined once
-          assert isinstance(v, Register) and lr[v][0] == i
-          cons = v.cons
-          # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
-          if ren.is_two_address(u) and j == 0:
-            uses = tuple(live.get(s.reg) for s in u.src)
-            cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
-          # HACK: cause the range is missing the comparison
-          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
-          self.reals.setdefault(i, {})[v] = live[v]
+        # assume all definitions are part of group
+        if u.tag[0]._gid is not None:
+          rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
+          for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r
+        else:
+          for j,v in enumerate(u.tag):
+            # register should only be defined once
+            assert isinstance(v, Register) and lr[v][0] == i
+            cons = v.cons
+            # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
+            if ren.is_two_address(u) and j == 0:
+              uses = tuple(live.get(s.reg) for s in u.src)
+              cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
+            # HACK: cause the range is missing the comparison
+            live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
+            self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate stack array
       if u.op is Ops.DEFINE_LOCAL:
@@ -114,6 +134,7 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
+  # assert ctx.uops[i] is x
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
