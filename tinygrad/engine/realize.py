@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, contextlib, weakref
+import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv, dedup, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
@@ -175,10 +175,10 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   et = None
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, resolve_params(call, ctx.input_uops))):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
-    rt = get_runtime(device:=bufs[0].device, ast, cache=ctx.cache)
+    rt = get_runtime(device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
       et = tm[0] = rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
@@ -209,8 +209,14 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
-  for d in dedup(flatten([to_tuple(u.device) for u in resolve_params(call, ctx.input_uops)])):
+  if call.arg.aux.inputs is not None:
+    for j,dev in enumerate(call.arg.aux.devs):
+      addrs = [(b.bufs[j] if isinstance(b:=ctx.input_uops[i].buffer, MultiBuffer) else b).get_buf(dev).va_addr for i in call.arg.aux.params]
+      call.src[1+call.arg.aux.inputs].buffer.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
+
+  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
+
+  for d in call.arg.aux.devs:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
   return None
