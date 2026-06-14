@@ -289,12 +289,13 @@ def DO_POST(self):
     raise RuntimeError(f"unhandled path {self.path}")
 
 if __name__ == "__main__":
+  # python3 examples/qwen3vl/qwen3vl.py --size={2B|4B}
+  
   parser = argparse.ArgumentParser()
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--size", type=str, default="2B", help="Model Size")
   args = parser.parse_args()
 
-  # load the model
   model, kv = Transformer.from_gguf(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{args.size}-Instruct-GGUF/resolve/main/Qwen3VL-{args.size}-Instruct-F16.gguf"), args.max_context)
   model_name = "Qwen3-VL"
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
