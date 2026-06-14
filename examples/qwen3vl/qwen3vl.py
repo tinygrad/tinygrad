@@ -2,7 +2,7 @@ from tinygrad import Tensor, TinyJit, dtypes, nn, Variable
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.helpers import fetch, Context, DEBUG
 from tinygrad.nn.state import load_state_dict
-import argparse, json, typing, base64, pathlib
+import argparse, json, typing, base64, pathlib, math
 from tinygrad.llm.cli import SimpleTokenizer, LLMServer, Handler
 from tinygrad.llm.model import Transformer
 from tinygrad.uop.ops import UOp, Ops
@@ -71,7 +71,9 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   return pos_ids
 
 class Qwen3VLVis():
-  def __init__(self, tok:SimpleTokenizer, size:str="2B", res:list=[640, 640]):
+  def __init__(self, tok:SimpleTokenizer, size="2B", res:list=[640, 640]):
+    assert len(res) == 2, f"Invalid qwen resolution: {res}"
+    res = [math.ceil(x / 32) * 32 for x in res] # make divisible by 32
     self.res = res
     self.toks_per_img = (self.res[0] * self.res[1]) // (32*32) # 32x32 tokens per pixel https://www.alibabacloud.com/help/en/model-studio/vision
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
