@@ -1,7 +1,7 @@
 import functools, itertools, math
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import floordiv, floormod, unwrap
+from tinygrad.helpers import unwrap
 
 # NOTE: this cache is only on index UOps
 @functools.cache
@@ -19,10 +19,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.arg) > 0:
-    # nested_div_mod: (x%(k*c))//c -> (x//c)%k (requires k>0), and (x%(k*c))%c -> x%c
-    if x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None:
-      if d.op is Ops.FLOORMOD: return x.src[0] % y
-      if k > 0: return x.src[0] // y % k
+    # nested_div: (x%(k*c))//c -> (x//c)%k (requires k>0); the mod case is handled by remove_nested_mod below
+    if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k > 0: return x.src[0] // y % k
 
     # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.FLOORMOD:
@@ -38,15 +36,10 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     decomp = [(u.divides(f:=u.const_factor()),f) for u in uops_no_const]
     terms, factors = zip(*decomp)
 
-    # fold_binary_numerator: fold if expression has one non-constant term that takes on two values
-    if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
-      y1 = (floormod if d.op is Ops.FLOORMOD else floordiv)(factors[0]*v.vmin+const, c)
-      y2 = (floormod if d.op is Ops.FLOORMOD else floordiv)(factors[0]*v.vmax+const, c)
-      return (y2-y1)*(v-v.vmin) + y1
-
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
-    # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
-    rem_choices = [(r, r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
+    # try both signs of the remainder for a lone term (covers a binary numerator that crosses one period)
+    # or on an exact f%c == c//2 tie; otherwise pick the smaller to keep the product over terms small
+    rem_choices = [(r, r-c) if (r:=f%c)*2 == c or len(terms)==1 else (min(r, r-c, key=abs),) for f in factors]
     for rems in itertools.product(*rem_choices):
       if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
         if d.op is Ops.FLOORMOD: return rem - rem.vmin//c*c
