@@ -145,10 +145,15 @@ class Tensor(RandMixin):
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
   @staticmethod
-  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
-    if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
-    dtype, device = kwargs.pop("dtype", None), kwargs.pop("device", None)
-    return Tensor(UOp.unique_const(fill_value, dtype, device), **kwargs)
+  def invalids(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return Tensor(UOp.invalids(argfix(*shape), dtype, device))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param

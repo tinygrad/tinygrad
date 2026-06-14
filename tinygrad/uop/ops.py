@@ -564,12 +564,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
-  def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
-                   shape:tuple[sint, ...]|None=None, unique=True):
-    # NOTE: fill_value is ConstType, not ConstLike, so UOps and tuples aren't allowed
-    assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
-    dt = to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value)
-    ret = UOp(Ops.CONST, dt, arg=dt.const(fill_value),
+  def invalids(shape:tuple[sint, ...]|None=None, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, unique=True) -> UOp:
+    dt = to_dtype(dtype) if dtype is not None else dtypes.from_py(Invalid)
+    ret = UOp(Ops.CONST, dt, arg=dt.const(Invalid),
               src=(UOp.unique(None if unique is True else unique), UOp(Ops.DEVICE, arg=canonicalize_device(device))))
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
@@ -746,7 +743,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
-    buffers[uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype)] = opaque.ref(1)
+    if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
+    else: assert buffers[uop] is opaque
     return uop
   @staticmethod
   def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
