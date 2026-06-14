@@ -479,7 +479,6 @@ def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
   if buf.op not in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT): return buf
   if isinstance(b:=buf.buffer, Buffer): return UOp.const(dtypes.uint64, b.get_buf(g.src[1].arg).va_addr)
-
   return UOp(Ops.STACK, dtypes.uint64.vec(len(b.bufs)), tuple(UOp.const(dtypes.uint64, x.ensure_allocated()._buf.va_addr) for x in b.bufs))
 
 def resolve_getaddr_slice(bv:UOp, dev:UOp) -> UOp:
