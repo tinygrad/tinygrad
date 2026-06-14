@@ -25,21 +25,21 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_buf:UOp,
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
-def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp,
-                                inv_scale_out:UOp, dname:str) -> UOp:
+def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, inv_scale_out:UOp,
+                                xw13:UOp, amax_state:UOp, grad_amax_state:UOp, dname:str) -> UOp:
   # NOTE: grad_amax_state is unused by fwd math, but kept as a HIP arg for bwd metadata lifetime/ABI.
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   mem = n_elems * 2 * 2 + n_elems + NUM_WG * 4 + 8
-  sink = UOp.sink(fp8_out.base, amax_buf.base, xw13.base, amax_state.base, grad_amax_state.base, inv_scale_out.base, threads, workgroups,
+  sink = UOp.sink(fp8_out.base, amax_buf.base, inv_scale_out.base, xw13.base, amax_state.base, grad_amax_state.base, threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
-  _, _, xw13, amax_state, grad_amax_state, _ = kernel.src[1:]
+  _, _, _, xw13, amax_state, grad_amax_state = kernel.src[1:]
   device = xw13.device
   axis = xw13.axis if isinstance(device, tuple) else None
   grad_xw13_fp8 = alloc_like(xw13.shape, dtypes.fp8e4m3,  device, axis)
@@ -58,7 +58,7 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   grad_xw13_fp8_uop = grad_xw13_fp8.uop.replace(src=grad_xw13_fp8.uop.src + (store_effect,))
   # Stash fp8 companion for cdna_asm_gemm's bwd to attach to grad_a.
   _grad_fp8_mailbox[grad_xw13_uop] = (grad_xw13_fp8_uop, inv_scale.uop)
-  return (None, None, grad_xw13_uop, None, None, None)
+  return (None, None, None, grad_xw13_uop, None, None)
 
 def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, inv_scale, new_amax)
@@ -72,6 +72,6 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   amax_buf = alloc_local((NUM_WG,),         dtypes.float32, xw13.device, axis)
   inv_scale = alloc_like((),                dtypes.float32, xw13.device)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
-  fp8_out, amax_buf, _, _, _, inv_scale = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, grad_amax_state, inv_scale,
+  fp8_out, amax_buf, inv_scale, _, _, _ = Tensor.custom_kernel(fp8_out, amax_buf, inv_scale, xw13, amax_state, grad_amax_state,
                                                                fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
   return fp8_out, inv_scale, scalar_amax(amax_buf)

@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax
 
 @functools.cache
-def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp, inv_scale_out:UOp) -> UOp:
+def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, inv_scale_out:UOp, x:UOp, amax_state:UOp) -> UOp:
   VEC = 8
   n_elems = prod(x.shape)
   assert n_elems % (NUM_WG * THREADS_PER_WG * VEC) == 0
@@ -66,11 +66,11 @@ def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
 def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   # NOTE: STE-equivalent backward — grad_x = grad_fp8 * scale, scale = FP8_MAX / amax_state.
   # `gradient` is bf16 grad w.r.t. fp8 output (asm_gemm bwd already applied x_scale).
-  _, _, x, amax_state, _ = kernel.src[1:]
+  _, _, _, x, amax_state = kernel.src[1:]
   device = x.device
   scale = FP8_MAX / (Tensor(amax_state, device=device).float() + 1e-8)
   grad_x = (Tensor(gradient, device=device).float() * scale).cast(dtypes.bfloat16)
-  return (None, None, grad_x.uop, None, None)
+  return (None, None, None, grad_x.uop, None)
 
 def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) -> tuple[Tensor, Tensor, Tensor, UOp]:
   # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling. Returns (fp8, inv_scale, new_amax, store_effect).
@@ -86,7 +86,7 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device, axis)
   inv_scale = alloc_like((), dtypes.float32, x.device)
   fxn = _custom_quantize_fp8_with_amax
-  fp8_out, amax_partial, _, _, inv_scale = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state, inv_scale,
+  fp8_out, amax_partial, inv_scale, _, _ = Tensor.custom_kernel(fp8_out, amax_partial, inv_scale, x, amax_state,
                                                                  fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
   new_amax = scalar_amax(amax_partial)
   store_effect = amax_state.uop.store(new_amax.uop)
