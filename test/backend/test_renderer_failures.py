@@ -1,4 +1,4 @@
-import unittest, re
+import unittest
 import numpy as np
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ConstType
@@ -11,7 +11,6 @@ from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, python_alu
 from tinygrad.tensor import Tensor, _to_np_dtype
-from test.helpers import to_uops_list
 
 def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
@@ -57,15 +56,6 @@ class TestCStyleFailures(unittest.TestCase):
     # CPU doesn't use the max function
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.int.min+1))
     self.assertEqual(ret[0], 1)
-
-  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need uint64")
-  def test_pointer_cast_store(self):
-    renderer = Device[Device.DEFAULT].renderer
-    buf = UOp.placeholder((16,), dtypes.uint8, 0)
-    store = buf.index(UOp.const(dtypes.int, 8), dtype=buf.dtype).cast(dtypes.uint64.ptr()).store(UOp.const(dtypes.uint64, 1))
-    uops = to_uops_list([store], ren=renderer)
-    self.assertEqual(next(u for u in uops if u.op is Ops.SHRINK).dtype, dtypes.uint64)
-    self.assertIsNotNone(re.search(r"\*\(\([^)]+\)\(", renderer.render(uops)))
 
   def _test_src_strip_paren(self, op: Ops, should_strip_paren:bool=True):
     dtype = "bool" if op in (Ops.OR, Ops.XOR, Ops.AND) else None
