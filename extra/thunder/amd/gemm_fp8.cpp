@@ -93,18 +93,20 @@ constexpr int NUM_WARPS = 8;
 
 using G = kittens::group<NUM_WARPS>;
 
-// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
+// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=extra
 #ifndef SCALE_MODE
 #define SCALE_MODE 3
 #endif
 
 __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr
-#if SCALE_MODE == 1
+#if SCALE_MODE & 1
     , float *x_scale_ptr
-#elif SCALE_MODE == 2
+#endif
+#if SCALE_MODE & 2
     , float *w_scale_ptr
-#elif SCALE_MODE == 3
-    , float *x_scale_ptr, float *w_scale_ptr
+#endif
+#if SCALE_MODE & 4
+    , float *extra_scale_ptr
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
@@ -347,12 +349,21 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
 
     // apply x_scale * w_scale before bf16 store to prevent overflow
 #if SCALE_MODE != 0
-#if SCALE_MODE == 1
-    float scale = *x_scale_ptr;
-#elif SCALE_MODE == 2
-    float scale = *w_scale_ptr;
-#elif SCALE_MODE == 3
-    float scale = *x_scale_ptr * *w_scale_ptr;
+    float scale = 1.0f;
+#if SCALE_MODE & 1
+    float x_scale =
+#if X_SCALE_IS_AMAX
+        (*x_scale_ptr + 1e-08f) * (1.0f / 448.0f);
+#else
+        *x_scale_ptr;
+#endif
+    scale *= x_scale;
+#endif
+#if SCALE_MODE & 2
+    scale *= *w_scale_ptr;
+#endif
+#if SCALE_MODE & 4
+    scale *= *extra_scale_ptr;
 #endif
 
     mul(cA, cA, scale);
