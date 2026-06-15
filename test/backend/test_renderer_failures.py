@@ -1,11 +1,12 @@
 import unittest
+import shutil, subprocess
 import numpy as np
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
-from tinygrad.codegen import to_program
-from tinygrad.helpers import prod
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.codegen import do_to_program, to_program
+from tinygrad.helpers import prod, Target
+from tinygrad.renderer.cstyle import CStyleLanguage, ClangRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
@@ -30,6 +31,14 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   store = UOp.store(a.index(idx, ptr=True), alu)
   return _test_uop_result([Tensor([input_val])], UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo()))[0]
 
+class _NoopCompiler:
+  def compile_cached(self, src:str) -> bytes: return b""
+
+def _clang_src(stores:tuple[UOp, ...]) -> str:
+  renderer = ClangRenderer(Target.parse("CPU:CPU:x86_64,core2"))
+  renderer.compiler = _NoopCompiler()
+  return do_to_program(UOp(Ops.SINK, dtypes.void, stores, arg=KernelInfo()), renderer).src[3].arg
+
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
@@ -49,6 +58,23 @@ class TestRendererFailures(unittest.TestCase):
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
+
+class TestClangRendererFailures(unittest.TestCase):
+  @unittest.skipUnless(shutil.which("clang"), "need clang")
+  def test_bfloat16_renders_without_native_bf16(self):
+    idx = UOp.const(dtypes.int, 0)
+    out_half, out_bf16, inp_bf16 = UOp.param(0, dtypes.half.ptr(1)), UOp.param(0, dtypes.bfloat16.ptr(1)), UOp.param(1, dtypes.bfloat16.ptr(1))
+    sources = [
+      _clang_src((out_half.index(idx, ptr=True).store(inp_bf16.index(idx, ptr=True).load().cast(dtypes.half)),)),
+      _clang_src((out_bf16.index(idx, ptr=True).store(inp_bf16.index(idx, ptr=True).load() + UOp.const(dtypes.bfloat16, 1.0)),)),
+      _clang_src((out_bf16.index(idx, ptr=True).store(UOp.const(dtypes.bfloat16, 1.0)),)),
+    ]
+    cmd = ["clang", "-c", "-x", "c", "--target=x86_64-none-unknown-elf", "-march=core2", "-O2", "-ffreestanding",
+           "-nostdlib", "-", "-o", "/tmp/tinygrad_clang_bf16.o"]
+    for src in sources:
+      self.assertNotIn("__bf16", src)
+      self.assertIn("unsigned short", src)
+      subprocess.check_output(cmd, input=src.encode())
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
