@@ -112,7 +112,7 @@ def _fused_add_bwd(*args, **kwargs):
   grad_h, grad_w = _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
   return (None, None, None, None, None, grad_h, grad_h, grad_w, None)
 
-def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, new_amax, x_normed, rrms).
   # x_normed + rrms are saved for the rmsnorm backward (also recomputed here from x regs).
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
@@ -130,7 +130,7 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   return fp8_out, scalar_amax(amax_buf), x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
-                                       eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+                                       eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
   # NOTE: h = x + residual; y_normed = rmsnorm(h); fp8 = quantize(y_normed * weight).
   # Returns (fp8, new_amax, h, x_normed, rrms). h is also written so downstream can
   # reuse it without recomputing x+residual — eliminates the separate residual-add kernel.
