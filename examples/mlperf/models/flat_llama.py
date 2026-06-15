@@ -58,7 +58,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if x_fp8 is None:
     if FUSED_INPUT_QUANTIZE and amax_x is not None:
       from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
-      x_fp8, x_new_amax, _ = quantize_fp8_delayed(x, amax_x, FP8_DTYPE)
+      x_fp8, _, x_new_amax, _ = quantize_fp8_delayed(x, amax_x, FP8_DTYPE)
     else:
       x_fp8, x_new_amax = quantize_fp8(x, amax_state=amax_x)
   if ASM_GEMM:
