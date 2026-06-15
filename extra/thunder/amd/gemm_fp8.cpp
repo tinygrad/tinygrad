@@ -93,7 +93,7 @@ constexpr int NUM_WARPS = 8;
 
 using G = kittens::group<NUM_WARPS>;
 
-// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=extra
+// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=g_scale (bw)
 #ifndef SCALE_MODE
 #define SCALE_MODE 3
 #endif
@@ -351,11 +351,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
 #if SCALE_MODE != 0
     float scale = 1.0f;
 #if SCALE_MODE & 1
-    float x_scale =
-#if X_SCALE_IS_AMAX
-        (*x_scale_ptr + 1e-08f) * (1.0f / 448.0f);
-#else
-        *x_scale_ptr;
+    float x_scale = (*x_scale_ptr + 1e-08f) * (1.0f / 448.0f);
 #endif
     scale *= x_scale;
 #endif

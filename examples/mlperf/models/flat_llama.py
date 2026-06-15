@@ -66,9 +66,9 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
     if can_use_asm_gemm(x_fp8, w.T):
       assert amax_x is not None
       if COLUMNWISE_WEIGHT_SCALE:
-        out = asm_gemm(x_fp8, w.T, x_scale=amax_x, grad_amax_state=grad_amax_state, w_post_scale=w_inv_scale, x_scale_is_amax=True)
+        out = asm_gemm(x_fp8, w.T, x_scale=amax_x, grad_amax_state=grad_amax_state, w_post_scale=w_inv_scale)
       else:
-        out = asm_gemm(x_fp8, w.T, x_scale=amax_x, w_scale=w_inv_scale, grad_amax_state=grad_amax_state, x_scale_is_amax=True)
+        out = asm_gemm(x_fp8, w.T, x_scale=amax_x, w_scale=w_inv_scale, grad_amax_state=grad_amax_state)
       return out, x_new_amax, x_fp8
   return (x_fp8.dot(w.T, dtype=dtypes.float) * ((amax_state.float() + 1e-8) / FP8_MAX) * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8
 
