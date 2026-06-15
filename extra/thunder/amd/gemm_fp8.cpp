@@ -93,7 +93,7 @@ constexpr int NUM_WARPS = 8;
 
 using G = kittens::group<NUM_WARPS>;
 
-// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=g_scale (bw)
+// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=all 3
 #ifndef SCALE_MODE
 #define SCALE_MODE 3
 #endif
