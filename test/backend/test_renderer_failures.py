@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
-from tinygrad.codegen import do_to_program, to_program
+from tinygrad.codegen import to_program, to_program_cache
 from tinygrad.helpers import prod, Target
 from tinygrad.renderer.cstyle import CStyleLanguage, ClangRenderer
 from tinygrad.renderer.ptx import PTXRenderer
@@ -37,7 +37,8 @@ class _NoopCompiler:
 def _clang_src(stores:tuple[UOp, ...]) -> str:
   renderer = ClangRenderer(Target.parse("CPU:CPU:x86_64,core2"))
   renderer.compiler = _NoopCompiler()
-  return do_to_program(UOp(Ops.SINK, dtypes.void, stores, arg=KernelInfo()), renderer).src[3].arg
+  try: return to_program(UOp(Ops.SINK, dtypes.void, stores, arg=KernelInfo()), renderer).src[3].arg
+  finally: to_program_cache.clear()
 
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
