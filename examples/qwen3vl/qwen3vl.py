@@ -13,8 +13,7 @@ import cv2
 def rotate_half(x:Tensor):
   x1 = x[..., : x.shape[-1] // 2]
   x2 = x[..., x.shape[-1] // 2 :]
-  ret = Tensor.cat(-x2, x1, dim=-1)
-  return ret
+  return Tensor.cat(-x2, x1, dim=-1)
 
 def apply_rotary_pos_emb_vision(query:Tensor, key:Tensor, cos:Tensor, sin:Tensor): return (query * cos) + (rotate_half(query) * sin), (key * cos) + (rotate_half(key) * sin)
 
@@ -67,8 +66,7 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   hpos_ids = hpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
   wpos_ids = Tensor.arange(w).unsqueeze(0).expand(h, -1)
   wpos_ids = wpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
-  pos_ids = Tensor.stack(hpos_ids, wpos_ids, dim=-1).repeat(1, 1)
-  return pos_ids
+  return Tensor.stack(hpos_ids, wpos_ids, dim=-1).repeat(1, 1)
 
 class Qwen3VLVis():
   def __init__(self, tok:SimpleTokenizer, size="2B", res:list=[640, 640]):
