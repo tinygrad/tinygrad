@@ -64,7 +64,7 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   hpos_ids = hpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
   wpos_ids = Tensor.arange(w).unsqueeze(0).expand(h, -1)
   wpos_ids = wpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
-  return Tensor.stack(hpos_ids, wpos_ids, dim=-1).repeat(1, 1)
+  return Tensor.stack(hpos_ids, wpos_ids, dim=-1)
 
 class Qwen3VLVis():
   def __init__(self, tok:SimpleTokenizer, size="2B", res:list=[640, 640]):
