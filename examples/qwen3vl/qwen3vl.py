@@ -24,21 +24,19 @@ def meshgrid(x:Tensor, y:Tensor):
 
 #https://github.com/huggingface/transformers/blob/a14eae2b54c19cb427c919a99c75db07afbeb7a0/src/transformers/vision_utils.py#L147
 def get_vision_bilinear_indices_and_weights(h: int, w: int, num_grid_per_side: int, merge_size: int ) -> tuple[Tensor, Tensor]:
-  side = num_grid_per_side
-
-  h_grid = Tensor.linspace(0, side - 1, h)
-  w_grid = Tensor.linspace(0, side - 1, w)
+  h_grid = Tensor.linspace(0, num_grid_per_side - 1, h)
+  w_grid = Tensor.linspace(0, num_grid_per_side - 1, w)
   h_floor = h_grid.cast(dtypes.int)
   w_floor = w_grid.cast(dtypes.int)
 
-  h_ceil = (h_floor + 1).clamp(max_=side - 1)
-  w_ceil = (w_floor + 1).clamp(max_=side - 1)
+  h_ceil = (h_floor + 1).clamp(max_=num_grid_per_side - 1)
+  w_ceil = (w_floor + 1).clamp(max_=num_grid_per_side - 1)
 
   h_frac = h_grid - h_floor
   w_frac = w_grid - w_floor
 
-  h_floor_offset = h_floor * side
-  h_ceil_offset = h_ceil * side
+  h_floor_offset = h_floor * num_grid_per_side
+  h_ceil_offset = h_ceil * num_grid_per_side
 
   corner_indices = Tensor.stack(
     (h_floor_offset[:, None] + w_floor[None, :]).flatten(),
