@@ -358,7 +358,8 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     scale *= *w_scale_ptr;
 #endif
 #if SCALE_MODE & 4
-    scale *= *g_scale_ptr;
+    float g_scale = (*g_scale_ptr + 1e-08f) * (1.0f / 448.0f);
+    scale *= *g_scale;
 #endif
 
     mul(cA, cA, scale);
