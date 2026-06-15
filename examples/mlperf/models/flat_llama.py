@@ -156,7 +156,7 @@ class FlatTransformer:
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
-    else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
+    else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std).realize()
     if MXFP8:
       from extra.gemm.cdna_asm_gemm import quantize_mxfp8
       w_q, w_e8, _ = quantize_mxfp8(w.reshape(self.n_layers * out_features, in_features))
