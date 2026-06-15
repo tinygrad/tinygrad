@@ -85,6 +85,7 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,
                                                     fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
   new_amax = scalar_amax(amax_partial)
+  # NOTE: this exists for the fp8 gemm bw
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   store_effect = amax_state.uop.store(new_amax.uop)
   return fp8_out, inv_scale, new_amax, store_effect
