@@ -2,9 +2,9 @@ from typing import cast
 from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, all_same
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import ParamArg, AxisType
+from tinygrad.uop.ops import ParamArg, AxisType, _align_left, _broadcast_shape
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -73,6 +73,42 @@ expander2 = PatternMatcher([
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
 ])+pm_flatten_range
 
+def broadcast_binary(x:UOp):
+  shapes = [u.shape for u in x.src]
+  print(x.op, shapes)
+  if all_same(shapes): return None
+  shaped_aligned = _align_left(*shapes)
+  broadcasted = _broadcast_shape(*shapes)
+  src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
+  return x.replace(src=tuple(src_reshaped))
+
+unbroadcast = PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+])
+
+def do_devectorize(b:UOp):
+  if b.shape == (): return None
+  # broadcasting needs to be already unpacked
+  if not all_same([x.shape for x in b.src]): return None
+  src = []
+  for idx in itertools.product(*[range(x) for x in b.shape]):
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+  return UOp.vectorize(*src)
+
+devectorizer2 = PatternMatcher([
+  # unpack broadcasting
+  (UPat(GroupOp.Elementwise|{Ops.STORE}, name="b"), do_devectorize),
+  # INDEX into STACK is src
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
+  # stacked INDEX is many INDEX
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
+   lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
+  # broadcast is just what's being broadcasted
+  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, src=(
+    UPat(Ops.RESHAPE, src=(UPat.var('x'), UPat(Ops.CONST, arg=1))),), allow_any_len=True), UPat(Ops.CONST))), lambda x: x),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -130,7 +166,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
-  # TODO: put devectorizer here
+  # unbroadcast
+  sink = graph_rewrite(sink, unbroadcast, name="unbroadcast")
+
+  # devectorizer
+  sink = graph_rewrite(sink, devectorizer2, name="devectorizer")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
