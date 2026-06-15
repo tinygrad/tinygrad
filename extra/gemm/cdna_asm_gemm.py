@@ -2810,13 +2810,13 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     s_x = inputs[i]; i += 1
     has_w = n_scales >= 2
     s_w = inputs[i] if has_w else None; i += has_w
-    s_extra = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
+    s_g = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
     grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
     w_post = inputs[i] if has_w_post else None
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t = Tensor(s_x, device=a.device)
     s_w_t = Tensor(s_w, device=a.device) if has_w else None
-    s_g_t = Tensor(s_extra, device=a.device) if s_extra is not None else None
+    s_g_t = Tensor(s_g, device=a.device) if s_g is not None else None
     w_post_t = Tensor(w_post, device=a.device) if has_w_post else None
     g_t = g_t[:a.shape[0]]
     from extra.llama_kernels.cast_amax import _grad_fp8_mailbox

@@ -34,7 +34,7 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   scale = FP8_MAX / ((amax_state if amax_state is not None else new_amax) + 1e-8)
   x_scaled = x * scale
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
-  return x_clamped.cast(FP8_DTYPE), new_amax
+  return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, x_new_amax:Tensor|None=None,
@@ -60,7 +60,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
       from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
       x_fp8, _, x_new_amax, _ = quantize_fp8_delayed(x, amax_x, FP8_DTYPE)
     else:
-      x_fp8, x_new_amax = quantize_fp8(x, amax_state=amax_x)
+      x_fp8, _, x_new_amax = quantize_fp8(x, amax_state=amax_x)
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
