@@ -27,7 +27,7 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value()),
       (UPat(Ops.BUFFER, tag="sentinel_signal"), lambda ctx: ctx.timeline_signal("sentinel", (1 << 64) - 1)),
       (UPat(Ops.BUFFER, name="b"), lambda ctx, b:
-        Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True, nolru=True))), # TODO: remove nolru
+        Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))), # TODO: remove nolru
     ])
 
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
@@ -294,7 +294,12 @@ def schedule_inner_sync(ctx:DepsCtx, linear:UOp) -> UOp:
     refs = get_call_arg_uops(call)
     deps = dedup(flatten(ctx.deps.access_resources([get_dep_buf(ctx, b, l) for b in refs], call.arg.aux.outs, new_q) for l in range(len(q.arg[0]))))
 
-    new_q = new_q.after(*deps).rtag("deps") if deps else new_q
+    # optims: keep only the max wait per queue, and drop self-queue waits when the queue self-orders
+    deps = {dep.arg:dep for dep in sorted(deps, key=lambda x: x.tag)}
+    if to_tuple(new_q.arg[0])[0].split(":")[0] in {"AMD", "QCOM"} or new_q.arg[1].startswith("COPY"):
+      deps.pop(new_q.arg, None)
+
+    new_q = new_q.after(*deps.values()).rtag("deps") if deps else new_q
     new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}), *call.src[1:])))
   return linear.replace(src=tuple(new_src))
 pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_inner_sync)])
