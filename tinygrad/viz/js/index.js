@@ -187,7 +187,7 @@ function renderDag(layoutSpec, { recenter }) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => ({ text:e.value.label.text })));
     if (anchor != null) {
       const n = g.node(anchor.id);
-      d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
+      if (n != null) d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
     } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
     anchor = null;
   };
