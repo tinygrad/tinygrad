@@ -2629,7 +2629,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
 
 @functools.cache
 def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3) -> UOp:
-  # scale_mode: 0=no scale, 1=x only, 2=w only, 3=both, 4=all 3
+  # scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
   n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0) + (1 if scale_mode & 4 else 0)
   scales, extra = args[:n_scales], args[n_scales:]
   M, K = A.shape[0]*A.shape[1], A.shape[2]
