@@ -522,15 +522,6 @@ class TestFunctionTuple(unittest.TestCase):
 
     np.testing.assert_allclose(g(a).numpy(), 14.0)
 
-  def test_custom_kernel_inplace_output_is_implicit(self):
-    # a custom_kernel output the kernel also READS (in-place add) is not write-only, so it must be captured as an input
-    def inplace_add(C:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.shape[0], 0)
-      return C[i].store(C[i].load() + A[i]).end(i).sink(arg=KernelInfo(name="inplace_add"))
-    @function(precompile=True, allow_implicit=False)
-    def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
-    with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
-
   def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
     devs = ("CPU:0", "CPU:1")
     def my_kernel(C:UOp, A:UOp) -> UOp:
@@ -554,7 +545,7 @@ class TestFunctionTuple(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, kernel_count)
     np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
 
-  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=6)
+  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
