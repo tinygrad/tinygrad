@@ -126,8 +126,10 @@ class FlatTransformer:
 
     # FeedForward
     if SPLIT_W13:
-      self.w1, s_1 = self.lin_per_layer(dim, hidden_dim)
-      self.w3, s_3 = self.lin_per_layer(dim, hidden_dim)
+      if getenv("ZEROS"): w13_raw = Tensor.zeros(2, self.n_layers, hidden_dim, dim)
+      else: w13_raw = Tensor.normal(2, self.n_layers, hidden_dim, dim, mean=0.0, std=0.02)
+      self.w1, s_1 = self.lin_per_layer(dim, hidden_dim, w=w13_raw[0])
+      self.w3, s_3 = self.lin_per_layer(dim, hidden_dim, w=w13_raw[1])
     else:
       self.w13, s_13 = self.lin_per_layer(dim, hidden_dim * 2)
     self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
@@ -155,9 +157,10 @@ class FlatTransformer:
     self._fp8_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
     self._fp8_next_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
 
-  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
-    if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
-    else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
+  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02, w:Tensor|None=None):
+    if w is None:
+      if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
+      else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std).realize()
     if MXFP8:
       from extra.gemm.cdna_asm_gemm import quantize_mxfp8
       w_q, w_e8, _ = quantize_mxfp8(w.reshape(self.n_layers * out_features, in_features))
