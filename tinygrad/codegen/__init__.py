@@ -4,7 +4,7 @@ import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, all_same
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import ParamArg, AxisType, _align_left, _broadcast_shape
+from tinygrad.uop.ops import ParamArg, AxisType, _align_left, _broadcast_shape, identity_element
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -112,6 +112,23 @@ devectorizer2 = pm_mops+PatternMatcher([
    lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
 ])
 
+def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
+  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
+  ctx.acc_num += 1
+  acc_initted = acc.after(acc.store(identity_element(r.arg[0], r.dtype.scalar())), *r.src[1:])
+  inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
+  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp))
+  return acc_initted.after(acc_out)
+
+def expand_horizontal_reduce(r:UOp):
+  # TODO
+  pass
+
+pm_reduce_local = PatternMatcher([
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
+  (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -139,7 +156,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # rewrite reduce after optimizations
-  sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(), name="remove_reduce")
+  sink = graph_rewrite(sink, pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
 
   # add loads
   sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)

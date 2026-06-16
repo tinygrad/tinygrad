@@ -1067,9 +1067,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(lookup[addrspace], dtype, (UOp.const(dtypes.weakint, prod(shape)),), arg=arg)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
-  def placeholder_like(self, slot:int):
+  def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot, addrspace)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
