@@ -531,19 +531,30 @@ class TestFunctionTuple(unittest.TestCase):
     def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
     with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
 
-  def test_custom_kernel_precompile_further_compute(self):
+  def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
+    devs = ("CPU:0", "CPU:1")
     def my_kernel(C:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.shape[0], 0)
+      C, A = C.flatten(), A.flatten()
+      i = UOp.range(A.numel(), 0)
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
 
     @function(precompile=True)
     def f(a:Tensor):
-      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      c = Tensor.invalids(*a.uop.shard_shape, dtype=a.dtype, device=a.device)
+      if multi: c = Tensor(c.uop.multi(a.uop.axis), device=a.device)
       c = Tensor.custom_kernel(c, a, fxn=my_kernel)[0]
       return c + 1
 
-    a = Tensor([1., 2., 3., 4.]).contiguous().realize()
-    np.testing.assert_allclose(f(a).numpy(), [3., 5., 7., 9.])
+    a = Tensor([1., 2., 3., 4.]).contiguous()
+    if multi: a = a.shard(devs, axis=0)
+    a.realize()
+    out = f(a)
+    GlobalCounters.reset()
+    out.realize()
+    self.assertEqual(GlobalCounters.kernel_count, kernel_count)
+    np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
+
+  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=6)
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
