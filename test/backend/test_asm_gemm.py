@@ -364,6 +364,7 @@ def run_atb_gemm(rows, M, N, a_shard=None, b_shard=None, gpus=1, atol=1.0, rtol=
   out = hk_bf16_atb_gemm(a, b)
   np.testing.assert_allclose(out.float().numpy(), ref.numpy(), atol=atol, rtol=rtol)
 
+@unittest.skipUnless(has_hipcc(), "MXFP8 gemm requires hipcc to compile")
 class TestHkBf16AtbGemm(unittest.TestCase):
   def setUp(self):
     if not is_cdna4(): self.skipTest("hk bf16 atb gemm is cdna4 only")
