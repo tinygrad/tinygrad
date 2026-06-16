@@ -134,7 +134,6 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
-  print(x.op)
   # assert ctx.uops[i] is x
   nsrc = []
   for j,s in enumerate(x.src):

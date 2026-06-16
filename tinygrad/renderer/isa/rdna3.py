@@ -1,4 +1,4 @@
-from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
+from tinygrad.dtype import PtrDType, dtypes, AddrSpace
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
@@ -9,18 +9,12 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 EXEC_LO = Register("exec_lo", 0)
 VCC = Register("vcc", 0)
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
-# contiguous multi-register constraint tuples, ex. v[4:5], v[6:9]
-VGPR_PAIRS = tuple((VGPRS[i],VGPRS[i+1]) for i in range(0, 256, 2))
-VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, 256//2, 2))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
-KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
+# contiguous multi-register constraint tuples, ex. v[4:5], v[6:9]
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-
-# How to represent register slices ex. global_load_b128 v[4:7], ..
-# or s_load_b64 s[5:6], s[0:1], ...
-
-# Ned some way to cleanly update regalloc to understand:
-# - multi register constraints ex. cons := tuple[tuple[Register],...]
+VGPR_PAIRS = tuple((GP_VGPRS[i],GP_VGPRS[i+1]) for i in range(0, 254, 2))
+VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, len(VGPR_PAIRS)//2, 2))
+KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 
 def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
 def const(dt, v:int) -> UOp: return UOp.const(dt,v)
@@ -123,7 +117,7 @@ def legalize_operands(x:UOp):
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
   return None
 
-# casting utility function, auto converts between compatible/unsupported hardware dtypes
+# IDEA: casting utility function, auto converts between compatible/unsupported hardware dtypes
 # if mapping dt_a -> dt_b does not exist automatically search for cvt chain path, else raise exception
 def cvt(a:UOp, x:UOp):
   implct = {
@@ -145,6 +139,7 @@ def cmp(x:UOp):
   elif x.op is Ops.CMPEQ: ins = V_CMPEQ[dt]
   elif x.op is Ops.CMPNE: ins = V_CMPNE[dt]
   else: ins = V_CMPGT[dt]
+
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
@@ -154,19 +149,31 @@ def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
   ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
 
+# Problem: dependency tracking of superficial ops ex. GEP and STACk for RDNA cause they are just 
+# register slices/indexing, dont require instruction emition
+# How about this: treat them as normal instructions all the way up until the encoding step where they get dropped
+# this doesn't work because regalloc has to somehow know that the relationship between the GEP/STACK op and their producer
+# that once it allocates registers for one, the consumers of GEP/STACK *must* use those same reg(isters)
+#
+# sentinel token that regalloc can detect that represents a lambda that given an already handled uop will produce the physical
+# registers that ins requires?
+#
+#
+# all we have to do in regalloc is use the same vreg definitions from the source op so live ranges see its next use
+
 pre_isel_matcher = PatternMatcher([
-  # (UPat.var("y").gep(name="x"), lambda y,x: x.replace(dtype=dtypes.void)),
   # (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
+# TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
-
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
+
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
 
@@ -180,16 +187,6 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").sin().named("x"), lambda y,x: x.ins(V_SIN[y.dtype])),
   (UPat.var("y").trunc().named("x"), lambda y,x: x.ins(V_TRUNC[y.dtype])),
   (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
-
-  # gep
-  # kind hacky, would be nice to avoid extract mov ins later
-  # (UPat.var("y", dt_128bit).gep(name="x", dt_32bit), lambda y,x: x.ins(RDNA3Ops.v_mov_b32)),
-
-  # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
-
-  # proper register fusion / extraction is lazily evaluated in encoding pass
-  # (UPat.var("y").gep(name="x"), lambda y,x: x.replace(dtype=dtypes.void)),
-  # (UPat(Ops.STACK, dtypes.float32.vec(4), name="x"), lambda x: x.replace(dtype=dtypes.void)),
 
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"),
@@ -229,7 +226,6 @@ isel_matcher = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"),
     lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, dtype=dtypes.void, src=fold_address(a) + (b,))),
 
-
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
@@ -241,16 +237,45 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
+
+# what was my idea from last night?: 
+# okay so gep and stack ops cant contribute to reals/live because they aren't part of the program counter, they arent
+# actual emitted instructions
+#
+# to support their semantics regalloc has to replace the uses (consumer ops of stack/gep) in src with the vregs
+# from uop src
+#
+# when does this swap have to happen?
+# all that needs to be updated is the live range step
+# need to somehow have a regalloc in LinearScanRegallocContext that swaps out the regs of the gep/stack for their src?
+
+def stack(x:UOp):
+  defs = []
+  for u in x.src: defs.extend(u.tag)
+  nx = x.replace(tag=tuple(defs))
+  return nx, [nx]
+
+def gep(x:UOp):
+  nx = x.replace(tag=(x.src[0].tag[x.arg[0]],)) # copy vreg requirement
+  return nx, [nx]
+
+# wait maybe this is unecessary, src already models the relationship 
+pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.GEP, name="x"), gep),
+  (UPat(Ops.STACK, name="x"), stack),
+])
+
 # problem with this is register live range invariance is not visible for regalloc
 # it doesn't know that STACK and GEP use their src registers this way at this point prg execution
 # ....
-def oregs(u:UOp) -> tuple[Register,...]:
-  if u.op is Ops.GEP: return tuple(u.src[0].regs[i] for i in u.arg)
+def oregs(u:UOp):
+  if u.op is Ops.GEP: return u.src[u.arg[0]].regs
   if u.op is Ops.STACK:
-    rs = ()
-    for v in u.src: rs += v.regs
-    return rs
+    defs = []
+    for s in u.src: defs += s.regs
+    return tuple(defs)
   return u.regs
+
 def encode(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
@@ -274,6 +299,7 @@ def encode(x:UOp):
   # sync loads across wave
   if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
+  print(opc, args)
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
@@ -292,6 +318,7 @@ class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
+  pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE)}
   def __init__(self, target:Target):
