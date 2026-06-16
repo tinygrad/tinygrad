@@ -149,18 +149,6 @@ def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
   ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
 
-# Problem: dependency tracking of superficial ops ex. GEP and STACk for RDNA cause they are just 
-# register slices/indexing, dont require instruction emition
-# How about this: treat them as normal instructions all the way up until the encoding step where they get dropped
-# this doesn't work because regalloc has to somehow know that the relationship between the GEP/STACK op and their producer
-# that once it allocates registers for one, the consumers of GEP/STACK *must* use those same reg(isters)
-#
-# sentinel token that regalloc can detect that represents a lambda that given an already handled uop will produce the physical
-# registers that ins requires?
-#
-#
-# all we have to do in regalloc is use the same vreg definitions from the source op so live ranges see its next use
-
 pre_isel_matcher = PatternMatcher([
   # (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # cast to ptr is noop
@@ -237,18 +225,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-
-# what was my idea from last night?: 
-# okay so gep and stack ops cant contribute to reals/live because they aren't part of the program counter, they arent
-# actual emitted instructions
-#
-# to support their semantics regalloc has to replace the uses (consumer ops of stack/gep) in src with the vregs
-# from uop src
-#
-# when does this swap have to happen?
-# all that needs to be updated is the live range step
-# need to somehow have a regalloc in LinearScanRegallocContext that swaps out the regs of the gep/stack for their src?
-
 def stack(x:UOp):
   defs = []
   for u in x.src: defs.extend(u.tag)
@@ -265,11 +241,8 @@ pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), stack),
 ])
 
-# problem with this is register live range invariance is not visible for regalloc
-# it doesn't know that STACK and GEP use their src registers this way at this point prg execution
-# ....
 def oregs(u:UOp):
-  if u.op is Ops.GEP: return u.src[u.arg[0]].regs
+  if u.op is Ops.GEP: return (u.src[0].regs[u.arg[0]],)
   if u.op is Ops.STACK:
     defs = []
     for s in u.src: defs += s.regs
