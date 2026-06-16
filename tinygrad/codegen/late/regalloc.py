@@ -1,4 +1,5 @@
 import itertools
+from os import wait
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
@@ -40,12 +41,25 @@ class LinearScanRegallocContext:
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
+    groups: dict[int, list[tuple[int, Register]]] = {} # mapping from group id to register definition and program point
+    sparse_group_blocks: dict[int, tuple[Register, ...]] = {}
 
-    def alloc_group(members:tuple[Register,...], i:int) -> tuple[Register,...]:
+    for i, u in enumerate(uops):
+      if (not isinstance(u.tag, tuple)) or (gid := u.tag[0]._gid) is None: continue
+      if gid in groups and len(groups[gid]) == u.tag[0]._count: continue
+      for v in u.tag: groups.setdefault(gid, []).append((i,v))
+
+    # greedily allocate group, the only problem is what if the members of the group
+    # are defined at seperate points in program?
+    # the invariant should be they are all defined at the same point, or they are defined in a sequence ex. 
+    # the next n instructions define all n regsters in the group
+    def alloc_group(members:tuple[Register,...], i:int|list[int]) -> tuple[Register,...]:
       n = len(members[0].cons)
       live_inv = {v:k for k,v in live.items()}
       # compute worst case cost (min distance till next use) for each row of cons
-      def _cost(rrv): return min(next((j-i for j in ([] if rv[1] is None else lr[rv[1]]) if j >= i), len(uops)) for rv in rrv)
+      def _cost(rrv, i=i):
+        if isinstance(i, int): i = [i] * len(members)
+        return min(next((j-i for i, j in zip(i, ([] if rv[1] is None else lr[rv[1]])) if j >= i), len(uops)) for rv in rrv)
       best_cost, best_row = float('-inf'), 0
       for i in range(n):
         if (c := _cost(tuple((m.cons[i], live_inv.get(m.cons[i])) for m in members))) > best_cost:
@@ -75,24 +89,41 @@ class LinearScanRegallocContext:
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
+    # we arent treating group children as ops?
+    # for i,u in enumerate(uops): print(i, u.arg.opc if u.op is Ops.INS else u.op)
 
     for i,u in enumerate(uops):
       if u.op in PSEUDO_OPS: continue
       # allocate uses
       for s in u.src:
-        # HACK: cause of later hacks to lower range
+        # HACK: cause of later hacks to lower ransge
         if u.op is Ops.END: continue
         for v in s.regs:
           if not isinstance(v, Register): continue
-          if v not in live: live[v] = fill(v, i)
+          if v not in live:
+            print("filling", s.arg.opc if s.op is Ops.INS else s.op, s.regs, u.arg.opc if u.op is Ops.INS else u.op)
+            live[v] = fill(v, i)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate defs
       if isinstance(u.tag, tuple):
-        # assume all definitions are part of group
-        if u.tag[0]._gid is not None:
-          rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
-          for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r
+        if (gid := u.tag[0]._gid) is not None:
+          # sparse case
+          if len(u.tag) < u.tag[0]._count:
+            if groups[gid][0][0] == i: # allocate contiguous block
+              _is = [j for j,_ in groups[gid]]
+              vrs = tuple([r for _, r in groups[gid]])
+              rs = alloc_group(vrs, _is)
+              sparse_group_blocks[gid] = rs
+              self.reals.setdefault(i, {})[vrs[0]] = live[vrs[0]] = rs[0]
+            else:
+              v = u.tag[0]
+              r = sparse_group_blocks[gid][v._pos]
+              # assign pre allocated reg
+              self.reals.setdefault(i, {})[v] = live[v] = r
+          else:
+            rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
+            for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r
         else:
           for j,v in enumerate(u.tag):
             # register should only be defined once

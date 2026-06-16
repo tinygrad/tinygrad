@@ -16,7 +16,7 @@ VGPR_PAIRS = tuple((GP_VGPRS[i],GP_VGPRS[i+1]) for i in range(0, 254, 2))
 VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, len(VGPR_PAIRS)//2, 2))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 
-def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
+# def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
 def const(dt, v:int) -> UOp: return UOp.const(dt,v)
 
 # def map_addrspace(x:UOp, local_ins, global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
@@ -104,7 +104,8 @@ V_CVT = {
 }
 
 def legalize_operands(x:UOp):
-  group, opc = x.arg.func, geopc(x)
+  group, opc = x.arg.func, x.arg.opc
+  # group, opc = x.arg.func, geopc(x)
   if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
     if any(s.tag is None for s in x.src[:2]): return None
     suffix = x.src[2:] if len(x.src) > 2 else ()
@@ -143,17 +144,26 @@ def cmp(x:UOp):
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
+"""
 def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
   local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx)).rtag()
   local_idx = local.index(const(dtypes.int32, 0), ptr=True)
   ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
+"""
 
 pre_isel_matcher = PatternMatcher([
   # (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
+
+# stack has to allocate a contiguous output slice
+# in encode pass emit a mov instruction for each input
+def stack(ctx:IselContext, x:UOp):
+  movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,))
+    for vr, u in zip(Register.contiguous(ctx, VGPR_QUADS), x.src)]
+  return UOp.group(*movs)
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
@@ -199,6 +209,11 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"),
    lambda x: x.ins(RDNA3Ops.v_cndmask_b32_e64, dtype=dtypes.uint32, src=(const(dtypes.uint32,0), const(dtypes.uint32,1), cmp(x)))),
 
+  # stack
+  # allocate contiguous output slice, should be dependent on x.dtype.count
+  # output Ops.group of mov instructions
+  (UPat(Ops.STACK, name="x"), stack),
+
   # casts
   # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
@@ -225,11 +240,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-def stack(x:UOp):
-  defs = []
-  for u in x.src: defs.extend(u.tag)
-  nx = x.replace(tag=tuple(defs))
-  return nx, [nx]
+# oh okay, stack is not a noop
 
 def gep(x:UOp):
   nx = x.replace(tag=(x.src[0].tag[x.arg[0]],)) # copy vreg requirement
@@ -238,15 +249,13 @@ def gep(x:UOp):
 # wait maybe this is unecessary, src already models the relationship 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.GEP, name="x"), gep),
-  (UPat(Ops.STACK, name="x"), stack),
+  # (UPat(Ops.STACK, name="x"), stack),
 ])
 
 def oregs(u:UOp):
   if u.op is Ops.GEP: return (u.src[0].regs[u.arg[0]],)
-  if u.op is Ops.STACK:
-    defs = []
-    for s in u.src: defs += s.regs
-    return tuple(defs)
+  if u.op is Ops.GROUP:
+    print("group")
   return u.regs
 
 def encode(x:UOp):
@@ -256,7 +265,7 @@ def encode(x:UOp):
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
-  enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, geopc(x), x.src, []
+  enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, x.arg.opc, x.src, []
 
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -272,7 +281,7 @@ def encode(x:UOp):
   # sync loads across wave
   if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
-  print(opc, args)
+  print(opc, [u.regs for u in x.src], args)
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
@@ -281,7 +290,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
 
   # strip everything but Ops.INS to bypass render rewrite
-  (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP), name="x"), lambda ctx,x: (x,[])),
+  (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
 
   # final operand legalization and then filling of dsl Inst class partials from autogen
   (UPat(Ops.INS, name="x"), encode),
@@ -298,7 +307,7 @@ class RDNA3Renderer(ISARenderer):
     super().__init__(target)
 
   # hack for now
-  def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-1])
+  def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-2])
   def spill(self, disp:UOp, x:UOp) -> UOp: return x
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
 

@@ -10,6 +10,7 @@ class Register:
   index: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
   _gid: int|None = None
+  _count: int|None = None
   _pos: int|None = None
   @property
   def cons(self): return self._cons or (self,)
@@ -18,7 +19,7 @@ class Register:
   def contiguous(ctx, slices:tuple[tuple[Register,...],...]) -> tuple[Register,...]:
     gid, n = next(ctx.group_n), len(slices[0])
     stripes = tuple(tuple(s[j] for s in slices) for j in range(n))
-    return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _pos=j) for j in range(n))
+    return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
 
 class IselContext:
   def __init__(self, sink:UOp):

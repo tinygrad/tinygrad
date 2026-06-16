@@ -268,6 +268,11 @@ def _canonical_name(name: str) -> str | None:
   return None
 
 class InsOp(functools.partial):
+  @property
+  def opc(self): return str(self).lower()
+  @property
+  def group(self): return self.func.__name__
+  def __repr__(self): return self.args[0].name
   def _key(self): return (self.func.__name__, *[str(a) for a in self.args])
   def __lt__(self, other): return self._key() < other._key()
 
