@@ -138,7 +138,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         # walk through excluded movement ops to find the underlying CONST
         cx = x
         while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
-        arg = cx.render() if cx.op is Ops.STACK else f"{cx.arg:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else f"{cx.arg}"
+        arg = f"{cx.arg:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK else f"{cx.arg}"
         label += f"\n{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else "")
     try:
       if len(rngs:=u.ranges):
