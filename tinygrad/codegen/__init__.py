@@ -1,6 +1,7 @@
 from typing import cast
 from dataclasses import replace
 import itertools
+import functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, all_same
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
@@ -121,8 +122,10 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   return acc_initted.after(acc_out)
 
 def expand_horizontal_reduce(r:UOp):
-  # TODO
-  pass
+  axes = r.arg[1]
+  vals = [r.src[0].shrink(tuple((idx[axes.index(i)], idx[axes.index(i)]+1) if i in axes else None for i in range(r.src[0].ndim)))
+          for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in axes])]
+  return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
