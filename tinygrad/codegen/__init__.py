@@ -40,6 +40,8 @@ pm_remove_vec_dtypes = PatternMatcher([
   (UPat((Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
     if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
+  # reshape of a single element shaped value to scalar is an index
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
@@ -193,16 +195,18 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
-  # ***** make it rendererable (outside spec, transform) *****
-
-  # move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="*** move gates from index")
+  # ***** this is where it gets large *****
 
   # unbroadcast
-  sink = graph_rewrite(sink, unbroadcast, name="unbroadcast")
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
 
   # devectorizer
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, name="devectorizer")
+
+  # ***** make it rendererable (outside spec, transform) *****
+
+  # move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # remove all weakints
   sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
