@@ -260,7 +260,7 @@ class TestViz(unittest.TestCase):
     self.assertTrue(const_graph[id(const_stack)]["exclude"])
     reshape_node = const_graph[id(const_reshaped)]
     self.assertFalse(reshape_node["exclude"])
-    self.assertEqual(reshape_node["label"].split("\n"), ["RESHAPE", "dtypes.int.vec(2)", "STACK0 {3,4}", "STACK1 {1,2}", "(1,2)"])
+    self.assertEqual(reshape_node["label"].split("\n"), ["RESHAPE", "dtypes.int.vec(2)", "STACK0 {3,4} Ops.CONST", "STACK1 {1,2} Ops.CONST", "(1,2)"])
 
 # VIZ displays nested graph_rewrites in a tree view
 
