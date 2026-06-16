@@ -308,9 +308,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
-      case Ops.REDUCE if len(self.arg[1]) == 0:
+      # no longer true
+      #case Ops.REDUCE if len(self.arg[1]) == 0:
         # these can mismatch if there's a horizonal reduce
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
+        #return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -554,9 +555,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
-    if isinstance(b, tuple) and all_same(b):
-      assert len(b) > 0, "can't create const from empty tuple"
-      b = b[0]  # doesn't have to be a STACK if they are all the same
+    # NOTE: it always has to be a stack now
+    #if isinstance(b, tuple) and all_same(b):
+    #  assert len(b) > 0, "can't create const from empty tuple"
+    #  b = b[0]  # doesn't have to be a STACK if they are all the same
     if isinstance(b, tuple):
       stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=()) for c in b]
       ret = UOp.vectorize(*stk)

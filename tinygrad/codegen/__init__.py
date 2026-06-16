@@ -66,8 +66,13 @@ def build_range_map(ctx, sink:UOp):
     if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
       ctx[x.arg[0]] = len(ctx)
 
+def fix_reduce(ctx, r:UOp):
+  range_to_axis = {u:ctx[u.arg[0]] for u in r.ended_ranges if u.arg[0] in ctx if u.arg[1] == AxisType.UNROLL}
+  return r.replace(src=tuple([u for u in r.src if u not in range_to_axis]), arg=(r.arg[0], r.arg[1]+tuple(range_to_axis.values())))
+
 expander2 = PatternMatcher([
   (UPat(Ops.SINK, name="sink"), build_range_map),
+  (UPat(Ops.REDUCE, name="r"), fix_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
@@ -75,7 +80,6 @@ expander2 = PatternMatcher([
 
 def broadcast_binary(x:UOp):
   shapes = [u.shape for u in x.src]
-  print(x.op, shapes)
   if all_same(shapes): return None
   shaped_aligned = _align_left(*shapes)
   broadcasted = _broadcast_shape(*shapes)
@@ -96,17 +100,16 @@ def do_devectorize(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.vectorize(*src)
 
-devectorizer2 = PatternMatcher([
+from tinygrad.schedule.rangeify import pm_mops
+
+devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
-  (UPat(GroupOp.Elementwise|{Ops.STORE}, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise|{Ops.LOAD, Ops.STORE}, name="b"), do_devectorize),
   # INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
    lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
-  # broadcast is just what's being broadcasted
-  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, src=(
-    UPat(Ops.RESHAPE, src=(UPat.var('x'), UPat(Ops.CONST, arg=1))),), allow_any_len=True), UPat(Ops.CONST))), lambda x: x),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
