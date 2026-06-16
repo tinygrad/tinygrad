@@ -99,7 +99,7 @@ def do_devectorize(b:UOp):
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp.vectorize(*src)
+  return UOp.vectorize(*src).reshape(b.shape)
 
 from tinygrad.schedule.rangeify import pm_mops
 
@@ -111,6 +111,11 @@ devectorizer2 = pm_mops+PatternMatcher([
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
    lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
+  # INDEX into RESHAPE moves the RESHAPE
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.RESHAPE, name="s"))),
+   lambda b,s: b.index(s.src[0]).reshape(s.shape)),
+  # RESHAPE a void is removed (hack for AFTER)
+  (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0])
 ])
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
@@ -118,7 +123,7 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   ctx.acc_num += 1
   acc_initted = acc.after(acc.store(identity_element(r.arg[0], r.dtype.scalar())), *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
-  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp))
+  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:])
   return acc_initted.after(acc_out)
 
 def expand_horizontal_reduce(r:UOp):
@@ -169,9 +174,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # ***** make it rendererable (within spec, tighten) *****
 
-  # remove all weakints
-  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
-
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
@@ -194,6 +196,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # devectorizer
   sink = graph_rewrite(sink, devectorizer2, name="devectorizer")
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
