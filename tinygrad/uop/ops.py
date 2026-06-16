@@ -476,7 +476,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
   def vectorize(self, *srcs):
-    return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
+    return UOp(Ops.STACK, self.dtype, (self,)+srcs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
