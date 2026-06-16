@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, AddrSpace, PtrDType, ImageDType, Invalid
+from tinygrad.dtype import dtypes, AddrSpace, PtrDType, ImageDType
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.helpers import VIZ, pluralize, all_int
 
@@ -106,9 +106,6 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
   return None
 
-def _is_invalid_init_store(base:UOp, dep:UOp) -> bool:
-  return dep.op is Ops.STORE and dep.src[0].buf_uop is base.buf_uop and dep.src[1].base.arg is Invalid
-
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
@@ -124,14 +121,11 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   items:list[UOp] = []
   for s, t in zip(srcs, targets):
     after_deps:list[UOp] = []
-    init_afters:list[UOp] = []
     while s.op is Ops.AFTER:
-      if all(_is_invalid_init_store(s.src[0], x) for x in s.src[1:]): init_afters.append(s)
-      else: after_deps.extend(s.src[1:])
+      after_deps.extend(s.src[1:])
       s = s.src[0]
     if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
       subs[s] = placed
-      subs.update((x, placed) for x in init_afters)
       items.append(s.after(*after_deps) if after_deps else s)
     else:
       items.append(t.after(t.store(s), *after_deps))
