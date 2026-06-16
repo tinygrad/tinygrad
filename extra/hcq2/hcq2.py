@@ -460,7 +460,7 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
   for b in bufs:
     if b.tag in maxtags: size_per_tag[b.tag] = max(size_per_tag.get(b.tag, 0), b.arg)
     elif b.tag in sumtags:
-      off_per_buf[b] = round_up(size_per_tag.get(b.tag, 0), {"program": 0x1000}.get(b.tag, 16))
+      off_per_buf[b] = round_up(size_per_tag.get(b.tag, 0), {"program": 0x1000}.get(b.tag, 128))
       size_per_tag[b.tag] = off_per_buf[b] + b.arg
 
   count_per_tag = collections.Counter(b.tag for b in bufs)
@@ -570,7 +570,7 @@ def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_replace_params, name="replace params")
   linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
   linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
-  linear = graph_rewrite(linear, pm_pack_placeholders, walk=True, name="pack hcq placeholders")
+  linear = graph_rewrite(linear, pm_pack_placeholders, walk=True, name="pack placeholders")
   linear = graph_rewrite(linear, pm_hold_call_buffers, walk=True, name="hold call buffers")
 
   # realize starts from here
