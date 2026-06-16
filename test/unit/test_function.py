@@ -554,7 +554,7 @@ class TestFunctionTuple(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, kernel_count)
     np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
 
-  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
+  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=6)
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
