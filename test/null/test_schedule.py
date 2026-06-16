@@ -2,6 +2,7 @@
 import gc, unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
+from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import compile_linear, run_linear
@@ -599,7 +600,7 @@ class TestSchedule(unittest.TestCase):
     sums = P.sum(axis=1, keepdim=True)
     P /= sums
     p = P[0]
-    p = p.pad(((1, 0), ))
+    p = p.pad(((1, 0), ), value=Invalid)
     p = p.repeat([2])
     check_schedule(p, 3)
 

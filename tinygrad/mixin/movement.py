@@ -469,7 +469,7 @@ class MovementMixin:
     ```
     """
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
-    return self.unsqueeze(-1).pad_to((None, 1+(n:=self.shape[0]))).flatten().shrink_to((n*n,)).reshape(n,n)
+    return self.unsqueeze(-1).pad((None, (0, (n:=self.shape[0])))).flatten().shrink_to((n*n,)).reshape(n,n)
 
   def diagonal(self, offset:int=0, dim1:int=0, dim2:int=1) -> Self:
     """

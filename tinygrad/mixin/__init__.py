@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, prod
 from tinygrad.helpers import resolve_pool_pads, round_up
 
@@ -293,9 +293,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     has_neg = not all(resolve(p >= 0) for p in flatten(pX))
     X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    base = MovementMixin.pad(X, pads)
-    if value == 0: return base
-    base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
+    if value is Invalid: return MovementMixin.pad(X, pads)
+    if value != 0: X = X.cast(least_upper_dtype(X.dtype, dtypes.from_py(value)))
+    if (base := MovementMixin.pad(X, pads)) is X: return base
     return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, base.const_like(value))
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
@@ -1061,7 +1061,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
     mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
     # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    return src.pad_to(*self.shape, None), mask.pad_to(*self.shape, None)
+    return src.pad_to(*self.shape, None), mask.pad(tuple((0, s - m) for s, m in zip(self.shape, mask.shape)) + (None,), value=False)
 
   def scatter_reduce(self, dim:int, index:Self, src:Self, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
                      include_self:bool=True) -> Self:

@@ -79,11 +79,11 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
     new_srcs.append(new_src)
   return x.replace(src=tuple(new_srcs))
 
-def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
+def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp, value:UOp):
   if x not in ctx.range_map: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   valid: UOp = UOp.const(dtypes.bool, True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
-  return valid.where(bx.src[0], UOp.const(x.dtype, 0))
+  return valid.where(bx.src[0], value.base)
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if len(x.arg[1]) == 0: return None
@@ -98,8 +98,9 @@ def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
 pm_apply_rangeify = PatternMatcher([
   # REDUCE(op, axis) -> REDUCE(op) with ranges
   (UPat(Ops.REDUCE, name="x"), convert_reduce_to_reduce_with_ranges),
-  # PAD -> WHERE
-  (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
+  # WHERE(PAD(mask), PAD(X), value) -> valid.where(X, value)
+  (UPat(Ops.WHERE, src=(UPat(Ops.PAD), UPat(Ops.PAD, name="x"), UPat.var("value"))),
+   convert_pad_to_where_to_keep_behavior_local),
   # finally, apply_rangeify
   (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op

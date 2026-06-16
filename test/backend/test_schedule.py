@@ -140,7 +140,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(a.tolist(), expected)
     self.assertEqual(kcount, expected_kcount)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
-  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
+  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad(((0, 0), (0, 3))), 1)
 
   def test_setitem_const_fused(self):
     # https://github.com/tinygrad/tinygrad/issues/10690

@@ -137,11 +137,10 @@ class TestJitFootguns(unittest.TestCase):
     from tinygrad import Variable
     a = Tensor.rand(3, 10).realize()
 
-    # broken: pad is a view, BIND values frozen at capture (i=2)
     @TinyJit
-    def f_broken(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
-    for i in range(1, 5): f_broken(a[:, :Variable("i", 1, 10).bind(i)])
-    self.assertEqual(int((f_broken(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 2)  # should be 4!
+    def f(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
+    for i in range(1, 5): f(a[:, :Variable("i", 1, 10).bind(i)])
+    self.assertEqual(int((f(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 4) 
 
     # workaround: contiguous fuses pad into kernel
     @TinyJit

@@ -979,7 +979,7 @@ class Tensor(RandMixin):
     data = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1])
     data_pad = rate - data.shape[-1] % rate
     # pad batches then pad blocks
-    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad_to(None, None, 200)
+    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
 
     # create pad mask
     lbe = (data.shape[1] - 1) * 200 + rate - data_pad
