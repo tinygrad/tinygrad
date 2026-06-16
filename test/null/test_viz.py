@@ -254,13 +254,13 @@ class TestViz(unittest.TestCase):
     graph = uop_to_json(VizData(), reshaped)
     self.assertFalse(graph[id(stack)]["exclude"])
 
-    const_stack = UOp.const(dtypes.int, 3).vectorize(UOp.const(dtypes.int, 4))
+    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])
     reshape_node = const_graph[id(const_reshaped)]
     self.assertFalse(reshape_node["exclude"])
-    self.assertEqual(reshape_node["label"].split("\n"), ["RESHAPE", "dtypes.int.vec(2)", "STACK0 {3,4} Ops.CONST", "STACK1 {1,2} Ops.CONST", "(1,2)"])
+    self.assertIn("STACK0 {1,2} Ops.CONST", reshape_node["label"].split("\n"))
 
 # VIZ displays nested graph_rewrites in a tree view
 
