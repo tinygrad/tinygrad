@@ -1,6 +1,6 @@
 from tinygrad.dtype import DType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
+from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
 from tinygrad.helpers import strip_parens
 
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
@@ -51,7 +51,7 @@ wgsl_matcher = PatternMatcher([
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
   (UPat.var("a") != UPat.var("a"), is_nan),
-  ]) + extra_pm
+  ])
 
 class WGSLRenderer(CStyleLanguage):
   global_max = (65535, 65535, 65535)
