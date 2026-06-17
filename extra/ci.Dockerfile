@@ -16,27 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     mkdir -p /artifacts && \
     cp -a --parents \
       /opt/rocm/lib/libamd_comgr.so* \
-      /opt/intel/oneapi/lib/intel64/libintelocl.so.2023.16.7.0 \
-      /opt/intel/oneapi/lib/intel64/libcommon_clang.so \
-      /opt/intel/oneapi/lib/intel64/libtbb.so.12.10 \
-      /opt/intel/oneapi/lib/intel64/libtbbmalloc.so.2.10 \
-      /opt/intel/oneapi/lib/intel64/libimf.so \
-      /opt/intel/oneapi/lib/intel64/libsvml.so \
-      /opt/intel/oneapi/lib/intel64/libirng.so \
-      /opt/intel/oneapi/lib/intel64/libintlc.so.5 \
-      /opt/intel/oneapi/lib/intel64/cl.cfg \
-      /opt/intel/oneapi/lib/intel64/__ocl_svml_l9.so \
-      /opt/intel/oneapi/lib/intel64/clbltfnl9.rtl \
       /opt/intel/oneapi/lib/clbltfnshared.rtl \
-      /opt/intel/oneapi/lib/intel64/cllibrary.rtl \
-      /opt/intel/oneapi/lib/intel64/cllibraryl9.o \
+      /opt/intel/oneapi/lib/intel64/ \
       /artifacts/ && \
     mkdir -p /artifacts/etc/OpenCL/vendors && \
     echo /opt/intel/oneapi/lib/intel64/libintelocl.so.2023.16.7.0 > /artifacts/etc/OpenCL/vendors/intel64.icd && \
-    mkdir -p /artifacts/usr/local/cuda/targets/x86_64-linux/lib /artifacts/usr/local/lib /artifacts/usr/lib && \
+    mkdir -p /artifacts/usr/local/cuda/targets/x86_64-linux /artifacts/usr/local/lib /artifacts/usr/lib && \
     curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-11.5.119-archive.tar.xz \
-      | tar -xJ -C /artifacts/usr/local/cuda/targets/x86_64-linux/lib --strip-components=2 cuda_nvrtc-linux-x86_64-11.5.119-archive/lib/libnvrtc.so.11.5.119 && \
-    mv /artifacts/usr/local/cuda/targets/x86_64-linux/lib/libnvrtc.so.11.5.119 /artifacts/usr/local/cuda/targets/x86_64-linux/lib/libnvrtc.so && \
+      | tar -xJ -C /artifacts/usr/local/cuda/targets/x86_64-linux --strip-components=1 && \
     curl --output-dir /artifacts/usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.so && \
     curl -fL https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /artifacts/usr/local/lib/libwebgpu_dawn.so && \
     curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa-mesa-25.2.7-linux-amd64.so -o /artifacts/usr/lib/libtinymesa.so && \
@@ -51,8 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       opencl-headers ocl-icd-libopencl1 \
       mesa-vulkan-drivers \
       libllvm20 clang-20 lld-20 \
-      qemu-user-static \
-      zlib1g libzstd1 libstdc++6 && \
+      qemu-user-static && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /artifacts/ /
