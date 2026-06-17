@@ -6,6 +6,8 @@ env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
   CHECK_OOB: 1
+  # no buffers should be over 300MB in CI
+  MAX_BUFFER_SIZE: 300000000
 
 on:
   push:
@@ -540,6 +542,7 @@ jobs:
 
     name: Linux (DEV=${{ matrix.dev }})
     runs-on: *linux
+    container: ghcr.io/sirhcm/tinygrad-ci
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -549,10 +552,6 @@ jobs:
       with:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
-        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
-        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
-        webgpu: ${{ matrix.dev == 'WEBGPU' }}
-        opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
       run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
