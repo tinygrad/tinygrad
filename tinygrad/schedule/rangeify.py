@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, replace
+from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg
@@ -318,7 +319,7 @@ def after_all_invalid(after:UOp):
   # check all ranges are used (no expand), and same size (no pad and shrink)
   return all(s.op is Ops.END and (st:=s.src[0]).op is Ops.STORE and st.src[1].base.arg is Invalid and st.src[0].buf_uop is buf
     and all(r in st.src[0].ranges for r in s.ended_ranges)
-    and resolve(prod(r.src[0] for r in s.ended_ranges).eq(buf.numel()), False) for s in after.src[1:])
+    and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
