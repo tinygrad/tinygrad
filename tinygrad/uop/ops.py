@@ -904,16 +904,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.weakint) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
-    return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+    return UOp(Ops.PARAM, dtype, src=(UOp(Ops.STACK, dtypes.void),),
+               arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=None))
   @property
   def expr(self) -> str:
     if self.op is Ops.PARAM and self.arg.addrspace is None: return unwrap(self.arg.name)
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
   def bind(self, val:int|UOp):
-    assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
+    assert self.op is Ops.PARAM and self.addrspace is None, f"op is {self.op}, need DEFINE_VAR"
     uval = self.const_like(val) if isinstance(val, int) else val
-    assert self.arg[1] <= uval.vmin and uval.vmax <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
+    assert self.arg.vmin_vmax[0] <= uval.vmin and uval.vmax <= self.arg.vmin_vmax[1], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, uval))
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
@@ -1673,7 +1674,8 @@ pm_lower_index_dtype = PatternMatcher([
   # special can only be int32
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.weakint),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),
-  (UPat(Ops.DEFINE_VAR, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=dtypes.int).cast(dtypes.weakint)),
+  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
+   lambda u: u.replace(dtype=dtypes.int).cast(dtypes.weakint) if u.addrspace is None else None),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
