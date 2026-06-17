@@ -34,7 +34,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git \
+      ca-certificates git sudo \
       opencl-headers ocl-icd-libopencl1 \
       mesa-vulkan-drivers \
       libllvm20 clang-20 lld-20 \
@@ -43,7 +43,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /artifacts/ /
 
-RUN echo /opt/intel/oneapi/lib/intel64 > /etc/ld.so.conf.d/intel-oneapi.conf && \
+RUN useradd -m -u 1001 runner && \
+    echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner && \
+    chmod 0440 /etc/sudoers.d/runner && \
+    echo /opt/intel/oneapi/lib/intel64 > /etc/ld.so.conf.d/intel-oneapi.conf && \
     echo /usr/local/cuda/targets/x86_64-linux/lib > /etc/ld.so.conf.d/cuda-nvrtc.conf && \
     ln -s /usr/bin/clang-20 /usr/local/bin/clang && \
     ldconfig
+
+USER runner
