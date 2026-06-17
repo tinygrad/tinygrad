@@ -796,6 +796,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self.arg.addrspace if isinstance(self.arg, ParamArg) else AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
+    if self.op in {Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:
       return self.src[0].addrspace
@@ -907,7 +908,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=None))
   @property
   def expr(self) -> str:
-    if self.op is Ops.PARAM and self.arg.addrspace is None: return unwrap(self.arg.name)
+    if self.op is Ops.PARAM: return unwrap(self.arg.name)
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
   def bind(self, val:int|UOp):
@@ -925,7 +926,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def val(self) -> int: return self.unbind()[1]
   def variables(self) -> list[Variable]:
-    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR or (x.op is Ops.PARAM and x.arg.addrspace is None)},
+    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR or (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU)},
                   key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
@@ -1035,7 +1036,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR or (x.op is Ops.PARAM and x.arg.addrspace is None)))
+    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR or (x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU)))
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
@@ -1151,8 +1152,8 @@ class ProgramInfo:
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
-      if u.op is Ops.DEFINE_VAR or (u.op is Ops.PARAM and u.addrspace is None): _vars.append(u)
-      if u.op is Ops.PARAM and u.addrspace is not None: _globals.append(u.arg.slot)
+      if u.op is Ops.DEFINE_VAR or (u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU): _vars.append(u)
+      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
@@ -1162,7 +1163,7 @@ class ProgramInfo:
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op in (Ops.DEFINE_VAR, Ops.PARAM) and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
-                       tuple(local_size) if local_size is not None else None, tuple(sorted(_vars, key=lambda v: v.expr)),
+                       tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
                        tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
 
 @dataclass(frozen=True)

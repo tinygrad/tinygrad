@@ -85,7 +85,7 @@ class PythonProgram:
           i += 1
           continue
         if u.op is Ops.AFTER: values[u] = src_values[0]
-        elif u.op is Ops.PARAM and u.addrspace is None: values[u] = [pvals.pop(0)] * warp_size
+        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
