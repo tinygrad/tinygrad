@@ -905,7 +905,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.weakint) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
-    return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+    return UOp(Ops.PARAM, dtype, src=(UOp(Ops.STACK, dtypes.weakint),),
+               arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=None))
+    #return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self) -> str:
     if self.op is Ops.PARAM and self.arg.addrspace is None: return unwrap(self.arg.name)

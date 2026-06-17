@@ -48,7 +48,7 @@ pm_remove_vec_dtypes = PatternMatcher([
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
   # replace DEFINE_VAR with PARAM
   (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x:
-   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
+   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
@@ -152,9 +152,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
-  name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # first we optimize
   if optimize:
@@ -211,6 +209,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+
+  # put registers in slots
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  name_to_slot = {x:x.replace(arg=replace(x.arg, slot=num_params+i))
+                  for i,x in enumerate(sorted([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot == -1]))}
+  sink = sink.substitute(name_to_slot, name="put variables in slots")
 
   # remove all weakints
   sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
