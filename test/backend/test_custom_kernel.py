@@ -343,6 +343,10 @@ class TestCustomKernel(unittest.TestCase):
     after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float, Invalid, shape=(2,))))
     self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
 
+  def test_multi_after_invalid_store_dep_removed(self):
+    x = Tensor.empty(4).uop
+    self.assertEqual(Tensor(x.after(x.store(5), x.store(Invalid))).tolist(), [5]*4)
+
   def test_expand_view_invalid_assign_keeps_uncovered_reads(self):
     x = Tensor([[10., 11., 12., 13.], [20., 21., 22., 23.], [30., 31., 32., 33.], [40., 41., 42., 43.]]).realize()
     v = x[:1, :].expand(4, 4)
