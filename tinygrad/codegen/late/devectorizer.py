@@ -63,7 +63,9 @@ load_store_indexing = PatternMatcher([
 def expand_index(ctx, buf:UOp, vec:UOp):
   # determine optimal image shapes
   if isinstance(dt:=buf.dtype, ImageDType):
-    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
+    idxs, valids = vec.get_idx(), vec.get_valid()
+    lane = next((i for i in range(vec.dtype.count) if valids.gep(i).vmax != 0), 0)
+    x, valid = idxs.gep(lane), valids.gep(lane)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
     for ch, cw in ImageDType.valid_dims(dt, ctx.target.arch):
