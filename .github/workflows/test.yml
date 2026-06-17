@@ -580,7 +580,11 @@ jobs:
           deps: testing_unit
       - name: Verify AMD autogen is up to date
         run: |
+          pwd
+          ls -la
+          ls -la $GITHUB_WORKSPACE
           python -m tinygrad.renderer.amd.generate
+          git  -C $GITHUB_WORKSPACE diff --exit-code tinygrad/runtime/autogen/amd/
           git diff --exit-code tinygrad/runtime/autogen/amd/
       - name: Install LLVM 21
         run: |
