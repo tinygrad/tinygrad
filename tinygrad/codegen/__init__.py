@@ -47,7 +47,7 @@ pm_remove_vec_dtypes = PatternMatcher([
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
   # replace DEFINE_VAR with PARAM
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x:
-   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
+   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=AddrSpace.ALU))),
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
