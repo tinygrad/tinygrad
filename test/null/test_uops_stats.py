@@ -217,7 +217,7 @@ class TestStatsOptimized(unittest.TestCase):
       raise unittest.SkipTest("no locals")
     SZ = N*N*4
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
-    self.check_gemm(p, extra_flops=SZ*4)
+    self.check_gemm(p, extra_flops=SZ*5)
     self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
 
   def test_reduce(self):
