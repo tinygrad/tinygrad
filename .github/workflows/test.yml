@@ -558,6 +558,8 @@ jobs:
       run: |
         echo $PATH
         ls .venv/bin
+        which python
+        ldd $(which python)
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run backend tests
