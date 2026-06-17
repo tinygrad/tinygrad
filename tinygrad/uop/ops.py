@@ -83,7 +83,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  if len(arg) == 0: return UOp(Ops.STACK, dtypes.weakint.vec(0))
+  if len(arg) == 0: return UOp(Ops.STACK)
   elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
   else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
