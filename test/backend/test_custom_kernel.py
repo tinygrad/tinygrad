@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
-from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 # **** kernels ****
@@ -327,6 +327,27 @@ class TestCustomKernel(unittest.TestCase):
       prg = call.src[0]
       if prg.op is not Ops.PROGRAM: continue
       self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
+
+  def test_multi_invalids_custom_kernel_no_copy(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(4, 4).shard(devs, axis=0).realize()
+    c = Tensor(UOp.const(dtypes.float, Invalid, shape=(2, 4)).clone(device=devs).multi(0), device=devs)
+    c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    c.realize()
+    self.assertEqual(GlobalCounters.kernel_count, len(devs))
+    self.assertTrue((c == 2).all().item())
+
+  def test_partial_invalid_store_keeps_uncovered_reads(self):
+    x = Tensor([10., 20., 30., 40.])
+    after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float, Invalid, shape=(2,))))
+    self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
+
+  def test_expand_view_invalid_assign_keeps_uncovered_reads(self):
+    x = Tensor([[10., 11., 12., 13.], [20., 21., 22., 23.], [30., 31., 32., 33.], [40., 41., 42., 43.]]).realize()
+    v = x[:1, :].expand(4, 4)
+    v.assign(Tensor.invalids(4, 4, dtype=dtypes.float))
+    self.assertEqual(v.contiguous().tolist(), [[10., 11., 12., 13.]]*4)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
