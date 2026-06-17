@@ -355,7 +355,7 @@ class TestUOpRender(unittest.TestCase):
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
     u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
-    self.assertEqual(u.render(simplify=False), "{0, ...}")
+    self.assertEqual(u.render(simplify=False), "{0,0,0}")
   def test_render_vectorize_different(self):
     u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(simplify=False), "{0,1,2}")
