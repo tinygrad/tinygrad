@@ -139,6 +139,17 @@ def expand_horizontal_reduce(r:UOp):
 pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x:
+   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
+])+pm_clean_up_group_sink
+
+def do_number_param(ctx:list[int], x:UOp):
+  if x.arg.slot != -1: return None
+  ctx[0] += 1
+  return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
+
+pm_number_params = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -299,9 +310,7 @@ def old_full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
-  name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
@@ -313,6 +322,10 @@ def old_full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
+  # put unnumbered DEFINE_VAR in slots
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
