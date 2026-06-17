@@ -25,7 +25,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
   for x in idx.toposort() | gate.toposort():
-    if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
@@ -42,6 +42,8 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
         if DEBUG >= 3: print_uops(lst)
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
+def is_shape_arg(u:UOp) -> bool: return u.dtype.scalar() == dtypes.weakint or (u.op is Ops.STACK and len(u.src) == 0)
+
 # ***** new specs *****
 
 # these ops can be used in the tensor graph and programs
@@ -54,6 +56,7 @@ spec_shared = PatternMatcher([
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: len(x.arg) == 3 and isinstance(x.arg[0], str)),
+  (UPat(Ops.STACK, src=(), dtype=dtypes.void), lambda: True),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -150,9 +153,9 @@ spec_tensor = PatternMatcher([
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
-  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
-  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint)), name="x"),
-   lambda x: x.src[1].dtype.count == x.src[2].dtype.count),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(name="shp"))), lambda shp: is_shape_arg(shp)),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(name="lo"), UPat(name="hi"))),
+   lambda lo,hi: is_shape_arg(lo) and is_shape_arg(hi) and lo.dtype.count == hi.dtype.count),
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
@@ -194,6 +197,9 @@ spec_tensor = PatternMatcher([
 spec_program = PatternMatcher([
   # no more of these in programs
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.GEP)), lambda: False),
+
+  # scalar shape metadata
+  (UPat(Ops.STACK, src=(), dtype=dtypes.void), lambda: True),
 
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),

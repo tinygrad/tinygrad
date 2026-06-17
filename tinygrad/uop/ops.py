@@ -83,7 +83,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  if len(arg) == 0: return UOp(Ops.STACK, dtypes.weakint.vec(0))
+  if len(arg) == 0: return UOp(Ops.STACK)
   elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
   else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
@@ -903,7 +903,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint) -> UOp:
-    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((dtype.count,)) if dtype.count > 1 else UOp(Ops.STACK, dtypes.void),),
+    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((dtype.count,) if dtype.count > 1 else ()),),
                arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=None))
   @property
   def expr(self) -> str:
@@ -932,6 +932,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def is_increasing(self:UOp) -> bool:
     # is f a monotonically increasing function regards its input
+    if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return True
     if self.op in GroupOp.Irreducible: return True
     if self.op is Ops.ADD: return self.src[0].is_increasing() and self.src[1].is_increasing()
     if self.op in (Ops.MUL, Ops.CDIV, Ops.FLOORDIV) and self.src[1].op is Ops.CONST and self.src[1].arg >= 0: return self.src[0].is_increasing()
@@ -1022,7 +1023,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
-    if self.op in {Ops.UNROLL, Ops.STACK}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
+    if self.op in {Ops.UNROLL, Ops.STACK}: return (0, 0) if len(self.src) == 0 else (min(x.vmin for x in self.src), max(x.vmax for x in self.src))
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.GEP: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
