@@ -44,5 +44,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /artifacts/ /
 
 RUN echo /opt/intel/oneapi/lib/intel64 > /etc/ld.so.conf.d/intel-oneapi.conf && \
+    echo /usr/local/cuda/targets/x86_64-linux/lib > /etc/ld.so.conf.d/cuda-nvrtc.conf && \
     ln -s /usr/bin/clang-20 /usr/local/bin/clang && \
     ldconfig
