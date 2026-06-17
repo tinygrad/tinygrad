@@ -567,6 +567,7 @@ jobs:
     name: AMD ASM IDE
     runs-on: *linux
     timeout-minutes: 20
+    container: ghcr.io/sirhcm/tinygrad-ci
     env:
       DEV: MOCKKFD+AMD
     steps:
@@ -577,7 +578,6 @@ jobs:
         with:
           key: rdna3-emu
           deps: testing_unit
-          amd: 'true'
       - name: Verify AMD autogen is up to date
         run: |
           python -m tinygrad.renderer.amd.generate
@@ -612,6 +612,7 @@ jobs:
   testmockam:
     name: Linux (am)
     runs-on: *linux
+    container: ghcr.io/sirhcm/tinygrad-ci
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
@@ -623,7 +624,6 @@ jobs:
         with:
           key: mockam
           deps: testing_unit
-          amd: 'true'
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
       - name: Run test_tiny on MOCKUSB
@@ -648,6 +648,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: *linux
+    container: ghcr.io/sirhcm/tinygrad-ci
     timeout-minutes: 15
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
@@ -660,8 +661,6 @@ jobs:
         with:
           key: ${{ matrix.backend }}-minimal
           deps: testing_unit
-          amd: 'true'
-          llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
@@ -683,6 +682,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }})
     runs-on: *linux
+    container: ghcr.io/sirhcm/tinygrad-ci
     timeout-minutes: 20
     env:
       FORWARD_ONLY: 1
@@ -694,8 +694,6 @@ jobs:
         with:
           key: ${{ matrix.backend }}-minimal
           deps: testing_unit
-          cuda: 'true'
-          ocelot: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
