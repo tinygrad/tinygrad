@@ -18,7 +18,7 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:tuple[UOp, ...]) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
@@ -44,9 +44,9 @@ class Estimates:
         lds += u.max_numel() * u.dtype.scalar().itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.src[1].dtype.scalar().itemsize * mults
-      elif u.op in GroupOp.ALU and (not ignore_indexing or u.addrspace is not None):
+      elif u.op in GroupOp.ALU and u.addrspace is not None:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-      elif u.op is Ops.WMMA and (not ignore_indexing or u.addrspace is not None):
+      elif u.op is Ops.WMMA and u.addrspace is not None:
         flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     return Estimates(flops, lds, sum(mem.values()))
 
