@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
 from tinygrad.device import Buffer, CompileError
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -462,6 +462,7 @@ class TestVizIntegration(unittest.TestCase):
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
+  @unittest.skipUnless(VIZ, "using TrackedPatternMatcher requires global VIZ=1")
   def test_view_source(self):
     def custom_fn(X:UOp):
       X = X.flatten()
@@ -472,8 +473,15 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       with self.assertRaises(CompileError):
         x.realize()
-    steps = [s["name"] for s in viz.list_items()[-1]["steps"]]
-    assert any([s == "View Source" for s in steps]), f"no source visible in {steps}"
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    disasm_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
+    assert all(i is not None for i in [lin_idx, src_idx, disasm_idx]), f"linear, source and disasm must be visible in {steps}"
+    lin_render = get_render(viz.data, steps[lin_idx]["query"])
+    print(lin_render)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
