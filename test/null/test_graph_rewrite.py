@@ -1,5 +1,6 @@
 import unittest, math
 from tinygrad import dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
 from test.helpers import full_rewrite
@@ -21,7 +22,7 @@ def apply_rewrite_values(expr):
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
     return uop.arg
-  elif uop.op == Ops.DEFINE_VAR or (uop.op == Ops.PARAM and uop.arg.addrspace is None):
+  elif uop.op == Ops.DEFINE_VAR or (uop.op == Ops.PARAM and uop.arg.addrspace is AddrSpace.ALU):
     return variables[uop.expr]
   elif uop.op in GroupOp.ALU:
     src_values = [evaluate_uop(src, variables) for src in uop.src]
