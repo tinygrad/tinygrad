@@ -126,11 +126,11 @@ runs:
     - name: Configure venv
       shell: bash
       run: |
-        echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+        echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
         if [[ "$RUNNER_OS" == "Windows" ]]; then
-          echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/.venv/Scripts" >> "$GITHUB_PATH"
         else
-          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
         fi
 
     # ******************* apt *******************
