@@ -902,9 +902,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.weakint) -> UOp:
-    assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
-    return UOp(Ops.PARAM, dtype, src=(UOp(Ops.STACK, dtypes.void),),
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint) -> UOp:
+    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((dtype.count,)) if dtype.count > 1 else UOp(Ops.STACK, dtypes.void),),
                arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=None))
   @property
   def expr(self) -> str:
@@ -917,7 +916,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.arg.vmin_vmax[0] <= uval.vmin and uval.vmax <= self.arg.vmin_vmax[1], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, uval))
   def unbind(self) -> tuple[Variable, int]:
-    assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
+    assert self.op is Ops.BIND and self.src[0].op is Ops.PARAM and self.src[0].arg.vmin_vmax is not None and \
+      self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
@@ -1086,7 +1086,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def param_like(self, slot:int):
     addrspace = self.addrspace if isinstance(self.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
-      return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].arg[0], addrspace)
+      return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].expr, addrspace)
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)

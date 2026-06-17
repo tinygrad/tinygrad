@@ -1,8 +1,9 @@
 # all of symbolic lives here now
 import math, struct
+from typing import cast
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
+from tinygrad.dtype import ConstType, PyConst, dtypes, PtrDType, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
 from tinygrad.uop.decompositions import threefry2x32, xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -186,7 +187,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
-    if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
+    if not ((u.op in GroupOp.Irreducible or (u.op is Ops.PARAM and u.arg.vmin_vmax is not None)) and u.vmin >= 0): return None
     ret.append(u)
   return UOp.usum(*ret) if changed else None
 
@@ -259,8 +260,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff")), \
    lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # ALU/variable min==max -> CONST
-  (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.DEFINE_VAR, Ops.BIND, Ops.SPECIAL}, name="x"),
-   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.DEFINE_VAR, Ops.PARAM, Ops.BIND, Ops.SPECIAL}, name="x"),
+   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax and (x.op is not Ops.PARAM or x.addrspace is None) else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
@@ -343,7 +344,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # try checking the whole clause
-    all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
+    all_candidates.append((expr, UOp.variable(f"fake{i}", cast(PyConst, v0), cast(PyConst, v1), expr.dtype)))
 
     if try_simplex:
       # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
