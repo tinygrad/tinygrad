@@ -24,15 +24,20 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
     2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
   """
-  # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
-  if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
-    good_tc_opt = False
-    tk = k.copy()
-    try: # check TC first and apply hand-coded opts if successful
-      rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
-      good_tc_opt = True
-    except KernelOptError:
-      pass
+  # multi-axis reduces (convs) put the aligned reduce at a non-zero axis choice, so sweep choices
+  # for a no-padding (opt_level 1) fit. Misaligned ones raise KernelOptError and fall back below
+  good_tc_opt, rngs = False, None
+  if USE_TC > 0:
+    n_reduce = len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE))
+    tc_opt_level = TC_OPT.value if n_reduce == 1 else max(TC_OPT.value, 1)
+    for tc_axis in (range(9) if n_reduce > 1 else (0,)):
+      tk = k.copy()
+      try: # check TC first and apply hand-coded opts if successful
+        rngs = tk.apply_opt(Opt(OptOps.TC, tc_axis, (TC_SELECT.value, tc_opt_level, USE_TC.value)))
+        good_tc_opt = True
+        break
+      except KernelOptError:
+        pass
     if good_tc_opt:
       if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
