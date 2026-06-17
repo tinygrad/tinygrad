@@ -28,7 +28,7 @@ class Estimates:
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort()))
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
