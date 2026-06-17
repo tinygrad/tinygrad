@@ -101,8 +101,6 @@ def do_devectorize(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.vectorize(*src).reshape(b.shape)
 
-from tinygrad.schedule.rangeify import pm_mops
-
 devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD, Ops.STORE}, name="b"), do_devectorize),
@@ -171,6 +169,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # rewrite reduce after optimizations
   sink = graph_rewrite(sink, pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
+
+  # add gpu dims
+  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # add loads
   sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
