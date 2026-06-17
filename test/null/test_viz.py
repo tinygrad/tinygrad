@@ -8,7 +8,7 @@ from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, CompileError
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
@@ -461,6 +461,19 @@ class TestVizIntegration(unittest.TestCase):
         events = [e for e in out["layout"][k]["events"] if graph_st <= e["st"] and e["st"]+e["dur"] <= graph_et]
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
+
+  def test_view_source(self):
+    def custom_fn(X:UOp):
+      X = X.flatten()
+      i = UOp.range(X.numel(), 0)
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_var")
+      return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
+    x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_fn)[0]
+    with save_viz() as viz:
+      with self.assertRaises(CompileError):
+        x.realize()
+    steps = [s["name"] for s in viz.list_items()[-1]["steps"]]
+    assert any([s == "View Source" for s in steps]), f"no source visible in {steps}"
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
