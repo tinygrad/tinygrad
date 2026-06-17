@@ -215,7 +215,7 @@ spec_program = PatternMatcher([
    lambda x: False if x.dtype.count > 1 and (x.dtype.count,) != x.shape else None),
 
   # STACK/GEP in program. TODO: this should match Tensor
-  (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 or len(x.src) == 0),
+  (UPat(Ops.STACK), lambda: True),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),

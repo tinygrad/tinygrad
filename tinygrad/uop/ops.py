@@ -554,9 +554,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
-    if isinstance(b, tuple) and all_same(b):
-      assert len(b) > 0, "can't create const from empty tuple"
-      b = b[0]  # doesn't have to be a STACK if they are all the same
+    # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
       stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=()) for c in b]
       ret = UOp.vectorize(*stk)
