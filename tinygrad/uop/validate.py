@@ -54,9 +54,10 @@ z3_renderer = PatternMatcher([
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   # gate on upstream AFTER/BUFFER as a replacement for PtrDType, but keep INDEX as an unknown LOAD
-  lst = [u for u in list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.BUFFER} and \
+  raw = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.BUFFER} and \
     not (x.op is Ops.PARAM and x.arg.vmin_vmax is None) and (x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
-    if not (u.op is Ops.STACK and len(u.src) == 0)]
+  param_shape_args = {p.src[0] for p in raw if p.op is Ops.PARAM and p.arg.vmin_vmax is not None and len(p.src) == 1}
+  lst = [u for u in raw if u not in param_shape_args]
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:
     z3_rewritten = z3_renderer.rewrite(u, ctx=(solver.ctx, z3map))

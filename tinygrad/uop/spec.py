@@ -43,6 +43,11 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
 def is_shape_arg(u:UOp) -> bool: return u.dtype.scalar() == dtypes.weakint or (u.op is Ops.STACK and len(u.src) == 0)
+def check_where(w:UOp, x:UOp, y:UOp) -> bool:
+  if w.dtype == x.dtype == y.dtype: return True
+  if x.op is Ops.INDEX and y.op is Ops.CONST and w.dtype == y.dtype: return True
+  if x.op is Ops.STACK and y.op is Ops.CONST and y.arg is Invalid and w.dtype == y.dtype: return True
+  return False
 
 # ***** new specs *****
 
@@ -59,7 +64,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.STACK, src=(), dtype=dtypes.void), lambda: True),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), check_where),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
