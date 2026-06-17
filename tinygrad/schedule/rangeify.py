@@ -76,6 +76,10 @@ def _mop_index(r:UOp, idx:UOp):
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
+  # INDEX without src is nothing
+  # TODO: enable this
+  #(UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
