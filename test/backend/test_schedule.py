@@ -61,6 +61,14 @@ class TestSchedule(unittest.TestCase):
     # NOTE: the gradient flows twice
     np.testing.assert_allclose(out.numpy(), 2*np.ones((64,64)))
 
+  def test_pad_reduce_scope_collision(self):
+    b = Tensor.rand(4, 3).realize()
+    s1 = b.pad(((1, 1), (0, 0))).sum(axis=1)
+    s2 = b.pad(((1, 2), (0, 0))).shrink(((0, 6), (0, 3))).sum(axis=1)
+    out = s1 + s2
+    run_linear(*check_schedule(out, 1))
+    np.testing.assert_allclose(out.numpy(), 2*np.pad(b.numpy(), ((1, 1), (0, 0))).sum(axis=1), rtol=1e-6)
+
   def test_cumsum_parallel_reduce_fused(self):
     # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)
     step, num_steps = 513, 10

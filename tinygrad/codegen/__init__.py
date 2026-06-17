@@ -28,9 +28,10 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
-    UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) if isinstance(buf.dtype, PtrDType) else None),
+    UOp(Ops.SHRINK, dtype=x.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) \
+      if isinstance(buf.dtype, PtrDType) and x.dtype.count > 1 else None),
   # rewrite GEP to INDEX
-  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
+  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg if len(x.arg) > 1 else x.arg[0]),), arg=None)),
 ])
 
 pm_remove_vec_dtypes = PatternMatcher([
@@ -45,9 +46,18 @@ pm_remove_vec_dtypes = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
   # replace DEFINE_VAR with PARAM
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x:
-   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=ctx[x.arg[0]], name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x:
+   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
+
+def do_number_param(ctx:list[int], x:UOp):
+  if x.arg.slot != -1: return None
+  ctx[0] += 1
+  return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
+
+pm_number_params = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), do_number_param),
+])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -118,17 +128,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
 
-  # move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
-
   # GEP/STACK stuff
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
 
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM])
-  name_to_slot = {nm:num_params+i for i,nm in enumerate(sorted([x.arg[0] for x in sink.toposort() if x.op is Ops.DEFINE_VAR]))}
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, ctx=name_to_slot, name="transform to new style")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
+  # move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
@@ -137,6 +145,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
+  # put unnumbered DEFINE_VAR in slots
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)

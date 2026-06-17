@@ -194,7 +194,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG:
         r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.max_numel())]
         continue
-      if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace == AddrSpace.REG:
+      if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
         r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].arg]
         continue

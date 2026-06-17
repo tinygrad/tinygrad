@@ -17,8 +17,10 @@ class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    arg_order = {Ops.PARAM: 0, Ops.SPECIAL: 1}
-    self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
+    def arg_key(u:UOp):
+      if u.op is Ops.SPECIAL: return (2, u.arg)
+      return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
+    self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
