@@ -190,7 +190,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   if sink.arg.estimates is not None: return None
-  return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src))),)+prg.src[1:])
+  return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = "\n".join(str(u.arg) for u in lin.src)

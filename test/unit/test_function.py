@@ -568,7 +568,7 @@ class TestFunctionGrad(unittest.TestCase):
     GlobalCounters.reset()
     loss.realize(w1.grad, w2.grad, w3.grad)
     print(GlobalCounters.global_ops, GlobalCounters.global_mem)
-    self.assertLessEqual(GlobalCounters.global_ops, 6000000)
+    self.assertLessEqual(GlobalCounters.global_ops, 4739344)
   def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
   def test_function_grad_ops_precompile_backward(self):
     self.test_function_grad_ops(precompile=True, precompile_backward=True)

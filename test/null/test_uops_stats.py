@@ -11,8 +11,8 @@ from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import replace_opts
 
-def flops_mem(uops):
-  est = Estimates.from_uops(uops)
+def flops_mem(uops, ignore_indexing=False):
+  est = Estimates.from_uops(uops, ignore_indexing)
   return est.ops, est.lds
 
 # **************** new FlopCounter ****************
@@ -171,7 +171,7 @@ class TestStatsOptimized(unittest.TestCase):
   def check_gemm(self, p:UOp, extra_flops=0):
     est = p.src[0].arg.estimates
     print(p.arg.name, est.ops, est.mem, est.lds)
-    self.assertGreaterEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs (+ indexing)
+    self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
     self.assertEqual(est.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
