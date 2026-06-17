@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, Invalid
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
@@ -416,7 +416,10 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
       self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
-    return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
+    fx, fy = ref.ufix(x), ref.ufix(y)
+    if getattr(fx, "op", None) is Ops.CONST and getattr(fx, "arg", None) is Invalid and fx.dtype != fy.dtype: fx = fy.ufix(Invalid)
+    if getattr(fy, "op", None) is Ops.CONST and getattr(fy, "arg", None) is Invalid and fy.dtype != fx.dtype: fy = fx.ufix(Invalid)
+    return self.alu(Ops.WHERE, fx, fy)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
     """

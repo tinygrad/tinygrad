@@ -1297,8 +1297,8 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     # cond has a range that the rewrite can move into the valid: gate (a<4) goes into load valid
     cond = (a < 4) & (r < 2)
     valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
-    idx = buf.index(a.valid(valid), ptr=True)
-    expr = cond.where(idx, 0)
+    idx = buf.index(a.valid(valid))
+    expr = cond.where(idx, False)
     out = graph_rewrite(expr, pm_move_where_on_load)
     # any WHERE in the rewritten graph must have matched-dtype branches
     for u in out.toposort():
