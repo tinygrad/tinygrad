@@ -1,29 +1,26 @@
-import functools, time
+import functools, itertools, time
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, ProgramInfo, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
-  if x.buf_uop in ctx[1]: return None
   ret = x.param_like(len(ctx[0]))
   ctx[0].append(x)
   return ret
+
+pm_transform_unique_const = PatternMatcher([
+  # transform unique consts to LUNIQUE
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
+   lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1]))),
+])
 
 pm_ctx = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
-])
-
-def write_only_outputs(uret:UOp) -> set[UOp]:
-  ret: set[UOp] = set()
-  for call in uret.backward_slice_with_self:
-    if call.op is Ops.CALL and call.src[0].op is Ops.SINK:
-      info = ProgramInfo.from_sink(call.src[0])
-      ret.update(call.src[1+i].buf_uop for i in set(info.outs)-set(info.ins))
-  return ret
+])+pm_transform_unique_const
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -68,7 +65,7 @@ class _function(Generic[ReturnType]):
 
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, write_only_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0)), bottom_up=True, name="get_implicit_inputs")
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
