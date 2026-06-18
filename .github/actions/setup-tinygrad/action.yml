@@ -171,7 +171,7 @@ runs:
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
-          pkgs+=" opencl-headers ocl-icd-libopencl1 cmake clang-20 libclang-20-dev llvm-20 libclang-cpp20-dev llvm-20-dev"
+          pkgs+=" opencl-headers ocl-icd-libopencl1 cmake clang-20 libclang-20-dev llvm-20 libclang-cpp20-dev llvm-20-dev ninja-build"
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
