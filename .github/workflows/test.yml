@@ -586,12 +586,6 @@ jobs:
           git status
           python -m tinygrad.renderer.amd.generate
           git -C $GITHUB_WORKSPACE diff --exit-code tinygrad/runtime/autogen/amd/
-      - name: Install LLVM 21
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
@@ -639,9 +633,11 @@ jobs:
       - name: Run test_tiny on MOCKPCI Remote
         run: |
           python extra/remote/serve.py 6667 &
+          pid=$!
           sleep 2
           REMOTE=127.0.0.1:6667 python test/test_tiny.py
-          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
+          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
+          kill $pid
 
   testamd:
     strategy:
