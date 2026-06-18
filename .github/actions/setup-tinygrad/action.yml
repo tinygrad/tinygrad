@@ -146,11 +146,6 @@ runs:
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' | sudo tee -a /etc/apt/apt.conf.d/99keep-debs
 
-    - name: Add OpenCL Repo
-      if: inputs.opencl == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-
     - name: Add AMD Repo (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
@@ -176,10 +171,7 @@ runs:
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
-          pkgs+=" opencl-headers \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16"
+          pkgs+=" opencl-headers pocl-opencl-icd"
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
