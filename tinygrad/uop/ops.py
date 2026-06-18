@@ -932,7 +932,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def is_increasing(self:UOp) -> bool:
     # is f a monotonically increasing function regards its input
     if self.op in GroupOp.Irreducible: return True
-    if self.op is Ops.PARAM and self.addrspace == AddrSpace.ALU: return True
     if self.op is Ops.ADD: return self.src[0].is_increasing() and self.src[1].is_increasing()
     if self.op in (Ops.MUL, Ops.CDIV, Ops.FLOORDIV) and self.src[1].op is Ops.CONST and self.src[1].arg >= 0: return self.src[0].is_increasing()
     return False  # False if not sure

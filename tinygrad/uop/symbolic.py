@@ -186,7 +186,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
-    if not (u.is_increasing() and u.vmin >= 0): return None
+    if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
   return UOp.usum(*ret) if changed else None
 
