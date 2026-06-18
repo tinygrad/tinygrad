@@ -467,7 +467,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_var")
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_name")
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_fn)[0]
     with save_viz() as viz:
@@ -478,15 +478,18 @@ class TestVizIntegration(unittest.TestCase):
     steps = lst[codegen_idx]["steps"]
     lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
     src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
-    disasm_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
-    assert all(i is not None for i in [lin_idx, src_idx, disasm_idx]), f"linear, source and disasm must be visible in {steps}"
+    bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
+    assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
     # Ops.LINEAR renders
-    lin_render = get_render(viz.data, steps[lin_idx]["query"])
-    self.assertIn("Ops.SINK", lin_render["src"])
-    self.assertIn("Ops.CUSTOMI", lin_render["src"])
+    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
+    self.assertIn("Ops.SINK", lin_render)
+    self.assertIn("Ops.CUSTOMI", lin_render)
     # Ops.SOURCE renders
-
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertIn("undeclared_name", src_render)
     # Ops.BINARY does not show anything since compile failed
+    bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
+    self.assertIn("CompileError", bin_render)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile

@@ -89,7 +89,7 @@ def load_rewrites(data:VizData) -> None:
         ki = _reconstruct(data, s.sink, depth=1).src[0].arg
         steps.append(create_step("View UOp List", ("/uops", i, len(steps)), j))
         steps.append(create_step("View Source", ("/code", i, len(steps)), j))
-        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, i)))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, j)))
     for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -176,12 +176,12 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None: data.all_uops[a] = ret
   return ret
 
-def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  next_sink = _reconstruct(data, ctx.sink)
+def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None) -> Generator[GraphRewriteDetails, None, None]:
+  next_sink = _reconstruct(data, ctx.sink, depth=depth)
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches, disable=not ctx.matches):
-    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
+    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num, depth=depth)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
@@ -612,10 +612,18 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "uops":
     for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
       if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(s["_sink"].src[2].src))}
-  if fmt == "code": return {"src":data, "lang":"cpp"}
+  if fmt == "code":
+    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
+      if s["upat"] and "do_render" in s["upat"][1]: return {"src":s["_sink"].src[3].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
-    renderer, lib = data
+    renderer, idx = data
+    lib:bytes|None = None
+    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][idx]):
+      if s["upat"] and "do_compile" in s["upat"][1]:
+        if s["_sink"].op is Ops.REWRITE_ERROR: return {"src":s["_sink"].arg}
+        lib = s["_sink"].src[4].arg
+    if lib is None: return {"src":"No compiled binary found."}
     if renderer.target.arch.startswith("gfx"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
