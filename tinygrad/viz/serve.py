@@ -107,12 +107,15 @@ def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in 
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 
 # never error in server side if a call fails.
-def unwrap_or(c:Callable, fallback:Callable):
+def unwrap_or(c:Callable, fallback:Callable=None):
   try: return c()
-  except Exception: return fallback()
+  except Exception: return fallback() if fallback else None
 
 # pyrender may check for shape mismatch
-def pystr(u:UOp) -> str: return unwrap_or(lambda: pyrender(u), lambda: str(u))
+def pystr(u:UOp) -> str:
+   # pyrender may check for shape mismatch
+  try: return pyrender(u)
+  except Exception: return str(u)
 
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
@@ -132,7 +135,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
   for u in toposort:
     argst = codecs.decode(str(u.arg), "unicode_escape")
-    if u.op in GroupOp.Movement and (marg:=unwrap_or(lambda: u.marg)): argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(marg)
+    with soft_err():
+      if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.arg:g}"
     wrap_len = 200 if u.op is Ops.SOURCE else 80
@@ -288,9 +292,10 @@ def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start
 # by default, VIZ does not start when there is an error
 # use this to instead display the traceback to the user
 @contextmanager
-def soft_err(fn:Callable):
+def soft_err(fn:Callable|None=None):
   try: yield
-  except Exception: fn({"src":traceback.format_exc()})
+  except Exception:
+    if fn is not None: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
   return ((0, 0),) if "Clock" in row else tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
