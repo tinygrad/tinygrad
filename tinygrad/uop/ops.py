@@ -99,9 +99,6 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if op is Ops.PARAM and isinstance(arg, tuple) and len(arg) == 3 and isinstance(arg[0], str) and len(src) == 0:
-      mn, mx = (x.arg if isinstance(x, UOp) and x.op is Ops.CONST else x for x in arg[1:])
-      src, arg = (shape_to_shape_arg((dtype.count,) if dtype.count > 1 else ()),), ParamArg(-1, name=arg[0], vmin_vmax=(mn, mx), addrspace=AddrSpace.ALU)
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
