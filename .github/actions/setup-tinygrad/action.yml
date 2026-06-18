@@ -232,7 +232,7 @@ runs:
         git clone https://github.com/pocl/pocl --depth 1 --branch v7.1
         mkdir -p pocl/build
         cd pocl/build
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DWITH_LLVM_CONFIG=/usr/bin/llvm-config-20
+        cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DWITH_LLVM_CONFIG=/usr/bin/llvm-config-20
         ninja
         sudo ninja install
     # **** AMD ****
