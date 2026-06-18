@@ -106,11 +106,6 @@ class GraphRewriteDetails(TypedDict):
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 
-# never error in server side if a call fails.
-def unwrap_or(c:Callable, fallback:Callable=None):
-  try: return c()
-  except Exception: return fallback() if fallback else None
-
 # pyrender may check for shape mismatch
 def pystr(u:UOp) -> str:
    # pyrender may check for shape mismatch
@@ -172,9 +167,10 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
+    addrspace_color:str|None = None
+    with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None,
-                    "addrspace":addrspace_colors.get(addrspace, None) if (addrspace:=unwrap_or(lambda: u.addrspace)) is not None else None}
+                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
