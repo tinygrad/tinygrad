@@ -22,7 +22,7 @@ def apply_rewrite_values(expr):
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
     return uop.arg
-  elif uop.op == Ops.DEFINE_VAR or (uop.op == Ops.PARAM and uop.arg.addrspace is AddrSpace.ALU):
+  elif uop.op == Ops.PARAM and uop.arg.addrspace is AddrSpace.ALU:
     return variables[uop.expr]
   elif uop.op in GroupOp.ALU:
     src_values = [evaluate_uop(src, variables) for src in uop.src]
@@ -301,13 +301,13 @@ class TestRecurse(unittest.TestCase):
   @given(matchers)
   def test_no_inf_loop(self, PatternMatcher):
     a = UOp.variable('a', 0, 10)
-    pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
+    pm = PatternMatcher([(UPat(Ops.PARAM, name="x"), lambda x: x)])
     graph_rewrite(a, pm)
 
   @given(matchers)
   def test_no_inf_loop_bottom_up(self, PatternMatcher):
     a = UOp.variable('a', 0, 10)
-    pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
+    pm = PatternMatcher([(UPat(Ops.PARAM, name="x"), lambda x: x)])
     graph_rewrite(a, pm, bottom_up=True)
 
   def test_inf_loop(self):
