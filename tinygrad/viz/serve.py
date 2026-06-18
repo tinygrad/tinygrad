@@ -65,7 +65,7 @@ addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace
 # Includes a name, metadata and a URL path for fetching the full data
 
 def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **kwargs) -> dict:
-  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "data":data, "depth":depth, **kwargs}
+  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "_data":data, "depth":depth, **kwargs}
 
 @dataclass(frozen=True)
 class VizData:
@@ -598,7 +598,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   from tinygrad.runtime.autogen import amdgpu_kd
   kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
   vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python",
+  return {"_data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python",
           "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
                                                                      ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
 
@@ -607,7 +607,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 def get_render(viz_data:VizData, query:str) -> dict:
   url = urlparse(query)
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
-  data = viz_data.ctxs[i]["steps"][j]["data"]
+  data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src))}
   if fmt == "code": return {"src":data, "lang":"cpp"}
