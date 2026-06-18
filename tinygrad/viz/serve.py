@@ -65,7 +65,7 @@ addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace
 # Includes a name, metadata and a URL path for fetching the full data
 
 def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **kwargs) -> dict:
-  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "data":data, "depth":depth, **kwargs}
+  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "_data":data, "depth":depth, **kwargs}
 
 @dataclass(frozen=True)
 class VizData:
@@ -607,7 +607,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 def get_render(viz_data:VizData, query:str) -> dict:
   url = urlparse(query)
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
-  data = viz_data.ctxs[i]["steps"][j]["data"]
+  data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src))}
   if fmt == "code": return {"src":data, "lang":"cpp"}
@@ -650,6 +650,8 @@ def get_render(viz_data:VizData, query:str) -> dict:
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
+def filter_keys(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
+
 class Handler(HTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
@@ -664,7 +666,7 @@ class Handler(HTTPRequestHandler):
       except FileNotFoundError: status_code = 404
 
     elif url.path == "/ctxs":
-      lst = [{"name":c["name"], "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in data.ctxs]
+      lst = [{"name":c["name"], "steps":[filter_keys(s) for s in c["steps"]]} for c in data.ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else:
