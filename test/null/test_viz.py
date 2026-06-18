@@ -47,6 +47,8 @@ def save_viz():
     yield viz
   viz.set_data()
 
+needs_tracked_pm = unittest.skipUnless(VIZ, "using TrackedPatternMatcher requires global VIZ=1")
+
 class TestViz(unittest.TestCase):
   def test_simple(self):
     with save_viz() as viz:
@@ -462,7 +464,7 @@ class TestVizIntegration(unittest.TestCase):
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
-  @unittest.skipUnless(VIZ, "using TrackedPatternMatcher requires global VIZ=1")
+  @needs_tracked_pm
   def test_view_source(self):
     def custom_fn(X:UOp):
       X = X.flatten()
@@ -792,6 +794,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbran
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 
+@needs_tracked_pm
 class TestCfg(unittest.TestCase):
   def setUp(self): self.arch = "gfx1100"
 
@@ -817,7 +820,7 @@ class TestCfg(unittest.TestCase):
     k.label("bb1")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    cfg = self.get_cfg("simple", k)["_data"]
+    cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_diamond(self):
@@ -837,7 +840,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
-    cfg = ret["_data"]
+    cfg = ret["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
@@ -990,6 +993,7 @@ def write_files(viz) -> list[str]:
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
+  @needs_tracked_pm
   def test_reconstruct_debug(self):
     with save_viz() as viz:
       Tensor.empty(1, device="NULL").add(2.0).realize()
@@ -1015,6 +1019,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(gemm_summary["count"], CNT)
     self.assertEqual(copy_summary["count"], CNT)
 
+  @needs_tracked_pm
   def test_flops(self):
     test_n = [(8, 16), (16, 32), (32, 64)]
     with save_viz() as viz:
@@ -1052,6 +1057,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
+  @needs_tracked_pm
   def test_call_graph(self):
     @function(precompile=True)
     def f(x):
