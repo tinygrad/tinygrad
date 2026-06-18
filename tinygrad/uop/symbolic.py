@@ -2,7 +2,7 @@
 import math, struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
+from tinygrad.dtype import PyConst, ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
 from tinygrad.uop.decompositions import threefry2x32, xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -332,7 +332,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
-  bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
+  bounds:defaultdict[UOp, list[PyConst|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):
     if (res:=parse_valid(stmt)) is None: continue
     expr, is_upper, c = res

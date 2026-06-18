@@ -20,7 +20,7 @@ binary_ops = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda 
 comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]
 
 def random_or_sub_expression_int(depth, expr):
-  sub_expr = random.choice([e for e in expr.toposort() if e.dtype is not dtypes.bool])
+  sub_expr = random.choice([e for e in expr.toposort() if e.dtype not in (dtypes.bool, dtypes.void)])
   return random.choice([random_int_expr(depth-1), sub_expr])
 
 def random_int_expr(depth=10):
