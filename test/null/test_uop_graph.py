@@ -171,7 +171,7 @@ class TestGraphRewrite(unittest.TestCase):
     c2 = UOp.const(dtypes.float, 2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
     self.assertEqual(nout.op, Ops.ADD)
-    self.assertEqual(nout.src[0].op, Ops.DEFINE_VAR)
+    self.assertEqual(nout.src[0].op, Ops.PARAM)
     self.assertEqual(nout.src[1].op, Ops.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
