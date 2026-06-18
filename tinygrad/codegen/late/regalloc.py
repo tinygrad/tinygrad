@@ -22,8 +22,8 @@ class LinearScanRegallocContext:
     lr = self.live_range
     ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
-      if u.op in PSEUDO_OPS and u.op is not Ops.GEP: continue
-      defs = u.tag if isinstance(u.tag, tuple) else ()
+      if u.op in PSEUDO_OPS: continue
+      defs = regs(u)
       uses = []
       for s in dedup(u.src): uses.extend(regs(s))
       print(u.op, u.arg.opc if u.op is Ops.INS else None, defs, uses)

@@ -3,7 +3,7 @@ from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 
 EXEC_LO = Register("exec_lo", 0)
@@ -158,17 +158,20 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
-# stack has to allocate a contiguous output slice
-# in encode pass emit a mov instruction for each input
+def _contiguous_groups(n, base_set): return tuple(tuple(base_set[i*n:(i+1)*n]) for i in range(len(base_set) // n))
 def stack(ctx:IselContext, x:UOp):
-  movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,))
-    for vr, u in zip(Register.contiguous(ctx, VGPR_QUADS), x.src)]
+  _slice = Register.contiguous(ctx, _contiguous_groups(len(x.src), GP_VGPRS))
+  movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(_slice, x.src)]
   return UOp.group(*movs)
+
+# all we need to do is prune the group op emitted by stack through an ins pattern that 
+# searches children for pseudo ops
 
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
+  # (UPat(src=UPat(Ops.STACK, name="x"), name="y"), lambda x,y: None),
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
 
@@ -209,11 +212,6 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"),
    lambda x: x.ins(RDNA3Ops.v_cndmask_b32_e64, dtype=dtypes.uint32, src=(const(dtypes.uint32,0), const(dtypes.uint32,1), cmp(x)))),
 
-  # stack
-  # allocate contiguous output slice, should be dependent on x.dtype.count
-  # output Ops.group of mov instructions
-  (UPat(Ops.STACK, name="x"), stack),
-
   # casts
   # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
@@ -233,6 +231,8 @@ isel_matcher = PatternMatcher([
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
 
+  (UPat(Ops.STACK, name="x"), stack),
+
   # allocate virtual registers
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
 
@@ -240,28 +240,14 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-# oh okay, stack is not a noop
-
-def gep(x:UOp):
-  nx = x.replace(tag=(x.src[0].tag[x.arg[0]],)) # copy vreg requirement
-  return nx, [nx]
-
 # wait maybe this is unecessary, src already models the relationship 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.GEP, name="x"), gep),
-  # (UPat(Ops.STACK, name="x"), stack),
 ])
-
-def oregs(u:UOp):
-  if u.op is Ops.GEP: return (u.src[0].regs[u.arg[0]],)
-  if u.op is Ops.GROUP:
-    print("group")
-  return u.regs
 
 def encode(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
-  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(oregs(x))
+  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(regs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
@@ -269,19 +255,19 @@ def encode(x:UOp):
 
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
-  if group == "SMEM": kw = dict(sdata=_fuse(oregs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
+  if group == "SMEM": kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group == "GLOBAL":
-    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(oregs(oprs[1])), offset=_immorreg(oprs[2]))
-    if x.tag is None: kw["data"]=_fuse(oregs(oprs[3]))
-    else: kw["vdst"]=_fuse(oregs(x))
+    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
+    if x.tag is None: kw["data"]=_fuse(regs(oprs[3]))
+    else: kw["vdst"]=_fuse(regs(x))
   elif group == "SOPK": args = [dsl_null, oprs[0].arg]
-  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(oregs(x))] + [_immorreg(u) for u in x.src]
+  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
   # sync loads across wave
   if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
-  print(opc, [u.regs for u in x.src], args)
+  print(opc, [regs(u) for u in x.src], args)
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
