@@ -8,7 +8,7 @@ from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
-from tinygrad.device import Buffer, CompileError
+from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
@@ -1056,6 +1056,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
+  @needs_tracked_pm
   def test_call_graph(self):
     @function(precompile=True)
     def f(x):
