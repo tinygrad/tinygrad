@@ -23,8 +23,7 @@ class LinearScanRegallocContext:
     ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
       if u.op in PSEUDO_OPS: continue
-      defs = regs(u)
-      uses = []
+      defs, uses = regs(u), []
       for s in dedup(u.src): uses.extend(regs(s))
       for v in defs + tuple(uses):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
@@ -50,7 +49,7 @@ class LinearScanRegallocContext:
       for v in u.tag: groups.setdefault(gid, []).append((i,v))
     for gid, group in groups.items(): groups[gid] = sorted(group, key=lambda x: x[1]._pos)
 
-    def alloc_group(members:tuple[Register,...], i:int|list[int]) -> tuple[Register,...]:
+    def alloc_group(members:tuple[Register,...], i:int|list[int]):
       cands = len(members[0].cons)
       live_inv = {v:k for k,v in live.items()}
       # compute worst case cost (min distance till next use) for each row of cons
@@ -60,14 +59,14 @@ class LinearScanRegallocContext:
           next((j-pt for j in (lr[rv[1]] if rv[1] is not None else []) if j >= pt), len(uops))
           for pt, rv in zip(prgpts, rrv)
         )
-      def _proc(m): return live.pop(vreg) if (vreg := live_inv.get(m.cons[best_row])) is not None else m.cons[best_row]
+      # make this a lambda to be called at assign?
+      def _proc(m, li): return live.pop(vreg) if (vreg := li.get(m.cons[best_row])) is not None else m.cons[best_row]
        
       best_cost, best_row = float('-inf'), 0
       for row in range(cands):
         c = _cost(tuple((m.cons[row], live_inv.get(m.cons[row])) for m in members))
-        if c > best_cost:
-          best_cost, best_row = c, row
-      return tuple(_proc(m) for m in members)
+        if c > best_cost: best_cost, best_row = c, row
+      return tuple(_proc for m in members)
 
     def alloc(cons:tuple[Register, ...], i:int) -> Register:
       live_inv = {v:k for k,v in live.items()}
@@ -104,6 +103,7 @@ class LinearScanRegallocContext:
       if isinstance(u.tag, tuple):
         if (gid := u.tag[0]._gid) is not None:
           # sparse case
+          li = { v:k for k,v in live.items() }
           if len(u.tag) < u.tag[0]._count:
             if gid not in sparse_group_blocks:
               pos = u.tag[0]._pos
@@ -111,17 +111,17 @@ class LinearScanRegallocContext:
               vrs = tuple([r for _, r in groups[gid]])
               rs = alloc_group(vrs, _is)
               sparse_group_blocks[gid] = rs
-              self.reals.setdefault(i, {})[vrs[pos]] = live[vrs[pos]] = rs[pos]
+              self.reals.setdefault(i, {})[vrs[pos]] = live[vrs[pos]] = rs[pos](vrs[pos],li)
             else:
               v = u.tag[0]
               r = sparse_group_blocks[gid][v._pos]
               # assign pre allocated reg
-              self.reals.setdefault(i, {})[v] = live[v] = r
+              self.reals.setdefault(i, {})[v] = live[v] = r(v,li)
           else:
             rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
-            for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r
+            for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r(v,li)
         else:
-          for j,v in enumerate(u.tag):
+          for j,v in enumerate(regs(u)):
             # register should only be defined once
             assert isinstance(v, Register) and lr[v][0] == i
             cons = v.cons

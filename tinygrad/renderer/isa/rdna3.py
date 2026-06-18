@@ -45,10 +45,8 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
     if x.arg[0] == 'g': return def_reg(dtypes.int, WGIDS[dim])
     else: return x.ins(RDNA3Ops.v_bfe_u32, src=(def_reg(dtypes.uint32, WIIDS[0]), const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
-  # pin kernarg ptr and contiguous gp sgprs for load
-  return x.ins(RDNA3Ops.s_load_b64,
-               src=(def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]), UOp.const(dtypes.uint32, offs).rtag()),
-               tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[2*i+1])))
+  kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (UOp.const(dtypes.uint32, offs).rtag(),), tag=ctx.vreg((GP_SGPRS, 2)))
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2)
@@ -116,6 +114,12 @@ def legalize_operands(x:UOp):
   elif group in [RDNA3Ops.GLOBAL] and "store" in opc: 
     if is_vgpr(x.src[-1]): return None
     return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
+  elif group is RDNA3Ops.VOP3:
+    lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
+    if len(lits) > 1:
+      new = list(x.src)
+      for i in lits[1:]: new[i]=to_vgpr(new[i])
+      return x.replace(src=tuple(new))
   return None
 
 # IDEA: casting utility function, auto converts between compatible/unsupported hardware dtypes
@@ -222,6 +226,9 @@ isel_matcher = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtype=dt_128bit), name="x"),
     lambda a,b,x: x.ins(RDNA3Ops.global_store_b128, dtype=dtypes.void, src=fold_address(a) + (b,))),
 
+  (UPat.var("a").store(UPat.var("b", dtype=dt_64bit), name="x"),
+    lambda a,b,x: x.ins(RDNA3Ops.global_store_b64, dtype=dtypes.void, src=fold_address(a) + (b,))),
+
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
     lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
   (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"),
@@ -241,8 +248,7 @@ isel_matcher = PatternMatcher([
 ])
 
 # wait maybe this is unecessary, src already models the relationship 
-pre_regalloc_matcher = PatternMatcher([
-])
+pre_regalloc_matcher = PatternMatcher([])
 
 def encode(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
@@ -302,6 +308,7 @@ class RDNA3Renderer(ISARenderer):
     # expects arg of every op in lin to be filled Inst class
     print(prg.arg)
     for u in lin.src: print(u.arg)
+    # insert waits here?
     return assemble_linear(prg, lin, self.target.arch)
 
   """
