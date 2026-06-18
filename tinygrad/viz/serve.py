@@ -608,26 +608,28 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 
 # ** Main render function to get the complete details about a trace event
 
+def get_sink_at(viz_data:VizData, ctx:TrackedGraphRewrite, upats:tuple[str, ...], depth:int|None=None) -> UOp|None:
+  for s in get_full_rewrite(viz_data, ctx, depth=depth):
+    if s["upat"] is not None and any(n in s["upat"][1] for n in upats): return s["_sink"]
+  return None
+
 def get_render(viz_data:VizData, query:str) -> dict:
   url = urlparse(query)
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops":
-    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
-      if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(list(s["_sink"].src[2].src)))}
+    if (sink:=get_sink_at(viz_data, viz_data.trace.rewrites[i][data], ("do_linearize",))) is None: return {"src":"No linear found"}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[2].src)))}
   if fmt == "code":
-    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data], depth=2):
-      if s["upat"] and "do_render" in s["upat"][1]: return {"src":s["_sink"].src[3].arg, "lang":"cpp"}
+    if (sink:=get_sink_at(viz_data, viz_data.trace.rewrites[i][data], ("do_render",), depth=1)) is None: return {"src":"No source found"}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[3].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
     renderer, idx = data
-    lib:bytes|None = None
-    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][idx], depth=1):
-      if s["upat"] and any(n in s["upat"][1] for n in ("do_compile", "do_assemble")):
-        if s["_sink"].op is Ops.REWRITE_ERROR: return {"src":s["_sink"].arg}
-        lib = s["_sink"].src[4].arg
-    if lib is None: return {"src":"No compiled binary found."}
+    if (sink:=get_sink_at(viz_data, viz_data.trace.rewrites[i][idx], ("do_compile","do_assemble"), depth=1)) is None: return {"src":"No binary found"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    lib:bytes = sink.src[4].arg
     if renderer.target.arch.startswith("gfx"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
