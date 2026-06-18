@@ -164,7 +164,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
       if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
-        dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev) # type:ignore[attr-defined]
+        dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
@@ -205,7 +205,7 @@ def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   rt = get_graph_runtime(ast, ctx.input_uops)
-  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t: t[0] = rt(ctx.input_uops, ctx.var_vals, wait=ctx.wait) # type: ignore[call-arg]
+  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t: t[0] = rt(ctx.input_uops, ctx.var_vals, wait=ctx.wait)
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:

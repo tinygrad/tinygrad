@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, replace
+from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg
@@ -76,6 +77,7 @@ def _mop_index(r:UOp, idx:UOp):
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
+  # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
@@ -312,6 +314,13 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
+def after_all_invalid(after:UOp):
+  buf = after.src[0].buf_uop
+  # check all ranges are used (no expand), and same size (no pad and shrink)
+  return all(s.op is Ops.END and (st:=s.src[0]).op is Ops.STORE and st.src[1].base.arg is Invalid and st.src[0].buf_uop is buf
+    and all(r in st.src[0].ranges for r in s.ended_ranges)
+    and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
+
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
@@ -322,6 +331,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
+  # indexing an after with all fully invalid stores is invalid
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
+   lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
@@ -443,6 +455,14 @@ def flatten_bufferize(x:UOp):
   return ret
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_bufferize)])
 
+def is_noop_after_dep(x:UOp) -> bool:
+  return (x.op is Ops.NOOP and len(x.src) == 0) or (x.op is Ops.END and is_noop_after_dep(x.src[0]))
+
+def remove_noop_afters(x:UOp) -> UOp|None:
+  src = (x.src[0],) + tuple(s for s in x.src[1:] if not is_noop_after_dep(s))
+  if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
+  return None
+
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
@@ -456,8 +476,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.NOOP, src=()))), lambda x: x),
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.END, src=(UPat(Ops.NOOP, src=()),), allow_any_len=True))), lambda x: x),
+  (UPat(Ops.AFTER, name="x"), remove_noop_afters),
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
