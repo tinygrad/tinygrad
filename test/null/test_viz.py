@@ -809,7 +809,7 @@ class TestCfg(unittest.TestCase):
     k.label("bb1")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    cfg = self.get_cfg("simple", k)["data"]
+    cfg = self.get_cfg("simple", k)["_data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_diamond(self):
@@ -829,7 +829,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     ret = self.get_cfg("diamond", k)
-    cfg = ret["data"]
+    cfg = ret["_data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
