@@ -533,7 +533,9 @@ to_define_global = PatternMatcher([
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
    None if isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
-  (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
+
+  # this was DEFINE_VAR, clean this up and make it universal
+  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat(Ops.AFTER, name="after"), handle_after),
