@@ -649,7 +649,8 @@ def get_render(viz_data:VizData, query:str) -> dict:
 # ** HTTP server
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
-def ret_dict(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
+
+def filter_keys(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
 
 class Handler(HTTPRequestHandler):
   def do_GET(self):
@@ -665,7 +666,7 @@ class Handler(HTTPRequestHandler):
       except FileNotFoundError: status_code = 404
 
     elif url.path == "/ctxs":
-      lst = [{"name":c["name"], "steps":[ret_dict(s) for s in c["steps"]]} for c in data.ctxs]
+      lst = [{"name":c["name"], "steps":[filter_keys(s) for s in c["steps"]]} for c in data.ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else:
