@@ -236,7 +236,7 @@ class TestViz(unittest.TestCase):
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
     c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
-    a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
+    a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
       graph_rewrite(alu, PatternMatcher([]))

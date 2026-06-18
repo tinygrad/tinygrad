@@ -1,5 +1,5 @@
 from typing import Tuple, Dict, List, Optional
-from tinygrad.dtype import DType, dtypes
+from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
@@ -39,7 +39,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[info.function_name] = prg.src[3].arg
-    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + [v for v in info.vars if v.op is Ops.DEFINE_VAR]
+    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
     statements.append((info.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
@@ -253,17 +253,18 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   symbolic_vars = OrderedDict()
   for i, (_, args, global_size, _) in enumerate(statements):
     for j, var in enumerate(args):
-      if getattr(var, "op", None) is Ops.DEFINE_VAR and isinstance(getattr(var, "arg", None), tuple) and isinstance(var.arg[0], str):
+      if getattr(var, "op", None) is Ops.PARAM and var.addrspace is AddrSpace.ALU and var.arg.name is not None:
         if var not in symbolic_vars:
-          symbolic_vars[var] = var.arg[0]
+          symbolic_vars[var] = var.expr
           bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, symbolic_vars[var])
         statements[i][1][j] = symbolic_vars[var]
 
     if global_size:
       for j, dim in enumerate(global_size):
-        if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and {dim.src[0].op, dim.src[1].op} == {Ops.DEFINE_VAR, Ops.CONST}:
+        if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and \
+           any(s.op is Ops.PARAM and s.addrspace is AddrSpace.ALU for s in dim.src) and any(s.op is Ops.CONST for s in dim.src):
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
-          global_size[j] = f"_{name.arg[0]}[0] + {val.arg}"
+          global_size[j] = f"_{name.expr}[0] + {val.arg}"
 
   prg = ""
   if target == "clang":

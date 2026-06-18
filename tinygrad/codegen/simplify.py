@@ -134,7 +134,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
+        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.DEFINE_LOCAL}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")

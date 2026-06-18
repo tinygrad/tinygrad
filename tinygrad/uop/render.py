@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import dtypes, Invalid, AddrSpace
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
 from tinygrad.helpers import strip_parens
@@ -33,7 +33,6 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
     precedence.get(x.src[1].op,99)<precedence[x.op] else right)
 
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
@@ -81,8 +80,12 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), arg=Invalid, name="x"),
    lambda x,u,d: f"UOp.invalids(dtype={x.dtype}, device={repr(d.arg)}, unique={u.arg})"),
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
-  (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x:
-    f"UOp.variable(\"{x.arg[0]}\", {x.arg[1]}, {x.arg[2]}{', dtype='+str(x.dtype) if x.dtype is not dtypes.weakint else ''})"),
+  (UPat(Ops.PARAM, name="x"), lambda x:
+    f"UOp.variable(\"{x.arg.name}\", {x.vmin!r}, {x.vmax!r}{', dtype='+str(x.dtype) if x.dtype is not dtypes.weakint else ''})"
+    if x.arg.addrspace is AddrSpace.ALU and x.arg.name is not None and x.arg.slot == -1 else None),
+  (UPat(Ops.PARAM, name="x"), lambda x:
+    f"UOp.param({x.arg.slot}, {x.dtype}, {x.shape!r}, vmin_vmax=({x.vmin!r}, {x.vmax!r}), name=\"{x.arg.name}\", addrspace=AddrSpace.ALU)"
+    if x.arg.addrspace is AddrSpace.ALU and x.arg.name is not None else None),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].arg}, {repr(x.arg)}, dtype={x.dtype})"),
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:
