@@ -105,18 +105,18 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
-def pystr(u:UOp) -> str:
-   # pyrender may check for shape mismatch
-  try: return pyrender(u)
-  except Exception: return str(u)
+
+# never error in server side if a call fails.
+def unwrap_or(c:Callable, fallback:Callable):
+  try: return c()
+  except Exception: return fallback()
+
+# pyrender may check for shape mismatch
+def pystr(u:UOp) -> str: return unwrap_or(lambda: pyrender(u), lambda: str(u))
 
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
-
-def unwrap_or(c:Callable):
-  try: return c()
-  except Exception: return None
 
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
