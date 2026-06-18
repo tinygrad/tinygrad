@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -46,6 +46,8 @@ def save_viz():
   with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
     yield viz
   viz.set_data()
+
+needs_tracked_pm = unittest.skipUnless(VIZ, "using TrackedPatternMatcher requires global VIZ=1")
 
 class TestViz(unittest.TestCase):
   def test_simple(self):
@@ -462,6 +464,35 @@ class TestVizIntegration(unittest.TestCase):
         self.assertGreater(len(events), 0)
         self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
 
+  @needs_tracked_pm
+  def test_view_source(self):
+    def custom_fn(X:UOp):
+      X = X.flatten()
+      i = UOp.range(X.numel(), 0)
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_name")
+      return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
+    with save_viz() as viz:
+      with self.assertRaises(Exception) as e:
+        x.realize()
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
+    assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
+    # Ops.LINEAR renders
+    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
+    self.assertIn("Ops.SINK", lin_render)
+    self.assertIn("Ops.CUSTOMI", lin_render)
+    # Ops.SOURCE renders
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertIn("undeclared_name", src_render)
+    # Ops.BINARY shows the error message since compile failed
+    bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
+    self.assertIn(type(e.exception).__name__, bin_render)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
@@ -763,6 +794,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbran
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 
+@needs_tracked_pm
 class TestCfg(unittest.TestCase):
   def setUp(self): self.arch = "gfx1100"
 
@@ -961,6 +993,7 @@ def write_files(viz) -> list[str]:
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
+  @needs_tracked_pm
   def test_reconstruct_debug(self):
     with save_viz() as viz:
       Tensor.empty(1, device="NULL").add(2.0).realize()
@@ -1023,6 +1056,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
+  @needs_tracked_pm
   def test_call_graph(self):
     @function(precompile=True)
     def f(x):
