@@ -85,11 +85,11 @@ def load_rewrites(data:VizData) -> None:
       steps.append(create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                                trace=k.tb if j==0 else None, depth=s.depth))
       # get source and binary from Ops.PROGRAM
-      if s.name == "View Program":
-        ki = (p:=_reconstruct(data, s.sink, depth=1)).src[0].arg
-        steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
-        steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
-        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
+      if s.name == "linearize/render":
+        ki = _reconstruct(data, s.sink, depth=1).src[0].arg
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), j))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), j))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, i)))
     for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
