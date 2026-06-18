@@ -580,14 +580,10 @@ jobs:
           deps: testing_unit
       - name: Verify AMD autogen is up to date
         run: |
-          echo $GITHUB_WORKSPACE
-          pwd
-          git -C $GITHUB_WORKSPACE status
-          git status
           python -m tinygrad.renderer.amd.generate
-          git -C $GITHUB_WORKSPACE diff --exit-code tinygrad/runtime/autogen/amd/
+          git diff --exit-code tinygrad/runtime/autogen/amd/
       - name: Install rocprof-trace-decoder
-        run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
+        run: sudo -E ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)

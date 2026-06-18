@@ -34,7 +34,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git sudo \
+      ca-certificates curl git sudo \
       opencl-headers ocl-icd-libopencl1 \
       mesa-vulkan-drivers \
       libllvm20 clang-20 lld-20 \
