@@ -2,7 +2,7 @@ import itertools
 from os import wait
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import ISARenderer, Register
+from tinygrad.renderer.isa import ISARenderer, Register, reg, regs
 from tinygrad.dtype import dtypes, PtrDType
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.GEP, Ops.STACK}
@@ -22,16 +22,23 @@ class LinearScanRegallocContext:
     lr = self.live_range
     ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
-      if u.op in PSEUDO_OPS: continue
+      if u.op in PSEUDO_OPS and u.op is not Ops.GEP: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
       uses = []
-      for s in dedup(u.src): uses.extend(s.regs)
+      for s in dedup(u.src): uses.extend(regs(s))
+      print(u.op, u.arg.opc if u.op is Ops.INS else None, defs, uses)
       for v in defs + tuple(uses):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       for v in defs:
         if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE:
-        for v in u.regs: ranges.append(v)
+        for v in regs(u): ranges.append(v)
+
+    import os
+    if os.getenv("DUMPLR"):
+      for v in sorted(lr, key=lambda r: r.name):
+        print("LR", v, lr[v])
+      for i,u in enumerate(uops): print("UOP", i, u.op, u.arg.opc if u.op is Ops.INS else None, "tag=", u.tag)
 
     # allocate registers
     self.stack_size: int = 0
@@ -98,10 +105,10 @@ class LinearScanRegallocContext:
       for s in u.src:
         # HACK: cause of later hacks to lower ransge
         if u.op is Ops.END: continue
-        for v in s.regs:
+        for v in regs(s):
           if not isinstance(v, Register): continue
           if v not in live:
-            print("filling", s.arg.opc if s.op is Ops.INS else s.op, s.regs, u.arg.opc if u.op is Ops.INS else u.op)
+            print("filling")
             live[v] = fill(v, i)
           self.reals.setdefault(i, {})[v] = live[v]
 
@@ -131,7 +138,7 @@ class LinearScanRegallocContext:
             cons = v.cons
             # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
             if ren.is_two_address(u) and j == 0:
-              uses = tuple(live.get(s.reg) for s in u.src)
+              uses = tuple(live.get(reg(s)) for s in u.src)
               cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
             # HACK: cause the range is missing the comparison
             live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
@@ -169,7 +176,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if i in ctx.reals and any(v in ctx.spills for v in ctx.uops[i].src[j].regs): nsrc.extend([ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]) for v in ctx.uops[i].src[j].regs])
+    if i in ctx.reals and any(v in ctx.spills for v in regs(ctx.uops[i].src[j])): nsrc.extend([ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]) for v in regs(ctx.uops[i].src[j])])
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
   if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))

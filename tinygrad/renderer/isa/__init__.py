@@ -21,6 +21,15 @@ class Register:
     stripes = tuple(tuple(s[j] for s in slices) for j in range(n))
     return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
 
+def regs(u:UOp) -> tuple[Register,...]:
+  # model view register dependencies through rewrites in here
+  if u.op in (Ops.NOOP, Ops.AFTER) and self.src: return regs(self.src[0])
+  if u.op is Ops.GEP: return (regs(u.src[0])[u.arg[0]],)
+  if u.op is Ops.STACK: return tuple(r for s in u.src for r in regs(s))
+  return u.tag if isinstance(u.tag, tuple) else (u.tag,)
+
+def reg(u:UOp) -> Register: return regs(u)[0]
+
 class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
