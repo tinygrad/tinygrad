@@ -583,7 +583,7 @@ jobs:
           python -m tinygrad.renderer.amd.generate
           git diff --exit-code tinygrad/runtime/autogen/amd/
       - name: Install rocprof-trace-decoder
-        run: sudo -E ./extra/sqtt/install_rocprof_decoder.py
+        run: ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
