@@ -107,20 +107,16 @@ class LinearScanRegallocContext:
           if len(u.tag) < u.tag[0]._count:
             if gid not in sparse_group_blocks:
               pos = u.tag[0]._pos
-              print(pos, groups[gid])
               _is = [j for j,_ in groups[gid]]
               vrs = tuple([r for _, r in groups[gid]])
               rs = alloc_group(vrs, _is)
-              print("sparse case init:", rs)
               sparse_group_blocks[gid] = rs
-              print(f"sparse case assign {vrs[pos]} -> {rs[pos]}")
               self.reals.setdefault(i, {})[vrs[pos]] = live[vrs[pos]] = rs[pos]
             else:
               v = u.tag[0]
               r = sparse_group_blocks[gid][v._pos]
               # assign pre allocated reg
               self.reals.setdefault(i, {})[v] = live[v] = r
-              print(f"sparse case assign {v} -> {r}")
           else:
             rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
             for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r
