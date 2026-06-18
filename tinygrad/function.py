@@ -46,8 +46,10 @@ class _function(Generic[ReturnType]):
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       _function.depth += 1
-      ret = self.fxn(*args, **kwargs)
-      _function.depth -= 1
+      try:
+        ret = self.fxn(*args, **kwargs)
+      finally:
+        _function.depth -= 1
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):

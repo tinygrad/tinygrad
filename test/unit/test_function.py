@@ -20,6 +20,13 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1,2,3])
     np.testing.assert_equal(f(a,a).numpy(), [2,4,6])
 
+  def test_depth_restored_on_exception(self):
+    from tinygrad.function import _function
+    @function
+    def f(a:Tensor) -> Tensor: raise ValueError("error")
+    with self.assertRaises(ValueError): f(Tensor([1]))
+    self.assertEqual(_function.depth, 0)
+
   def test_implicit(self):
     inp = Tensor([7,8,9])
     @function(allow_implicit=True)
