@@ -1800,7 +1800,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
   else:  # RDNA3: addr, data, offset
-    addr_reg = ctx.inst_field(type(inst).addr)  # type: ignore[union-attr]
+    addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)  # type: ignore[union-attr]
     vdst_reg = ctx.inst_field(type(inst).vdst)
     offset = ctx.inst_field_signed(type(inst).offset)  # type: ignore[union-attr]
