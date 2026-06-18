@@ -737,7 +737,7 @@ class Parser:
     return _u32(0)
 
   def _find_var_name(self, base: UOp) -> str | None:
-    if base.op == Ops.DEFINE_VAR and base.arg: return base.arg[0]
+    if base.op == Ops.PARAM and base.arg.name is not None: return base.arg.name
     for name, v in self.vars.items():
       if isinstance(v, UOp) and v is base: return name
     return None
