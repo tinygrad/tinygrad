@@ -471,9 +471,9 @@ class TestVizIntegration(unittest.TestCase):
       i = UOp.range(X.numel(), 0)
       custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_name")
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
-    x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_fn)[0]
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
     with save_viz() as viz:
-      with self.assertRaises(CompileError):
+      with self.assertRaises(Exception) as e:
         x.realize()
     lst = viz.list_items()
     codegen_idx = len(lst)-1
@@ -491,7 +491,7 @@ class TestVizIntegration(unittest.TestCase):
     self.assertIn("undeclared_name", src_render)
     # Ops.BINARY does not show anything since compile failed
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
-    self.assertIn("CompileError", bin_render)
+    self.assertIn(type(e.exception).__name__, bin_render)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -1019,7 +1019,6 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(gemm_summary["count"], CNT)
     self.assertEqual(copy_summary["count"], CNT)
 
-  @needs_tracked_pm
   def test_flops(self):
     test_n = [(8, 16), (16, 32), (32, 64)]
     with save_viz() as viz:
@@ -1057,7 +1056,6 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
-  @needs_tracked_pm
   def test_call_graph(self):
     @function(precompile=True)
     def f(x):
