@@ -171,7 +171,7 @@ runs:
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
-          pkgs+=" opencl-headers ocl-icd-libopencl1 pocl-opencl-icd"
+          pkgs+=" opencl-headers ocl-icd-libopencl1 cmake clang-20 libclang-20-dev llvm-20 libclang-cpp20-dev llvm-20-dev"
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
@@ -224,6 +224,17 @@ runs:
       shell: bash
       run: echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
 
+    # **** OpenCL ****
+    - name: Setup OpenCL
+      if: inputs.opencl == 'true'
+      shell: bash
+      run: |
+        git clone https://github.com/pocl/pocl --depth 1 --branch v7.1
+        mkdir -p pocl/build
+        cd pocl/build
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DWITH_LLVM_CONFIG=/usr/bin/llvm-config-20
+        ninja
+        sudo ninja install
     # **** AMD ****
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
