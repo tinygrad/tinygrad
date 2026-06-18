@@ -26,19 +26,12 @@ class LinearScanRegallocContext:
       defs = regs(u)
       uses = []
       for s in dedup(u.src): uses.extend(regs(s))
-      print(u.op, u.arg.opc if u.op is Ops.INS else None, defs, uses)
       for v in defs + tuple(uses):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       for v in defs:
         if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE:
         for v in regs(u): ranges.append(v)
-
-    import os
-    if os.getenv("DUMPLR"):
-      for v in sorted(lr, key=lambda r: r.name):
-        print("LR", v, lr[v])
-      for i,u in enumerate(uops): print("UOP", i, u.op, u.arg.opc if u.op is Ops.INS else None, "tag=", u.tag)
 
     # allocate registers
     self.stack_size: int = 0
@@ -55,25 +48,25 @@ class LinearScanRegallocContext:
       if (not isinstance(u.tag, tuple)) or (gid := u.tag[0]._gid) is None: continue
       if gid in groups and len(groups[gid]) == u.tag[0]._count: continue
       for v in u.tag: groups.setdefault(gid, []).append((i,v))
+    for gid, group in groups.items(): groups[gid] = sorted(group, key=lambda x: x[1]._pos)
 
-    # greedily allocate group, the only problem is what if the members of the group
-    # are defined at seperate points in program?
-    # the invariant should be they are all defined at the same point, or they are defined in a sequence ex. 
-    # the next n instructions define all n regsters in the group
     def alloc_group(members:tuple[Register,...], i:int|list[int]) -> tuple[Register,...]:
-      n = len(members[0].cons)
+      cands = len(members[0].cons)
       live_inv = {v:k for k,v in live.items()}
       # compute worst case cost (min distance till next use) for each row of cons
-      def _cost(rrv, i=i):
-        if isinstance(i, int): i = [i] * len(members)
-        return min(next((j-i for i, j in zip(i, ([] if rv[1] is None else lr[rv[1]])) if j >= i), len(uops)) for rv in rrv)
+      def _cost(rrv, prgpts=i):
+        if isinstance(prgpts, int): prgpts = [prgpts] * len(members)
+        return min(
+          next((j-pt for j in (lr[rv[1]] if rv[1] is not None else []) if j >= pt), len(uops))
+          for pt, rv in zip(prgpts, rrv)
+        )
+      def _proc(m): return live.pop(vreg) if (vreg := live_inv.get(m.cons[best_row])) is not None else m.cons[best_row]
+       
       best_cost, best_row = float('-inf'), 0
-      for i in range(n):
-        if (c := _cost(tuple((m.cons[i], live_inv.get(m.cons[i])) for m in members))) > best_cost:
-          best_cost = c
-          best_row = i
-      def _proc(m):
-        return live.pop(vreg) if (vreg := live_inv.get(m.cons[best_row])) is not None else m.cons[best_row]
+      for row in range(cands):
+        c = _cost(tuple((m.cons[row], live_inv.get(m.cons[row])) for m in members))
+        if c > best_cost:
+          best_cost, best_row = c, row
       return tuple(_proc(m) for m in members)
 
     def alloc(cons:tuple[Register, ...], i:int) -> Register:
@@ -96,9 +89,6 @@ class LinearScanRegallocContext:
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
-    # we arent treating group children as ops?
-    # for i,u in enumerate(uops): print(i, u.arg.opc if u.op is Ops.INS else u.op)
-
     for i,u in enumerate(uops):
       if u.op in PSEUDO_OPS: continue
       # allocate uses
@@ -107,9 +97,7 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         for v in regs(s):
           if not isinstance(v, Register): continue
-          if v not in live:
-            print("filling")
-            live[v] = fill(v, i)
+          if v not in live: live[v] = fill(v, i)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate defs
@@ -117,17 +105,22 @@ class LinearScanRegallocContext:
         if (gid := u.tag[0]._gid) is not None:
           # sparse case
           if len(u.tag) < u.tag[0]._count:
-            if groups[gid][0][0] == i: # allocate contiguous block
+            if gid not in sparse_group_blocks:
+              pos = u.tag[0]._pos
+              print(pos, groups[gid])
               _is = [j for j,_ in groups[gid]]
               vrs = tuple([r for _, r in groups[gid]])
               rs = alloc_group(vrs, _is)
+              print("sparse case init:", rs)
               sparse_group_blocks[gid] = rs
-              self.reals.setdefault(i, {})[vrs[0]] = live[vrs[0]] = rs[0]
+              print(f"sparse case assign {vrs[pos]} -> {rs[pos]}")
+              self.reals.setdefault(i, {})[vrs[pos]] = live[vrs[pos]] = rs[pos]
             else:
               v = u.tag[0]
               r = sparse_group_blocks[gid][v._pos]
               # assign pre allocated reg
               self.reals.setdefault(i, {})[v] = live[v] = r
+              print(f"sparse case assign {v} -> {r}")
           else:
             rs = alloc_group(u.tag, i+1 if u.op is not Ops.RANGE else i)
             for v, r in zip(u.tag, rs): self.reals.setdefault(i, {})[v] = live[v] = r

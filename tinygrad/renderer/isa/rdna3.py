@@ -161,7 +161,6 @@ pre_isel_matcher = PatternMatcher([
 # def _contiguous_groups(n, base_set): return tuple(tuple(base_set[i*n:(i+1)*n]) for i in range(len(base_set) // n))
 def stack(ctx:IselContext, x:UOp):
   _slice = Register.contiguous(ctx, GP_VGPRS, len(x.src))
-  # _slice = Register.contiguous(ctx, _contiguous_groups(len(x.src), GP_VGPRS))
   movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(_slice, x.src)]
   return UOp.group(*movs)
 
@@ -268,7 +267,7 @@ def encode(x:UOp):
   # sync loads across wave
   if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
-  print(opc, [regs(u) for u in x.src], args)
+  # print(opc, [regs(u) for u in x.src], args)
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
