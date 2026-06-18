@@ -615,7 +615,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops":
     for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
-      if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(s["_sink"].src[2].src))}
+      if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(list(s["_sink"].src[2].src)))}
   if fmt == "code":
     for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data], depth=2):
       if s["upat"] and "do_render" in s["upat"][1]: return {"src":s["_sink"].src[3].arg, "lang":"cpp"}
