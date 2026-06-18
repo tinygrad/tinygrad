@@ -582,6 +582,12 @@ jobs:
         run: |
           python -m tinygrad.renderer.amd.generate
           git diff --exit-code tinygrad/runtime/autogen/amd/
+      - name: Install LLVM 21
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
         run: ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
