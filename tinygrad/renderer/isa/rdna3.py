@@ -1,4 +1,4 @@
-from tinygrad.dtype import PtrDType, dtypes, AddrSpace
+from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
@@ -17,7 +17,9 @@ GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 
 # def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
-def const(dt, v:int) -> UOp: return UOp.const(dt,v)
+def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
+# todo impl with trunc and casting?
+def imm16(dt, v): return const(dt, v)
 
 # def map_addrspace(x:UOp, local_ins, global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
@@ -89,7 +91,7 @@ V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e64, dtypes.float32:RDNA3Ops.v_
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e64 }
 V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e64, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e64, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e64 }
-V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_nlg_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_nlg_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_nlg_f64_e64 }
+V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_eq_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_eq_f64_e32, dtypes.uint16:RDNA3Ops.v_cmp_eq_u16_e32, dtypes.uint32:RDNA3Ops.v_cmp_eq_u32_e32, dtypes.int16:RDNA3Ops.v_cmp_eq_i16_e32, dtypes.int32:RDNA3Ops.v_cmp_eq_i32_e32 }
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
 V_CVT = {
@@ -171,6 +173,9 @@ def stack(ctx:IselContext, x:UOp):
 # all we need to do is prune the group op emitted by stack through an ins pattern that 
 # searches children for pseudo ops
 
+# TODO: 64 bit integer mul with MAD_u64/i64 and MUL_lo_u32
+# 32x32 + 64 -> 64
+
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
@@ -184,6 +189,11 @@ isel_matcher = PatternMatcher([
 
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
+
+  # range gets lowered after regalloc, convert arg to immediate and define sgpr for acc
+
+  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), lambda bnd,x: x.replace(src=(const(bnd.dtype, bnd.arg),) + x.src[1:])),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(GP_SGPRS),)) if not isinstance(x.tag, tuple) else None),
 
   # unary alu ops
   (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[y.dtype])),
@@ -202,6 +212,7 @@ isel_matcher = PatternMatcher([
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
   (UPat(Ops.MAX, name="x"), lambda x: x.ins(V_MAX[x.dtype])),
+  (UPat(Ops.XOR, dtype=dt_32bit, name="x"), lambda x: x.ins(RDNA3Ops.v_xor_b32_e32)),
 
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
   (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
@@ -239,6 +250,8 @@ isel_matcher = PatternMatcher([
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
 
   (UPat(Ops.STACK, name="x"), stack),
+
+  (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
 
   # allocate virtual registers
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
@@ -278,8 +291,22 @@ def encode(x:UOp):
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
 
+def lower_range(x:UOp):
+  loop_label = "_".join(str(i) for i in x.src[:-1])
+  acc = x.ins(RDNA3Ops.s_move_b32, src=(imm(x.dtype, 0),) + x.src[1:])
+  label = x.ins(RDNA3Ops.s_nop, src=(), tag=f".LOOP_{loop_label}")
+  cmp = x.ins(RDNA3Ops.s_cmp_ge_u32, src=(acc, x.src[0]))
+  jmp_out = x.ins(RDNA3Ops.s_cbranch_scc0, src=(), tag=f".LOOP_OUT_{loop_label}")
+  return acc, [acc, label, cmp, jmp_out]
+
+def lower_end(x:UOp):
+  pass
+
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
+
+  (UPat(Ops.RANGE, name="x"), lower_range),
+  # (UPat(Ops.END, name="x"), 
 
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
@@ -294,7 +321,7 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   def __init__(self, target:Target):
     super().__init__(target)
 
