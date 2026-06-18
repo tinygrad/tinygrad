@@ -12,8 +12,8 @@ VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 # contiguous multi-register constraint tuples, ex. v[4:5], v[6:9]
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-VGPR_PAIRS = tuple((GP_VGPRS[i],GP_VGPRS[i+1]) for i in range(0, 254, 2))
-VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, len(VGPR_PAIRS)//2, 2))
+# VGPR_PAIRS = tuple((GP_VGPRS[i],GP_VGPRS[i+1]) for i in range(0, 254, 2))
+# VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, len(VGPR_PAIRS)//2, 2))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 
 # def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
@@ -158,9 +158,10 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
-def _contiguous_groups(n, base_set): return tuple(tuple(base_set[i*n:(i+1)*n]) for i in range(len(base_set) // n))
+# def _contiguous_groups(n, base_set): return tuple(tuple(base_set[i*n:(i+1)*n]) for i in range(len(base_set) // n))
 def stack(ctx:IselContext, x:UOp):
-  _slice = Register.contiguous(ctx, _contiguous_groups(len(x.src), GP_VGPRS))
+  _slice = Register.contiguous(ctx, GP_VGPRS, len(x.src))
+  # _slice = Register.contiguous(ctx, _contiguous_groups(len(x.src), GP_VGPRS))
   movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(_slice, x.src)]
   return UOp.group(*movs)
 
@@ -218,7 +219,7 @@ isel_matcher = PatternMatcher([
 
   # mem ops
   (UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))),
-    lambda x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=VGPR_QUADS)),
+    lambda ctx,x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=(GP_VGPRS, 4))),
   (UPat.var("a").store(UPat.var("b", dtype=dt_128bit), name="x"),
     lambda a,b,x: x.ins(RDNA3Ops.global_store_b128, dtype=dtypes.void, src=fold_address(a) + (b,))),
 

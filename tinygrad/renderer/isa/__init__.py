@@ -16,9 +16,9 @@ class Register:
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
   @staticmethod
-  def contiguous(ctx, slices:tuple[tuple[Register,...],...]) -> tuple[Register,...]:
-    gid, n = next(ctx.group_n), len(slices[0])
-    stripes = tuple(tuple(s[j] for s in slices) for j in range(n))
+  def contiguous(ctx, cons:tuple[Register,...], n) -> tuple[Register,...]:
+    gid = next(ctx.group_n)
+    stripes = tuple(tuple(cons[i*n+j] for i in range(len(cons) // n)) for j in range(n))
     return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
 
 def regs(u:UOp) -> tuple[Register,...]:
@@ -27,7 +27,6 @@ def regs(u:UOp) -> tuple[Register,...]:
   if u.op is Ops.GEP: return (regs(u.src[0])[u.arg[0]],) # narrow
   if u.op is Ops.GROUP: return tuple(r for s in u.src for r in regs(s)) # widen
   return u.tag if isinstance(u.tag, tuple) else (u.tag,)
-
 def reg(u:UOp) -> Register: return regs(u)[0]
 
 class IselContext:
@@ -37,8 +36,8 @@ class IselContext:
     arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
     self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
 
-  def vreg(self, cons:tuple[tuple[Register,...],...]|tuple[Register, ...]|Register) -> tuple[Register,...]|Register:
-    if isinstance(cons, tuple) and isinstance(cons[0], tuple): return Register.contiguous(self, cons)
+  def vreg(self, cons:tuple[tuple[Register,...],n]|tuple[Register, ...]|Register) -> tuple[Register,...]|Register:
+    if isinstance(cons, tuple) and isinstance(cons[0], tuple): return Register.contiguous(self, *cons)
     return Register(f"vr{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
 @dataclass
