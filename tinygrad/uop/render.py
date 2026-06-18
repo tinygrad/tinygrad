@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.dtype import dtypes, Invalid, AddrSpace
+from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
 from tinygrad.helpers import strip_parens
@@ -80,12 +80,6 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), arg=Invalid, name="x"),
    lambda x,u,d: f"UOp.invalids(dtype={x.dtype}, device={repr(d.arg)}, unique={u.arg})"),
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
-  (UPat(Ops.PARAM, name="x"), lambda x:
-    f"UOp.variable(\"{x.arg.name}\", {x.vmin!r}, {x.vmax!r}{', dtype='+str(x.dtype) if x.dtype is not dtypes.weakint else ''})"
-    if x.arg.addrspace is AddrSpace.ALU and x.arg.name is not None and x.arg.slot == -1 else None),
-  (UPat(Ops.PARAM, name="x"), lambda x:
-    f"UOp.param({x.arg.slot}, {x.dtype}, {x.shape!r}, vmin_vmax=({x.vmin!r}, {x.vmax!r}), name=\"{x.arg.name}\", addrspace=AddrSpace.ALU)"
-    if x.arg.addrspace is AddrSpace.ALU and x.arg.name is not None else None),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].arg}, {repr(x.arg)}, dtype={x.dtype})"),
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:

@@ -11,14 +11,10 @@ class FastEnum(IntEnum):
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
-  @classmethod
-  def _missing_(cls, value):
-    if value == 1: return cls.PARAM
-
   # ** 1 -- defines/special **
 
   # BIND pairs a symbolic PARAM with a concrete value
-  BIND = 2
+  BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
