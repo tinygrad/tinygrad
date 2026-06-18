@@ -33,7 +33,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
       self.send_header("Cache-Control", "no-cache")
       self.end_headers()
       for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.write(f"data: {json.dumps(filter_keys(r))}\n\n".encode("utf-8"))
         self.wfile.flush()
       self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
     # pass if client closed connection
@@ -178,7 +178,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(data, ctx.sink)
-  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches, disable=not ctx.matches):
     replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
@@ -186,7 +186,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRe
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
+           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 
 # encoder helpers
@@ -609,7 +609,9 @@ def get_render(viz_data:VizData, query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src))}
+  if fmt == "uops":
+    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
+      if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(s["_sink"].src[2].src))}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
@@ -649,7 +651,8 @@ def get_render(viz_data:VizData, query:str) -> dict:
 # ** HTTP server
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
-def ret_dict(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
+
+def filter_keys(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
 
 class Handler(HTTPRequestHandler):
   def do_GET(self):
@@ -665,7 +668,7 @@ class Handler(HTTPRequestHandler):
       except FileNotFoundError: status_code = 404
 
     elif url.path == "/ctxs":
-      lst = [{"name":c["name"], "steps":[ret_dict(s) for s in c["steps"]]} for c in data.ctxs]
+      lst = [{"name":c["name"], "steps":[filter_keys(s) for s in c["steps"]]} for c in data.ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else:

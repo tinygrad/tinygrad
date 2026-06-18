@@ -480,8 +480,13 @@ class TestVizIntegration(unittest.TestCase):
     src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
     disasm_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
     assert all(i is not None for i in [lin_idx, src_idx, disasm_idx]), f"linear, source and disasm must be visible in {steps}"
+    # Ops.LINEAR renders
     lin_render = get_render(viz.data, steps[lin_idx]["query"])
-    print(lin_render)
+    self.assertIn("Ops.SINK", lin_render["src"])
+    self.assertIn("Ops.CUSTOMI", lin_render["src"])
+    # Ops.SOURCE renders
+
+    # Ops.BINARY does not show anything since compile failed
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
