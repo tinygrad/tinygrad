@@ -489,7 +489,7 @@ class TestVizIntegration(unittest.TestCase):
     # Ops.SOURCE renders
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertIn("undeclared_name", src_render)
-    # Ops.BINARY does not show anything since compile failed
+    # Ops.BINARY shows the error message since compile failed
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
     self.assertIn(type(e.exception).__name__, bin_render)
 
