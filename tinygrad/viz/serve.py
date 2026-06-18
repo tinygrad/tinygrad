@@ -113,6 +113,10 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
+def unwrap_or(c:Callable):
+  try: return c()
+  except Exception: return None
+
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
@@ -165,7 +169,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label = "\n".join(lines[:30]) + "\n..."
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None,
-                    "addrspace":addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None}
+                    "addrspace":addrspace_colors.get(addrspace, None) if (addrspace:=unwrap_or(lambda: u.addrspace)) is not None else None}
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
@@ -181,7 +185,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None)
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches, disable=not ctx.matches):
-    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num, depth=depth)
+    replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
@@ -613,13 +617,13 @@ def get_render(viz_data:VizData, query:str) -> dict:
     for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
       if s["upat"] and "do_linearize" in s["upat"][1]: return {"src":get_stdout(lambda: print_uops(s["_sink"].src[2].src))}
   if fmt == "code":
-    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data]):
+    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][data], depth=2):
       if s["upat"] and "do_render" in s["upat"][1]: return {"src":s["_sink"].src[3].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
     renderer, idx = data
     lib:bytes|None = None
-    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][idx]):
+    for s in get_full_rewrite(viz_data, viz_data.trace.rewrites[i][idx], depth=1):
       if s["upat"] and "do_compile" in s["upat"][1]:
         if s["_sink"].op is Ops.REWRITE_ERROR: return {"src":s["_sink"].arg}
         lib = s["_sink"].src[4].arg
