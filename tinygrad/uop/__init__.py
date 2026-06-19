@@ -13,8 +13,8 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # define GLOBAL/VAR are ptrs to outside the Kernel
-  DEFINE_VAR = auto(); BIND = auto()
+  # BIND pairs a symbolic PARAM with a concrete value
+  BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
@@ -127,7 +127,7 @@ class GroupOp:
 
   Defines = {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
 
-  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   # BinaryOps that can be flipped

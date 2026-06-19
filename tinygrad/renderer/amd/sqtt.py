@@ -349,7 +349,7 @@ class PERF_RDNA4(PacketType):  # Layout 4: 28->32 bits
 
 class NOP(PacketType):
   encoding = bits[3:0] == 0b0000
-  delta = None  # type: ignore
+  delta = None
   _padding = bits[3:0]
 
 class TS_WAVE_STATE(PacketType):
@@ -388,7 +388,7 @@ class SNAPSHOT(PacketType):
 
 class LAYOUT_HEADER(PacketType):
   encoding = bits[6:0] == 0b0010001
-  delta = None  # type: ignore
+  delta = None
   layout = bits[12:7]
   simd = bits[14:13]
   group = bits[17:15]

@@ -24,7 +24,8 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # TODO: validate these
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
-  for x in idx.toposort() | gate.toposort():
+  # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
+  for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
     if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
@@ -51,9 +52,12 @@ spec_shared = PatternMatcher([
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
 
-  # CONST/DEFINE_VAR are everywhere
+  # CONST is everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: len(x.arg) == 3 and isinstance(x.arg[0], str)),
+
+  # STACK is everywhere too
+  (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
+  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"), lambda s: all_same([x.shape for x in s.src])),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -132,7 +136,7 @@ spec_tensor = PatternMatcher([
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -146,12 +150,11 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # inputs to movement ops
-  (UPat(Ops.STACK), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
-  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
-  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint)), name="x"),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(), UPat()), name="x"),
    lambda x: x.src[1].dtype.count == x.src[2].dtype.count),
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
@@ -193,7 +196,7 @@ spec_tensor = PatternMatcher([
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
   # no more of these in programs
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.GEP)), lambda: False),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.GEP)), lambda: False),
 
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
@@ -213,9 +216,6 @@ spec_program = PatternMatcher([
   # shape of uop must match dtype.count in program
   (UPat(GroupOp.All-{Ops.INS, Ops.NOOP}, name="x"),
    lambda x: False if x.dtype.count > 1 and (x.dtype.count,) != x.shape else None),
-
-  # STACK/GEP in program. TODO: this should match Tensor
-  (UPat(Ops.STACK), lambda: True),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),

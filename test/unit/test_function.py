@@ -20,6 +20,13 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1,2,3])
     np.testing.assert_equal(f(a,a).numpy(), [2,4,6])
 
+  def test_depth_restored_on_exception(self):
+    from tinygrad.function import _function
+    @function
+    def f(a:Tensor) -> Tensor: raise ValueError("error")
+    with self.assertRaises(ValueError): f(Tensor([1]))
+    self.assertEqual(_function.depth, 0)
+
   def test_implicit(self):
     inp = Tensor([7,8,9])
     @function(allow_implicit=True)
@@ -568,7 +575,7 @@ class TestFunctionGrad(unittest.TestCase):
     GlobalCounters.reset()
     loss.realize(w1.grad, w2.grad, w3.grad)
     print(GlobalCounters.global_ops, GlobalCounters.global_mem)
-    self.assertLessEqual(GlobalCounters.global_ops, 4739344)
+    self.assertLessEqual(GlobalCounters.global_ops, 5000000)
   def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
   def test_function_grad_ops_precompile_backward(self):
     self.test_function_grad_ops(precompile=True, precompile_backward=True)

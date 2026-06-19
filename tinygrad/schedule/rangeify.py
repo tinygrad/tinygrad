@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, replace
+from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg
@@ -126,7 +127,7 @@ mop_cleanup = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
-pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
+pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
 def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if c.arg.precompile: return None
   params: list[UOp] = []
@@ -313,6 +314,13 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
+def after_all_invalid(after:UOp):
+  buf = after.src[0].buf_uop
+  # check all ranges are used (no expand), and same size (no pad and shrink)
+  return all(s.op is Ops.END and (st:=s.src[0]).op is Ops.STORE and st.src[1].base.arg is Invalid and st.src[0].buf_uop is buf
+    and all(r in st.src[0].ranges for r in s.ended_ranges)
+    and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
+
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
@@ -323,6 +331,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
+  # indexing an after with all fully invalid stores is invalid
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
+   lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
@@ -372,7 +383,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     # TODO: add cache to fix n^2
-    if is_load:=(u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
+    if is_load:=(u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
 
@@ -444,6 +455,14 @@ def flatten_bufferize(x:UOp):
   return ret
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_bufferize)])
 
+def is_noop_after_dep(x:UOp) -> bool:
+  return (x.op is Ops.NOOP and len(x.src) == 0) or (x.op is Ops.END and is_noop_after_dep(x.src[0]))
+
+def remove_noop_afters(x:UOp) -> UOp|None:
+  src = (x.src[0],) + tuple(s for s in x.src[1:] if not is_noop_after_dep(s))
+  if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
+  return None
+
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
@@ -457,8 +476,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.NOOP, src=()))), lambda x: x),
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.END, src=(UPat(Ops.NOOP, src=()),), allow_any_len=True))), lambda x: x),
+  (UPat(Ops.AFTER, name="x"), remove_noop_afters),
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
@@ -515,7 +533,9 @@ to_define_global = PatternMatcher([
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
    None if isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
-  (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
+
+  # ALU params are scalar symbolic values, not buffers.
+  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat(Ops.AFTER, name="after"), handle_after),
