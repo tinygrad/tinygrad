@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
 
@@ -214,9 +214,13 @@ def main():
     for i in range(args.benchmark):
       profile_marker(f"decode @ {i}")
       GlobalCounters.reset()
+      if (log:=getenv("BENCHMARK_LOG", "")): from extra.bench_log import WallTimeEvent, BenchEvent
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
-                  tok.decode(toks).replace("\n", "\\n")): next(gen)
+                  tok.decode(toks).replace("\n", "\\n")):
+        if log:
+          with WallTimeEvent(BenchEvent.STEP): next(gen)
+        else: next(gen)
     exit(0)
 
   # interactive chat

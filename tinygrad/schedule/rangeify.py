@@ -427,7 +427,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
       ended_stores.append(store_target.replace(dtype=sdtype).store(store.src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
 
-  # NOTE: the DEFINE_LOCAL needs to be disambiguated here
+  # NOTE: the local BUFFER needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
     if x.src[0].op is Ops.SLICE:
@@ -561,11 +561,11 @@ rangeify_codegen = PatternMatcher([
   # TODO: this can be moved into codegen?
   (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 
-  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if isinstance(idx.dtype, PtrDType) else
+  (UPat(Ops.BUFFER).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,idx: None if dg.addrspace is not AddrSpace.LOCAL or isinstance(idx.dtype, PtrDType) else
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
-  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if isinstance(idx.dtype, PtrDType) else
+  (UPat(Ops.BUFFER).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,idx: None if dg.addrspace is not AddrSpace.LOCAL or isinstance(idx.dtype, PtrDType) else
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
 ])
 
