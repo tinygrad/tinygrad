@@ -2,7 +2,7 @@ import unittest
 import functools
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ParamArg
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
@@ -70,8 +70,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
   num_threads = A.shape[0]
   threads = UOp.special(num_threads, "lidx0")
   wg = UOp.special(1, "gidx0")
-  lds = UOp(Ops.BUFFER, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (UOp.const(dtypes.int, 512),),
-            ParamArg(-1, name='lds', addrspace=AddrSpace.LOCAL))  # 128 * 4 bytes
+  lds = UOp.placeholder((512,), dtypes.uint8, -1, AddrSpace.LOCAL)  # 128 * 4 bytes
   isa = r4 if arch == "rdna4" else r3
   wait_kmcnt = [isa.s_wait_kmcnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)]
   wait_dscnt = [isa.s_wait_dscnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)]
@@ -104,8 +103,7 @@ def custom_handwritten(A:UOp) -> UOp:
   A = A.flatten()
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(1, "gidx0")
-  lds = UOp(Ops.BUFFER, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (UOp.const(dtypes.int, 512),),
-            ParamArg(-1, name='lds', addrspace=AddrSpace.LOCAL))  # 128 * 4 bytes
+  lds = UOp.placeholder((512,), dtypes.uint8, -1, AddrSpace.LOCAL)  # 128 * 4 bytes
   pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
   k = Kernel()
   # wrap in loop to filter out icache misses

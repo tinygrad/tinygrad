@@ -1,7 +1,7 @@
 # RDNA4 128x128 GEMM using WMMA — optimized DS scheduling
 import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ParamArg
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.engine.realize import Estimates, run_linear
@@ -220,8 +220,7 @@ def test_matmul():
     gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
     lidxs = [UOp.special(THREADS, "lidx0")]
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC",2))
-    lds = UOp(Ops.BUFFER, dtypes.uint8.ptr(size=lds_size, addrspace=AddrSpace.LOCAL), (UOp.const(dtypes.int, lds_size),),
-              ParamArg(-1, name='lds', addrspace=AddrSpace.LOCAL))
+    lds = UOp.placeholder((lds_size,), dtypes.uint8, -1, AddrSpace.LOCAL)
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs,
                     arg=KernelInfo(name=colored("kernel","cyan"), estimates=Estimates(ops=N*N*N*2, mem=N*N*2*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
