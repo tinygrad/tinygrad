@@ -469,7 +469,7 @@ jobs:
 # ****** Models Tests ******
 
   testmodels:
-    name: Models (llvm+cpu+gpu)
+    name: Models
     runs-on: *linux
     timeout-minutes: 15
     steps:
