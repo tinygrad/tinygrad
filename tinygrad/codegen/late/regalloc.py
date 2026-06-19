@@ -83,10 +83,10 @@ class LinearScanRegallocContext:
           live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
           self.reals.setdefault(i, {})[v] = live[v]
 
-      # allocate stack array, BUFFER size is in src[0]
+      # allocate stack array
       if u.op is Ops.BUFFER:
         self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
-        self.stack_size += u.src[0].arg * u.dtype.itemsize
+        self.stack_size += u.max_numel() * u.dtype.itemsize
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:

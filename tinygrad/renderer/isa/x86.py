@@ -4,7 +4,7 @@ import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, ParamArg
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
@@ -174,7 +174,7 @@ extra_matcher = PatternMatcher([
 # ***** X86 pre instruction selection *****
 
 def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
-  return UOp(Ops.BUFFER, elem_dt, src=(UOp.const(dtypes.int, count),), arg=ParamArg(slot, addrspace=AddrSpace.LOCAL))
+  return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = scratch_buffer(addr.src[0].dtype.scalar(), x.dtype.count, next(ctx))

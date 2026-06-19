@@ -268,12 +268,10 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   return buf.broadcast(len(pairs)).index(idx.gep(idx_lanes)*cnt + UOp.const(dtypes.weakint.vec(len(pairs)), offsets), ptr=True)
 
 devectorize_buf_and_index = PatternMatcher([
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER), name="buf"), no_vectorized_buf),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
-   no_vectorized_index),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
-   no_vectorized_index),
+  (UPat(Ops.BUFFER, name="buf"), no_vectorized_buf),
+  (UPat(Ops.BUFFER).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
+  (UPat(Ops.BUFFER).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")), no_vectorized_index),
+  (UPat(Ops.BUFFER).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")), no_vectorized_index),
 ])
 
 devectorize_alu = PatternMatcher([
