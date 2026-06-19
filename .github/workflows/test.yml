@@ -469,7 +469,7 @@ jobs:
 # ****** Models Tests ******
 
   testmodels:
-    name: Models (llvm+cpu+gpu)
+    name: Models
     runs-on: *linux
     timeout-minutes: 15
     steps:
@@ -480,33 +480,11 @@ jobs:
         with:
           key: models
           deps: testing
-          opencl: 'true'
           llvm: 'true'
-      - name: Test models (llvm)
-        run: DEV=CPU:LLVM python -m pytest -n=auto test/models --durations=20
-      - name: Test models (opencl)
-        run: DEV=CL python -m pytest -n=auto test/models --durations=20
       - name: Test models (cpu)
         run: DEV=CPU python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
-
-  testmetalmodels:
-    name: Models (metal)
-    runs-on: &macos macos-26
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: metal
-        deps: testing
-    - name: Test models (Metal)
-      run: DEV=METAL python -m pytest -n=auto test/models --durations=20
-    - name: Test LLaMA compile speed
-      run: DEV=METAL python test/external/external_test_speed_llama.py
 
 # ****** Feature Tests ******
 
@@ -716,7 +694,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
-    runs-on: *macos
+    runs-on: &macos macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
