@@ -7,6 +7,22 @@ from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
+class TestPreIselX86(unittest.TestCase):
+  def pre_isel_rewrite(self, x:UOp):
+    return graph_rewrite(x, cast(X86Renderer, Device[Device.DEFAULT].renderer).pre_isel_matcher, {}, bottom_up=True)
+
+  def test_no_repeat_define_local(self):
+    # only 1 define local is created per alt
+    base = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0)
+    alt = UOp.const(dtypes.int32, 0)
+    gate1 = UOp.variable("a", 0, 1, dtypes.bool)
+    gate2 = UOp.variable("b", 0, 1, dtypes.bool)
+    load1 = base.index(UOp.const(dtypes.int32, 0), ptr=True).load(alt, gate1)
+    load2 = base.index(UOp.const(dtypes.int32, 1), ptr=True).load(alt, gate2)
+    n = self.pre_isel_rewrite(load1 + load2)
+    self.assertTrue(len([x for x in n.toposort() if x.op is Ops.DEFINE_LOCAL]) == 1)
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
     return graph_rewrite(x, cast(X86Renderer, Device[Device.DEFAULT].renderer).isel_matcher, IselContext(x), bottom_up=True)

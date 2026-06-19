@@ -203,7 +203,7 @@ pm_x86_style = PatternMatcher([
 # ***** X86 pre instruction selection *****
 
 def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx))
+  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=ctx.setdefault(alt, -len(ctx)-1))
   local_idx = local.index(UOp.const(dtypes.int32, 0), ptr=True)
   ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
