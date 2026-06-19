@@ -6,6 +6,9 @@ from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
+# INDEX on a register value with a constant index extracts a single element (the old GEP)
+def lane(y:UOp, i:int) -> UOp: return y.index(UOp.const(dtypes.int, i), dtype=y.dtype.scalar())
+
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
@@ -57,9 +60,9 @@ class TestIselX86(unittest.TestCase):
     # need to move src from gpr to xmm before broadcasting
     self.assertTrue(n.arg is X86Ops.VPBROADCASTD and n.src[0].arg is X86Ops.VMOVD)
     # if we can fuse a load we can skip the move and access memory directly
-    load = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
     n = self.isel_rewrite(load.broadcast(4))
-    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 3)
+    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 4)
 
   def test_vbroadcastss(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
@@ -73,17 +76,17 @@ class TestIselX86(unittest.TestCase):
     d = UOp.variable("d", 0, 0, dtypes.float32)
 
     valid = [UOp.vectorize(c, c, d, d),
-             UOp.vectorize(a.gep(0), a.gep(1), c, c),
-             UOp.vectorize(a.gep(0), a.gep(1), b.gep(2), b.gep(3)),
-             UOp.vectorize(a.gep(1), a.gep(2), a.gep(3), a.gep(0)),
-             UOp.vectorize(a.gep(3), a.gep(2), a.gep(1), a.gep(0), a.gep(7), a.gep(6), a.gep(5), a.gep(4)),
-             UOp.vectorize(a.gep(0), a.gep(0), b.gep(1), b.gep(1), a.gep(4), a.gep(4), b.gep(5), b.gep(5))]
+             UOp.vectorize(lane(a, 0), lane(a, 1), c, c),
+             UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 2), lane(b, 3)),
+             UOp.vectorize(lane(a, 1), lane(a, 2), lane(a, 3), lane(a, 0)),
+             UOp.vectorize(lane(a, 3), lane(a, 2), lane(a, 1), lane(a, 0), lane(a, 7), lane(a, 6), lane(a, 5), lane(a, 4)),
+             UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 1), lane(b, 1), lane(a, 4), lane(a, 4), lane(b, 5), lane(b, 5))]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPS)
 
-    invalid = [UOp.vectorize(a.gep(0), a.gep(1), b.gep(4), b.gep(5)),
-               UOp.vectorize(a.gep(0), a.gep(5), b.gep(2), b.gep(3)),
-               UOp.vectorize(a.gep(0), a.gep(0), a.gep(0), a.gep(0), a.gep(4), a.gep(4), a.gep(4), a.gep(5)),
-               UOp.vectorize(a.gep(0), a.gep(0), b.gep(0), b.gep(0), a.gep(4), a.gep(4), b.gep(4), a.gep(4))]
+    invalid = [UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 4), lane(b, 5)),
+               UOp.vectorize(lane(a, 0), lane(a, 5), lane(b, 2), lane(b, 3)),
+               UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5)),
+               UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 0), lane(b, 0), lane(a, 4), lane(a, 4), lane(b, 4), lane(a, 4))]
     for shuf in invalid: self.assertIsNot(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPS)
 
   def test_vshufpd(self):
@@ -93,16 +96,16 @@ class TestIselX86(unittest.TestCase):
     d = UOp.variable("d", 0, 0, dtypes.float64)
 
     valid = [UOp.vectorize(c, d),
-             UOp.vectorize(a.gep(0), c),
-             UOp.vectorize(a.gep(1), b.gep(1)),
-             UOp.vectorize(a.gep(0), b.gep(1), a.gep(2), b.gep(3)),
-             UOp.vectorize(a.gep(1), a.gep(1), a.gep(3), a.gep(3))]
+             UOp.vectorize(lane(a, 0), c),
+             UOp.vectorize(lane(a, 1), lane(b, 1)),
+             UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
+             UOp.vectorize(lane(a, 1), lane(a, 1), lane(a, 3), lane(a, 3))]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPD)
 
     invalid = [UOp.vectorize(c, c, c, c),
-               UOp.vectorize(a.gep(0), a.gep(1), b.gep(2), b.gep(3)),
-               UOp.vectorize(a.gep(2), b.gep(3), a.gep(2), b.gep(3)),
-               UOp.vectorize(a.gep(0), b.gep(1), a.gep(0), b.gep(1))]
+               UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 2), lane(b, 3)),
+               UOp.vectorize(lane(a, 2), lane(b, 3), lane(a, 2), lane(b, 3)),
+               UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 0), lane(b, 1))]
     for shuf in invalid: self.assertIsNot(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPD)
 
   def test_vinsertps(self):
@@ -111,31 +114,31 @@ class TestIselX86(unittest.TestCase):
     c = UOp.variable("c", 0, 0, dtypes.float32.vec(4))
     d = UOp.variable("e", 0, 0, dtypes.float32)
     # moving 0th element to position 0 does nothing so only 1 vinsertps is generated
-    n = self.isel_rewrite(UOp.vectorize(a.gep(0), d))
+    n = self.isel_rewrite(UOp.vectorize(lane(a, 0), d))
     self.assertIs(n.arg, X86Ops.VINSERTPS)
     self.assertIsNot(n.src[0].arg, X86Ops.VINSERTPS)
 
-    valid = [UOp.vectorize(a.gep(0), b.gep(1), a.gep(2), b.gep(3)),
-             UOp.vectorize(a.gep(3), b.gep(2), c.gep(1), d)]
+    valid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
+             UOp.vectorize(lane(a, 3), lane(b, 2), lane(c, 1), d)]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VINSERTPS)
 
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
-    load = UOp.param(0, dtypes.int32.ptr()).index(a + 1, ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(a + 1).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
     self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].arg == 4)
 
   def test_fold_load(self):
-    load1 = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
-    load2 = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 1), ptr=True).load()
+    load1 = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
+    load2 = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 1)).load()
     n = self.isel_rewrite(load1 + load2)
-    self.assertTrue(len(n.src) == 4)
+    self.assertTrue(len(n.src) == 5)
 
   # don't fold when used multiple times
   def test_dont_fold_load(self):
-    load = UOp.param(0, dtypes.int32.ptr()).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
     # used by multiple users
     n = self.isel_rewrite(load + 1 + load)
     self.assertTrue(len(n.src) == 2)

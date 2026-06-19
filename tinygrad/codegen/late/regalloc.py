@@ -2,7 +2,7 @@ import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
@@ -49,8 +49,9 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
+        # the value of a BUFFER is its 64bit address
         dt = self.vdef(v).dtype
-        sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
+        sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.scalar().itemsize * dt.count
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
@@ -82,10 +83,10 @@ class LinearScanRegallocContext:
           live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
           self.reals.setdefault(i, {})[v] = live[v]
 
-      # allocate stack array
-      if u.op is Ops.DEFINE_LOCAL:
+      # allocate stack array, BUFFER size is in src[0]
+      if u.op is Ops.BUFFER:
         self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
-        self.stack_size += u.dtype.nbytes()
+        self.stack_size += u.src[0].arg * u.dtype.itemsize
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
@@ -116,7 +117,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if i in ctx.reals and (v:=ctx.uops[i].src[j].reg) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  if x.op is Ops.BUFFER: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], tag=ndefs))
   else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
@@ -132,6 +133,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"),
-   regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
