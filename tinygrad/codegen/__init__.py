@@ -46,9 +46,6 @@ pm_remove_vec_dtypes = PatternMatcher([
   # replace DEFINE_LOCAL/DEFINE_REG with BUFFER
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
-  # replace DEFINE_VAR with PARAM
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x:
-   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
@@ -116,6 +113,8 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  # INDEX without src is nothing
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
 ])
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
@@ -139,8 +138,6 @@ def expand_horizontal_reduce(r:UOp):
 pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x:
-   x.replace(op=Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(slot=-1, name=x.arg[0], vmin_vmax=x.arg[1:], addrspace=None))),
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
