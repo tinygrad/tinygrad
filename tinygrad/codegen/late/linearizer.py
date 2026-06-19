@@ -2,6 +2,7 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
@@ -23,9 +24,7 @@ def linearize(sink:UOp) -> list[UOp]:
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
-      case Ops.BUFFER: priority = -18
-      case Ops.DEFINE_REG: priority = -18
-      case Ops.DEFINE_LOCAL: priority = -17
+      case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
