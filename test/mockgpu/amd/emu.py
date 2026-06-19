@@ -1402,7 +1402,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   acc_dt = dtypes.int32 if is_int_out else dtypes.float32
   # Use uint32 temp array to prevent optimizer from eliminating f16→f32 bitcast chains.
   # The optimizer folds bitcast(uint32→float32) stores to float32 arrays, losing the conversion.
-  tmp = UOp(Ops.DEFINE_LOCAL, dtypes.uint32.ptr(n_a_elems + n_b_elems, addrspace=AddrSpace.LOCAL), arg=(n_a_elems + n_b_elems,))
+  tmp = UOp.placeholder((n_a_elems + n_b_elems,), dtypes.uint32, slot=0, addrspace=AddrSpace.LOCAL)
 
   def cvt_elem(raw: UOp, sub_idx: int) -> UOp:
     if is_i8:
@@ -1425,7 +1425,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       mant = h & UOp.const(dtypes.uint32, 0x3FF)
       # Use bf16 path: shift left by 16 to create bf16 bits, then shift mantissa and adjust exponent in float domain
       # bf16 bits = (sign << 15) | (exp_bf16 << 7) | mant_bf16 -- but f16 and bf16 have different formats
-      # Instead: construct f32 bits properly, use a DEFINE_LOCAL uint32 array to force materialization
+      # Instead: construct f32 bits properly, use a local uint32 array to force materialization
       f32_bits = (sign << UOp.const(dtypes.uint32, 31)) | \
                  ((exp + UOp.const(dtypes.uint32, 112)) << UOp.const(dtypes.uint32, 23)) | \
                  (mant << UOp.const(dtypes.uint32, 13))
