@@ -694,7 +694,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
-    runs-on: *macos
+    runs-on: &macos macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
