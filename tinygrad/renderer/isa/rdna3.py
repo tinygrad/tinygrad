@@ -172,20 +172,19 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
 # TODO: integrate this iterative offseting into fold_address?
 # TODO: fuse similar parts of load/store
 def load(idx:UOp, x:UOp):
-  # derive ins type from idx
+  # derive ins type from x
   imap = {
     dt_32bit:(RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
     dt_64bit:(RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
     dt_128bit:(RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128)
   }
-  gins, lins = next(gl for dt, gl in imap.items() if idx.dtype.base in dt)
+  gins, lins = next(gl for dt, gl in imap.items() if x.dtype in dt)
   ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
   _idx, base, offs = fold_address(idx)
-  # batch loads, need to update offset
   loads = [
-      UOp(Ops.INS, arg=ins, src=(idx, base, offs + const(offs.dtype, i * base.dtype.itemsize)),
-          tag=(GP_VGPRS,) if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
-      for i in range(idx.dtype.size)
+      UOp(Ops.INS, arg=ins, src=(idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
+          tag=GP_VGPRS if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
+      for i in range(x.dtype.count)
   ]
   return UOp.group(*loads) if len(loads) > 1 else loads[0]
 
