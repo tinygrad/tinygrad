@@ -168,7 +168,11 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
+
+# TODO: integrate this iterative offseting into fold_address?
+# TODO: fuse similar parts of load/store
 def load(idx:UOp, x:UOp):
+  # derive ins type from idx
   imap = {
     dt_32bit:(RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
     dt_64bit:(RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
@@ -176,9 +180,8 @@ def load(idx:UOp, x:UOp):
   }
   gins, lins = next(gl for dt, gl in imap.items() if idx.dtype.base in dt)
   ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
-  idx, base, offs = fold_address(idx)
+  _idx, base, offs = fold_address(idx)
   # batch loads, need to update offset
-  # TODO: integrate this iterative offseting into fold_address?
   loads = [
       UOp(Ops.INS, arg=ins, src=(idx, base, offs + const(offs.dtype, i * base.dtype.itemsize)),
           tag=(GP_VGPRS,) if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
@@ -187,19 +190,18 @@ def load(idx:UOp, x:UOp):
   return UOp.group(*loads) if len(loads) > 1 else loads[0]
 
 def store(idx:UOp, val:UOp, x:UOp):
+  # derive ins type from val
   imap = {
     dt_32bit:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     dt_64bit:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     dt_128bit:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  gins, lins = next(gl for dt, gl in imap.items() if idx.dtype.base in dt)
+  gins, lins = next(gl for dt, gl in imap.items() if val.dtype.scalar() in dt)
   ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
   _idx, base, offs = fold_address(idx)
-  # GEP into val?
   stores = [
-      UOp(Ops.INS, arg=ins, src=(_idx, base, offs + const(offs.dtype, i * base.dtype.itemsize)) + (val.gep(i),),
-          tag=(GP_VGPRS,) if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
-      for i in range(idx.dtype.size)
+      UOp(Ops.INS, arg=ins, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
+      for i in range(val.dtype.count)
   ]
   return UOp.group(*stores) if len(stores) > 1 else stores[0]
 
