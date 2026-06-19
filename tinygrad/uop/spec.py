@@ -79,6 +79,8 @@ spec_shared = PatternMatcher([
 
   # PARAM
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.CONST, dtype=dtypes.int),), name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
   # TODO: remove UNROLL here, it's for SPEC=2
