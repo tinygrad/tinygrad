@@ -279,7 +279,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER: return self.src[0].as_shape if isinstance(self.arg, ParamArg) else (self.arg,)
+      case Ops.BUFFER:
+        if isinstance(self.arg, ParamArg):
+          if len(self.src): return self.src[0].as_shape
+          if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
+          return (self.dtype.count,) if self.dtype.count > 1 else ()
+        return (self.arg,)
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
@@ -288,13 +293,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
-      case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
-        if len(self.src) >= 1:
-          # NOTE: this is the same as PARAM
-          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
-        if isinstance(self.dtype, PtrDType):
-          return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
@@ -794,8 +792,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace if isinstance(self.arg, ParamArg) else AddrSpace.GLOBAL
-    if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
-    if self.op is Ops.DEFINE_REG: return AddrSpace.REG
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:

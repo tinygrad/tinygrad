@@ -76,7 +76,7 @@ class TestLinearizer(unittest.TestCase):
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
-      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_REG])
+      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG])
       ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.END and u.src[0] in range_in_acc)]
       for i,u in enumerate(ranges):
         if skip and i in skip: continue
@@ -161,7 +161,7 @@ class TestLinearizer(unittest.TestCase):
 
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0],
       [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]), renderer=Device[Device.DEFAULT].renderer).src[2].src)
-    accs = [u for u in uops if u.op is Ops.DEFINE_REG]
+    accs = [u for u in uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
@@ -210,14 +210,14 @@ class TestLinearizer(unittest.TestCase):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-        local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
+        local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-      local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
+      local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
       self.assertEqual(local[0].dtype.base, expected_dtype)
 
     tests = (
@@ -243,7 +243,7 @@ class TestLinearizer(unittest.TestCase):
     r = (x@y).relu()
     opt = [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]
     ast = helper_linearizer_opt(r, [opt])
-    # the uops graph is DEFINE_REG -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
+    # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[2].src)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
@@ -361,7 +361,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[2].src)
-    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
+    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL for x in get_recursive(u.src[0]))]
     global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.PARAM for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER]
     assert len(barrier) == 1

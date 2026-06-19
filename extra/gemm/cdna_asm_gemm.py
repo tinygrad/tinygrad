@@ -1,7 +1,7 @@
 import atexit, functools, pathlib
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, ParamArg
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
@@ -2619,7 +2619,8 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(NUM_WG, "gidx0")
   insts = build_kernel(batch, M, N, K, A.dtype.base)
-  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (), 'lds')
+  lds = UOp(Ops.BUFFER, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (UOp.const(dtypes.int, 133_120),),
+            ParamArg(-1, name='lds', addrspace=AddrSpace.LOCAL))
   sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
                   arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),

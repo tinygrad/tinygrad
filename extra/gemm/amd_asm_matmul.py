@@ -10,7 +10,7 @@
 
 import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ParamArg
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.engine.realize import Estimates, run_linear
@@ -458,7 +458,9 @@ def test_matmul():
   def asm_kernel(A:UOp, B:UOp, C:UOp) -> UOp:
     gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
     lidxs = [UOp.special(n, f"lidx{i}") for i,n in enumerate(local)]
-    lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536)), addrspace=AddrSpace.LOCAL), (), 'lds')
+    lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
+    lds = UOp(Ops.BUFFER, dtypes.uint8.ptr(size=lds_size, addrspace=AddrSpace.LOCAL), (UOp.const(dtypes.int, lds_size),),
+              ParamArg(-1, name='lds', addrspace=AddrSpace.LOCAL))
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan"),
                                                                                   estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))

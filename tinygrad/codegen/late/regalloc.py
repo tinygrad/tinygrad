@@ -2,7 +2,7 @@ import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
@@ -83,7 +83,7 @@ class LinearScanRegallocContext:
           self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate stack array
-      if u.op is Ops.DEFINE_LOCAL:
+      if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL:
         self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
         self.stack_size += u.dtype.nbytes()
 
@@ -116,7 +116,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if i in ctx.reals and (v:=ctx.uops[i].src[j].reg) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  if x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
   else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
@@ -132,6 +132,6 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"),
    regalloc_rewrite),
 ])

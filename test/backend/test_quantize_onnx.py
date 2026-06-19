@@ -3,6 +3,7 @@ import numpy as np
 import tempfile, unittest
 from tinygrad import Tensor, Context, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops
+from tinygrad.dtype import AddrSpace
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -80,7 +81,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     with Context(QUANTIZE=1):
       linear = run_onnx({"input":inp})["output"].schedule_linear()
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
-      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.DEFINE_REG]
+      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
