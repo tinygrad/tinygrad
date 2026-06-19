@@ -51,7 +51,6 @@ def wer_helper(result: str, reference: str)->float:
   wer, _, _ = metrics.word_error_rate([result], [reference])
   return wer
 
-@unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 # TODO: WEBGPU GPU dispatch dimensions limit
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU GPU dispatch dimensions limit")
 class TestWhisper(unittest.TestCase):
