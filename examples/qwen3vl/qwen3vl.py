@@ -108,17 +108,17 @@ class Qwen3VLVis():
     cos, sin = emb.cos(), emb.sin()
     cos, sin = cos.unsqueeze(-2), sin.unsqueeze(-2)
     
-    deepstack_feature_lists = []
+    deepstack_features = []
     for i in range(len(self.v.blk)):
       hidden_states = self.v.blk[i](hidden_states=hidden_states, position_embeddings=(cos, sin))
-      if i in self.v.deepstack_idx: deepstack_feature_lists.append(self.v.deepstack[i](hidden_states))
+      if i in self.v.deepstack_idx: deepstack_features.append(self.v.deepstack[i](hidden_states))
 
     image_embeds = self.v.post_ln(hidden_states)
     image_embeds = image_embeds.view(-1, self.feed_forward_length)
     image_embeds = self.mm[0](image_embeds)
     image_embeds = Tensor.gelu(image_embeds)
     image_embeds = self.mm[2](image_embeds)
-    return image_embeds, hidden_states, deepstack_feature_lists
+    return image_embeds, hidden_states, deepstack_features
 
   def __call__(self, lang:Transformer, image:Tensor|bytes, start_pos:UOp.variable, end_turn:bool=False):
     if type(image) == bytes: image = cv2.cvtColor(cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
@@ -163,7 +163,7 @@ class Qwen3VLVis():
     pixel_values = pixel_values.cast(dtypes.bfloat16)
 
     input_ids = Tensor.cat(self.prefix, Tensor.zeros(self.toks_per_img), self.suffix).unsqueeze(0).cast(dtypes.int)
-    image_embeds, hidden_states, deepstack_feature_lists = self.forward(pixel_values, [grid_h, grid_w])
+    image_embeds, hidden_states, deepstack_features = self.forward(pixel_values, [grid_h, grid_w])
     hidden_states = lang.token_embd(input_ids).cast(dtypes.float)
     hidden_states[:, self.prefix.shape[0]:-self.suffix.shape[0], :] = image_embeds.unsqueeze(0)
     
@@ -171,7 +171,7 @@ class Qwen3VLVis():
     for i in range(len(lang.blk)):
       hidden_states = lang.blk[i](hidden_states, start_pos=start_pos)
       if i in self.v.deepstack_idx:
-        hidden_states[:, self.prefix.shape[0]:-self.suffix.shape[0], :] += deepstack_feature_lists[self.v.deepstack_idx.index(i)]
+        hidden_states[:, self.prefix.shape[0]:-self.suffix.shape[0], :] += deepstack_features[self.v.deepstack_idx.index(i)]
     hidden_states.realize()
 
 class Qwen3PatchEmbed:
