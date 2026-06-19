@@ -1,8 +1,9 @@
 # sorted in order of increasing complexity
-import itertools
+import itertools, math
 from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype, to_dtype
+from tinygrad.uop.ops import sint
 
 class Optimizer:
   """
@@ -177,3 +178,99 @@ class LAMB(Optimizer):
         r = 1.0
       ret.append((self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
+
+class APOLLO(Optimizer):
+  """
+  APOLLO optimizer with low-rank gradient scaling.
+
+  APOLLO is applied to 2D parameter tensors. Other tensors use the same AdamW update without projection.
+
+  - Paper: https://arxiv.org/abs/2412.05270
+  """
+  def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, rank=256,
+               proj="random", scale_type="channel", scale=1.0, update_proj_gap=200, proj_type="std", scale_front=False,
+               disable_nl=False, correct_bias=True, device=None, fused=FUSE_OPTIM):
+    assert not fused, "FUSE_OPTIM not allowed for APOLLO optimizer"
+    if not 0 <= b1 < 1: raise ValueError(f"Invalid b1 value: {b1}")
+    if not 0 <= b2 < 1: raise ValueError(f"Invalid b2 value: {b2}")
+    if eps < 0: raise ValueError(f"Invalid eps value: {eps}")
+    if weight_decay < 0: raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+    if rank < 1: raise ValueError(f"Invalid rank value: {rank}")
+    if scale < 0: raise ValueError(f"Invalid scale value: {scale}")
+    if update_proj_gap < 1: raise ValueError(f"Invalid update_proj_gap value: {update_proj_gap}")
+    if proj != "random": raise NotImplementedError("tinygrad APOLLO supports proj='random'")
+    if scale_type not in {"channel", "tensor"}: raise ValueError(f"Invalid scale_type value: {scale_type}")
+    if proj_type not in {"std", "reverse_std", "left", "right"}: raise ValueError(f"Invalid proj_type value: {proj_type}")
+    super().__init__(params, lr, device, fused)
+    if isinstance(self.device, tuple): raise AssertionError("APOLLO optimizer state must be on a single device")
+    self.b1, self.b2, self.eps, self.wd, self.rank = b1, b2, eps, weight_decay, rank
+    self.scale_type, self.scale, self.update_proj_gap = scale_type, scale, update_proj_gap
+    self.proj_type, self.scale_front, self.disable_nl, self.correct_bias = proj_type, scale_front, disable_nl, correct_bias
+    self.apollo = [t.ndim == 2 for t in self.params]
+    self.step_t = Tensor.zeros((1,), dtype=dtypes.int32, device=self.device).is_param_(False)
+    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device).is_param_(False) for _ in [b1, b2])
+    self.m = [Tensor.zeros(self._state_shape(t), dtype=self.param_dtype, device=self.device) for t in self.params]
+    self.v = [Tensor.zeros(self._state_shape(t), dtype=self.param_dtype, device=self.device) for t in self.params]
+    self.projs = [Tensor.zeros(self._proj_shape(t.shape), dtype=self.param_dtype, device=self.device) if a else
+                  Tensor.zeros((0,), dtype=self.param_dtype, device=self.device) for t,a in zip(self.params, self.apollo)]
+    self.scaled_grad = [Tensor.zeros((1,), dtype=self.param_dtype, device=self.device) for _ in self.params]
+
+  def _right(self, shape:tuple[sint, ...]) -> bool:
+    if self.proj_type == "right": return True
+    if self.proj_type == "left": return False
+    return (shape[0] >= shape[1]) == (self.proj_type == "std")
+
+  def _rank(self, shape:tuple[sint, ...]) -> int: return min(self.rank, shape[0], shape[1])
+  def _low_shape(self, shape:tuple[sint, ...]) -> tuple[sint, sint]:
+    return (shape[0], self._rank(shape)) if self._right(shape) else (self._rank(shape), shape[1])
+  def _proj_shape(self, shape:tuple[sint, ...]) -> tuple[sint, sint]:
+    return (self._rank(shape), shape[1]) if self._right(shape) else (shape[0], self._rank(shape))
+  def _state_shape(self, t:Tensor) -> tuple[sint, ...]: return self._low_shape(t.shape) if t.ndim == 2 else t.shape
+
+  def _new_proj(self, g:Tensor, right:bool) -> Tensor:
+    rank = self._rank(g.shape)
+    return Tensor.randn(*((rank, g.shape[1]) if right else (g.shape[0], rank)), dtype=self.param_dtype, device=self.device) / math.sqrt(rank)
+
+  def _project(self, g:Tensor, i:int, refresh:Tensor) -> tuple[Tensor, bool]:
+    right = self._right(g.shape)
+    proj = self.projs[i].assign(refresh.where(self._new_proj(g, right), self.projs[i]))
+    return (g @ proj.transpose() if right else proj.transpose() @ g), right
+
+  def _adam_update(self, g:Tensor, i:int) -> Tensor:
+    self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
+    self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
+    return self.m[i] / (self.v[i].sqrt() + self.eps)
+
+  def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
+    ret = []
+    self.step_t.assign(self.step_t + 1)
+    first, refresh = self.step_t.eq(1), ((self.step_t - 1) % self.update_proj_gap).eq(0)
+    self.b1_t *= self.b1
+    self.b2_t *= self.b2
+    step_size = self.lr * ((1.0 - self.b2_t).sqrt() / (1.0 - self.b1_t) if self.correct_bias else 1.0)
+    for i, (t, g) in enumerate(zip(params, grads)):
+      if g.device != self.m[i].device: g = g.contiguous().to(self.m[i].device)
+      g = g.cast(self.param_dtype)
+      if self.apollo[i]:
+        low, right = self._project(g, i, refresh)
+        norm_grad = self._adam_update(low, i)
+        if self.scale_type == "channel":
+          axis = 1 if right else 0
+          factor = norm_grad.square().sum(axis).sqrt() / (low.square().sum(axis).sqrt() + 1e-8)
+          if axis == 1: factor = factor.unsqueeze(1)
+        else:
+          factor = norm_grad.square().sum().sqrt() / (low.square().sum().sqrt() + 1e-8)
+        norm_grad = g * factor
+        if self.scale_front: norm_grad = norm_grad * math.sqrt(self.scale)
+        if not self.disable_nl:
+          norm = norm_grad.square().sum().sqrt().reshape(1)
+          limiter = (norm / (self.scaled_grad[i] + 1e-8)).maximum(1.01) / 1.01
+          norm_grad, norm = first.where(norm_grad, norm_grad / limiter), first.where(norm, norm / limiter)
+          self.scaled_grad[i].assign(norm.cast(self.scaled_grad[i].dtype))
+        if not self.scale_front: norm_grad = norm_grad * math.sqrt(self.scale)
+      else:
+        norm_grad = self._adam_update(g, i)
+      up = step_size * norm_grad
+      if self.wd > 0: up = up + self.lr * self.wd * (t.detach().to(up.device) - up)
+      ret.append(up.cast(t.dtype))
+    return ret, [self.step_t, self.b1_t, self.b2_t] + self.m + self.v + self.projs + self.scaled_grad

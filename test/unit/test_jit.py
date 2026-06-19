@@ -390,6 +390,25 @@ class TestJit(unittest.TestCase):
       jit_step(conv, x, y)
       np.testing.assert_allclose(conv.weight.grad.numpy(), ref, atol=1e-4, rtol=1e-5)
 
+  def test_jit_apollo_step(self):
+    from tinygrad.nn.optim import APOLLO
+    old_training, Tensor.training = Tensor.training, True
+    try:
+      w, b = Tensor.randn(4, 4).realize(), Tensor.randn(4).realize()
+      x = Tensor.randn(4, 4).realize()
+      opt = APOLLO([w, b], lr=0.01, rank=2)
+      @TinyJit
+      def step(x):
+        opt.zero_grad()
+        loss = (x @ w + b).sum()
+        loss.backward()
+        opt.step()
+        return loss.realize()
+      for _ in range(4): step(x)
+      self.assertTrue(np.isfinite(w.numpy()).all() and np.isfinite(b.numpy()).all())
+    finally:
+      Tensor.training = old_training
+
 class TestJitPrune(unittest.TestCase):
   def test_simple_prune(self):
     weights = Tensor.rand(16).realize()

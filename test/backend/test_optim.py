@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
+from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB, APOLLO
 from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
@@ -126,6 +126,38 @@ class TestOptim(unittest.TestCase):
 
   def test_multistep_adamw(self): self._test_adamw(10, {'lr': 0.001}, 1e-5, 0)
   def test_multistep_adamw_high_lr(self): self._test_adamw(10, {'lr': 10}, 5e-4, 2e-3)
+
+  def test_apollo_mini(self):
+    t = Tensor(W_init.copy())
+    t.grad = Tensor.ones(*t.shape)
+    opt = APOLLO([t], lr=0.01, rank=1, scale=128, scale_type="tensor")
+    opt.step()
+    self.assertTrue(np.isfinite(t.numpy()).all())
+
+  def test_apollo_default_rank_small_tensor(self):
+    t = Tensor(W_init.copy())
+    t.sum().backward()
+    APOLLO([t], lr=0.01).step()
+    self.assertTrue(np.isfinite(t.numpy()).all())
+
+  def test_apollo_channel(self):
+    t = Tensor(W_init.copy())
+    opt = APOLLO([t], lr=0.01, rank=2, scale_type="channel")
+    for _ in range(3):
+      t.sum().backward()
+      opt.step()
+      opt.zero_grad()
+    self.assertTrue(np.isfinite(t.numpy()).all())
+
+  def test_apollo_mixed_shapes(self):
+    weight, bias = Tensor(W_init.copy()), Tensor(x_init.copy().reshape(4))
+    opt = APOLLO([weight, bias], lr=0.01, rank=2)
+    (weight.sum() + bias.sum()).backward()
+    opt.step()
+    self.assertTrue(np.isfinite(weight.numpy()).all() and np.isfinite(bias.numpy()).all())
+
+  def test_apollo_rejects_fused(self):
+    self.assertRaises(AssertionError, APOLLO, [Tensor.ones(2, 2)], rank=1, fused=True)
 
   def test_duped_weights(self):
     for Opt in [Adam, AdamW, SGD]:

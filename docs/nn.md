@@ -21,6 +21,7 @@
 ::: tinygrad.nn.optim.AdamW
 ::: tinygrad.nn.optim.Adam
 ::: tinygrad.nn.optim.LAMB
+::: tinygrad.nn.optim.APOLLO
 
 ## Load/Save
 
