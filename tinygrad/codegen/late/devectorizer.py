@@ -354,21 +354,6 @@ pm_reduce = PatternMatcher([
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])
 
-# add loads
-
-def add_load(idx:UOp):
-  if isinstance(idx.dtype, PtrDType): return None
-  assert isinstance(idx.src[0].dtype, PtrDType), f"param is not PtrDType {idx.src[0].dtype}"
-  return idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)
-
-pm_add_loads = PatternMatcher([
-  # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), add_load),
-  # remove loads from stores
-  (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
-  (UPat(Ops.LOAD, src=(UPat(Ops.LOAD),), allow_any_len=True, name="l"), lambda l: l.replace(src=(l.src[0].src[0],)+l.src[1:])),
-])
-
 # make images
 
 pm_imageh_store = PatternMatcher([
