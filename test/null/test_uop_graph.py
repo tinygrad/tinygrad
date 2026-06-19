@@ -541,7 +541,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp.param(0, dtypes.int.ptr(16))
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, addrspace=AddrSpace.LOCAL), (), "temp")
+    smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0", dtypes.int)
     st = smem.index(lidx, ptr=True).store(glbl0.index(lidx, ptr=True).load())
     barrier = st.barrier()
