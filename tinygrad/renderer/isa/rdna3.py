@@ -170,8 +170,8 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
 
 
 # TODO: integrate this iterative offseting into fold_address?
-# TODO: fuse similar parts of load/store
-def load(idx:UOp, x:UOp):
+# TODO: auto fuse large loads/stores into wider instructions ex. 4xb32 -> 1xb128 ins
+def load(ctx, idx:UOp, x:UOp):
   # derive ins type from x
   imap = {
     dt_32bit:(RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
@@ -182,13 +182,17 @@ def load(idx:UOp, x:UOp):
   ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
   _idx, base, offs = fold_address(idx)
   loads = [
-      UOp(Ops.INS, arg=ins, src=(idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
+      UOp(Ops.INS, arg=ins, dtype=x.dtype, src=(idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
           tag=GP_VGPRS if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
       for i in range(x.dtype.count)
   ]
   return UOp.group(*loads) if len(loads) > 1 else loads[0]
 
-def store(idx:UOp, val:UOp, x:UOp):
+def store(ctx, idx:UOp, val:UOp, x:UOp):
+  if x.addrspace is AddrSpace.REG:
+    tags = [GP_VGPRS] if val.dtype.count == 1 else ctx.vreg((GP_VGPRS, val.dtype.count))
+    mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg) for i, tg in zip(range(val.dtype.count), tags)]
+    return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
   # derive ins type from val
   imap = {
     dt_32bit:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
@@ -204,12 +208,11 @@ def store(idx:UOp, val:UOp, x:UOp):
   ]
   return UOp.group(*stores) if len(stores) > 1 else stores[0]
 
-# all we need to do is prune the group op emitted by stack through an ins pattern that 
-# searches children for pseudo ops
 
-# TODO: 64 bit integer mul with MAD_u64/i64 and MUL_lo_u32
-# 32x32 + 64 -> 64
+# TODO: control flow, gated load/store and RANGE/END
 
+
+# TODO: 64 bit integer mul with MAD_u64/i64 and MUL_lo_u32, 32x32 + 64 -> 64
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
 # TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
 # TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
@@ -220,6 +223,9 @@ isel_matcher = PatternMatcher([
 
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
+
+  # hack
+  (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
 
   # make define reg a mov
   # (UPat(Ops.DEFINE_LOCAL, name="x"), lds),
@@ -273,14 +279,6 @@ isel_matcher = PatternMatcher([
 
   (UPat(Ops.LOAD, name="x", src=(UPat.var("idx"))), load),
   (UPat.var("idx").store(UPat.var("val"), name="x"), store),
-  #(UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))),
-    #lambda ctx,x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=(GP_VGPRS, 4))),
-  #(UPat.var("idx").store(UPat.var("val"), name="x"), store),
-  #(UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
-    #lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
-  #(UPat.var("a").store(UPat.var("b", dtype=dt_64bit), name="x"),
-    #lambda a,b,x: x.ins(RDNA3Ops.global_store_b64, dtype=dtypes.void, src=fold_address(a) + (b,))),
-  # (UPat.var("idx").store(UPat.var("val", dtype=dt_64bit), name="x"), store),
 
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
@@ -296,9 +294,6 @@ isel_matcher = PatternMatcher([
   # normalize and satisfy operand orders/reg types
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
-
-# wait maybe this is unecessary, src already models the relationship 
-pre_regalloc_matcher = PatternMatcher([])
 
 def encode(x:UOp):
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
@@ -356,7 +351,6 @@ class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
-  pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   def __init__(self, target:Target):
