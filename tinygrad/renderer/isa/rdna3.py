@@ -148,7 +148,6 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
-
 # TODO: integrate this iterative offseting into fold_address?
 # TODO: auto fuse large loads/stores into wider instructions ex. 4xb32 -> 1xb128 ins
 def load(ctx, idx:UOp, x:UOp):
@@ -159,10 +158,10 @@ def load(ctx, idx:UOp, x:UOp):
     dt_128bit:(RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128)
   }
   gins, lins = next(gl for dt, gl in imap.items() if x.dtype in dt)
-  ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
+  ins = gins if idx.addrspace is AddrSpace.GLOBAL else lins
   _idx, base, offs = fold_address(idx)
   loads = [
-      UOp(Ops.INS, arg=ins, dtype=x.dtype, src=(idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
+      UOp(Ops.INS, arg=ins, dtype=x.dtype, src=(_idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
           tag=GP_VGPRS if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
       for i in range(x.dtype.count)
   ]
@@ -195,9 +194,8 @@ def gated(ctx, x:UOp, idx:UOp, gate:UOp, val:UOp|None=None):
 
 def prepare_range(ctx, x:UOp, bnd:UOp):
   if x.src[-1].op is Ops.DEFINE_REG: return None # already processed
-  mask = UOp(Ops.DEFINE_REG, dtypes.uint32, tag=ctx.vreg(GP_SGPRS))
-  acc = ctx.vreg(GP_VGPRS)
-  return x.replace(src=x.src + (mask,), tag=acc)
+  mask = UOp(Ops.DEFINE_REG, dtypes.uint32, tag=(ctx.vreg(GP_SGPRS),))
+  return x.replace(src=x.src + (mask,), tag=(ctx.vreg(GP_VGPRS),))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop

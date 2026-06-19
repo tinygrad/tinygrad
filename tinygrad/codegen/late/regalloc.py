@@ -78,6 +78,7 @@ class LinearScanRegallocContext:
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
+      print("WARNING: filling")
       if v not in self.spills:
         dt = self.vdef(v).dtype
         sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
@@ -134,9 +135,11 @@ class LinearScanRegallocContext:
             self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate stack array
+      """
       if u.op is Ops.DEFINE_LOCAL:
         self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
         self.stack_size += u.dtype.nbytes()
+      """
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
@@ -158,6 +161,7 @@ class LinearScanRegallocContext:
         for v,r in live_ins.pop().items():
           if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
 
+
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
@@ -167,20 +171,23 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     # v here is the virtual defined by the original s as s is the rewritten version
     if i in ctx.reals and any(v in ctx.spills for v in regs(ctx.uops[i].src[j])): nsrc.extend([ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]) for v in regs(ctx.uops[i].src[j])])
     else: nsrc.append(s)
-  ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
+  ndefs = tuple(ctx.reals[i][v] for v in regs(x)) if isinstance(x.tag, tuple) else regs(x)
   # TODO: this is unhandled for RDNA3
-  if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
-  else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  # if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  # else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
-  after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
+  after = [ctx.ren.spill(ctx.spills[v], nx) for v in regs(x) if v in ctx.spills]
 
+  """
   # alloc/dealloc stack
   if ctx.stack_size > 0:
     sp = ctx.ren.stack_pointer()
     offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
     if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
     elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+  """
 
   return nx, before + [nx] + after
 
