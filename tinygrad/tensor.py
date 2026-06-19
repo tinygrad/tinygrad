@@ -9,7 +9,7 @@ from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
+from tinygrad.uop.ops import UOp, Ops, GroupOp, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -254,9 +254,15 @@ class Tensor(RandMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
+    base, target = self.uop.base, self.uop
+    # only allow movement ops + detach between base and target
+    while target is not base and target.op in GroupOp.Movement.union({Ops.DETACH}): target = target.src[0]
+    if base.op is Ops.COPY and target is base and not self.uop.has_buffer_identity() and base not in x.uop.backward_slice_with_self:
+      _apply_map_to_tensors({base: base.after(self.uop.store(x.uop))}, name="Copy View Assign", walk=True)
+      return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
-    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER, Ops.CONTIGUOUS} and self.uop is not base and not self.uop.has_buffer_identity():
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
