@@ -1402,7 +1402,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   acc_dt = dtypes.int32 if is_int_out else dtypes.float32
   # Use uint32 temp array to prevent optimizer from eliminating f16→f32 bitcast chains.
   # The optimizer folds bitcast(uint32→float32) stores to float32 arrays, losing the conversion.
-  tmp = UOp(Ops.DEFINE_LOCAL, dtypes.uint32.ptr(n_a_elems + n_b_elems, addrspace=AddrSpace.LOCAL), arg=(n_a_elems + n_b_elems,))
+  tmp = UOp.placeholder((n_a_elems + n_b_elems,), dtypes.uint32, slot=0, addrspace=AddrSpace.LOCAL)
 
   def cvt_elem(raw: UOp, sub_idx: int) -> UOp:
     if is_i8:
