@@ -116,7 +116,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if i in ctx.reals and (v:=ctx.uops[i].src[j].reg) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  if x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  if x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL:
+    nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
   else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]

@@ -272,7 +272,8 @@ def is_foldable(ctx:IselContext, x:UOp, s:UOp) -> bool: return len(ctx.uses[s]) 
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
 def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.BUFFER, dt, arg=ParamArg(-1, addrspace=AddrSpace.REG), tag=None if reg is None else (reg,))
+def def_reg(dt:DType, reg:Register|None=None) -> UOp:
+  return UOp(Ops.BUFFER, dt, arg=ParamArg(-1, addrspace=AddrSpace.REG), tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None

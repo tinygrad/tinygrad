@@ -361,7 +361,8 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[2].src)
-    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL for x in get_recursive(u.src[0]))]
+    local_stores = [u for u in uops if u.op is Ops.STORE and any(
+      x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL for x in get_recursive(u.src[0]))]
     global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.PARAM for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER]
     assert len(barrier) == 1
