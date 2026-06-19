@@ -22,7 +22,6 @@ def linearize(sink:UOp) -> list[UOp]:
     extra = None
     match u.op:
       # the order and placement of these defines is important
-      case Ops.PARAM if u.arg.addrspace is None: priority, extra = -19, u.expr # var params sort after global params
       case Ops.PARAM: priority, extra = -20, u.arg.slot
       case Ops.BUFFER: priority = -18
       case Ops.LOAD: priority = -1    # place loads early

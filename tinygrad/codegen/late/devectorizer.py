@@ -63,7 +63,9 @@ load_store_indexing = PatternMatcher([
 def expand_index(ctx, buf:UOp, vec:UOp):
   # determine optimal image shapes
   if isinstance(dt:=buf.dtype, ImageDType):
-    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
+    idxs, valids = vec.get_idx(), vec.get_valid()
+    lane = next((i for i in range(vec.dtype.count) if valids.gep(i).vmax != 0), 0)
+    x, valid = idxs.gep(lane), valids.gep(lane)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
     for ch, cw in ImageDType.valid_dims(dt, ctx.target.arch):
@@ -243,11 +245,15 @@ def no_vectorized_alu(alu:UOp):
   return UOp(Ops.STACK, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
+  if not isinstance(buf.dtype, PtrDType): return None
+  if buf.addrspace not in (AddrSpace.LOCAL, AddrSpace.REG): return None
   # TODO: this fails on regs
   #assert buf.max_numel() == buf.ptrdtype.size
-  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.addrspace)).cast(buf.dtype)
+  sz = buf.ptrdtype.size*buf.ptrdtype.count
+  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(sz, buf.addrspace), src=(UOp.const(dtypes.int, sz),)).cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
+  if buf.addrspace not in (AddrSpace.LOCAL, AddrSpace.REG): return None
   cnt = cast.dtype.count
   if bcast is not None and bcast.op is Ops.GEP:
     # GEP selects specific lanes; bcast.arg[k] is the offset for lane k, iterate groups × selected lanes
@@ -262,11 +268,11 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   return buf.broadcast(len(pairs)).index(idx.gep(idx_lanes)*cnt + UOp.const(dtypes.weakint.vec(len(pairs)), offsets), ptr=True)
 
 devectorize_buf_and_index = PatternMatcher([
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER), name="buf"), no_vectorized_buf),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
    no_vectorized_index),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
    no_vectorized_index),
 ])
 

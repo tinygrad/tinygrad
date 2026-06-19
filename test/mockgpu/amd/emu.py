@@ -1402,7 +1402,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   acc_dt = dtypes.int32 if is_int_out else dtypes.float32
   # Use uint32 temp array to prevent optimizer from eliminating f16→f32 bitcast chains.
   # The optimizer folds bitcast(uint32→float32) stores to float32 arrays, losing the conversion.
-  tmp = UOp(Ops.DEFINE_LOCAL, dtypes.uint32.ptr(n_a_elems + n_b_elems, addrspace=AddrSpace.LOCAL), arg=(n_a_elems + n_b_elems,))
+  tmp = UOp.placeholder((n_a_elems + n_b_elems,), dtypes.uint32, slot=0, addrspace=AddrSpace.LOCAL)
 
   def cvt_elem(raw: UOp, sub_idx: int) -> UOp:
     if is_i8:
@@ -1800,7 +1800,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
   else:  # RDNA3: addr, data, offset
-    addr_reg = ctx.inst_field(type(inst).addr)  # type: ignore[union-attr]
+    addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)  # type: ignore[union-attr]
     vdst_reg = ctx.inst_field(type(inst).vdst)
     offset = ctx.inst_field_signed(type(inst).offset)  # type: ignore[union-attr]

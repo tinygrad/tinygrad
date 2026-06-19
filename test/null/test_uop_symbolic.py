@@ -9,7 +9,7 @@ from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_w
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
-  sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
+  sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.RANGE, Ops.SPECIAL, Ops.PARAM)}
   s_eval = eval(s, sym_vars)
   if isinstance(s_eval, int) and v.dtype==dtypes.weakint: s_eval = UOp.const(dtypes.weakint, s_eval)
   elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
@@ -373,6 +373,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a//-2)//-3, 0, 20, "((a//-2)//-3)")
     self.helper_test_variable((a//2)//-3, -21, 0, "((a//2)//-3)")
     self.helper_test_variable((a//-2)//3, -21, 0, "(a//-6)")
+
+  def test_div_const_div_neg_inner_divisor(self):
+    # (x//c+a)//d -> (x+a*c)//(c*d) works for negative c too
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//-2+1)//3, -21, 0, "((a+-2)//-6)")
 
   def test_neg_mod(self):
     a = Variable("a", 0, 124)

@@ -46,9 +46,9 @@ class TestGraphRewriteConst(unittest.TestCase):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = UOp.const(dtypes.int.vec(3), (2,1,0))
     ret = graph_rewrite(v1+v2, sym)
-    self.assertEqual(ret.op, Ops.CONST)
+    self.assertEqual(ret.op, Ops.STACK)
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
-    self.assertEqual(ret.arg, 2)
+    self.assertEqual(const_values(ret), (2,2,2))
 
 def xfail_broken_const_wraparound(fn):
   fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)
@@ -113,11 +113,11 @@ class TestGraphRewrite(unittest.TestCase):
   # NOTE: this shows why we can't have a UOp in arg
   @unittest.expectedFailure
   def test_no_dedup_args(self):
-    a1 = UOp(Ops.DEFINE_VAR, dtypes.int, (), ("a1", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
-    a2 = UOp(Ops.DEFINE_VAR, dtypes.int, (), ("a2", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
+    a1 = UOp.variable("a1", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11), dtypes.int)
+    a2 = UOp.variable("a2", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11), dtypes.int)
     sink = a1.sink(a2)
-    define_vars = [x for x in graph_rewrite(sink, PatternMatcher([])).toposort() if x.op is Ops.DEFINE_VAR]
-    self.assertEqual(len(define_vars), 1)
+    variables = [x for x in graph_rewrite(sink, PatternMatcher([])).toposort() if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU]
+    self.assertEqual(len(variables), 1)
 
   def test_simple(self):
     c1 = UOp.const(dtypes.float, 1.0)
@@ -171,7 +171,7 @@ class TestGraphRewrite(unittest.TestCase):
     c2 = UOp.const(dtypes.float, 2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
     self.assertEqual(nout.op, Ops.ADD)
-    self.assertEqual(nout.src[0].op, Ops.DEFINE_VAR)
+    self.assertEqual(nout.src[0].op, Ops.PARAM)
     self.assertEqual(nout.src[1].op, Ops.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
@@ -344,19 +344,19 @@ class TestUOpGraph(unittest.TestCase):
     for i in [4, 8]:
       vec = UOp(Ops.STACK, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+                tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
+      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
     for i in [4, 8]:
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
       vec = UOp(Ops.STACK, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
-      acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+                tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
+      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
@@ -364,17 +364,17 @@ class TestUOpGraph(unittest.TestCase):
     for i in [2, 4, 8]:
       vec = UOp(Ops.STACK, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
+      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
     for i in [2, 4, 8]:
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
       vec = UOp(Ops.STACK, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
@@ -541,7 +541,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp.param(0, dtypes.int.ptr(16))
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, addrspace=AddrSpace.LOCAL), (), "temp")
+    smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0", dtypes.int)
     st = smem.index(lidx, ptr=True).store(glbl0.index(lidx, ptr=True).load())
     barrier = st.barrier()

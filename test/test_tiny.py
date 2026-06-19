@@ -41,7 +41,7 @@ class TestTiny(unittest.TestCase):
 
   def test_gemm(self, N=getenv("GEMM_N", 64)):
     a = Tensor.ones(N,N).contiguous()
-    b = Tensor.eye(N).contiguous()
+    b = Tensor.eye(N).clone()
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
@@ -50,7 +50,7 @@ class TestTiny(unittest.TestCase):
 
   def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(1,N).contiguous()
-    b = Tensor.eye(N).contiguous()
+    b = Tensor.eye(N).clone()
     lst = (out:=a@b).tolist()
     for x in range(N):
       self.assertEqual(lst[0][x], 1.0, msg=f"mismatch at {x}")

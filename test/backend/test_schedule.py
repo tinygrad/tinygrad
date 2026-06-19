@@ -4,8 +4,6 @@
 
 import unittest
 import numpy as np
-from typing import cast
-from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import UOp, Ops, UPat
@@ -61,6 +59,14 @@ class TestSchedule(unittest.TestCase):
     # NOTE: the gradient flows twice
     np.testing.assert_allclose(out.numpy(), 2*np.ones((64,64)))
 
+  def test_pad_reduce_scope_collision(self):
+    b = Tensor.rand(4, 3).realize()
+    s1 = b.pad(((1, 1), (0, 0))).sum(axis=1)
+    s2 = b.pad(((1, 2), (0, 0))).shrink(((0, 6), (0, 3))).sum(axis=1)
+    out = s1 + s2
+    run_linear(*check_schedule(out, 1))
+    np.testing.assert_allclose(out.numpy(), 2*np.pad(b.numpy(), ((1, 1), (0, 0))).sum(axis=1), rtol=1e-6)
+
   def test_cumsum_parallel_reduce_fused(self):
     # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)
     step, num_steps = 513, 10
@@ -78,25 +84,6 @@ class TestSchedule(unittest.TestCase):
     # two REDUCEs sharing the same RANGE at different nesting depths must NOT merge
     x = Tensor.arange(768).reshape(3, 256).float()
     np.testing.assert_allclose((x.sum(axis=1) + x.sum(axis=1).sum()).numpy(), x.numpy().sum(axis=1) + x.numpy().sum(axis=1).sum())
-
-  @unittest.skip("disabling subbuffer manually isn't supported anymore")
-  def test_bitcast_disable_subbufer(self):
-    x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().uop)
-    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
-    b = x.cast(dtypes.int32, True, allow_buffer_view=False)
-    b = a.alu(Ops.ADD, b)
-    check_schedule(b, 1)
-
-  @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
-  @unittest.skip("kernel count depends on input")
-  def test_cast_padded_const(self, dt1, dt2):
-    assume(dt1 in supported_dtypes and dt2 in supported_dtypes)
-    a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
-    casted_view = a.cast(dt2)
-    run_linear(*check_schedule(casted_view, 0))
-    realized_const_view = casted_view.contiguous()
-    run_linear(*check_schedule(realized_const_view, 1))
-    np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
