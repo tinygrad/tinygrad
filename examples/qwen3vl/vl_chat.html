@@ -35,9 +35,9 @@
     if (!input.value.trim()) return;
     const content = [{type:'input_text',text:input.value.trim()}];
     if (image) content.push({type:'input_image',image_url:image});
-    const msg = {role:'user', content, ...(image&&{image})};
+    const msg = {role:'user', content};
     chat.innerHTML += '<div class="msg user">' + (image ? `<img src="${image}" style="max-width:160px;max-height:160px;border-radius:12px;display:block;margin-bottom:8px">` : '') + input.value.trim().replace(/</g, '&lt;') + '</div>';
-    if (image) { msg.image = image; image = null; imgBtn.innerHTML = origSvg; imgBtn.style.padding = ''; }
+    if (image) { image = null; imgBtn.innerHTML = origSvg; imgBtn.style.padding = ''; }
     msgs.push(msg);
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
