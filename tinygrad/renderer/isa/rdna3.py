@@ -10,10 +10,7 @@ EXEC_LO = Register("exec_lo", 0)
 VCC = Register("vcc", 0)
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
-# contiguous multi-register constraint tuples, ex. v[4:5], v[6:9]
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-# VGPR_PAIRS = tuple((GP_VGPRS[i],GP_VGPRS[i+1]) for i in range(0, 254, 2))
-# VGPR_QUADS = tuple(VGPR_PAIRS[i] + VGPR_PAIRS[i+1] for i in range(0, len(VGPR_PAIRS)//2, 2))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 
 # def geopc(x:UOp): return "" if not isinstance(x.arg, InsOp) else x.arg.args[0].name.lower()
@@ -59,21 +56,6 @@ dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.op is Ops.CONST else x
 
-def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
-  def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
-  # def _const(v:int) -> UOp: return UOp.const(dtypes.int32, v)
-  base, idx = x.src
-  # TODO: handle multi-register index ex. 64 bit SGPR pair
-  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
-  # really should get stored in sgpr
-  shft = to_vgpr(const(dtypes.int, disp_scale // 2))
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, _offs(idx.arg * disp_scale))
-  # NOTE: dont cast for now so I dont need to impl cast alu
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
-  # For now dont use immediate offset (set to 0x0)
-  # lane relative offsets need to be stored in vgpr
-  return (idx << shft, base, _offs(0))
 
 V_ADD =   { dtypes.float16:RDNA3Ops.v_add_f16_e32,  dtypes.float32:RDNA3Ops.v_add_f32_e32,  dtypes.float64:RDNA3Ops.v_add_f64,   dtypes.int32:RDNA3Ops.v_add_nc_i32,       dtypes.uint32:RDNA3Ops.v_add_nc_u32_e32,  }
 V_SUB =   { dtypes.float16:RDNA3Ops.v_sub_f16_e32,  dtypes.float32:RDNA3Ops.v_sub_f32_e32,  dtypes.int32:RDNA3Ops.v_sub_nc_i32,  dtypes.uint32:RDNA3Ops.v_sub_nc_u32_e32,  }
@@ -170,6 +152,57 @@ def stack(ctx:IselContext, x:UOp):
   movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(_slice, x.src)]
   return UOp.group(*movs)
 
+def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
+  def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
+  # def _const(v:int) -> UOp: return UOp.const(dtypes.int32, v)
+  base, idx = x.src
+  # TODO: handle multi-register index ex. 64 bit SGPR pair
+  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  # really should get stored in sgpr
+  shft = to_vgpr(const(dtypes.int, disp_scale // 2))
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, _offs(idx.arg * disp_scale))
+  # NOTE: dont cast for now so I dont need to impl cast alu
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
+  # For now dont use immediate offset (set to 0x0)
+  # lane relative offsets need to be stored in vgpr
+  return (idx << shft, base, _offs(0))
+
+def load(idx:UOp, x:UOp):
+  imap = {
+    dt_32bit:(RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
+    dt_64bit:(RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
+    dt_128bit:(RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128)
+  }
+  gins, lins = next(gl for dt, gl in imap.items() if idx.dtype.base in dt)
+  ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
+  idx, base, offs = fold_address(idx)
+  # batch loads, need to update offset
+  # TODO: integrate this iterative offseting into fold_address?
+  loads = [
+      UOp(Ops.INS, arg=ins, src=(idx, base, offs + const(offs.dtype, i * base.dtype.itemsize)),
+          tag=(GP_VGPRS,) if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
+      for i in range(idx.dtype.size)
+  ]
+  return UOp.group(*loads) if len(loads) > 1 else loads[0]
+
+def store(idx:UOp, val:UOp, x:UOp):
+  imap = {
+    dt_32bit:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
+    dt_64bit:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
+    dt_128bit:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
+  }
+  gins, lins = next(gl for dt, gl in imap.items() if idx.dtype.base in dt)
+  ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
+  _idx, base, offs = fold_address(idx)
+  # GEP into val?
+  stores = [
+      UOp(Ops.INS, arg=ins, src=(_idx, base, offs + const(offs.dtype, i * base.dtype.itemsize)) + (val.gep(i),),
+          tag=(GP_VGPRS,) if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
+      for i in range(idx.dtype.size)
+  ]
+  return UOp.group(*stores) if len(stores) > 1 else stores[0]
+
 # all we need to do is prune the group op emitted by stack through an ins pattern that 
 # searches children for pseudo ops
 
@@ -187,11 +220,15 @@ isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
 
+  # make define reg a mov
+  # (UPat(Ops.DEFINE_LOCAL, name="x"), lds),
+  # make define local route to ds
+  # (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
+
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # range gets lowered after regalloc, convert arg to immediate and define sgpr for acc
-
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), lambda bnd,x: x.replace(src=(const(bnd.dtype, bnd.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(GP_SGPRS),)) if not isinstance(x.tag, tuple) else None),
 
@@ -232,18 +269,17 @@ isel_matcher = PatternMatcher([
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
 
   # mem ops
-  (UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))),
-    lambda ctx,x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=(GP_VGPRS, 4))),
-  (UPat.var("a").store(UPat.var("b", dtype=dt_128bit), name="x"),
-    lambda a,b,x: x.ins(RDNA3Ops.global_store_b128, dtype=dtypes.void, src=fold_address(a) + (b,))),
 
-  (UPat.var("a").store(UPat.var("b", dtype=dt_64bit), name="x"),
-    lambda a,b,x: x.ins(RDNA3Ops.global_store_b64, dtype=dtypes.void, src=fold_address(a) + (b,))),
-
-  (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
-    lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
-  (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"),
-    lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, dtype=dtypes.void, src=fold_address(a) + (b,))),
+  (UPat(Ops.LOAD, name="x", src=(UPat.var("idx"))), load),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), store),
+  #(UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))),
+    #lambda ctx,x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx), tag=(GP_VGPRS, 4))),
+  #(UPat.var("idx").store(UPat.var("val"), name="x"), store),
+  #(UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))),
+    #lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
+  #(UPat.var("a").store(UPat.var("b", dtype=dt_64bit), name="x"),
+    #lambda a,b,x: x.ins(RDNA3Ops.global_store_b64, dtype=dtypes.void, src=fold_address(a) + (b,))),
+  # (UPat.var("idx").store(UPat.var("val", dtype=dt_64bit), name="x"), store),
 
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),

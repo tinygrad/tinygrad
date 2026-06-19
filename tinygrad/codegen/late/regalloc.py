@@ -141,7 +141,7 @@ class LinearScanRegallocContext:
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[u.reg][-1] for l in lr[v])]
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[r][-1] for l in lr[v] for r in regs(u))]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.index))
         live_in: dict[Register, Register] = {}
         for v in sorted_uses:
@@ -168,6 +168,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if i in ctx.reals and any(v in ctx.spills for v in regs(ctx.uops[i].src[j])): nsrc.extend([ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]) for v in regs(ctx.uops[i].src[j])])
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
+  # TODO: this is unhandled for RDNA3
   if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
   else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
 

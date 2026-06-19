@@ -23,7 +23,7 @@ class Register:
 
 def regs(u:UOp) -> tuple[Register,...]:
   # model view register dependencies through rewrites in here
-  if u.op is Ops.AFTER and self.src: return tuple(r for s in u.src for r in regs(s))
+  if u.op is Ops.AFTER: return regs(u.src[0])
   if u.op is Ops.GEP: return (regs(u.src[0])[u.arg[0]],) # narrow
   if u.op is Ops.GROUP: return tuple(r for s in u.src for r in regs(s)) # widen
   return u.tag if isinstance(u.tag, tuple) else (u.tag,)
