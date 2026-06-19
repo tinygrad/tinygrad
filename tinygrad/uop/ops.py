@@ -279,12 +279,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER:
-        if isinstance(self.arg, ParamArg):
-          ret = self.src[0].as_shape
-          return ret + (self.dtype.count,) if self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and isinstance(self.dtype, PtrDType) and \
-            self.dtype.count > 1 else ret
-        return (self.arg,)
+      case Ops.BUFFER: return self.src[0].as_shape if isinstance(self.arg, ParamArg) else (self.arg,)
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
@@ -1069,7 +1064,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.PARAM, dtype.ptr(prod(shape), addrspace), arg=ParamArg(slot, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(UOp.const(dtypes.int, prod(shape)),), arg=ParamArg(slot, addrspace=addrspace))
+      buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
+      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
   def placeholder_like(self, slot:int):

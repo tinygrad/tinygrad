@@ -249,7 +249,8 @@ def no_vectorized_buf(buf:UOp):
   if buf.addrspace not in (AddrSpace.LOCAL, AddrSpace.REG): return None
   # TODO: this fails on regs
   #assert buf.max_numel() == buf.ptrdtype.size
-  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.addrspace)).cast(buf.dtype)
+  sz = buf.ptrdtype.size*buf.ptrdtype.count
+  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(sz, buf.addrspace), src=(UOp.const(dtypes.int, sz),)).cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   if buf.addrspace not in (AddrSpace.LOCAL, AddrSpace.REG): return None
