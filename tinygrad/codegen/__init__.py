@@ -59,7 +59,7 @@ pm_number_params = PatternMatcher([
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_load_to_alu = PatternMatcher([
   # NOTE: the PtrDType thing is temporary
-  (UPat(GroupOp.Elementwise|{Ops.STACK}, name="x"), lambda x:
+  (UPat(GroupOp.Elementwise|{Ops.STACK,Ops.GEP}, name="x"), lambda x:
    x.replace(src=tuple([maybe_load(u) for u in x.src])) if not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
