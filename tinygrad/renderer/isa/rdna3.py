@@ -12,6 +12,9 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
+def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
+vccop, _execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
+
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 # TODO: impl with trunc and casting?
 def imm16(dt, v): return const(dt, v)
@@ -19,7 +22,6 @@ def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag
 def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.op is Ops.CONST else x
 
 # def map_addrspace(x:UOp, local_ins, global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
-def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
   if x.op is Ops.DEFINE_REG and x.tag is not None: return None
@@ -187,30 +189,17 @@ def store(ctx, idx:UOp, val:UOp, x:UOp):
   return UOp.group(*stores) if len(stores) > 1 else stores[0]
 
 # TODO: fold cmp in so vreg doesnt get emitted (cnd mask)?
-# - should this be lowered in post regalloc?
-# how would I do this post regalloc?
-# maybe fold gate into src and expand later
-
-# Either do the gated hack or maybe lower to IF ENDIF?
-
-"""
-def gated_store(ctx, idx:UOp, val:UOp, gate:UOp, x:UOp):
-  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=GP_SGPRS) # exec mask
-  # TODO: branch labels
-  branch = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz) # if all lanes are false skip loads
-  ins = store(ctx, idx, val, x)
-  execr = def_reg(dtypes.uint32, EXEC_LO)
-  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execr, execr, mask))
-  return restore.after(ins).after(branch).after(mask)
-"""
-
-def gated_store(ctx, idx:UOp, val:UOp, gate:UOp, x:UOp):
-  nx = store(ctx, idx, val, x)
-  # store cmp outcome in sgpr to allow exec masking
+def gated(ctx, x:UOp, idx:UOp, gate:UOp, val:UOp|None=None):
+  nx = load(ctx, idx, x) if val is None else store(ctx, idx, val, x)
   return nx.replace(src=nx.src + (gate,))
 
+def prepare_range(ctx, x:UOp, bnd:UOp):
+  if x.src[-1].op is Ops.DEFINE_REG: return None # already processed
+  mask = UOp(Ops.DEFINE_REG, dtypes.uint32, tag=ctx.vreg(GP_SGPRS))
+  acc = ctx.vreg(GP_VGPRS)
+  return x.replace(src=x.src + (mask,), tag=acc)
+
 pre_isel_matcher = PatternMatcher([
-  # (UPat.var("idx").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
@@ -229,9 +218,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
-  # range gets lowered after regalloc, convert arg to immediate and define sgpr for acc
-  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), lambda bnd,x: x.replace(src=(const(bnd.dtype, bnd.arg),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(GP_SGPRS),)) if not isinstance(x.tag, tuple) else None),
+  # Range and end gets lowered after regalloc
+  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
+  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), # wire sgpr execmask into src to model reg dependency
+    lambda x,rng: x.replace(src=x.src + (rng.src[-1],)) if len(x.src) == 2 else None), 
   # unary alu ops
   (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[y.dtype])),
   (UPat.var("y").exp2().named("x"), lambda y,x: x.ins(V_EXP[y.dtype])),
@@ -258,7 +248,8 @@ isel_matcher = PatternMatcher([
   # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
   # gated mem ops, fully lowered post regalloc. preserves gate in src
-  (UPat.var("idx").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
+  (UPat.var("idx").store(UPat.var("val"), UPat.var("gate"), name="x"), gated),
+  (UPat(Ops.LOAD, name="x", src=(UPat.var("idx"), UPat.var("gate"))), gated),
   # mem ops
   (UPat(Ops.LOAD, name="x", src=(UPat.var("idx"))), load),
   (UPat.var("idx").store(UPat.var("val"), name="x"), store),
@@ -274,6 +265,7 @@ isel_matcher = PatternMatcher([
 ])
 
 def encode(x:UOp):
+  if x.arg is RDNA3Ops.s_nop: return x, []
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
   def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(regs(x))
@@ -302,34 +294,44 @@ def encode(x:UOp):
   nx = x.replace(arg=ret)
   return nx, [nx] + suffix
 
-def lower_range(x:UOp):
+# is range wave uniform?
+# assume no, so only exit on execz (all bounds are reached)
+def lower_range(ctx,x:UOp):
+  # mask needs to be preallocated!, cant be reserved reg cause nested control flow
   loop_label = "_".join(str(i) for i in x.src[:-1])
-  acc = x.ins(RDNA3Ops.s_move_b32, src=(imm(x.dtype, 0),) + x.src[1:])
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(imm(x.dtype, 0),), tag=regs(x))
   label = x.ins(RDNA3Ops.s_nop, src=(), tag=f".LOOP_{loop_label}")
-  cmp = x.ins(RDNA3Ops.s_cmp_ge_u32, src=(acc, x.src[0]))
+  cmp = x.ins(RDNA3Ops.v_cmp_ge_u32_e32, src=(acc, x.src[0]))
+  mask = UOp(Ops.INS, RDNA3Ops.s_and_saveexec_b32, src=(vccop,), tag=GP_SGPRS)
   jmp_out = x.ins(RDNA3Ops.s_cbranch_scc0, src=(), tag=f".LOOP_OUT_{loop_label}")
+  ctx.loop_label[acc]=loop_label
   return acc, [acc, label, cmp, jmp_out]
 
-def lower_end(x:UOp):
-  pass
+def lower_end(ctx, x:UOp):
+  acc, mask = x.src[1], x.src[-1]
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(acc, const(dtyps.uint32, 1)), tag=(acc,))
+  branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP{ctx.loop_label[acc]}")
+  label = UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=f".LOOP_OUT_{ctx.loop_label[acc]}")
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
+  return inc, [inc, branch, label, restore]
 
 def lower_gated_memops(x:UOp):
+  branch_label = "_".join(str(i) for i in x.src)
   if x.arg not in [RDNA3Ops.GLOBAL, RDNA3Ops.DS]: return None
   expect = 4 if "store" in x.arg.opc else 3
   if len(x.src) == expect: return None
-  gate = x.src[-1]
-  vcc = def_reg(dtypes.uint32, VCC)
-  # use vcc
-  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(vcc,), tag=GP_SGPRS)
+  gate, mask = x.src[-2], x.src[-1]
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(vccop,), tag=GP_SGPRS)
   # TODO: branch labels
   branch = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz) # if all lanes are false skip loads
-  execr = def_reg(dtypes.uint32, EXEC_LO)
-  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execr, execr, mask))
-  return gate, [gate, mask, branch, x, restore]
+  label = UOp(RDNA3Ops.s_nop, src=(None,), tag=f".BRANCH_{branch_label}")
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
+  return gate, [gate, mask, branch, x, label, restore]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
   (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.END, name="x"), lower_end),
   (UPat(Ops.INS, name="x"), lower_gated_memops),
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
