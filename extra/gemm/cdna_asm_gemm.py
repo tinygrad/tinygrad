@@ -2619,7 +2619,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(NUM_WG, "gidx0")
   insts = build_kernel(batch, M, N, K, A.dtype.base)
-  lds = UOp.placeholder((133_120,), dtypes.uint8, -1, AddrSpace.LOCAL)
+  lds = UOp.placeholder((133_120,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
                   arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),

@@ -220,7 +220,7 @@ def test_matmul():
     gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
     lidxs = [UOp.special(THREADS, "lidx0")]
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC",2))
-    lds = UOp.placeholder((lds_size,), dtypes.uint8, -1, AddrSpace.LOCAL)
+    lds = UOp.placeholder((lds_size,), dtypes.uint8, 0, AddrSpace.LOCAL)
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs,
                     arg=KernelInfo(name=colored("kernel","cyan"), estimates=Estimates(ops=N*N*N*2, mem=N*N*2*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
