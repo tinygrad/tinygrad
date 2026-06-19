@@ -115,8 +115,7 @@ class Qwen3VLVis():
 
     image_embeds = self.v.post_ln(hidden_states)
     image_embeds = image_embeds.view(-1, self.feed_forward_length)
-    image_embeds = self.mm[0](image_embeds)
-    image_embeds = Tensor.gelu(image_embeds)
+    image_embeds = self.mm[0](image_embeds).gelu()
     image_embeds = self.mm[2](image_embeds)
     return image_embeds, hidden_states, deepstack_features
 
@@ -207,7 +206,7 @@ class DeepstackLayer:
   #https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L112
   def __call__(self, hidden_states:Tensor):
     deepstack_feature = (hidden_states.view(-1, self.hidden_size)).view(-1, self.hidden_size)
-    return self.fc2(Tensor.gelu(self.fc1(deepstack_feature)))
+    return self.fc2((self.fc1(deepstack_feature)).gelu())
 
 class Qwen3VisBlock:
   def __init__(self, kv:dict, weights:dict):
