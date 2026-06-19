@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 
-VCC, EXEC_LO = Register("vcc", 0), Register("exec_lo", 0) k# hack: special regs
+VCC, EXEC_LO = Register("vcc", 0), Register("exec_lo", 0) # hack: special regs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
@@ -125,21 +125,6 @@ def cmp(x:UOp):
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
-"""
-def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx)).rtag()
-  local_idx = local.index(const(dtypes.int32, 0), ptr=True)
-  ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
-  return ptr.cast(cast.dtype).load(dtype=x.dtype)
-"""
-
-pre_isel_matcher = PatternMatcher([
-  # (UPat.var("base").index(UPat.var("idx")).or_casted(name="cast").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
-  # cast to ptr is noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-])
-
-# def _contiguous_groups(n, base_set): return tuple(tuple(base_set[i*n:(i+1)*n]) for i in range(len(base_set) // n))
 def stack(ctx:IselContext, x:UOp):
   _slice = Register.contiguous(ctx, GP_VGPRS, len(x.src))
   movs = [u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(_slice, x.src)]
@@ -196,11 +181,39 @@ def store(ctx, idx:UOp, val:UOp, x:UOp):
   ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
   _idx, base, offs = fold_address(idx)
   stores = [
-      UOp(Ops.INS, arg=ins, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
+      UOp(Ops.INS, arg=ins, dtype=dtypes.void, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
       for i in range(val.dtype.count)
   ]
   return UOp.group(*stores) if len(stores) > 1 else stores[0]
 
+# TODO: fold cmp in so vreg doesnt get emitted (cnd mask)?
+# - should this be lowered in post regalloc?
+# how would I do this post regalloc?
+# maybe fold gate into src and expand later
+
+# Either do the gated hack or maybe lower to IF ENDIF?
+
+"""
+def gated_store(ctx, idx:UOp, val:UOp, gate:UOp, x:UOp):
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=GP_SGPRS) # exec mask
+  # TODO: branch labels
+  branch = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz) # if all lanes are false skip loads
+  ins = store(ctx, idx, val, x)
+  execr = def_reg(dtypes.uint32, EXEC_LO)
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execr, execr, mask))
+  return restore.after(ins).after(branch).after(mask)
+"""
+
+def gated_store(ctx, idx:UOp, val:UOp, gate:UOp, x:UOp):
+  nx = store(ctx, idx, val, x)
+  # store cmp outcome in sgpr to allow exec masking
+  return nx.replace(src=nx.src + (gate,))
+
+pre_isel_matcher = PatternMatcher([
+  # (UPat.var("idx").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
+  # cast to ptr is noop
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+])
 
 # TODO: control flow, gated load/store and RANGE/END
 # TODO: 64 bit integer mul with MAD_u64/i64 and MUL_lo_u32, 32x32 + 64 -> 64
@@ -244,6 +257,8 @@ isel_matcher = PatternMatcher([
   # casts
   # (UPat(dtype=(dtypes.uint8, dtypes.bool, dtypes.uint16)).cast(name="x"), lambda x: x.ins(V_CVT[dtypes.uint16][x.dtype])),
   # (UPat.var("a").cast(name="x"), lambda a,x: x.ins(V_CVT[a.dtype][x.dtype])),
+  # gated mem ops, fully lowered post regalloc. preserves gate in src
+  (UPat.var("idx").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   # mem ops
   (UPat(Ops.LOAD, name="x", src=(UPat.var("idx"))), load),
   (UPat.var("idx").store(UPat.var("val"), name="x"), store),
@@ -267,12 +282,14 @@ def encode(x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, x.arg.opc, x.src, []
 
+  # print(x.op, opc, regs(x))
+
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group == "SMEM": kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group == "GLOBAL":
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
-    if x.tag is None: kw["data"]=_fuse(regs(oprs[3]))
+    if reg(x) is None: kw["data"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
   elif group == "SOPK": args = [dsl_null, oprs[0].arg]
   elif group[:3] in ["VOP", "SOP"]: args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
@@ -296,9 +313,24 @@ def lower_range(x:UOp):
 def lower_end(x:UOp):
   pass
 
+def lower_gated_memops(x:UOp):
+  if x.arg not in [RDNA3Ops.GLOBAL, RDNA3Ops.DS]: return None
+  expect = 4 if "store" in x.arg.opc else 3
+  if len(x.src) == expect: return None
+  gate = x.src[-1]
+  vcc = def_reg(dtypes.uint32, VCC)
+  # use vcc
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(vcc,), tag=GP_SGPRS)
+  # TODO: branch labels
+  branch = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz) # if all lanes are false skip loads
+  execr = def_reg(dtypes.uint32, EXEC_LO)
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execr, execr, mask))
+  return gate, [gate, mask, branch, x, restore]
+
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
   (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.INS, name="x"), lower_gated_memops),
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
   # final operand legalization and then filling of dsl Inst class partials from autogen
