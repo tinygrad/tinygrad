@@ -1,8 +1,9 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor, GlobalCounters
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad import Tensor, GlobalCounters, Device
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -548,6 +549,36 @@ class TestFunctionTuple(unittest.TestCase):
     def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
     f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
     np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
+
+  def test_custom_kernel_program_invalids_not_captured(self):
+    # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
+    # still must not be captured as an input -- else it is read before the kernel writes it
+    src = "void k(float* restrict data0, float* restrict data1) { for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
+    lib = Device["CPU"].compiler.compile(src)
+    def prog(C:UOp, A:UOp) -> UOp:
+      sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
+                 arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
+
+    @function(precompile=True)
+    def f(a:Tensor):
+      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      return Tensor.custom_kernel(c, a, fxn=prog)[0]
+
+    a = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()
+    np.testing.assert_allclose(f(a).numpy(), [2., 4., 6., 8.])
+
+  def test_invalid_store_into_realized_buffer_is_captured(self):
+    # only fresh invalids() scratch is skipped; a realized buffer is a real input even if an Invalid store
+    # writes into part of it (its other elements must be preserved), so it is still captured
+    state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
+    @function(precompile=True, allow_implicit=True)
+    def f(a:Tensor):
+      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float32, Invalid, shape=(2,))))
+      return Tensor(after).contiguous() + a
+    out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
+    np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
 
   def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
     devs = ("CPU:0", "CPU:1")

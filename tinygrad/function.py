@@ -1,26 +1,29 @@
-import functools, itertools, time
+import functools, time
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
+from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
+  if x.buf_uop in ctx[1]: return None
   ret = x.param_like(len(ctx[0]))
   ctx[0].append(x)
   return ret
-
-pm_transform_unique_const = PatternMatcher([
-  # transform unique consts to LUNIQUE
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
-   lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1]))),
-])
 
 pm_ctx = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
-])+pm_transform_unique_const
+])
+
+def invalid_outputs(uret:UOp) -> set[UOp]:
+  # invalids() returns fresh write-only scratch: a clone storing CONST(Invalid)
+  # don't capture it as an input; only skip fresh buffers, not realized ones
+  return {u.src[0].buf_uop for u in uret.backward_slice_with_self
+          if u.op is Ops.STORE and u.src[1].base.op is Ops.CONST and u.src[1].base.arg is Invalid
+          and not u.src[0].buf_uop.is_realized}
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -63,7 +66,7 @@ class _function(Generic[ReturnType]):
 
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0)), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
