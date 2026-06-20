@@ -5,10 +5,11 @@ from tinygrad.uop import Ops
 from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, argsort, make_tuple, merge_dicts
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 
 
-class ReduceMixin(DTypeMixin, MovementMixin):
+class ReduceMixin(DTypeMixin, ElementwiseMixin, MovementMixin):
   def _rop(self, op: Ops, axis: tuple[int, ...]) -> Self:
     raise NotImplementedError
 
