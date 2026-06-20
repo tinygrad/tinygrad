@@ -148,25 +148,20 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
-# TODO: integrate this iterative offseting into fold_address?
-# TODO: auto fuse large loads/stores into wider instructions ex. 4xb32 -> 1xb128 ins
+# todo: handle 16 bit loads?
+def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
 def load(ctx, idx:UOp, x:UOp):
-  # derive ins type from x
   imap = {
-    dt_32bit:(RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
-    dt_64bit:(RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
-    dt_128bit:(RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128)
+    dt_32bit : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
+    dt_64bit : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
+    dt_128bit : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
   }
-  gins, lins = next(gl for dt, gl in imap.items() if x.dtype in dt)
-  ins = gins if idx.addrspace is AddrSpace.GLOBAL else lins
-  _idx, base, offs = fold_address(idx)
-  loads = [
-      UOp(Ops.INS, arg=ins, dtype=x.dtype, src=(_idx, base, offs.replace(arg=offs.arg+i*base.dtype.itemsize)),
-          tag=GP_VGPRS if base.dtype.itemsize == 4 else (GP_VGPRS,base.dtype.itemsize // 4))
-      for i in range(x.dtype.count)
-  ]
-  return UOp.group(*loads) if len(loads) > 1 else loads[0]
+  nregs = (x.dtype.count * x.dtype.scalar().itemsize+3)//4
+  gl = next(gl for match, gl in imap.items() if x.dtype in match)
+  return x.ins(_insspace(gl,idx), src=fold_address(idx), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
 
+# maybe emitting invidiual stores is better than batching but then needing to move into registers??
+# actually no definetely not, HBM overhead
 def store(ctx, idx:UOp, val:UOp, x:UOp):
   if x.addrspace is AddrSpace.REG:
     tags = [GP_VGPRS] if val.dtype.count == 1 else ctx.vreg((GP_VGPRS, val.dtype.count))
@@ -178,11 +173,10 @@ def store(ctx, idx:UOp, val:UOp, x:UOp):
     dt_64bit:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     dt_128bit:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  gins, lins = next(gl for dt, gl in imap.items() if val.dtype.scalar() in dt)
-  ins = gins if x.addrspace is AddrSpace.GLOBAL else lins
+  gl = next(gl for dt, gl in imap.items() if val.dtype.scalar() in dt)
   _idx, base, offs = fold_address(idx)
   stores = [
-      UOp(Ops.INS, arg=ins, dtype=dtypes.void, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
+      UOp(Ops.INS, arg=_insspace(gl,x), dtype=dtypes.void, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
       for i in range(val.dtype.count)
   ]
   return UOp.group(*stores) if len(stores) > 1 else stores[0]

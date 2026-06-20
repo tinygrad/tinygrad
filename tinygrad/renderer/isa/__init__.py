@@ -35,8 +35,9 @@ class IselContext:
     self.reg_n, self.group_n = itertools.count(), itertools.count()
     arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
     self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
+    self.lds_size = 0
 
-  def vreg(self, cons:tuple[tuple[Register,...],n]|tuple[Register, ...]|Register) -> tuple[Register,...]|Register:
+  def vreg(self, cons:tuple[tuple[Register,...],int]|tuple[Register, ...]|Register) -> tuple[Register,...]|Register:
     if isinstance(cons, tuple) and isinstance(cons[0], tuple): return Register.contiguous(self, *cons)
     return Register(f"vr{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
