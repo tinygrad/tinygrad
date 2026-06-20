@@ -35,7 +35,6 @@ MOCKGPU = DEV.interface.startswith("MOCK")
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
 
-  @unittest.expectedFailure
   def test_max_nan(self):
     # Reductions with NaN should propagate NaN like PyTorch.
     arr = [1.0, float('nan'), 3.0]
