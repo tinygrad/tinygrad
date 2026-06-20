@@ -84,8 +84,8 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
-  else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
+  elif all_int(arg): return UOp.const(dtypes.weakint, arg)
+  else: return UOp(Ops.STACK, dtypes.weakint, tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
@@ -473,7 +473,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
   def vectorize(self, *srcs):
-    return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
+    return UOp(Ops.STACK, self.dtype, (self,)+srcs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):

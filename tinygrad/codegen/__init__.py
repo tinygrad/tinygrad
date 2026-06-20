@@ -24,6 +24,8 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
+from tinygrad.codegen.codegen2 import expander2, pm_move_regs
+
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
@@ -81,7 +83,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
@@ -96,7 +99,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # **** optimizations are done, now we lower to actual code ****
 
   # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  #sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  sink = graph_rewrite(sink, pm_move_regs,  name="** add loads")
 
   # create image buffers
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
