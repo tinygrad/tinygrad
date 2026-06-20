@@ -9,7 +9,7 @@ from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 
 
-class ReduceMixin(DTypeMixin, ElementwiseMixin, MovementMixin):
+class ReduceMixin(DTypeMixin, MovementMixin):
   def _rop(self, op: Ops, axis: tuple[int, ...]) -> Self:
     raise NotImplementedError
 
@@ -95,7 +95,8 @@ class ReduceMixin(DTypeMixin, ElementwiseMixin, MovementMixin):
     """
     ret = self._reduce(Ops.MAX, axis, keepdim)
     if self.dtype in dtypes.floats:
-      has_nan = self.isnan().any(axis=axis, keepdim=keepdim)
+      t = cast(ElementwiseMixin, self)
+      has_nan = t.isnan().any(axis=axis, keepdim=keepdim)
       ret = has_nan.where(ret.const_like(math.nan), ret)
     return ret
 
