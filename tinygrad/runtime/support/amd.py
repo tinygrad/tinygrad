@@ -36,7 +36,9 @@ def import_module(name:str, target:tuple[int, int, int], submod=""):
     return getattr(mod, children[-1])
   raise ImportError(f"Failed to import {submod+'.' if submod else ''}{name} {'.'.join(map(str, target))}")
 
-def import_soc(ip): return getattr(tinygrad.runtime.autogen.am, f"soc_{ip[0]}")
+def import_soc(ip):
+  # RDNA1 (gfx10xx) reuses soc_11 until dedicated soc_10 headers land
+  return getattr(tinygrad.runtime.autogen.am, f"soc_{11 if ip[0] == 10 else ip[0]}")
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   from tinygrad.runtime.autogen.am import pmc
