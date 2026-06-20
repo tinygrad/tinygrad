@@ -51,6 +51,7 @@ class ISARenderer(Renderer):
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
+  post_regalloc_ctx: any|None = None
 
   def is_two_address(self, x:UOp) -> bool: return False
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")

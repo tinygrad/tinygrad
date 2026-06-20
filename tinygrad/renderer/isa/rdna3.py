@@ -5,6 +5,7 @@ from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
+from dataclasses import dataclass
 
 VCC, EXEC_LO = Register("vcc", 0), Register("exec_lo", 0) # hack: special regs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
@@ -320,6 +321,14 @@ def lower_gated_memops(x:UOp):
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return gate, [gate, mask, branch, x, label, restore]
 
+def insertwaits(ctx, x:UOp):
+  return None
+
+# does it make snse for waitcnt pass in this matcher?
+# its annoying to be put arch specific info into regalloc ctx,
+# would be nice to have a final pass matcher arch specific
+
+# this doesnt need regalloc ctx? just make an isa specific one in ISARenderer
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
   (UPat(Ops.RANGE, name="x"), lower_range),
@@ -328,8 +337,13 @@ post_regalloc_matcher = PatternMatcher([
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
   # final operand legalization and then filling of dsl Inst class partials from autogen
+  (UPat(Ops.INS, name="x"), insertwaits),
   (UPat(Ops.INS, name="x"), encode),
 ])
+
+@dataclass
+class RDNA3LinearCtx:
+  foo: int = 0
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -337,6 +351,7 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
+  post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
 
