@@ -168,19 +168,19 @@ def store(ctx, idx:UOp, val:UOp, x:UOp):
     tags = [GP_VGPRS] if val.dtype.count == 1 else ctx.vreg((GP_VGPRS, val.dtype.count))
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg) for i, tg in zip(range(val.dtype.count), tags)]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
-  # derive ins type from val
   imap = {
     dt_32bit:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     dt_64bit:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     dt_128bit:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  gl = next(gl for dt, gl in imap.items() if val.dtype.scalar() in dt)
-  _idx, base, offs = fold_address(idx)
-  stores = [
-      UOp(Ops.INS, arg=_insspace(gl,x), dtype=dtypes.void, src=(_idx, base, offs.replace(arg=offs.arg + i * base.dtype.itemsize)) + (val.gep(i),))
-      for i in range(val.dtype.count)
-  ]
-  return UOp.group(*stores) if len(stores) > 1 else stores[0]
+  gl = next(gl for match, gl in imap.items() if val.dtype in match)
+  nregs = (val.dtype.count * val.dtype.scalar().itemsize+3)//4
+  _str = UOp(Ops.INS, arg=_insspace(gl,idx), dtype=dtypes.void, src=fold_address(idx) + (val,))
+  if nregs > 1:
+      mvs = [UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=(r,))
+        for i, r in enumerate(ctx.vreg((GP_VGPRS, nregs)))]
+      _str.replace(src=_str.src[:-1] + tuple(mvs))
+  return _str
 
 # TODO: fold cmp in so vreg doesnt get emitted (cnd mask)?
 def gated(ctx, x:UOp, idx:UOp, gate:UOp, val:UOp|None=None):
