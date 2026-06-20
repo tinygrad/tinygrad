@@ -5,7 +5,7 @@ from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 VCC, EXEC_LO = Register("vcc", 0), Register("exec_lo", 0) # hack: special regs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
@@ -321,14 +321,28 @@ def lower_gated_memops(x:UOp):
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return gate, [gate, mask, branch, x, label, restore]
 
+@dataclass
+class CntState:
+  ds_cnt: int     = 0 # LGKMcnt
+  load_cnt: int   = 0 # VMcnt
+  store_cnt: int  = 0 # VScnt
+
+@dataclass
+class RDNA3LinearCtx:
+  cntstate: CntState = field(default_factory=CntState)
+  memsync: dict[Register, CntState] = field(default_factory=dict) # maps register defs to required cnt state (sync uses)
+
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
 def insertwaits(ctx, x:UOp):
+  if x.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: return None
+  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: ctx.cntstate.ds_cnt += 1
+  elif "load" in x.arg.opc: ctx.cntstate.load_cnt += 1
+  else: ctx.cntstate.store_cnt += 1
+  from copy import copy
+  if reg(x) is not None:
+    for r in regs(x): ctx.memsync[r] = copy(ctx.cntstate)
   return None
 
-# does it make snse for waitcnt pass in this matcher?
-# its annoying to be put arch specific info into regalloc ctx,
-# would be nice to have a final pass matcher arch specific
-
-# this doesnt need regalloc ctx? just make an isa specific one in ISARenderer
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
   (UPat(Ops.RANGE, name="x"), lower_range),
@@ -340,10 +354,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), insertwaits),
   (UPat(Ops.INS, name="x"), encode),
 ])
-
-@dataclass
-class RDNA3LinearCtx:
-  foo: int = 0
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -366,6 +376,8 @@ class RDNA3Renderer(ISARenderer):
     print(prg.arg)
     for u in lin.src: print(u.arg)
     # insert waits here?
+    for r, cnts in self.post_regalloc_ctx.memsync.items():
+      print(r, cnts)
     return assemble_linear(prg, lin, self.target.arch)
 
   # def asm_str(self, uops:list[UOp], function_name:str) -> str:
