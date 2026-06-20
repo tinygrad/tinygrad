@@ -1062,9 +1062,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
-  def placeholder_like(self, slot:int):
+  def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot, addrspace)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
@@ -1686,7 +1686,7 @@ pm_lower_index_dtype = PatternMatcher([
                         UPat.var("gate").where(UPat.var("idx_x", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx_x,idx_y,gate: buf.index(gate.where(idx_y, idx_y.const_like(Invalid)),
                                           gate.where(idx_x, idx_x.const_like(Invalid)), ptr=True)),
-  (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
+  (UPat((Ops.SINK, Ops.NOOP, Ops.END, Ops.AFTER, Ops.BUFFER), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
