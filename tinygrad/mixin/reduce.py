@@ -1,3 +1,4 @@
+import math
 import string
 from typing import Self, Sequence, cast
 from tinygrad.uop import Ops
@@ -91,7 +92,11 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     print(t.max(axis=1, keepdim=True).numpy())
     ```
     """
-    return self._reduce(Ops.MAX, axis, keepdim)
+    ret = self._reduce(Ops.MAX, axis, keepdim)
+    if self.dtype in dtypes.floats:
+      has_nan = self.isnan().any(axis=axis, keepdim=keepdim)
+      ret = has_nan.where(ret.const_like(math.nan), ret)
+    return ret
 
   def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
     """

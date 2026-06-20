@@ -2904,7 +2904,6 @@ class TestOps(unittest.TestCase):
   def test_matvec(self):
     helper_test_op([(1,128), (128,128)], lambda x,y: (x@y).relu())
 
-  @unittest.skip("this test is broken #862")
   def test_max_nan(self):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
