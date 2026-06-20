@@ -1591,7 +1591,10 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     # for RDNA3, same layout as f32 but only lo 16 bits used
     mat_c = [read_f16_val(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
-    mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
+    mat_d = [
+      sum((mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)), start=UOp.const(dtypes.float32, 0.0)) + mat_c[r*16+c]
+      for r in range(16) for c in range(16)
+    ]
     def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
     def f32_to_bf16_bits(v: UOp) -> UOp: return (v.bitcast(dtypes.uint32) >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
     out_cvt = f32_to_bf16_bits if is_bf16 else f32_to_f16_bits
@@ -1605,7 +1608,10 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   else: # f32
     mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0])).bitcast(dtypes.float32)
              for m in range(16) for n in range(16)]
-    mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
+    mat_d = [
+      sum((mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)), start=UOp.const(dtypes.float32, 0.0)) + mat_c[r*16+c]
+      for r in range(16) for c in range(16)
+    ]
     stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0]), mat_d[m*16+n].bitcast(dtypes.uint32), exec_mask)
               for m in range(16) for n in range(16)]
   return UOp.sink(*stores, *ctx.inc_pc())
