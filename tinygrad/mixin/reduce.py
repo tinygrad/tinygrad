@@ -1,12 +1,14 @@
 import math
 import string
-from typing import Self, Sequence, cast
+from typing import TYPE_CHECKING, Self, Sequence, cast
 from tinygrad.uop import Ops
 from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, argsort, make_tuple, merge_dicts
 from tinygrad.mixin.dtype import DTypeMixin
-from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
+
+if TYPE_CHECKING:
+  from tinygrad.mixin import OpMixin
 
 
 class ReduceMixin(DTypeMixin, MovementMixin):
@@ -95,9 +97,9 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     """
     ret = self._reduce(Ops.MAX, axis, keepdim)
     if self.dtype in dtypes.floats:
-      t = cast(ElementwiseMixin, self)
-      has_nan = t.isnan().any(axis=axis, keepdim=keepdim)
-      ret = has_nan.where(ret.const_like(math.nan), ret)
+      src, out = cast("OpMixin", self), cast("OpMixin", ret)
+      has_nan = src.isnan().any(axis=axis, keepdim=keepdim)
+      ret = has_nan.where(out.const_like(math.nan), ret)
     return ret
 
   def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:

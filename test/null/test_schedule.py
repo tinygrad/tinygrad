@@ -266,7 +266,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(big_enough).realize()
     with Context(SPLIT_REDUCEOP=1):
       out = (x - x.max(keepdim=True)).max()
-      check_schedule(out, 4)
+      check_schedule(out, 6)
 
   def test_example_matmul_contig(self):
     x = Tensor.eye(64).clone().realize()
@@ -1370,7 +1370,7 @@ class TestSchedule(unittest.TestCase):
   # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
   def test_min_float_has_two_mul(self):
     t = Tensor([1.0, 2.0, 3.0]).min()
-    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.CMPNE, Ops.MUL, Ops.WHERE, Ops.MUL])
 
   # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
   def test_min_int_has_two_xor(self):
