@@ -265,9 +265,9 @@ def encode(x:UOp):
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
-  enc, group, opc, oprs, suffix = x.arg, x.arg.func.__name__, x.arg.opc, x.src, []
+  enc, group, opc, oprs = x.arg, x.arg.func.__name__, x.arg.opc, x.src
 
-  # print(x.op, opc, regs(x))
+  # print(opc, regs(x), [regs(u) for u in x.src])
 
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -281,11 +281,11 @@ def encode(x:UOp):
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
   # sync loads across wave
-  if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
+  # if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
-  return nx, [nx] + suffix
+  return nx, [nx]
 
 # is range wave uniform?
 # assume no, so only exit on execz (all bounds are reached)
@@ -321,26 +321,47 @@ def lower_gated_memops(x:UOp):
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return gate, [gate, mask, branch, x, label, restore]
 
-@dataclass
-class CntState:
-  ds_cnt: int     = 0 # LGKMcnt
-  load_cnt: int   = 0 # VMcnt
-  store_cnt: int  = 0 # VScnt
+
+from enum import Enum, auto
+class CounterType(Enum):
+  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
 
 @dataclass
 class RDNA3LinearCtx:
-  cntstate: CntState = field(default_factory=CntState)
-  memsync: dict[Register, CntState] = field(default_factory=dict) # maps register defs to required cnt state (sync uses)
+  bld_cntstate: dict[CounterType, int] = field(default_factory=lambda:{CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0})
+  fill_cntstate: dict[CounterType, int] = field(default_factory=lambda:{CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0})
+  # maps register defs to required cnt state (sync uses) and wait ins
+  tosync: dict[Register, tuple[CounterType, int]] = field(default_factory=dict) 
+
+def _counter(x:UOp):
+  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: return CounterType.DS_CNT
+  elif "load" in x.arg.opc: return CounterType.LOAD_CNT
+  else: return CounterType.STORE_CNT
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
-def insertwaits(ctx, x:UOp):
+def buildcnts(ctx:RDNA3LinearCtx, x:UOp):
   if x.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: return None
-  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: ctx.cntstate.ds_cnt += 1
-  elif "load" in x.arg.opc: ctx.cntstate.load_cnt += 1
-  else: ctx.cntstate.store_cnt += 1
-  from copy import copy
+  ctx.bld_cntstate[(ctp:=_counter(x))] += 1
   if reg(x) is not None:
-    for r in regs(x): ctx.memsync[r] = copy(ctx.cntstate)
+    for r in regs(x): ctx.tosync[r] = [ctp, ctx.bld_cntstate[ctp]]
+  return None
+
+# lazy insert
+def insertwaitcnts(ctx:RDNA3LinearCtx, x:UOp):
+  waitins = {
+    CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt,
+    CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt,
+    CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt
+  }
+  if x.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: ctx.fill_cntstate[_counter(x)] += 1
+  deps = [ctx.tosync[r] for r in regs(x) if r in ctx.tosync]
+  if len(deps) == 0: return None
+  lowers: dict[CounterType, int] = {}
+  for tp,n in deps:
+    if ctx.fill_cntstate[tp] > n: lowers[tp] = min(lowers.setdefault(tp, float('inf')), n)
+  if len(lowers) == 0: return None
+  before = [UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16, n),)) for tp,n in lowers.items()]
+  # return before[0], before + [x]
   return None
 
 post_regalloc_matcher = PatternMatcher([
@@ -351,7 +372,8 @@ post_regalloc_matcher = PatternMatcher([
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
   # final operand legalization and then filling of dsl Inst class partials from autogen
-  (UPat(Ops.INS, name="x"), insertwaits),
+  (UPat(Ops.INS, name="x"), buildcnts),
+  (UPat(Ops.INS, name="x"), insertwaitcnts),
   (UPat(Ops.INS, name="x"), encode),
 ])
 
@@ -376,8 +398,7 @@ class RDNA3Renderer(ISARenderer):
     print(prg.arg)
     for u in lin.src: print(u.arg)
     # insert waits here?
-    for r, cnts in self.post_regalloc_ctx.memsync.items():
-      print(r, cnts)
+    # for r, (tp,n) in self.post_regalloc_ctx.tosync.items(): print(r, tp, n)
     return assemble_linear(prg, lin, self.target.arch)
 
   # def asm_str(self, uops:list[UOp], function_name:str) -> str:
