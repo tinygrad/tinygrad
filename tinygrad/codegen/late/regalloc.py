@@ -80,8 +80,9 @@ class LinearScanRegallocContext:
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       print("WARNING: filling")
       if v not in self.spills:
+        # the value of a BUFFER is its 64bit address
         dt = self.vdef(v).dtype
-        sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
+        sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.scalar().itemsize * dt.count
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
@@ -138,7 +139,7 @@ class LinearScanRegallocContext:
       """
       if u.op is Ops.DEFINE_LOCAL:
         self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
-        self.stack_size += u.dtype.nbytes()
+        self.stack_size += u.max.numel() * u.dtype.itemsize()
       """
 
       # loop prologue, avoid loading inside the loop
@@ -192,6 +193,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL} | PSEUDO_OPS, name="x"),
-   regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

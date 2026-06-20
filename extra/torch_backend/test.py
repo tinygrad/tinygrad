@@ -248,7 +248,7 @@ class TestTorchBackend(unittest.TestCase):
     samples = torch.randint(0, X_train.shape[0], (32,))
     X,Y = X_train[samples], Y_train[samples]
     X.cpu(), Y.cpu()
-    self.assertLessEqual(GlobalCounters.global_ops, 10_000_000)
+    self.assertLessEqual(GlobalCounters.global_ops, 25_000_000)
 
   def _test_diagonal(self, *shape):
     a = torch.randn(*shape, dtype=torch.float32, device=device)

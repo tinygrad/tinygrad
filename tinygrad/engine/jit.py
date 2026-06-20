@@ -1,6 +1,6 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
@@ -69,8 +69,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
@@ -296,7 +296,8 @@ class TinyJit(Generic[ReturnType]):
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
         run_linear(onetime_linear, var_vals)
 
-      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
+      held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
       self.captured = CapturedJit(ret, linear, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)

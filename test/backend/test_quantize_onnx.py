@@ -1,8 +1,9 @@
 # ruff: noqa: E501
 import numpy as np
-import unittest
+import tempfile, unittest
 from tinygrad import Tensor, Context, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops
+from tinygrad.dtype import AddrSpace
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -57,8 +58,9 @@ def get_quantized_model(sz):
       self.cnt += 1
       if self.cnt == 100: return None
       return {"input": np.random.uniform(size=(sz, sz)).astype(np.float32)}
-  out_file = "/tmp/test_out.onnx"
-  quantize_static(create_gemm_model("/tmp/test_in.onnx", sz, sz, sz), out_file,
+  tmpdir = tempfile.mkdtemp()
+  out_file = f"{tmpdir}/test_out.onnx"
+  quantize_static(create_gemm_model(f"{tmpdir}/test_in.onnx", sz, sz, sz), out_file,
                   FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
                   activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
                   extra_options={"ActivationSymmetric": False})
@@ -79,7 +81,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     with Context(QUANTIZE=1):
       linear = run_onnx({"input":inp})["output"].schedule_linear()
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
-      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.DEFINE_REG]
+      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")

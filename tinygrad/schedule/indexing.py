@@ -8,8 +8,8 @@ from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_claus
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.CALL, Ops.FUNCTION}
+                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
+                      Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -77,23 +77,20 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         new_src = UOp(Ops.STAGE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
-  # NOTE: do we need this?
-  return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
+  return x.replace(src=tuple(new_srcs))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
+  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   valid: UOp = UOp.const(dtypes.bool, True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
-  ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
-  ctx.range_map[ret] = ctx.range_map[x]
-  return ret
+  return valid.where(bx.src[0], UOp.const(x.dtype, 0))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if len(x.arg[1]) == 0: return None
+  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
   new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
-  ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=(x.arg[0], ()))
-  ctx.range_map[ret] = ctx.range_map[x]
-  return ret
+  return UOp(Ops.REDUCE, x.dtype, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], ()))
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]

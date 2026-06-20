@@ -14,13 +14,13 @@ print(f"Seed: {seed}", flush=True)
 random.seed(seed)
 
 unary_ops = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
-            lambda a: a//random.randint(1, 9), lambda a: a%random.randint(1, 9),
+            lambda a: a//random.choice(list(range(-9, 0)) + list(range(1, 10))), lambda a: a%random.randint(1, 9),
             lambda a:a.maximum(random.randint(-10, 10)), lambda a:a.minimum(random.randint(-10, 10))]
 binary_ops = [lambda a,b: a+b, lambda a,b: a*b, lambda a,b:a.maximum(b), lambda a,b:a.minimum(b)]
 comp_ops = [operator.lt, operator.le, operator.gt, operator.ge]
 
 def random_or_sub_expression_int(depth, expr):
-  sub_expr = random.choice([e for e in expr.toposort() if e.dtype is not dtypes.bool])
+  sub_expr = random.choice([e for e in expr.toposort() if e.dtype not in (dtypes.bool, dtypes.void)])
   return random.choice([random_int_expr(depth-1), sub_expr])
 
 def random_int_expr(depth=10):

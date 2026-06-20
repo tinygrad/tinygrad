@@ -133,7 +133,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   constexpr int neg_inf_v = 29;
   // Move -inf to VGPR neg_inf_v
   kittens::macros::clobber_gpr<neg_inf_v>();
-  kittens::macros::v_mov_b32<neg_inf_v>(0xff800000);
+  kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000);
 
   art<float, DOT_SLICE_QO, WARP_SIZE_KV, col_l, rt_16x16_s, P_ranges> P_ij; // 16 registers
   art<float, DOT_SLICE_QO, WARP_SIZE_KV, col_l, rt_16x16_s, dP_ranges> dP_ij; // 16 registers
@@ -330,7 +330,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -588,7 +588,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -845,7 +845,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1101,7 +1101,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1371,7 +1371,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1632,7 +1632,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1889,7 +1889,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -2145,7 +2145,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
-        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+        kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -2410,7 +2410,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 0
-      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+      kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -2671,7 +2671,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 1
-      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+      kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -2927,7 +2927,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 2
-      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+      kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -3183,7 +3183,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 3
-      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
+      kittens::macros::v_mov_b32_up2p<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);

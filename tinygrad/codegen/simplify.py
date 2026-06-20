@@ -113,7 +113,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # AND on WHERE
-  ((UPat(Ops.DEFINE_VAR, name="x") & UPat.var("y")).where(UPat.var("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+  ((UPat(Ops.PARAM, name="x") & UPat.var("y")).where(UPat.var("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
@@ -134,7 +134,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
+        if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")

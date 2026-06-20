@@ -1,5 +1,6 @@
 # minimal amdgpu elf packer
 import ctypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ceildiv, round_up
 from tinygrad.uop.ops import ProgramInfo, UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
@@ -38,7 +39,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), set(prginfo.globals)
   sink, lds_size = prg.src[0], 0
   for u in sink.toposort():
-    if u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
+    if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"

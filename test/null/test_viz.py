@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -46,6 +46,8 @@ def save_viz():
   with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
     yield viz
   viz.set_data()
+
+needs_tracked_pm = unittest.skipUnless(VIZ, "using TrackedPatternMatcher requires global VIZ=1")
 
 class TestViz(unittest.TestCase):
   def test_simple(self):
@@ -224,7 +226,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(y), id(sink)])
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
@@ -234,7 +236,7 @@ class TestViz(unittest.TestCase):
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
     c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
-    a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
+    a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
       graph_rewrite(alu, PatternMatcher([]))
@@ -258,11 +260,14 @@ class TestViz(unittest.TestCase):
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])
+    reshape_node = const_graph[id(const_reshaped)]
+    self.assertFalse(reshape_node["exclude"])
+    self.assertIn("STACK0 {1,2} Ops.CONST", reshape_node["label"].split("\n"))
 
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
-leaf = TrackedPatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), leaf_rewrite)])
+leaf = TrackedPatternMatcher([(UPat(Ops.PARAM, name="x"), leaf_rewrite)])
 
 def branch_rewrite(x:UOp, y:UOp):
   if x.tag is not None: return
@@ -452,6 +457,41 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
     self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+    for graph in out["layout"]["NULL Graph"]["events"]:
+      graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
+      for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
+        events = [e for e in out["layout"][k]["events"] if graph_st <= e["st"] and e["st"]+e["dur"] <= graph_et]
+        self.assertGreater(len(events), 0)
+        self.assertEqual([e["st"] for e in events], [graph_st+i*events[0]["dur"] for i in range(len(events))])
+
+  @needs_tracked_pm
+  def test_view_source(self):
+    def custom_fn(X:UOp):
+      X = X.flatten()
+      i = UOp.range(X.numel(), 0)
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_name")
+      return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
+    with save_viz() as viz:
+      with self.assertRaises(Exception) as e:
+        x.realize()
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    lin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View UOp List"), None)
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    bin_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Disassembly"), None)
+    assert all(i is not None for i in [lin_idx, src_idx, bin_idx]), f"linear, source and disasm must be visible in {steps}"
+    # Ops.LINEAR renders
+    lin_render = get_render(viz.data, steps[lin_idx]["query"])["src"]
+    self.assertIn("Ops.SINK", lin_render)
+    self.assertIn("Ops.CUSTOMI", lin_render)
+    # Ops.SOURCE renders
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertIn("undeclared_name", src_render)
+    # Ops.BINARY shows the error message since compile failed
+    bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
+    self.assertIn(type(e.exception).__name__, bin_render)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -754,6 +794,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbran
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 
+@needs_tracked_pm
 class TestCfg(unittest.TestCase):
   def setUp(self): self.arch = "gfx1100"
 
@@ -952,6 +993,7 @@ def write_files(viz) -> list[str]:
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
+  @needs_tracked_pm
   def test_reconstruct_debug(self):
     with save_viz() as viz:
       Tensor.empty(1, device="NULL").add(2.0).realize()
@@ -1014,6 +1056,7 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
+  @needs_tracked_pm
   def test_call_graph(self):
     @function(precompile=True)
     def f(x):

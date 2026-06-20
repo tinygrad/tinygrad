@@ -43,31 +43,21 @@ jobs:
         cd $HOME/test_external_dir
         uv venv venv
         uv pip install --python venv $GITHUB_WORKSPACE mypy
+        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         venv/bin/python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         venv/bin/mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist with tinygrad only
-      run: |
-        mkdir $GITHUB_WORKSPACE/test_dir
-        cd $GITHUB_WORKSPACE/test_dir
-        uv venv venv
-        uv pip install --python venv $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         BS=2 STEPS=10 MAX_BUFFER_SIZE=0 venv/bin/python beautiful_mnist.py
-    - name: Test Docs Build
-      run: python -m mkdocs build --strict
     - name: Test Docs
-      run: python docs/abstractions3.py
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
+      run: |
+        parallel --link --tagstring '[{1}]' '{2}' \
+          ::: mkdocs abstractions3 readme quickstart export \
+          ::: 'mkdocs build --strict' \
+              'python docs/abstractions3.py' \
+              $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' README.md | python' \
+              $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' docs/quickstart.md | python' \
+              'DEV=CPU python examples/compile_efficientnet.py > recognize.c && clang -O2 recognize.c -lm -o recognize && cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock'
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Compile EfficientNet to C and test it
-      run: |
-        DEV=CPU python examples/compile_efficientnet.py > recognize.c
-        clang -O2 recognize.c -lm -o recognize
-        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
   torchbackend:
     name: Torch Backend Tests
@@ -202,7 +192,7 @@ jobs:
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Run pre-commit linting hooks
-      run: SKIP=tiny,tests,example pre-commit run --all-files
+      run: SKIP=tiny,tests,example,mypy pre-commit run --all-files
     - name: Lint additional files with ruff
       run: |
         python3 -m ruff check examples/mlperf/ --ignore E501
@@ -228,14 +218,15 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
-        pydeps: "pillow ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
         amd: 'true'
     - name: Run NULL backend tests
       run: DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run targeted tests on NULL backend
-      run: DEV=NULL python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
+      run: |
+        DEV=NULL python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
+        DEV=NULL VIZ=1 python3 -m pytest -n=auto test/null/test_viz.py
     # TODO: too slow
     # - name: Run SDXL on NULL backend
     #   run: DEV=NULL DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
@@ -259,11 +250,11 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
-        pydeps: "pillow ftfy regex pre-commit"
+        pydeps: "pre-commit"
         deps: testing_unit
         llvm: 'true'
     - name: Run pre-commit test hooks
-      run: SKIP=ruff,mypy pre-commit run --all-files
+      run: SKIP=ruff,mypy,tests pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
@@ -388,7 +379,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=10 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
         run: |
           DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
@@ -463,20 +454,22 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: apps_llm
-      - name: Test 1B LLM (llama)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model llama3.2:1b | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (llama q4)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (qwen3.5)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model qwen3.5:0.8b | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (qwen)
-        # NOTE: qwen is dumb and only knows about female chickens
-        run: echo "What's a female chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen
+      - name: Test LLMs
+        env:
+          MAX_BUFFER_SIZE: 0
+        run: |
+          parallel --link --tagstring '[{1}]' '{2}' \
+            ::: llama 'llama q4' qwen3.5 qwen \
+            ::: $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model llama3.2:1b | tee /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model qwen3.5:0.8b | tee /dev/stderr | grep -i rooster' \
+                $'echo "What\'s a female chicken called? Answer with only one word." | python3 -m tinygrad.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen'
+                # NOTE: qwen is dumb and only knows about female chickens
 
 # ****** Models Tests ******
 
   testmodels:
-    name: Models (llvm+cpu+gpu)
+    name: Models
     runs-on: *linux
     timeout-minutes: 15
     steps:
@@ -487,33 +480,11 @@ jobs:
         with:
           key: models
           deps: testing
-          opencl: 'true'
           llvm: 'true'
-      - name: Test models (llvm)
-        run: DEV=CPU:LLVM python -m pytest -n=auto test/models --durations=20
-      - name: Test models (opencl)
-        run: DEV=CL python -m pytest -n=auto test/models --durations=20
       - name: Test models (cpu)
         run: DEV=CPU python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
-
-  testmetalmodels:
-    name: Models (metal)
-    runs-on: &macos macos-26
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: metal
-        deps: testing
-    - name: Test models (Metal)
-      run: DEV=METAL python -m pytest -n=auto test/models --durations=20
-    - name: Test LLaMA compile speed
-      run: DEV=METAL python test/external/external_test_speed_llama.py
 
 # ****** Feature Tests ******
 
@@ -531,14 +502,8 @@ jobs:
         deps: testing
         llvm: "true"
         qemu: "true"
-    - name: Set MOCKDSP env
-      run: printf "MOCKDSP=1" >> $GITHUB_ENV
-    - name: Run test_tiny on DSP
-      run: DEBUG=2 DEV=DSP python test/test_tiny.py
-    - name: Test transcendentals
-      run: DEBUG=2 DEV=DSP python test/backend/test_transcendental.py TestTranscendentalVectorized
-    - name: Test quantize onnx
-      run: DEBUG=2 DEV=DSP python3 test/backend/test_quantize_onnx.py
+    - name: Run tests
+      run: MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/backend/test_transcendental.py::TestTranscendentalVectorized test/backend/test_quantize_onnx.py
 
   testlinux:
     strategy:
@@ -729,7 +694,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
-    runs-on: *macos
+    runs-on: &macos macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code

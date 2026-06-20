@@ -24,17 +24,11 @@ class Estimates:
     mem: dict[tuple[UOp, Ops], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
-    dont_count: set[UOp] = set()
+    excluded: set[UOp] = set()
     if ignore_indexing:
-      def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
-        if u.op in {Ops.LOAD, Ops.STORE}:
-          # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
-          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
-          # TODO: is this correct? this all needs to be cleaned up
-          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
-        elif u.op is Ops.IF:
-          dont_count = dont_count.union(u.src[0].toposort())
+        if u.op in {Ops.INDEX, Ops.SHRINK}:
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -50,13 +44,15 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': mults *= u.arg[2] + 1
+      elif u.op is Ops.PARAM and u.arg.addrspace == AddrSpace.ALU and u.expr == 'core_id': mults *= int(u.vmax) + 1
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.scalar().itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.src[1].dtype.scalar().itemsize * mults
-      elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
-      elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+      elif u.op in GroupOp.ALU and u not in excluded:
+        flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
+      elif u.op is Ops.WMMA and u not in excluded:
+        flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     return Estimates(flops, lds, sum(mem.values()))
 
 class Renderer:
@@ -77,7 +73,6 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
-  new_style: bool = False
 
   compiler: Compiler = Compiler()
 

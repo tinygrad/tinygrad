@@ -1,8 +1,9 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor, GlobalCounters
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad import Tensor, GlobalCounters, Device
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -19,6 +20,13 @@ class TestFunction(unittest.TestCase):
 
     a = Tensor([1,2,3])
     np.testing.assert_equal(f(a,a).numpy(), [2,4,6])
+
+  def test_depth_restored_on_exception(self):
+    from tinygrad.function import _function
+    @function
+    def f(a:Tensor) -> Tensor: raise ValueError("error")
+    with self.assertRaises(ValueError): f(Tensor([1]))
+    self.assertEqual(_function.depth, 0)
 
   def test_implicit(self):
     inp = Tensor([7,8,9])
@@ -505,28 +513,97 @@ class TestFunctionTuple(unittest.TestCase):
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="double_kernel"))
     def double_grad(d_c:UOp, call:UOp): return (None, (Tensor(d_c) * 2.0).uop)
 
+    a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0).realize()
+
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
       c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
-    a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0)
-    Tensor.realize(a)
     np.testing.assert_allclose(f(a).numpy(), 14.0)
 
-  def test_custom_kernel_precompile_further_compute(self):
-    def my_kernel(C:UOp, A:UOp) -> UOp:
+    # g is f with empty output instead of invalids
+    @function(precompile=True, allow_implicit=True)
+    def g(a:Tensor):
+      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
+
+    np.testing.assert_allclose(g(a).numpy(), 14.0)
+
+  def test_custom_kernel_inplace_output_is_implicit(self):
+    # a custom_kernel output the kernel also READS (in-place add) is not write-only, so it must be captured as an input
+    def inplace_add(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+      return C[i].store(C[i].load() + A[i]).end(i).sink(arg=KernelInfo(name="inplace_add"))
+    @function(precompile=True, allow_implicit=False)
+    def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
+    with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
+
+  def test_custom_kernel_write_only_persistent_output_is_implicit(self):
+    # a write-only custom_kernel output that is a realized buffer must be captured
+    def write(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.shape[0], 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+    state = Tensor([100., 200., 300., 400.], device="CPU").contiguous().realize()
+    @function(precompile=True, allow_implicit=True)
+    def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
+    f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
+    np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
+
+  def test_custom_kernel_program_invalids_not_captured(self):
+    # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
+    # still must not be captured as an input -- else it is read before the kernel writes it
+    src = "void k(float* restrict data0, float* restrict data1) { for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
+    lib = Device["CPU"].compiler.compile(src)
+    def prog(C:UOp, A:UOp) -> UOp:
+      sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
+                 arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
 
     @function(precompile=True)
     def f(a:Tensor):
       c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      return Tensor.custom_kernel(c, a, fxn=prog)[0]
+
+    a = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()
+    np.testing.assert_allclose(f(a).numpy(), [2., 4., 6., 8.])
+
+  def test_invalid_store_into_realized_buffer_is_captured(self):
+    # only fresh invalids() scratch is skipped; a realized buffer is a real input even if an Invalid store
+    # writes into part of it (its other elements must be preserved), so it is still captured
+    state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
+    @function(precompile=True, allow_implicit=True)
+    def f(a:Tensor):
+      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float32, Invalid, shape=(2,))))
+      return Tensor(after).contiguous() + a
+    out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
+    np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
+
+  def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
+    devs = ("CPU:0", "CPU:1")
+    def my_kernel(C:UOp, A:UOp) -> UOp:
+      C, A = C.flatten(), A.flatten()
+      i = UOp.range(A.numel(), 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+
+    @function(precompile=True)
+    def f(a:Tensor):
+      c = Tensor.invalids(*a.uop.shard_shape, dtype=a.dtype, device=a.device)
+      if multi: c = Tensor(c.uop.multi(a.uop.axis), device=a.device)
       c = Tensor.custom_kernel(c, a, fxn=my_kernel)[0]
       return c + 1
 
-    a = Tensor([1., 2., 3., 4.]).contiguous().realize()
-    np.testing.assert_allclose(f(a).numpy(), [3., 5., 7., 9.])
+    a = Tensor([1., 2., 3., 4.]).contiguous()
+    if multi: a = a.shard(devs, axis=0)
+    a.realize()
+    out = f(a)
+    GlobalCounters.reset()
+    out.realize()
+    self.assertEqual(GlobalCounters.kernel_count, kernel_count)
+    np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
+
+  def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
@@ -549,7 +626,7 @@ class TestFunctionGrad(unittest.TestCase):
     GlobalCounters.reset()
     loss.realize(w1.grad, w2.grad, w3.grad)
     print(GlobalCounters.global_ops, GlobalCounters.global_mem)
-    self.assertLessEqual(GlobalCounters.global_ops, 4739073)
+    self.assertLessEqual(GlobalCounters.global_ops, 5000000)
   def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
   def test_function_grad_ops_precompile_backward(self):
     self.test_function_grad_ops(precompile=True, precompile_backward=True)

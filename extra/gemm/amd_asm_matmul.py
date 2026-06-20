@@ -458,7 +458,8 @@ def test_matmul():
   def asm_kernel(A:UOp, B:UOp, C:UOp) -> UOp:
     gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
     lidxs = [UOp.special(n, f"lidx{i}") for i,n in enumerate(local)]
-    lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536)), addrspace=AddrSpace.LOCAL), (), 'lds')
+    lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
+    lds = UOp.placeholder((lds_size,), dtypes.uint8, 0, AddrSpace.LOCAL)
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan"),
                                                                                   estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
