@@ -357,46 +357,42 @@ class RDNA3Renderer(ISARenderer):
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    from tinygrad.renderer.amd.elf import assemble_linear
-     
     bld_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
     fill_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
-    # maps op that consumes sync dependent register to cnt requirement
-    tosync: dict[Register, tuple[CounterType, int]] = {}
-
-    for u in lin.src:
-      if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
-      bld_cntstate[(ctp:=_counter(u))] += 1
-      if reg(u) is not None:
-        for r in regs(u): tosync[r] = [ctp, bld_cntstate[ctp]]
-
-    # okay now I need to handle syncing reused registers, currently the cnt
-    # state in tosync dict gets overwritten by later uses
+    # maps op that consumes sync dependent register to cnt requirement + pc from which this cnt is required
+    tosync: dict[Register, tuple[CounterType, list[tuple[int, int]]]] = {}
     nuops = []
+   
     waitins = {
       CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt,
       CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt,
       CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt
     }
-    for u in lin.src:
+
+    for i, u in enumerate(lin.src):
+      if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
+      if reg(u) is not None:
+        for r in regs(u): tosync.setdefault(r,((ctp:=_counter(u)),[]))[1].append((i,bld_cntstate[ctp]))
+      bld_cntstate[ctp] += 1
+
+    for i, u in enumerate(lin.src):
       if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[(ctp:=_counter(u))] += 1
-      deps = [tosync.pop(r) for s in u.src for r in regs(s) if r in tosync]
+      deps = [r for s in u.src for r in regs(s) if r in tosync]
       waits = {}
-      for i, (tp,n) in enumerate(deps):
-        if fill_cntstate[tp] > n:
-          waits[tp] = min(waits.setdefault(tp, float('inf')), n)
-          fill_cntstate[tp]=n
+      for r in deps:
+        tp, pts = tosync[r]
+        cnt = next((n for j,n in reversed(pts) if i > j), None)
+        if (cnt is not None) and fill_cntstate[tp] > cnt:
+          fill_cntstate[tp] = waits[tp] = min(waits.setdefault(tp, float('inf')), cnt)
       nuops.extend([UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16,n),)) for tp,n in waits.items()])
       nuops.append(u)
 
     lin = lin.replace(src=tuple(encode(u) for u in nuops if u.arg is not RDNA3Ops.s_nop))
 
-    # expects arg of every op in lin to be filled Inst class
     print(prg.arg)
-    # insert waits here?
-    for u in lin.src:
-      print(u.arg)
-    # for r, (tp,n) in self.post_regalloc_ctx.tosync.items(): print(r, tp, n)
+    for u in lin.src: print(u.arg)
+     
+    from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
   # def asm_str(self, uops:list[UOp], function_name:str) -> str:
