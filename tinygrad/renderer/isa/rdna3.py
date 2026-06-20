@@ -258,7 +258,7 @@ isel_matcher = PatternMatcher([
 ])
 
 def encode(x:UOp):
-  if x.arg is RDNA3Ops.s_nop: return x, []
+  if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null, VCC as dsl_vcc
   def _route(r:Register): return dsl_vcc if r.name == "vcc" else dsl_v if r.name[0] == "v" else dsl_s
   def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(regs(x))
@@ -285,7 +285,8 @@ def encode(x:UOp):
 
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
-  return nx, [nx]
+  return nx
+  # return nx, [nx]
 
 # is range wave uniform?
 # assume no, so only exit on execz (all bounds are reached)
@@ -321,61 +322,24 @@ def lower_gated_memops(x:UOp):
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return gate, [gate, mask, branch, x, label, restore]
 
-
-from enum import Enum, auto
-class CounterType(Enum):
-  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
-
-@dataclass
-class RDNA3LinearCtx:
-  bld_cntstate: dict[CounterType, int] = field(default_factory=lambda:{CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0})
-  fill_cntstate: dict[CounterType, int] = field(default_factory=lambda:{CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0})
-  # maps register defs to required cnt state (sync uses) and wait ins
-  tosync: dict[Register, tuple[CounterType, int]] = field(default_factory=dict) 
-
-def _counter(x:UOp):
-  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: return CounterType.DS_CNT
-  elif "load" in x.arg.opc: return CounterType.LOAD_CNT
-  else: return CounterType.STORE_CNT
-
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
-def buildcnts(ctx:RDNA3LinearCtx, x:UOp):
-  if x.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: return None
-  ctx.bld_cntstate[(ctp:=_counter(x))] += 1
-  if reg(x) is not None:
-    for r in regs(x): ctx.tosync[r] = [ctp, ctx.bld_cntstate[ctp]]
-  return None
-
-# lazy insert
-def insertwaitcnts(ctx:RDNA3LinearCtx, x:UOp):
-  waitins = {
-    CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt,
-    CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt,
-    CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt
-  }
-  if x.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: ctx.fill_cntstate[_counter(x)] += 1
-  deps = [ctx.tosync[r] for r in regs(x) if r in ctx.tosync]
-  if len(deps) == 0: return None
-  lowers: dict[CounterType, int] = {}
-  for tp,n in deps:
-    if ctx.fill_cntstate[tp] > n: lowers[tp] = min(lowers.setdefault(tp, float('inf')), n)
-  if len(lowers) == 0: return None
-  before = [UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16, n),)) for tp,n in lowers.items()]
-  # return before[0], before + [x]
-  return None
-
 post_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
+  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
   (UPat(Ops.INS, name="x"), lower_gated_memops),
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
-  # final operand legalization and then filling of dsl Inst class partials from autogen
-  (UPat(Ops.INS, name="x"), buildcnts),
-  (UPat(Ops.INS, name="x"), insertwaitcnts),
-  (UPat(Ops.INS, name="x"), encode),
 ])
+
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
+from enum import Enum, auto
+class CounterType(Enum):
+  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
+
+def _counter(x:UOp):
+  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: return CounterType.DS_CNT
+  elif "load" in x.arg.opc: return CounterType.LOAD_CNT
+  else: return CounterType.STORE_CNT
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -383,7 +347,7 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
-  post_regalloc_ctx = RDNA3LinearCtx()
+  # post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
 
@@ -394,10 +358,44 @@ class RDNA3Renderer(ISARenderer):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
+     
+    bld_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
+    fill_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
+    # maps op that consumes sync dependent register to cnt requirement
+    tosync: dict[Register, tuple[CounterType, int]] = {}
+
+    for u in lin.src:
+      if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
+      bld_cntstate[(ctp:=_counter(u))] += 1
+      if reg(u) is not None:
+        for r in regs(u): tosync[r] = [ctp, bld_cntstate[ctp]]
+
+    # okay now I need to handle syncing reused registers, currently the cnt
+    # state in tosync dict gets overwritten by later uses
+    nuops = []
+    waitins = {
+      CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt,
+      CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt,
+      CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt
+    }
+    for u in lin.src:
+      if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[(ctp:=_counter(u))] += 1
+      deps = [tosync.pop(r) for s in u.src for r in regs(s) if r in tosync]
+      waits = {}
+      for i, (tp,n) in enumerate(deps):
+        if fill_cntstate[tp] > n:
+          waits[tp] = min(waits.setdefault(tp, float('inf')), n)
+          fill_cntstate[tp]=n
+      nuops.extend([UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16,n),)) for tp,n in waits.items()])
+      nuops.append(u)
+
+    lin = lin.replace(src=tuple(encode(u) for u in nuops if u.arg is not RDNA3Ops.s_nop))
+
     # expects arg of every op in lin to be filled Inst class
     print(prg.arg)
-    for u in lin.src: print(u.arg)
     # insert waits here?
+    for u in lin.src:
+      print(u.arg)
     # for r, (tp,n) in self.post_regalloc_ctx.tosync.items(): print(r, tp, n)
     return assemble_linear(prg, lin, self.target.arch)
 
