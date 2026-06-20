@@ -99,7 +99,7 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     if self.dtype in dtypes.floats:
       src, out = cast("OpMixin", self), cast("OpMixin", ret)
       has_nan = src.isnan().any(axis=axis, keepdim=keepdim)
-      ret = has_nan.where(out.const_like(math.nan), ret)
+      return cast(Self, has_nan.where(out.const_like(math.nan), out))
     return ret
 
   def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
