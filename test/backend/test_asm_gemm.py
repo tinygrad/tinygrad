@@ -338,11 +338,15 @@ class TestGemmMXFP8(unittest.TestCase):
   def test_llama_ffn(self): run_mxfp8_gemm(8192, 14336, 4096)
   def test_llama_ffn2(self): run_mxfp8_gemm(8192, 4096, 14336)
   def test_llama_qkv(self): run_mxfp8_gemm(8192, 4096, 4096)
+  def test_general_n_fw(self):
+    for N in (256, 1792, 2048, 8192): run_mxfp8_gemm(8192, N, 4096)
   # backward needs all dims tile-aligned (dgrad reduces N, wgrad reduces M)
   def test_bw_simple(self): run_mx_gemm_bw(256, 256, 256)
   def test_bw_rect(self): run_mx_gemm_bw(512, 256, 512)
   def test_bw_w_post(self): run_mx_gemm_bw(256, 256, 256, w_post=True)
   def test_bw_llama_qkv(self): run_mx_gemm_bw(8192, 4096, 4096)
+  def test_general_n_bw(self):
+    for N in (2048, 8192, 14336): run_mx_gemm_bw(8192, N, 4096)
   # MP sharding: col-parallel (w on out axis), row-parallel (x,w on in axis)
   @needs_second_gpu
   def test_multi_col_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=None, w_shard=0, g_shard=1)

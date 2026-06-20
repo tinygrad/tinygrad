@@ -8,7 +8,7 @@ from extra.models import clip
 from examples.mlperf.initializers import gelu_erf, init_stable_diffusion, attn_f32_softmax
 from typing import Literal
 
-clip_params = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True, "clip_tokenizer_version": "sd_mlperf_v5_0"}
+clip_params = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True}
 def get_cond_stage_model(GPUS:list[str]|None=None) -> clip.FrozenOpenClipEmbedder:
   clip.gelu = gelu_erf
   model = clip.FrozenOpenClipEmbedder(**clip_params)
@@ -22,8 +22,8 @@ class TestOpenClip(unittest.TestCase):
     prompt = "Beautiful is better than ugly.\nExplicit is better than implicit.\nSimple is better than complex.\nComplex is better than complicated."
     model = get_cond_stage_model()
     tokens = model.tokenizer.encode(prompt, pad_with_zeros=True)
-    expected = [49406, 1215, 533, 1539, 1126, 8159, 269, 33228, 533, 1539, 1126, 15269, 585, 269, 4129, 533, 1539, 1126, 6324, 269, 6324, 533,
-                1539, 1126, 16621, 269, 49407] + [0]*50
+    expected = [49406, 1215, 533, 1539, 1126, 36070, 269, 33228, 533, 1539, 1126, 15269, 529, 269, 4129, 533, 1539, 1126, 16099, 269, 6324, 533,
+                1539, 1126, 11460, 14589, 269, 49407] + [0]*49
     self.assertEqual(tokens, expected)
 
   def test_clip_gelu_init(self):

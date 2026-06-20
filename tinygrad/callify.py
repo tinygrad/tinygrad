@@ -183,7 +183,7 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None,
+                   b._min_max if b.op is Ops.BIND else None, b.src[0].expr if b.op is Ops.BIND else None,
                    b.addrspace if isinstance(b.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
@@ -197,7 +197,7 @@ pm_replace_buf = PatternMatcher([
   # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
   (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.weakint)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
+  (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
 @track_rewrites(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -205,8 +205,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
-  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
-  ctx = AllocCtx(bases=set([x.multibase for x in big_sink.src if x.base.op not in dont_realize]))
+  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.AFTER}
+  ctx = AllocCtx(bases=set([x.multibase for x in big_sink.src if x.base.op not in dont_realize and x.base.addrspace is not AddrSpace.ALU]))
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
