@@ -265,28 +265,23 @@ def encode(x:UOp):
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
-  enc, group, opc, oprs = x.arg, x.arg.func.__name__, x.arg.opc, x.src
-
-  # print(opc, regs(x), [regs(u) for u in x.src])
+  enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
-  if group == "SMEM": kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
-  elif group == "GLOBAL":
+  if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
+  elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
     if reg(x) is None: kw["data"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
-  elif group == "SOPK": args = [dsl_null, oprs[0].arg]
-  elif group[:3] in ["VOP", "SOP"]: args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
+  elif group is RDNA3Ops.SOPK: args = [dsl_null, oprs[0].arg]
+  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2]: # alujk s
+    args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
-
-  # sync loads across wave
-  # if "load" in opc: suffix.append(encode(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_lgkmcnt if group == "SMEM" else RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))[0])
 
   ret = enc(**kw) if kw is not None else enc(*args)
   nx = x.replace(arg=ret)
   return nx
-  # return nx, [nx]
 
 # is range wave uniform?
 # assume no, so only exit on execz (all bounds are reached)
@@ -363,12 +358,7 @@ class RDNA3Renderer(ISARenderer):
     tosync: dict[Register, tuple[CounterType, list[tuple[int, int]]]] = {}
     nuops = []
    
-    waitins = {
-      CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt,
-      CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt,
-      CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt
-    }
-
+    waitins = { CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt, CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt, CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt }
     for i, u in enumerate(lin.src):
       if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
       if reg(u) is not None:
