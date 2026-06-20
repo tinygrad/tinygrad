@@ -5,12 +5,12 @@ import functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, all_same, flatten
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import ParamArg, AxisType, _align_left, _broadcast_shape, identity_element
+from tinygrad.uop.ops import AxisType, _align_left, _broadcast_shape, identity_element
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
