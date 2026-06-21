@@ -5,18 +5,40 @@
   #chat { flex: 1; overflow-y: auto; padding: 20px }
   .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
   .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
-  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
+  #input { flex: 1; margin-right: 12px; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
 </style></head><body><div id="chat"></div>
-<textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+<div style="display:flex;align-items:center;width:calc(100% - 40px);max-width:768px;margin:20px auto">
+  <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+  <input type="file" id="fileInput" style="display:none" accept="image/*" onchange="handleFile(event)">
+<button id="imgBtn" style="width:44px;height:44px;display:flex;justify-content:center;align-items:center;border:none;border-radius:24px;background:#2f2f2f;color:#e3e3e3;cursor:pointer"
+    onclick="document.getElementById('fileInput').click()">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>
+    </svg>
+  </button>
+</div>
 <script>
+  let image = null, origSvg = imgBtn.innerHTML;
+  fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3Vl')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
+  async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { image = reader.result; imgBtn.style.padding = '0'; imgBtn.innerHTML = `<img src="${reader.result}" style="width:100%;height:100%;border-radius:24px;object-fit:cover">`; };
+    reader.readAsDataURL(file);
+  }
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   async function send() {
     if (!input.value.trim()) return;
-    msgs.push({role: 'user', content: input.value.trim()});
-    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    const content = [{type:'input_text',text:input.value.trim()}];
+    if (image) content.push({type:'input_image',image_url:image});
+    const msg = {role:'user', content};
+    chat.innerHTML += '<div class="msg user">' + (image ? `<img src="${image}" style="max-width:160px;max-height:160px;border-radius:12px;display:block;margin-bottom:8px">` : '') + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    if (image) { image = null; imgBtn.innerHTML = origSvg; imgBtn.style.padding = ''; }
+    msgs.push(msg);
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},

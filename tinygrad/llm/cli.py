@@ -1,6 +1,6 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
-from tinygrad import nn
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, base64
+from tinygrad import nn, Variable
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -147,19 +147,28 @@ class Handler(HTTPRequestHandler):
     tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
         content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
+        text = []
+        if isinstance(content, str): text.append(content)
         elif isinstance(content, list):
           for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
+            # https://developers.openai.com/api/docs/guides/images-vision?format=base64-encoded
+            if c["type"] == "input_text": text.append(c["text"])
+            elif c["type"] == "input_image":
+              ids.extend([0] * (self.server.vis.toks_per_img + self.server.vis.prefix.shape[0] + self.server.vis.suffix.shape[0]))
+              if i == len(body["messages"]) - 1:
+                self.server.vis(lang=self.server.model, image=base64.b64decode(c["image_url"].split(',')[1]), start_pos=\
+                Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
+        ids += tok.role(msg["role"])
+        for t in text: ids += tok.encode(t)
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn()
       else: ids += tok.role("assistant")
