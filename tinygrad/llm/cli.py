@@ -161,9 +161,9 @@ class Handler(HTTPRequestHandler):
             # https://developers.openai.com/api/docs/guides/images-vision?format=base64-encoded
             if c["type"] == "input_text": text.append(c["text"])
             elif c["type"] == "input_image":
-              ids.extend([0] * (self.server.vis.toks_per_img + self.server.vis.prefix.shape[0] + self.server.vis.suffix.shape[0]))
+              ids.extend([0] * (self.server.model.vis.toks_per_img + self.server.model.vis.prefix.shape[0] + self.server.model.vis.suffix.shape[0]))
               if i == len(body["messages"]) - 1:
-                self.server.vis(lang=self.server.model, image=base64.b64decode(c["image_url"].split(',')[1]), start_pos=\
+                self.server.model.vis(lang=self.server.model, image=base64.b64decode(c["image_url"].split(',')[1]), start_pos=\
                 Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
@@ -210,6 +210,10 @@ def main():
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  if "qwen3-vl" in args.model:
+    from extra.models.qwen3vl import Qwen3VLVis
+    model.vis = Qwen3VLVis(size="2B", tok=tok)
 
   # warmup the JIT
   if args.warmup or args.serve:
