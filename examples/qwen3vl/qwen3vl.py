@@ -260,7 +260,7 @@ def DO_POST(self):
           # https://developers.openai.com/api/docs/guides/images-vision?format=base64-encoded
           if c["type"] == "input_text": text.append(c["text"])
           elif c["type"] == "input_image":
-            ids.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
+            ids.extend([0] * (self.server.vis.toks_per_img + self.server.vis.prefix.shape[0] + self.server.vis.suffix.shape[0]))
             if i == len(body["messages"]) - 1:
               self.server.vis(lang=self.server.model, image=base64.b64decode(c["image_url"].split(',')[1]), start_pos=\
               Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
