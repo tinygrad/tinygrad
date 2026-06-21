@@ -496,11 +496,7 @@ class TestTinygrad(unittest.TestCase):
   def test_copy_from_numpy_dtype(self):
     data = np.array([1.0, 2, 3], dtype=np.float32)
     t = Tensor(data, dtype=dtypes.bfloat16)
-    try:
-      # TODO: fix dtype in tinygrad space
-      assert t.dtype == dtypes.bfloat16
-    except AssertionError:
-      assert t.dtype == dtypes.float32
+    assert t.dtype == dtypes.bfloat16
     np.testing.assert_equal(t.tolist(), data)
     np.testing.assert_equal((t+1).tolist(), data+1)
 

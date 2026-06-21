@@ -37,8 +37,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, walk:bool=False)
 
 # **** Tensor helper functions ****
 
-def _fromnp(x: 'numpy.ndarray') -> UOp:
-  ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
+def _fromnp(x: 'numpy.ndarray', dtype: DType|None=None) -> UOp:
+  ret = UOp.new_buffer("NPY", x.size, dtype or _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)
   return ret.reshape(x.shape)
@@ -108,11 +108,17 @@ class Tensor(RandMixin):
       if data.shape == ():
         data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
       else:
-        data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
+        if _dtype is dtypes.bfloat16:
+          x = data.astype(np.float32, copy=False)
+          u = x.view(np.uint32)
+          u = u + np.uint32(0x7FFF) + ((u >> np.uint32(16)) & np.uint32(1))
+          bf16 = (u >> np.uint32(16)).astype(np.uint16)
+          data = _fromnp(bf16, _dtype)
+        else:
+          data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
       _dtype = _dtype or dtypes.uint8
       data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
-
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
