@@ -136,24 +136,13 @@ class Tensor(RandMixin):
     all_tensors[weakref.ref(ret)] = None
     return ret
 
-  # alu and const_like are used by the mixins
+  # alu, _uop, _wrap_uop and const are used by the mixins
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   @property
   def _uop(self) -> UOp: return self.uop
   def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
-  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
-  @staticmethod
-  def invalids(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with Invalid.
-
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
-    """
-    return Tensor(UOp.invalids(argfix(*shape), dtype, device))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param

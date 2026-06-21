@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, prod
 from tinygrad.helpers import resolve_pool_pads, round_up
 
@@ -19,6 +19,17 @@ ReductionStr = Literal["mean", "sum", "none"]
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def const(dtype, b): raise NotImplementedError
+
+  @classmethod
+  def invalids(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Self:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return cls.full(argfix(*shape), Invalid, dtype=dtype, device=device)
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
