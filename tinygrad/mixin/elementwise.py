@@ -15,11 +15,6 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
 
-  @property
-  def _uop(self) -> 'UOp': raise NotImplementedError
-
-  def _wrap_uop(self, u: 'UOp') -> Self: raise NotImplementedError
-
   # great functions you get!
   def ufix(self, x: 'Self|ConstType|UOp') -> Self:
     return x if isinstance(x, type(self)) else self._wrap_uop(self._uop.ufix(x))

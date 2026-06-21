@@ -146,7 +146,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1):
       # Define buffers
       gbuf = UOp.param(0, dtypes.uint.ptr(400))
-      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, addrspace=AddrSpace.LOCAL), (), "temp0")
+      sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
 
       # Define indices, valids and barrier
       gidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 416),), "gidx0")

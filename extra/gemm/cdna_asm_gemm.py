@@ -2619,7 +2619,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(NUM_WG, "gidx0")
   insts = build_kernel(batch, M, N, K, A.dtype.base)
-  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (), 'lds')
+  lds = UOp.placeholder((133_120,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
                   arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),
@@ -2674,14 +2674,14 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
-  rows, K = x.shape
+  *batch, K = x.shape
   scale_K, k_iters = K // 32, K // 128
   amax = x.detach().float().reshape(rows, scale_K, 32).abs().max(axis=-1)
   e8 = (amax.maximum(1e-38).log2().floor() + 127).clamp(0, 254).cast(dtypes.uint8)
-  qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, K)
+  qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(*batch, scale_K, 1).expand(*batch, scale_K, 32).reshape(*batch, K)
   x_scaled = x.float() * qscale
   x_clamped = x_scaled + (x_scaled.detach().clamp(-448.0, 448.0) - x_scaled.detach())  # STE
-  return x_clamped.cast(FP8_DTYPE), e8, mx_pack(e8)
+  return x_clamped.cast(FP8_DTYPE), e8, (mx_pack(e8) if len(batch) == 1 else None)
 
 def mx_pack(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
@@ -2788,15 +2788,21 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
   assert M % TILE_M == 0 and N % TILE_N == 0 and (batch * rows) % TILE_K == 0, \
     f"atb shape {a.shape} {b.shape} must produce (M,N,K) multiples of ({TILE_M},{TILE_N},{TILE_K})"
   is_multi = isinstance(a.device, tuple)
+  reduce_out = False
   if is_multi:
-    out = Tensor(Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device).uop.multi(0), device=a.device)
+    ndev = len(a.device)
+    if a.uop.axis in (0, 1) or b.uop.axis in (0, 1): inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device), 0, True
+    elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=a.dtype, device=a.device), 2
+    elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=a.dtype, device=a.device), 1
+    else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device), 0, True
+    out = Tensor(inv.uop.multi(out_axis), device=a.device)
     dname = a.device[0]
   else:
     out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device)
     dname = a.device
   dname = dname.split(":")[0]
   out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_hk_bf16_atb_gemm, dname=dname))[0]
-  if is_multi: out = out.sum(0)
+  if reduce_out: out = out.sum(0)
   return out.squeeze(0) if out.ndim == 3 else out
 
 
