@@ -317,6 +317,19 @@ class TestTensorUOpScatterReduce(unittest.TestCase):
   def test_mean_exclude_self(self):
     self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="mean", include_self=False)
 
+class TestTensorUOpMaskedSelect(unittest.TestCase):
+  # only the fixed-size path is pure
+  def _check(self, t, mask, **kw):
+    self.assertIs(t.masked_select(mask, **kw).uop, t.uop.masked_select(mask.uop, **kw))
+  def test_masked_select_1d(self): self._check(_t(6), Tensor([True, False, True, False, True, False]), size=4)
+  def test_masked_select_2d(self):
+    self._check(_t(3, 3), Tensor([[True, False, True], [False, True, False], [False, False, True]]), size=6, fill_value=-1)
+
+class TestTensorUOpNonzero(unittest.TestCase):
+  def _check(self, t, **kw): self.assertIs(t.nonzero(**kw).uop, t.uop.nonzero(**kw))
+  def test_nonzero_1d(self): self._check(_t(5), size=3)
+  def test_nonzero_2d(self): self._check(_t(2, 3), size=4)
+
 class TestTensorUOpPool(unittest.TestCase):
   def test_avg_pool2d(self):                _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d())
   def test_avg_pool2d_padding(self):        _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(padding=1))
