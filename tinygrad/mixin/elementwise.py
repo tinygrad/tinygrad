@@ -15,16 +15,9 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
 
-  @property
-  def _uop(self) -> 'UOp': raise NotImplementedError
-
-  def _wrap_uop(self, u: 'UOp') -> Self: raise NotImplementedError
-
   # great functions you get!
   def ufix(self, x: 'Self|ConstType|UOp') -> Self:
     return x if isinstance(x, type(self)) else self._wrap_uop(self._uop.ufix(x))
-
-  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
 
   # implemented in OpMixin, broadcasting needs the movement ops
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:

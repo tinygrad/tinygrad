@@ -453,13 +453,6 @@ class Tensor(RandMixin):
     """
     return Tensor(UOp.empty(argfix(*shape), dtype, device))
 
-  def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> Tensor:
-    """
-    Creates an empty tensor with the same shape as `self`.
-    If `dtype` is not specified, the dtype of `self` is used.
-    """
-    return Tensor(self.uop.empty_like(dtype, device))
-
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
     """
