@@ -416,7 +416,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
     raise NotImplementedError(f"{mode=} is not supported")
 
-  def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
+  def _broadcasted(self, y:Self|ConstType|UOp, reverse:bool=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
     # ValueError: unsized ptr has shape (-1,) which can't broadcast; RuntimeError: shape mismatch
