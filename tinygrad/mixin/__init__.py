@@ -20,6 +20,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def const(dtype, b): raise NotImplementedError
 
+  def _multi_like(self, fxn:Callable[[tuple[sint, ...], str|None], Self]) -> Self:
+    from tinygrad.uop.ops import UOp
+    assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
+    if self._uop.axis is None: return self._wrap_uop(fxn(self.shape, None)._uop.shard(self.device, None))
+    return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).multi(self._uop.axis))
+
   @classmethod
   def invalids(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Self:
     """
