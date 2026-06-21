@@ -23,8 +23,9 @@ class Register:
 
 def regs(u:UOp) -> tuple[Register,...]:
   # model view register dependencies through rewrites in here
-  if u.op in [Ops.AFTER, Ops.END]: return regs(u.src[0])
+  if u.op in {Ops.AFTER, Ops.END}: return regs(u.src[0])
   if u.op is Ops.GEP: return (regs(u.src[0])[u.arg[0]],) # narrow
+  if u.op is Ops.INDEX: return (regs(u.src[0])[u.src[1].arg],) # narrow
   if u.op is Ops.GROUP: return tuple(r for s in u.src for r in regs(s)) # widen
   return u.tag if isinstance(u.tag, tuple) else (u.tag,)
 def reg(u:UOp) -> Register: return regs(u)[0]
@@ -33,7 +34,6 @@ class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n, self.group_n = itertools.count(), itertools.count()
-    arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
     self.lds_size = 0
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)

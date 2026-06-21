@@ -2,7 +2,7 @@ from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
@@ -13,8 +13,11 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
-def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
-vccop, _execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
+# How do i want to represent floating registers?
+# What uop does it belong to?
+def def_reg(dt, reg:Register): return UOp(Ops.INS, arg=RDNA3Ops.s_nop, dtype=dt, tag=(reg,))
+# def def_reg(dt, reg:Register): return UOp(Ops.BUFFER, arg=ParamArg(-1, addrspace=AddrSpace.REG), dtype=dt, tag=(reg,))
+vccop, execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 # TODO: impl with trunc and casting?
@@ -25,7 +28,7 @@ def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.o
 # def map_addrspace(x:UOp, local_ins, global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
-  if x.op is Ops.DEFINE_REG and x.tag is not None: return None
+  if x.op is Ops.BUFFER and x.addrspace is AddrSpace.REG and x.tag is not None: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -134,48 +137,43 @@ def stack(ctx:IselContext, x:UOp):
   return UOp.group(*movs)
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
   def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
+  if x.op not in {Ops.SHRINK, Ops.INDEX}: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
   # def _const(v:int) -> UOp: return UOp.const(dtypes.int32, v)
-  base, idx = x.src
+  base, idx = x.src[0], x.src[1]
   # TODO: handle multi-register index ex. 64 bit SGPR pair
-  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
-  # really should get stored in sgpr
+  disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(const(dtypes.int, disp_scale // 2))
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, _offs(idx.arg * disp_scale))
-  # NOTE: dont cast for now so I dont need to impl cast alu
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
-  # For now dont use immediate offset (set to 0x0)
-  # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
 # todo: handle 16 bit loads?
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
 def load(ctx, idx:UOp, x:UOp):
   imap = {
-    dt_32bit : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
-    dt_64bit : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
-    dt_128bit : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
+    1 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
+    2 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
+    4 : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
   }
-  nregs = (x.dtype.count * x.dtype.scalar().itemsize+3)//4
-  gl = next(gl for match, gl in imap.items() if x.dtype in match)
-  return x.ins(_insspace(gl,idx), src=fold_address(idx), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
+  n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
+  nregs = (n * x.dtype.itemsize+3)//4
+  return x.ins(_insspace(imap[nregs],idx), src=fold_address(idx), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
 
-# maybe emitting invidiual stores is better than batching but then needing to move into registers??
-# actually no definetely not, HBM overhead
 def store(ctx, idx:UOp, val:UOp, x:UOp):
   if x.addrspace is AddrSpace.REG:
     tags = [GP_VGPRS] if val.dtype.count == 1 else ctx.vreg((GP_VGPRS, val.dtype.count))
-    mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg) for i, tg in zip(range(val.dtype.count), tags)]
+    mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
+        for i, tg in zip(range(val.dtype.count), tags)]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
+  n = len(val.src) if val.op is Ops.STACK else 1
+  nregs = (n*val.dtype.itemsize+3)//4
   imap = {
-    dt_32bit:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
-    dt_64bit:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
-    dt_128bit:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
+    1:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
+    2:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
+    4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  gl = next(gl for match, gl in imap.items() if val.dtype in match)
-  nregs = (val.dtype.count * val.dtype.scalar().itemsize+3)//4
-  _str = UOp(Ops.INS, arg=_insspace(gl,idx), dtype=dtypes.void, src=fold_address(idx) + (val,))
+  _str = UOp(Ops.INS, arg=_insspace(imap[nregs],idx), dtype=dtypes.void, src=fold_address(idx) + (val,))
   if nregs > 1:
       mvs = [UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=(r,))
         for i, r in enumerate(ctx.vreg((GP_VGPRS, nregs)))]
@@ -200,17 +198,15 @@ pre_isel_matcher = PatternMatcher([
 # TODO: control flow, gated load/store and RANGE/END
 # TODO: 64 bit integer mul with MAD_u64/i64 and MUL_lo_u32, 32x32 + 64 -> 64
 # TODO: handle unsupported dtypes in pre_isel_matcher by casting?
-# TODO: cleanup!! maybe make pseudops in regalloc dependent on arch/renderer
-# TODO: check for uniformity for SALU usage instead, like x86 is_foldable?
 isel_matcher = PatternMatcher([
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   # hack
-  (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
+  # (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
   # function abi
-  (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
+  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), abi),
   # Range and end gets lowered after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), # wire sgpr execmask into src to model reg dependency
@@ -252,7 +248,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), stack),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
   # normalize and satisfy operand orders/reg types
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
@@ -266,16 +262,18 @@ def encode(x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+  print(opc)
 
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
-  if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
+  if group is RDNA3Ops.SMEM:
+    kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl_null, offset=oprs[-1].arg)
   elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
     if reg(x) is None: kw["data"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl_null, oprs[0].arg]
-  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2]: # alujk s
+  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2]: # alu
     args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
@@ -286,23 +284,29 @@ def encode(x:UOp):
 # is range wave uniform?
 # assume no, so only exit on execz (all bounds are reached)
 def lower_range(ctx,x:UOp):
+  return x, []
+  """
   # mask needs to be preallocated!, cant be reserved reg cause nested control flow
   loop_label = "_".join(str(i) for i in x.src[:-1])
-  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(imm(x.dtype, 0),), tag=regs(x))
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(x.dtype, 0),), tag=regs(x))
   label = x.ins(RDNA3Ops.s_nop, src=(), tag=f".LOOP_{loop_label}")
   cmp = x.ins(RDNA3Ops.v_cmp_ge_u32_e32, src=(acc, x.src[0]))
   mask = UOp(Ops.INS, RDNA3Ops.s_and_saveexec_b32, src=(vccop,), tag=GP_SGPRS)
   jmp_out = x.ins(RDNA3Ops.s_cbranch_scc0, src=(), tag=f".LOOP_OUT_{loop_label}")
   ctx.loop_label[acc]=loop_label
   return acc, [acc, label, cmp, jmp_out]
+  """
 
 def lower_end(ctx, x:UOp):
+  return x, []
+  """
   acc, mask = x.src[1], x.src[-1]
-  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(acc, const(dtyps.uint32, 1)), tag=(acc,))
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(acc, const(dtypes.uint32, 1)), tag=(acc,))
   branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP{ctx.loop_label[acc]}")
   label = UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=f".LOOP_OUT_{ctx.loop_label[acc]}")
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return inc, [inc, branch, label, restore]
+  """
 
 def lower_gated_memops(x:UOp):
   branch_label = "_".join(str(i) for i in x.src)
@@ -317,13 +321,18 @@ def lower_gated_memops(x:UOp):
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execop, mask))
   return gate, [gate, mask, branch, x, label, restore]
 
+def purge_nops(x:UOp):
+  if x.arg is RDNA3Ops.s_nop: return x, []
+  return x, [x]
+
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
+  (UPat(Ops.INS, name="x"), purge_nops),
   (UPat(Ops.INS, name="x"), lower_gated_memops),
   # strip everything but Ops.INS to bypass render rewrite
-  (UPat((Ops.DEFINE_REG, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.GEP, Ops.AFTER), name="x"), lambda ctx,x: (x,[])),
+  (UPat((Ops.NOOP, Ops.BUFFER, Ops.CONST, Ops.GROUP, Ops.STACK, Ops.INDEX, Ops.GEP, Ops.AFTER, Ops.RANGE, Ops.END), name="x"), lambda ctx,x: (x,[])),
 ])
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
@@ -336,13 +345,17 @@ def _counter(x:UOp):
   elif "load" in x.arg.opc: return CounterType.LOAD_CNT
   else: return CounterType.STORE_CNT
 
+@dataclass
+class RDNA3LinearCtx:
+  loop_label: dict[UOp, str] = field(default_factory=dict)
+
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
-  # post_regalloc_ctx = RDNA3LinearCtx()
+  post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
 
