@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, base64
-from tinygrad import nn, Variable
+from tinygrad import nn, Variable, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -214,6 +214,8 @@ def main():
   if "qwen3-vl" in args.model:
     from extra.models.qwen3vl import Qwen3VLVis
     model.vis = Qwen3VLVis(size="2B", tok=tok)
+    for _ in range(2):
+      model.vis.prefill(lang=model, image=Tensor.rand(*model.vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, model.max_context).bind(42))
 
   # warmup the JIT
   if args.warmup or args.serve:
