@@ -131,8 +131,6 @@ class FlatTransformer:
     else:
       self.w13, s_13 = self.lin_per_layer(dim, hidden_dim * 2)
     self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
-    self._fp8_std = {"wqkv": 0.02, "wo": scaled_std, "w2": scaled_std}
-    self._fp8_std.update({"w1": 0.02, "w3": 0.02} if SPLIT_W13 else {"w13": 0.02})
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
