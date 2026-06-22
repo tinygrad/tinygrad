@@ -1,6 +1,6 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import List, Callable
-from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Device
+from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Device, Context
 from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
 
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
   @TinyJit
   def train_step() -> Tensor:
-    with Tensor.train():
+    with Context(TRAINING=1):
       opt.zero_grad()
       samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
       Xt, Yt = X_train[samples].shard_(GPUS, axis=0), Y_train[samples].shard_(GPUS, axis=0)  # we shard the data on axis 0
