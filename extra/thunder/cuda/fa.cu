@@ -10,14 +10,14 @@ constexpr int ATTN_N = 1024;
 constexpr int ATTN_H = 16;
 constexpr int ATTN_D = 64;
 
-template<int D> constexpr size_t ROWS = 16*(64/D); // height of each worker tile (rows)
+template<int D> constexpr size_t ROWS = (D >= 128) ? 16 : (16*64)/D; // tile rows; kittens needs %16 so D=128 uses 16 (not 8)
 template<int D, typename T=bf16, typename L=row_l> using qkvo_tile = rt<T, ROWS<D>, D, L>;
 template<int D, typename T=float> using attn_tile = rt<T, ROWS<D>, ROWS<D>>;
 template<int D> using shared_tile = st_bf<ROWS<D>, D>;
 template<int D> using global_layout = gl<bf16, -1, -1, -1, D>; // B, N, H, specified at runtime, D known at compile time for this kernel
 template<int D> struct globals { global_layout<D> Qg, Kg, Vg, Og; };
 
-__launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
+extern "C" __launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
 __global__ void attend_ker(bf16 *O_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr) {
     constexpr int D = ATTN_D;
     global_layout<D> Qg{Q_ptr, ATTN_B, ATTN_N, ATTN_H, nullptr};
