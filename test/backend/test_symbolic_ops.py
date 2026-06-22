@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Variable, GlobalCounters
+from tinygrad import Tensor, Variable, GlobalCounters, Context
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
 from examples.gpt2 import Attention
@@ -63,7 +63,7 @@ class TestSymbolicOps(unittest.TestCase):
     self.test_attention(imin=4, imax=5, use_symbolic=True)
 
   def test_attention_training(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       self.test_attention(dropout_p=0.0)
       with self.assertRaises(ValueError):
         # symbolic shape dropout is not supported

@@ -358,7 +358,7 @@ def eval_stable_diffusion():
       batch = batch.cat(batch[-1:].expand(bs - unpadded_bs, *batch[-1].shape))
     return batch, unpadded_bs 
 
-  @Tensor.train(mode=False)
+  @Context(TRAINING=0)
   def eval_unet(eval_inputs:list[dict], unet:UNetModel, cond_stage:FrozenOpenClipEmbedder, first_stage:AutoencoderKL,
                 inception:FidInceptionV3, clip:OpenClipEncoder) -> tuple[float, float]:
     # Eval is divided into 5 jits, one per model

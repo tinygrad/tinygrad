@@ -1093,14 +1093,14 @@ class TestSchedule(unittest.TestCase):
 
   #@unittest.skip("may want to reconsider this")
   def test_fold_batchnorm(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(1,32,4,4)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       out = bn(img)
       check_schedule(out, 3, nn.state.get_parameters(bn))
 
   def test_fold_conv_batchnorm_notrain(self):
-    with Tensor.train(False):
+    with Context(TRAINING=0):
       img = Tensor.empty(1,3,8,8)
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=True)
@@ -1108,7 +1108,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(out, 1, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_notrain_no_running_stats(self):
-    with Tensor.train(False):
+    with Context(TRAINING=0):
       img = Tensor.empty(1,3,8,8)
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
@@ -1116,7 +1116,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(1,3,8,8)
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
@@ -1125,7 +1125,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self, adam=False):
     optim, cnt = (nn.optim.Adam, 29) if adam else (nn.optim.SGD, 15)
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.ones(1,3,4,4)
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
@@ -1139,7 +1139,7 @@ class TestSchedule(unittest.TestCase):
   def test_fold_conv_batchnorm_optim_adam(self): self.test_fold_conv_batchnorm_optim(True)
 
   def test_fold_batchnorm_backward(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       x = Tensor.empty((2, 16, 8, 8)).contiguous()
       bn = nn.BatchNorm2d(16)
       fw = bn(x).contiguous_backward().relu().contiguous()
@@ -1484,7 +1484,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 4)
 
   def test_adam_step_fusion(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       x = Tensor.empty(4, 64, 32)
       layer = nn.Linear(32, 32*4)
       _realize_weights(layer)
@@ -1494,7 +1494,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 13)
 
   def test_adam_conv_fuse(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
       _realize_weights(c1)
@@ -1505,7 +1505,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 13)
 
   def test_adam_2convs_fuse(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
@@ -1517,7 +1517,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 15)
 
   def test_sgd_conv_fuse(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
       _realize_weights(c1)
@@ -1527,7 +1527,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 5) # TODO: 3?
 
   def test_sgd_2convs_fuse(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
@@ -1538,7 +1538,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 7)
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
@@ -1550,7 +1550,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 11)
 
   def test_sgd_4convs_fuse(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,16,16)
       c1 = nn.Conv2d(3,4,3,bias=False)
       c2 = nn.Conv2d(4,8,3,bias=False)
@@ -1563,7 +1563,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 15)
 
   def test_sgd_4convs_fuse_conv_bw(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       img = Tensor.empty(2,3,16,16)
       c1 = nn.Conv2d(3,4,3,bias=False)
       c2 = nn.Conv2d(4,8,3,bias=False)
@@ -1664,7 +1664,7 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(len([x for x in linear.src[0].src[0].backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 
   def test_resnet_block(self):
-    with Tensor.train(False):
+    with Context(TRAINING=0):
       in_planes, planes = 64, 64
       conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
       bn1 = nn.BatchNorm2d(planes)

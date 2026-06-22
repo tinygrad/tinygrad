@@ -1,7 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math, itertools, functools, sys, inspect, pathlib, hashlib, weakref
-from contextlib import ContextDecorator
 from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype
@@ -71,7 +70,7 @@ class Tensor(RandMixin, metaclass=TensorMeta):
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
   ```python exec="true" session="tensor"
-  from tinygrad import Tensor, dtypes, nn
+  from tinygrad import Tensor, dtypes, nn, Context
   import numpy as np
   import math
   np.set_printoptions(precision=4)
@@ -153,11 +152,6 @@ class Tensor(RandMixin, metaclass=TensorMeta):
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
     return self
-
-  class train(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, TRAINING.value = TRAINING.value, int(self.mode)
-    def __exit__(self, exc_type, exc_value, traceback): TRAINING.value = self.prev
 
   def __repr__(self):
     ld = self.uop
@@ -804,7 +798,7 @@ class Tensor(RandMixin, metaclass=TensorMeta):
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     t = Tensor.randn(2, 2)
-    with Tensor.train():
+    with Context(TRAINING=1):
       print(t.dropout().numpy())
     ```
     """
