@@ -31,12 +31,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     assert self.numel() == 1, "must have one element for item"
     return self.data()[(0,) * len(self.shape)]
 
-  def _multi_like(self, fxn:Callable[[tuple[sint, ...], str|None], Self]) -> Self:
-    from tinygrad.uop.ops import UOp
-    assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
-    if self._uop.axis is None: return self._wrap_uop(fxn(self.shape, None)._uop.shard(self.device, None))
-    return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).multi(self._uop.axis))
-
   def __getitem__(self, indices) -> Self:
     """
     Retrieves a sub-tensor using indexing.
