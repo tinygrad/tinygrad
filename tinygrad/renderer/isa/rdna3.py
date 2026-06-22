@@ -13,11 +13,6 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
-# how to handle 'flag' registers, do they need to be modelled by regalloc?
-# ex. exec mask, is that a Register object?
-# - get multi defintion errors
-
-# maybe this should also be represented as a Ops.BUFFER w/ paramarg addrspace reg
 def def_reg(dt, reg:Register): return UOp(Ops.INS, arg=RDNA3Ops.s_nop, dtype=dt, tag=(reg,))
 vccop, execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
 
@@ -145,8 +140,8 @@ def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace
 # todo: handle 16 bit loads?
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
 def load(ctx, addr:UOp, x:UOp):
-  idx = addr.src[1]
-  if idx.addrspace is AddrSpace.REG:
+  base, idx = addr.src[:2]
+  if base.addrspace is AddrSpace.REG:
     return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=addr.src[0].dtype, src=(addr.src[0],))
   imap = {
     1 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
@@ -155,12 +150,12 @@ def load(ctx, addr:UOp, x:UOp):
   }
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * x.dtype.itemsize+3)//4
-  return x.ins(_insspace(imap[nregs],idx), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
+  return x.ins(_insspace(imap[nregs],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
 
 def store(ctx, addr:UOp, val:UOp, x:UOp):
-  idx = addr.src[1]
+  base, idx = addr.src[:2]
   n = len(val.src) if val.op is Ops.STACK else 1
-  if idx.addrspace is AddrSpace.REG:
+  if base.addrspace is AddrSpace.REG:
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
         for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
@@ -170,7 +165,7 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
     2:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  return UOp(Ops.INS, arg=_insspace(imap[nregs],addr), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
+  return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
 
 def prepare_range(ctx, x:UOp, bnd:UOp):
   if x.src[-1].op is Ops.INS and x.src[-1].arg is RDNA3Ops.s_nop: return None # already processed
