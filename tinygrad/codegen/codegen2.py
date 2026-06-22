@@ -56,6 +56,7 @@ def do_devectorize(b:UOp):
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+  if b.op is Ops.STORE: return UOp.group(*src)
   return UOp.vectorize(*src).reshape(b.shape)
 
 devectorizer2 = pm_mops+PatternMatcher([
