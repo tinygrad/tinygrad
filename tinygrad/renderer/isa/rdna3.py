@@ -13,7 +13,7 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 
-def def_reg(dt, reg:Register): return UOp(Ops.INS, arg=RDNA3Ops.s_nop, dtype=dt, tag=(reg,))
+def def_reg(dt, reg:Register): return UOp.placeholder((1,), dt, -1, AddrSpace.REG).replace(tag=(reg,))
 vccop, execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
