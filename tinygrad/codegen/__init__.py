@@ -58,7 +58,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
-  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(ast, pm_remove_vec_dtypes+pm_mops+pm_syntactic_sugar+pm_store_ranges,
+                       ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -109,7 +110,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
   #                     ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, name="devectorize2")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
