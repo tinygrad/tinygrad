@@ -2,13 +2,13 @@
 from __future__ import annotations
 import time, math, itertools, functools, sys, inspect, pathlib, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing, disable_gc
+from tinygrad.helpers import suppress_finalizing, disable_gc, TRAINING
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -59,7 +59,14 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-class Tensor(RandMixin):
+# TODO: deprecate this, always use TRAINING
+class TensorMeta(type):
+  @property
+  def training(cls) -> bool: return bool(TRAINING.value)
+  @training.setter
+  def training(cls, mode:bool): TRAINING.value = int(mode)
+
+class Tensor(RandMixin, metaclass=TensorMeta):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -71,7 +78,6 @@ class Tensor(RandMixin):
   ```
   """
   __slots__ = "uop", "is_param", "grad"
-  training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None):
@@ -150,8 +156,8 @@ class Tensor(RandMixin):
 
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
+    def __enter__(self): self.prev, TRAINING.value = TRAINING.value, int(self.mode)
+    def __exit__(self, exc_type, exc_value, traceback): TRAINING.value = self.prev
 
   def __repr__(self):
     ld = self.uop
