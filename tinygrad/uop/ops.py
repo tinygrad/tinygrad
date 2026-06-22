@@ -305,10 +305,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
-      # REDUCE with empty axis is passthrough (lowered form)
-      case Ops.REDUCE if len(self.arg[1]) == 0:
-        # these can mismatch if there's a horizonal reduce
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
