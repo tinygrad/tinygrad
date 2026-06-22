@@ -1,15 +1,8 @@
-from typing import TYPE_CHECKING, Self
+from typing import Self
 from tinygrad.dtype import ConstType, DType, DTypeLike
+from tinygrad.mixin.dtype import DTypeMixin
 
-if TYPE_CHECKING:
-  from tinygrad.uop.ops import UOp
-
-class CreationMixin:
-  @property
-  def _uop(self) -> 'UOp': raise NotImplementedError
-  def _wrap_uop(self, u: 'UOp') -> Self: raise NotImplementedError
-  def cast(self, dtype: DType) -> Self: raise NotImplementedError
-
+class CreationMixin(DTypeMixin):
   def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:

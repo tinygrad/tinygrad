@@ -3,14 +3,13 @@ from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
-from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
 
-class ElementwiseMixin(DTypeMixin, CreationMixin):
+class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError

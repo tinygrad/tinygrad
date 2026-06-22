@@ -859,25 +859,6 @@ class Tensor(RandMixin):
 
   # ***** cast ops *****
 
-  def cast(self, dtype:DTypeLike) -> Tensor:
-    """
-    Casts `self` to the given `dtype`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.uint8)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else self._apply_uop(UOp.cast, dtype=dt)
-
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
     Bitcasts `self` to the given `dtype` of the same itemsize.
