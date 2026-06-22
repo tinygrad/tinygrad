@@ -136,24 +136,13 @@ class Tensor(RandMixin):
     all_tensors[weakref.ref(ret)] = None
     return ret
 
-  # alu and const_like are used by the mixins
+  # alu, _uop, _wrap_uop and const are used by the mixins
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   @property
   def _uop(self) -> UOp: return self.uop
   def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
-  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
-  @staticmethod
-  def invalids(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with Invalid.
-
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
-    """
-    return Tensor(UOp.invalids(argfix(*shape), dtype, device))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
@@ -291,18 +280,6 @@ class Tensor(RandMixin):
     assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
     return self._buffer().as_memoryview().cast(self.dtype.base.fmt, self.shape)
-
-  def item(self) -> PyConst:
-    """
-    Returns the value of this tensor as a standard Python number.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(42)
-    print(t.item())
-    ```
-    """
-    assert self.numel() == 1, "must have one element for item"
-    return self.data()[(0,) * len(self.shape)]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -464,13 +441,6 @@ class Tensor(RandMixin):
     """
     return Tensor(UOp.empty(argfix(*shape), dtype, device))
 
-  def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> Tensor:
-    """
-    Creates an empty tensor with the same shape as `self`.
-    If `dtype` is not specified, the dtype of `self` is used.
-    """
-    return Tensor(self.uop.empty_like(dtype, device))
-
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
     """
@@ -533,261 +503,6 @@ class Tensor(RandMixin):
     high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
     return Tensor._device_seeds[device], low.cat(high)
 
-  @staticmethod
-  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.rand(2, 3)
-    print(t.numpy())
-    ```
-    """
-    dt = to_dtype(dtype or dtypes.default_float)
-    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
-    if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
-    if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
-    device = cast(str, canonicalize_device(device))
-    key, counter = Tensor._next_counter(device, ceildiv(prod(shape) * dt.itemsize, 4))
-    return Tensor._rand(key, counter, shape, dt, contiguous=contiguous)
-
-  # ***** creation helper functions *****
-
-  def _multi_like(self, fxn:Callable[[tuple[sint, ...], str|None], Tensor]) -> Tensor:
-    assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
-    if self.uop.axis is None: return fxn(self.shape, None).shard(self.device)
-    stacked = UOp.mstack(*[fxn(self.uop.shard_shape, d).uop for d in self.device])
-    return Tensor(stacked.multi(self.uop.axis))
-
-  def full_like(self, fill_value:ConstType, dtype=None, device=None) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with the given value.
-    If `dtype` is not specified, the dtype of `self` is used.
-
-    You can pass in the `device` keyword argument to control device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.full_like(t, 42).numpy())
-    ```
-    """
-    if isinstance(self.device, tuple):
-      if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
-      return self._multi_like(lambda shape, dev: Tensor.full(shape, fill_value, dtype=dtype or self.dtype, device=dev))
-    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device)
-
-  def rand_like(self, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape and sharding as `self`, filled with random values from a uniform distribution over the interval `[0, 1)`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.rand_like(t).numpy())
-    ```
-    """
-    if isinstance(self.device, tuple):
-      if kwargs.pop("device", None) is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
-      dtype = kwargs.pop("dtype", self.dtype)
-      return self._multi_like(lambda shape, dev: Tensor.rand(*shape, dtype=dtype, device=dev, **kwargs))
-    return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=kwargs.pop("dtype", self.dtype), **kwargs)
-
-  # ***** random functions *****
-
-  def randn_like(self, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape and sharding as `self`, filled with random values from a normal distribution with mean 0 and variance 1.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.randn_like(t).numpy())
-    ```
-    """
-    src = self.stack(self).rand_like(**{**kwargs, "dtype": dtypes.float32})
-    # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or self.dtype)
-
-  @staticmethod
-  def randn(*shape, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random values from a normal distribution with mean `0` and standard deviation `1`.
-    If `dtype` is not specified, the default type is used.
-
-    You can pass in the `device` keyword argument to control device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.randn(2, 3).numpy())
-    ```
-    """
-    return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype)
-
-  @staticmethod
-  def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random integer values generated uniformly from the interval `[low, high)`.
-    Requires `low < high`. If `dtype` is not specified, the default type is used.
-
-    You can pass in the `device` keyword argument to control device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.randint(2, 3, low=5, high=10).numpy())
-    ```
-    """
-    if not all_int([low, high]): raise TypeError(f"{low=} and {high=} must be integers")
-    if not dtypes.is_int(dtype := to_dtype(dtype)): raise TypeError(f"{dtype=} must be int")
-    if low >= high: raise ValueError(f"Tensor.randint requires low < high, got {low=}, {high=}")
-    return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
-
-  @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
-    Requires `std >= 0`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.normal(2, 3, mean=10, std=2).numpy())
-    ```
-    """
-    if std < 0: raise ValueError(f"Tensor.normal requires std >= 0, got {std=}")
-    return std * Tensor.randn(*shape, **kwargs) + mean
-
-  @staticmethod
-  def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
-    Requires `low < high`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.uniform(2, 3, low=2, high=10).numpy())
-    ```
-    """
-    if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
-    if low >= high: raise ValueError(f"Tensor.uniform requires low < high, got {low=}, {high=}")
-    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype or dtypes.default_float) + low
-
-  @staticmethod
-  def scaled_uniform(*shape, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with random values from a uniform distribution
-    over the interval `[-prod(shape)**-0.5, prod(shape)**-0.5)`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.scaled_uniform(2, 3).numpy())
-    ```
-    """
-    return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(argfix(*shape))**-0.5)
-
-  @staticmethod
-  def glorot_uniform(*shape, **kwargs) -> Tensor:
-    """
-    <https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform>
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.glorot_uniform(2, 3).numpy())
-    ```
-    """
-    bound = (6 / (argfix(*shape)[0]+prod(argfix(*shape)[1:]))) ** 0.5
-    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
-
-  @staticmethod
-  def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    """
-    <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_>
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.kaiming_uniform(2, 3).numpy())
-    ```
-    """
-    bound = (6 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
-    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
-
-  @staticmethod
-  def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    """
-    <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_>
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.kaiming_normal(2, 3).numpy())
-    ```
-    """
-    std = (2 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
-    return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
-
-  @staticmethod
-  def randperm(n:int, device=None, dtype=dtypes.int32, **kwargs) -> Tensor:
-    """
-    Returns a tensor with a random permutation of integers from `0` to `n-1`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    print(Tensor.randperm(6).numpy())
-    ```
-    """
-    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
-
-  def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
-    """
-    Returns a tensor with `num_samples` indices sampled from a multinomial distribution weighted by `self`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor([1, 2, 3, 4])
-    print(t.multinomial(20, replacement=True).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor([1, 2, 3, 4])
-    print(t.multinomial(3, replacement=False).numpy())
-    ```
-    """
-    assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
-    weight = self.unsqueeze(0) if self.ndim == 1 else self
-    assert replacement or num_samples <= weight.shape[1], "no replacement samples must not exceed population size"
-    if replacement or num_samples == 1:
-      cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-      unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
-      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
-    else:
-      # Efraimidis–Spirakis
-      indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
-    return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
-
   # ***** toposort and backward pass *****
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
@@ -816,46 +531,6 @@ class Tensor(RandMixin):
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
-
-  def __getitem__(self, indices) -> Tensor:
-    """
-    Retrieves a sub-tensor using indexing.
-
-    Supported Index Types: `int | slice | Tensor | None | list | tuple | Ellipsis`
-
-    Examples:
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(12).reshape(3, 4)
-    print(t.numpy())
-    ```
-
-    - Int Indexing: Select an element or sub-tensor using integers for each dimension.
-      ```python exec="true" source="above" session="tensor" result="python"
-      print(t[1, 2].numpy())
-      ```
-
-    - Slice Indexing: Select a range of elements using slice notation (`start:end:stride`).
-      ```python exec="true" source="above" session="tensor" result="python"
-      print(t[0:2, ::2].numpy())
-      ```
-
-    - Tensor Indexing: Use another tensor as indices for advanced indexing. Using `tuple` or `list` here also works.
-      ```python exec="true" source="above" session="tensor" result="python"
-      print(t[Tensor([2, 0, 1]), Tensor([1, 2, 3])].numpy())
-      ```
-
-    - `None` Indexing: Add a new dimension to the tensor.
-      ```python exec="true" source="above" session="tensor" result="python"
-      print(t[:, None].shape)
-      ```
-
-    NOTE: Out-of-bounds indexing results in a value of `0`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t[Tensor([4, 3, 2])].numpy())
-    ```
-    """
-    return super().__getitem__(indices)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
@@ -886,68 +561,6 @@ class Tensor(RandMixin):
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
-
-  def masked_select(self, mask, size:int|None=None, fill_value:ConstType=0):
-    """
-    Selects elements from `self` based on the boolean `mask`.
-
-    With `size=None` (default), output length equals the number of `True` values (not jittable).
-    With `size=N`, output length is `N`, padded with `fill_value` or truncated (jittable).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-    mask = Tensor([[True, False, True], [False, True, False], [False, False, True]])
-    print(t.numpy())
-    print(mask.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.masked_select(mask).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.masked_select(mask, size=6, fill_value=-1).numpy())
-    ```
-    """
-    if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
-    x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
-    mask_cumsum = mask.cumsum()
-    if size is None:
-      counts = Tensor.zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, buffer=False)
-      return x[counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()]
-    counts = Tensor.zeros(size, dtype=dtypes.int32, buffer=False).scatter(0, mask_cumsum, 1, reduce='add')
-    return (Tensor.arange(size) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
-
-  def nonzero(self, size:int|None=None, fill_value:ConstType=0) -> Tensor:
-    """
-    Returns the indices of the elements that are non-zero.
-
-    With `size=None` (default), output shape is `(n_nonzero, ndim)` (not jittable).
-    With `size=N`, output shape is `(N, ndim)`, padded with `fill_value` or truncated (jittable).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 0, 2, 0, 3])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0], [0, 2]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero(size=3, fill_value=-1).numpy())
-    ```
-    """
-    if self.ndim == 0:
-      return Tensor.zeros(size if size is not None else int((self != 0).item()), 0, dtype=dtypes.int32, device=self.device)
-    mask = (self != 0).flatten()
-    indices = Tensor.stack(*[Tensor.arange(s).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
-                             for i, s in enumerate(self.shape)], dim=-1)
-    return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim),
-                                 size=size*self.ndim if size is not None else None, fill_value=fill_value).reshape(-1, self.ndim)
 
   # ***** reduce ops *****
 
@@ -1054,11 +667,11 @@ class Tensor(RandMixin):
 
     g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
 
-    # compute 6x6 winograd tiles: GgGt, BtdB
+    # compute 6x6 winograd tiles: GgGt, BtdB. contiguous so the transforms are materialized once
     # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
     # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
-    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
+    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)
 
     # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
     ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
@@ -1226,25 +839,6 @@ class Tensor(RandMixin):
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   # ***** cast ops *****
-
-  def cast(self, dtype:DTypeLike) -> Tensor:
-    """
-    Casts `self` to the given `dtype`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.uint8)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
