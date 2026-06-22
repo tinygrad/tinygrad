@@ -1,16 +1,23 @@
-from typing import TYPE_CHECKING, Self
-from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype
+from typing import TYPE_CHECKING, Callable, Self
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
 from tinygrad.helpers import argfix
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.movement import MovementMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint, UOp
 
-class CreationMixin(DTypeMixin):
+class CreationMixin(DTypeMixin, MovementMixin):
   @staticmethod
   def const(dtype, b): raise NotImplementedError
 
   def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
+
+  def _multi_like(self, fxn:'Callable[[tuple[sint, ...], str|None], Self]') -> Self:
+    from tinygrad.uop.ops import UOp
+    assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
+    if self._uop.axis is None: return self._wrap_uop(fxn(self.shape, None)._uop.shard(self.device, None))
+    return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).multi(self._uop.axis))
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:
     """
@@ -55,9 +62,23 @@ class CreationMixin(DTypeMixin):
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     return val.clone(device=device) if buffer else val
 
-  def full_like(self, fill_value: ConstType, dtype: DType|None=None) -> Self:
-    """Creates a tensor with the same shape as `self`, filled with the given value."""
-    return self.const_like(fill_value) if dtype is None else self.const_like(fill_value).cast(dtype)
+  def full_like(self, fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, buffer=True) -> Self:
+    """
+    Creates a tensor with the same shape as `self`, filled with the given value.
+    If `dtype` is not specified, the dtype of `self` is used.
+
+    You can pass in the `device` keyword argument to control device of the tensor.
+    Pass `buffer=False` to get a broadcast const value instead of a materialized buffer.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(Tensor.full_like(t, 42).numpy())
+    ```
+    """
+    if isinstance(self.device, tuple):
+      if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
+      return self._multi_like(lambda shape, dev: type(self).full(shape, fill_value, dtype=dtype or self.dtype, device=dev, buffer=buffer))
+    return type(self).full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device, buffer=buffer)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:

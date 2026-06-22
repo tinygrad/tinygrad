@@ -503,25 +503,6 @@ class Tensor(RandMixin):
     high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
     return Tensor._device_seeds[device], low.cat(high)
 
-  # ***** creation helper functions *****
-
-  def full_like(self, fill_value:ConstType, dtype=None, device=None) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with the given value.
-    If `dtype` is not specified, the dtype of `self` is used.
-
-    You can pass in the `device` keyword argument to control device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.full_like(t, 42).numpy())
-    ```
-    """
-    if isinstance(self.device, tuple):
-      if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
-      return self._multi_like(lambda shape, dev: Tensor.full(shape, fill_value, dtype=dtype or self.dtype, device=dev))
-    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device)
-
   # ***** toposort and backward pass *****
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
