@@ -162,6 +162,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # determine fold lengths
   lengths = []
   must_divide = True
+  """
   if ctx is not None and ctx.target.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
@@ -174,6 +175,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
     lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
+  """
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
