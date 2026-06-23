@@ -58,8 +58,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
-  sink = graph_rewrite(ast, pm_remove_vec_dtypes+pm_mops+pm_syntactic_sugar+pm_store_ranges,
-                       ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -119,13 +118,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
-  # memory coalesing
-  sink = memory_coalesing(sink)
-
-  # again
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
-  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
-
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
@@ -143,6 +135,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
+  # memory coalesing
+  sink = memory_coalesing(sink)
+
+  # again
+  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
