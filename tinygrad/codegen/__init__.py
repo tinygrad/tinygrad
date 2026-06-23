@@ -121,7 +121,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
 
   # do memory coalesing (late)
-  sink = memory_coalesing(sink)
+  sink = memory_coalesing(sink, ren)
 
   # instruction selection decompositions
   pm_decomp = pm_decomp+\
