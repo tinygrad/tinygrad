@@ -22,7 +22,7 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
-from tinygrad.codegen.codegen2 import expander2, pm_move_regs, devectorizer2, unbroadcast, pm_reduce_local
+from tinygrad.codegen.codegen2 import expander2, pm_move_regs, devectorizer2, unbroadcast, pm_reduce_local, pm_horizontal_reduce
 
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
@@ -105,6 +105,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # create image buffers
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
     sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
+
+  # hreduce
+  sink = graph_rewrite(sink, pm_mops+pm_horizontal_reduce, name="hreduce")
 
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,

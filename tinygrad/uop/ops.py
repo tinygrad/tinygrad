@@ -84,7 +84,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif all_int(arg): return UOp.const(dtypes.weakint, arg)
+  elif len(arg) == 1: return UOp.const(dtypes.weakint, arg[0])
   else: return UOp(Ops.STACK, dtypes.weakint, tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
@@ -1047,11 +1047,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, dtype.ptr(prod(shape), addrspace), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.PARAM, dtype, arg=ParamArg(slot, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
-      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):

@@ -8,13 +8,12 @@ from tinygrad.helpers import all_same, flatten, getenv
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.codegen.late.devectorizer import ReduceContext
 from tinygrad.uop.symbolic import pm_clean_up_group_sink
-from tinygrad.renderer import Renderer
 from collections import defaultdict
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_move_regs = PatternMatcher([
   # BITCAST?
-  (UPat(GroupOp.Elementwise, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(GroupOp.Elementwise|{Ops.REDUCE}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
@@ -82,16 +81,19 @@ def new_split_load_store(ls:UOp, midx:UOp):
       lidx = midx.src[offsets[grp[0]][0]]
       if len(grp) > 1: lidx = lidx.src[0]._mop(Ops.SHRINK, arg=[(lidx.src[1], len(grp))])
       # do load
-      lidx = lidx.load(lidx.vconst_like(0), valid) if valid != True else lidx.load()
+      lidx = lidx.load(lidx.vconst_like(0), valid) if not valid else lidx.load()
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]:
-          idxs[oo] = lidx.index(UOp.const(dtypes.int, i))
+          idxs[oo] = lidx.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else lidx
   assert None not in idxs, f"some idxs are missing {idxs}"
   return UOp.vectorize(*idxs)
 
 #from tinygrad.codegen.late.devectorizer import fold_expanded_index
 devectorizer2 = pm_mops+PatternMatcher([
+  # LOAD+INDEX -> INDEX+LOAD
+  (UPat(Ops.LOAD, src=(UPat.var("buf"),)).index(allow_any_len=True),
+   lambda buf: buf.index(UOp.const(dtypes.int, 0)).load() if buf.shape == (1,) else None),
   # TODO: support STORE
   (UPat((Ops.LOAD,), src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"),), name="ls", allow_any_len=True), new_split_load_store),
   # unpack broadcasting
@@ -135,5 +137,8 @@ def expand_horizontal_reduce(r:UOp):
 
 pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
-  (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
 ])+pm_clean_up_group_sink
+
+pm_horizontal_reduce = PatternMatcher([
+  (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+])
