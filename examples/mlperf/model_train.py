@@ -1849,7 +1849,7 @@ def train_flux():
   grads = [p.grad for p in optim.params]
 
   @TinyJit
-  @Tensor.train(mode=True)
+  @Context(TRAINING=1)
   def minibatch(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
     inputs, noise, labels, latent_dims = prepare_inputs(sample)
     latent_noise_pred = model(**inputs)
@@ -1869,7 +1869,7 @@ def train_flux():
   def optim_step(optim:AdamW):
     optim.step()
 
-  @Tensor.train(mode=False)
+  @Context(TRAINING=0)
   def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
     inputs, noise, labels, latent_dims = prepare_inputs(sample)
     latent_noise_pred = model(**inputs)
