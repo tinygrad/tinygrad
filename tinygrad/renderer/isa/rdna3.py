@@ -22,7 +22,10 @@ execop, execsaveop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, EXEC_S
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
-def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.op is Ops.CONST else x
+def to_vgpr(ctx, x:UOp) -> UOp:
+  if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
+  if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)])
+  return x
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
@@ -77,7 +80,7 @@ V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e32, dtypes.float32:RDNA3Ops.v_
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
 
-def legalize_operands(x:UOp):
+def legalize_operands(ctx, x:UOp):
   group, opc = x.arg.func, x.arg.opc
   if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
     if any(s.tag is None for s in x.src[:2]): return None
@@ -85,15 +88,15 @@ def legalize_operands(x:UOp):
     a, b = x.src[:2]
     if is_vgpr(b): return None
     if is_vgpr(a): return x.replace(src=(b,a) + suffix)
-    return x.replace(src=((a, to_vgpr(b))) + suffix)
+    return x.replace(src=((a, to_vgpr(ctx, b))) + suffix)
   elif group in [RDNA3Ops.GLOBAL] and "store" in opc: 
     if is_vgpr(x.src[-1]): return None
-    return x.replace(src=x.src[:-1] + (to_vgpr(x.src[-1]),))
+    return x.replace(src=x.src[:-1] + (to_vgpr(ctx, x.src[-1]),))
   elif group is RDNA3Ops.VOP3:
     lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
     if len(lits) > 1:
       new = list(x.src)
-      for i in lits[1:]: new[i]=to_vgpr(new[i])
+      for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
       return x.replace(src=tuple(new))
   return None
 
@@ -106,18 +109,14 @@ def cmp(x:UOp):
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
-# this should return single instruction dumbass, nvm bigger dumass
-def stack(ctx:IselContext, x:UOp):
-  return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)])
-
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
-def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
+# def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  shft = to_vgpr(const(dtypes.int, disp_scale // 2))
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, _offs(idx.arg * disp_scale))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
-  return (idx << shft, base, _offs(0))
+  shft = to_vgpr(ctx, const(dtypes.int, disp_scale // 2))
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, const(dtypes.int16, idx.arg * disp_scale))
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, const(dtypes.int16, idx.src[1].arg * disp_scale))
+  return (idx << shft, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
@@ -125,7 +124,7 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = 1 
   print(base.op, idx.op)
   if idx.op is Ops.CONST: return (base, idx.arg * scale)
-  shft = to_vgpr(const(dtypes.int, scale // 2))
+  shft = to_vgpr(ctx, const(dtypes.int, scale // 2))
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
     return (base + (idx.src[0] << shft), idx.src[1].arg * scale)
   raise NotImplementedError(f"cant fold lds, idx.op={idx.op}")
@@ -168,9 +167,7 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
 # differently at compile time, gate result cannot be known ahead of time
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
   ld = load(ctx, addr, x)
-  # alt needs to be independtly emitted here just in case its shared
-  # note: to_vgpr should handle stacks
-  return ld.replace(src=(alt,) + ld.src + (gate,))
+  return ld.replace(src=(to_vgpr(ctx, alt),) + ld.src + (gate,))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
@@ -219,7 +216,7 @@ isel_matcher = PatternMatcher([
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
-  (UPat(Ops.STACK, name="x"), stack),
+  # (UPat(Ops.STACK, name="x"), stack),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
@@ -261,7 +258,7 @@ def encode(x:UOp):
 # order cmp -> load alt -> update exec -> load addr -> restore exec -> passthrough buf
 def expand_gated_load(x:UOp):
   default, gate  = x.src[0], x.src[-1]
-  saved = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(execop,), tag=(EXEC_SAVE,))
+  saved = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=(EXEC_SAVE,))
   restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execsaveop), tag=(EXEC,))
   x = x.replace(src=x.src[1:-1])
   return default, [default, saved, x, restore]
