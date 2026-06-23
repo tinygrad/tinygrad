@@ -48,6 +48,46 @@ def _custom_silu_mul_quantize_mxfp8(fp8_out:UOp, e8_out:UOp, si_out:UOp, x_w1:UO
   si_store = si_out.after(e8_store.end(sb))[col4 * rows + row].store(packed)
   return si_store.end(tid, wg).sink(arg=KernelInfo(f"silu_mul_quantize_mxfp8_{n_elems}", opts_to_apply=()))
 
+@functools.cache
+def _custom_silu_mul_bwd_mxfp8(gx1_out:UOp, gx3_out:UOp, x_w1:UOp, x_w3:UOp, grad_aq:UOp, e8:UOp) -> UOp:
+  rows, K = x_w1.shape
+  scale_K = K // BLK
+  n_elems = rows * K
+  VEC = 8
+  assert n_elems % (THREADS_PER_WG * VEC) == 0, f"{n_elems=} must divide {THREADS_PER_WG*VEC=}"
+  nwg = n_elems // (THREADS_PER_WG * VEC)
+  x_w1, x_w3, grad_aq = x_w1.reshape(n_elems), x_w3.reshape(n_elems), grad_aq.reshape(n_elems)
+  gx1_out, gx3_out, e8 = gx1_out.reshape(n_elems), gx3_out.reshape(n_elems), e8.reshape(rows * scale_K)
+
+  wg = UOp.range(nwg, 0, AxisType.GLOBAL)
+  tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
+  lane = UOp.range(VEC, 2, AxisType.UNROLL)
+  idx = (wg * THREADS_PER_WG + tid) * VEC + lane
+
+  e8v = e8[idx // BLK].cast(dtypes.float)
+  qscale = (127.0 - e8v).exp2()
+  ga = grad_aq[idx].cast(dtypes.float) * qscale
+  w1 = x_w1[idx].cast(dtypes.float)
+  w3 = x_w3[idx].cast(dtypes.float)
+  sig = (1.0 + (w1 * -LOG2E).exp2()).reciprocal()
+  s = w1 * sig
+  sprime = sig * (1.0 + w1 * (1.0 - sig))
+  gx1 = gx1_out[idx].store((ga * sprime * w3).cast(gx1_out.dtype.base))
+  gx3 = gx3_out.after(gx1)[idx].store((ga * s).cast(gx3_out.dtype.base))
+  return gx3.end(lane, tid, wg).sink(arg=KernelInfo(f"silu_mul_bwd_mxfp8_{n_elems}", opts_to_apply=()))
+
+def _silu_mul_quantize_mxfp8_bwd(gradient:UOp, kernel:UOp):
+  _, e8_out, _, x_w1, x_w3 = kernel.src[1:]
+  device = x_w1.device
+  rows, K = x_w1.shape
+  axis = x_w1.axis if isinstance(device, tuple) else None
+  gx1 = alloc_like((rows, K), dtypes.bfloat16, device, axis)
+  gx3 = alloc_like((rows, K), dtypes.bfloat16, device, axis)
+  gx1, gx3, *_ = Tensor.custom_kernel(gx1, gx3, Tensor(x_w1, device=device), Tensor(x_w3, device=device),
+                                      Tensor(gradient, device=device).cast(dtypes.bfloat16), Tensor(e8_out.after(kernel), device=device),
+                                      fxn=_custom_silu_mul_bwd_mxfp8)
+  return (None, None, None, gx1.uop, gx3.uop)
+
 def fused_silu_mul_quantize_mxfp8(x_w1:Tensor, x_w3:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   assert x_w1.shape == x_w3.shape, f"{x_w1.shape} != {x_w3.shape}"
   assert x_w1.dtype == dtypes.bfloat16 and x_w3.dtype == dtypes.bfloat16
@@ -60,5 +100,5 @@ def fused_silu_mul_quantize_mxfp8(x_w1:Tensor, x_w3:Tensor) -> tuple[Tensor, Ten
   e8_out = alloc_like((rows, scale_K), dtypes.uint8, x_w1.device, axis)
   si_out = alloc_like((scale_K // PACK, rows), dtypes.uint32, x_w1.device, None if axis is None else (1 if axis == 0 else 0))
   fp8_out, e8_out, si_out, *_ = Tensor.custom_kernel(fp8_out, e8_out, si_out, x_w1, x_w3,
-                                                     fxn=_custom_silu_mul_quantize_mxfp8)
+                                                     fxn=_custom_silu_mul_quantize_mxfp8, grad_fxn=_silu_mul_quantize_mxfp8_bwd)
   return fp8_out, e8_out, si_out
