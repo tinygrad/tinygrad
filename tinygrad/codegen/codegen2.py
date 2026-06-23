@@ -60,42 +60,7 @@ def do_devectorize(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
-def new_split_load_store(ls:UOp, midx:UOp):
-  # extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  for i in range(len(midx.src)):
-    idx: Any = midx.src[i].src[1].get_idx()
-    if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
-    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
-    elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
-    else: root_src, arg = idx, 0
-    root_src = (midx.src[i].src[1].get_valid(), root_src)
-    offsets_rootsrc[root_src].setdefault(arg, []).append(i)
-
-  idxs: list[UOp|None] = [None]*len(midx.src)
-  for (valid,_),offsets in offsets_rootsrc.items():
-    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
-    for grp in grouped_offsets:
-      # get the index offset for this element. using [0] is okay, because they are the same
-      lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.src[0]._mop(Ops.SHRINK, arg=[(lidx.src[1], len(grp))])
-      # do load
-      lidx = lidx.load(lidx.vconst_like(0), valid) if not resolve(valid, False) else lidx.load()
-      # set the idxs of the output
-      for i,g in enumerate(grp):
-        for oo in offsets[g]:
-          idxs[oo] = lidx.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else lidx
-  assert None not in idxs, f"some idxs are missing {idxs}"
-  return UOp.vectorize(*idxs)
-
-#from tinygrad.codegen.late.devectorizer import fold_expanded_index
 devectorizer2 = pm_mops+PatternMatcher([
-  # LOAD+INDEX -> INDEX+LOAD
-  #(UPat(Ops.LOAD, src=(UPat.var("buf"),)).index(allow_any_len=True),
-  # lambda buf: buf.index(UOp.const(dtypes.int, 0)).load() if buf.shape == (1,) else None),
-  # TODO: support STORE
-  #(UPat((Ops.LOAD,), src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"),), name="ls", allow_any_len=True), new_split_load_store),
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # const INDEX into STACK is src
@@ -146,6 +111,8 @@ pm_horizontal_reduce = PatternMatcher([
 # *** memory coalesing ***
 
 def memory_coalesing(sink:UOp):
+  if getenv("DMC"): return sink
+
   # collect
   memory: defaultdict[tuple[UOp, UOp, UOp], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
@@ -166,15 +133,15 @@ def memory_coalesing(sink:UOp):
   for (op,buf,base,valid),offsets in memory.items():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for grp in grouped_offsets:
-      if len(grp) > 1: idx = buf._mop(Ops.SHRINK, arg=[(base+grp[0], len(grp))])
-      else: idx = buf.index(base+grp[0])
+      offset = (base+grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.weakint, grp[0])
+      idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
       if op is Ops.STORE:
         datas = []
         for i,g in enumerate(grp):
           assert len(offsets[g]) == 1
           datas.append(offsets[g][0].src[1])
         data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
-        store = idx.store(data, valid) if valid is None else idx.store(data)
+        store = idx.store(data, valid) if valid is not None else idx.store(data)
         for i,g in enumerate(grp): replacements[offsets[g][0]] = store
       else:
         ld = idx.load(idx.vconst_like(0), valid) if valid is not None else idx.load()
