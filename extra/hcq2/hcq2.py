@@ -214,15 +214,11 @@ def prep_program(call:UOp, prg:UOp) -> UOp|None:
   return prg.replace(src=(buf.after(buf.store(blob)),), arg=(data, prg.arg)).call(*call.src[1:], aux=HCQInfo.from_call(call))
 
 def prep_kernargs(call:UOp, prg:UOp) -> UOp:
-  data, info = prg.arg
-  patches = [(i*dtypes.uint64.itemsize, UOp(Ops.GETADDR, dtypes.uint64, src=(call.src[1+gi], UOp(Ops.DEVICE, arg=call.src[1+gi].device))),
-              dtypes.uint64) for i,gi in enumerate(info.globals)] \
-          + [(len(info.globals)*dtypes.uint64.itemsize + i*dtypes.uint32.itemsize, v, dtypes.uint32) for i,v in enumerate(info.vars)]
-
-  buf = UOp.new_buffer(call.src[1].device, data.kernargs_alloc_size, dtypes.uint8).rtag("kernargs")
-  kernargs = buf.after(*tuple(make_patch(buf, o, val, dt) for o, val, dt in patches))
-
-  return call.replace(src=(prg.replace(src=prg.src + (kernargs,), arg=(data, info)),) + call.src[1:])
+  (data, info), dev_uop = prg.arg, UOp(Ops.DEVICE, arg=call.src[1].device)
+  buf = UOp.new_buffer(dev_uop.arg, data.kernargs_alloc_size, dtypes.uint8).rtag("kernargs")
+  patches = [make_patch(buf, i*8, UOp(Ops.GETADDR, dtypes.uint64, src=(call.src[1+gi], dev_uop))) for i,gi in enumerate(info.globals)] \
+          + [make_patch(buf, len(info.globals)*8 + i*4, v, dtypes.uint32) for i,v in enumerate(info.vars)]
+  return call.replace(src=(prg.replace(src=prg.src + (buf.after(*patches),), arg=(data, info)),) + call.src[1:])
 
 pm_prep_runtime = PatternMatcher([
   # bind generic PROGRAM device to the call's actual dev(s), then run device-specific lowering
