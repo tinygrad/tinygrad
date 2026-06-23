@@ -2,7 +2,7 @@ from typing import Any
 import itertools, functools
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.simplify import pm_flatten_range
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, resolve
 from tinygrad.dtype import dtypes, AddrSpace, ImageDType, Invalid
 from tinygrad.helpers import all_same, flatten, getenv
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
@@ -58,7 +58,7 @@ def do_devectorize(b:UOp):
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp.vectorize(*src).reshape(b.shape)
+  return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def new_split_load_store(ls:UOp, midx:UOp):
   # extract all the relevant offsets
@@ -81,7 +81,7 @@ def new_split_load_store(ls:UOp, midx:UOp):
       lidx = midx.src[offsets[grp[0]][0]]
       if len(grp) > 1: lidx = lidx.src[0]._mop(Ops.SHRINK, arg=[(lidx.src[1], len(grp))])
       # do load
-      lidx = lidx.load(lidx.vconst_like(0), valid) if not valid else lidx.load()
+      lidx = lidx.load(lidx.vconst_like(0), valid) if not resolve(valid, False) else lidx.load()
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]:
@@ -92,12 +92,12 @@ def new_split_load_store(ls:UOp, midx:UOp):
 #from tinygrad.codegen.late.devectorizer import fold_expanded_index
 devectorizer2 = pm_mops+PatternMatcher([
   # LOAD+INDEX -> INDEX+LOAD
-  (UPat(Ops.LOAD, src=(UPat.var("buf"),)).index(allow_any_len=True),
-   lambda buf: buf.index(UOp.const(dtypes.int, 0)).load() if buf.shape == (1,) else None),
+  #(UPat(Ops.LOAD, src=(UPat.var("buf"),)).index(allow_any_len=True),
+  # lambda buf: buf.index(UOp.const(dtypes.int, 0)).load() if buf.shape == (1,) else None),
   # TODO: support STORE
-  (UPat((Ops.LOAD,), src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"),), name="ls", allow_any_len=True), new_split_load_store),
+  #(UPat((Ops.LOAD,), src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"),), name="ls", allow_any_len=True), new_split_load_store),
   # unpack broadcasting
-  (UPat(GroupOp.Elementwise|{Ops.STORE}, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
   # stacked INDEX is many INDEX

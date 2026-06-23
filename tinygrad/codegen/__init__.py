@@ -91,7 +91,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   #sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
-  sink = graph_rewrite(sink, pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
+  sink = graph_rewrite(sink, pm_reduce_local+pm_horizontal_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
@@ -107,7 +107,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
 
   # hreduce
-  sink = graph_rewrite(sink, pm_mops+pm_horizontal_reduce, name="hreduce")
+  #sink = graph_rewrite(sink, pm_mops+pm_horizontal_reduce, name="hreduce")
 
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
