@@ -919,12 +919,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** uop symbolic stuff ***
 
-  def is_increasing(self:UOp) -> bool:
-    # is f a monotonically increasing function regards its input
-    if self.op in GroupOp.Irreducible: return True
-    if self.op is Ops.ADD: return self.src[0].is_increasing() and self.src[1].is_increasing()
-    if self.op in (Ops.MUL, Ops.CDIV, Ops.FLOORDIV) and self.src[1].op is Ops.CONST and self.src[1].arg >= 0: return self.src[0].is_increasing()
-    return False  # False if not sure
   def const_factor(self) -> int:
     """largest known int that divides self"""
     # TODO: for negatives it's not the largest
@@ -1190,8 +1184,9 @@ python_alu: dict[Ops, Callable]  = {
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
-  if dtype.count > 1:
-    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+  if any(isinstance(x, tuple) for x in operands):
+    count = max(len(x) for x in operands if isinstance(x, tuple))
+    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.weakint and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
@@ -1672,6 +1667,8 @@ pm_lower_index_dtype = PatternMatcher([
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("slen", dtypes.ints).cast(),), name="shrink"),
+   lambda shrink,buf,idx,slen: shrink.replace(src=(buf,idx,slen))),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
   # remove hanging casts for images

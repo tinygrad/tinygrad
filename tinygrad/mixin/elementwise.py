@@ -45,7 +45,11 @@ class ElementwiseMixin(CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def contiguous(self, *args, **kwargs) -> Self: raise NotImplementedError
+  def contiguous(self, **kwargs) -> Self:
+    """
+    Returns a contiguous tensor.
+    """
+    return self._wrap_uop(self._uop.contiguous(**kwargs))
 
   def contiguous_backward(self) -> Self:
     """

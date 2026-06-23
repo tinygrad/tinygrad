@@ -2,7 +2,7 @@ import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
 
-from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
+from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes, Context
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker, DEBUG
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
@@ -614,7 +614,7 @@ def train_retinanet():
 
       if getenv("RESET_STEP", 1): _train_step.reset()
 
-      with Tensor.train(mode=False):
+      with Context(TRAINING=0):
         if not RUNMLPERF:
           i, proc = 0, _fake_data_get(EVAL_BS, val=(val:=True))
         else:
@@ -784,7 +784,7 @@ def train_unet3d():
     return x.shard(GPUS, axis=0).realize(), y.shard(GPUS, axis=0), cookie
 
   @TinyJit
-  @Tensor.train()
+  @Context(TRAINING=1)
   def train_step(model, x, y):
     optim.zero_grad()
 
@@ -795,7 +795,7 @@ def train_unet3d():
     optim.step()
     return loss.realize()
 
-  @Tensor.train(mode=False)
+  @Context(TRAINING=0)
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
     y_hat, y = Tensor(y_hat), Tensor(y)
@@ -1490,7 +1490,7 @@ def train_llama3():
     return lr_cpu, grad_norm_cpu
 
   @TinyJit
-  @Tensor.train(False)
+  @Context(TRAINING=0)
   def eval_step(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
@@ -1803,7 +1803,7 @@ if __name__ == "__main__":
   elif getenv("RUNMLPERF"): bench_log_manager = WallTimeEvent(BenchEvent.MLPERF_RUN)
   else: bench_log_manager = contextlib.nullcontext()
 
-  with Tensor.train():
+  with Context(TRAINING=1):
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
       nm = f"train_{m}"
       if nm in globals():
