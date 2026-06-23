@@ -13,7 +13,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
-from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
+from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps, get_simplifying_rewrite_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
@@ -114,23 +114,23 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
-  # early dtype decomp
+  # floordiv+mod / dtype decomp (early)
+  supported_ops = tuple(ren.code_for_op.keys())
+  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
+  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink)
 
-  # decompositions
-  supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
-  pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions")
-  sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
+  # instruction selection decompositions
+  pm_decomp = pm_decomp+\
+    get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
+    get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
 
-  # GEP/STACK stuff
+  # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-
-  # this is new style
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
