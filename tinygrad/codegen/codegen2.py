@@ -116,7 +116,7 @@ def memory_coalesing(sink:UOp):
   # collect
   memory: defaultdict[tuple[UOp, UOp, UOp], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
-    if u.op in {Ops.LOAD, Ops.STORE}:
+    if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace != AddrSpace.REG:
       assert u.src[0].op is Ops.INDEX
       buf,idx_u = u.src[0].src
       idx: Any = idx_u.get_idx()

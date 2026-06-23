@@ -114,6 +114,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   #                     ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
+  sink = graph_rewrite(sink, symbolic, name="pre memory coalese")
 
   # memory coalesing
   sink = memory_coalesing(sink)
