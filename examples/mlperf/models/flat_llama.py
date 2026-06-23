@@ -38,7 +38,7 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, x_new_amax:Tensor|None=None,
-           grad_amax_state:Tensor|None=None) -> tuple[Tensor,...]:
+           grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
@@ -47,12 +47,14 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   assert w_inv_scale is not None, "fp8 matmul requires w_inv_scale (weights must be stored in fp8 with per-tensor scale)"
   if MXFP8:
     from extra.gemm.cdna_asm_gemm import asm_gemm, quantize_mxfp8, mx_pack, can_use_asm_gemm, _mx_block_scale
-    x_q, x_e8, x_si = quantize_mxfp8(x.reshape(-1, x.shape[-1]))
+    if x_prequant_mx is not None: x_q, x_e8, x_si = x_prequant_mx       # fused producer already quantized (2d)
+    else: x_q, x_e8, x_si = quantize_mxfp8(x.reshape(-1, x.shape[-1]))
+    l_shape = x.shape[:-1] if x is not None else x_q.shape[:-1]
     if can_use_asm_gemm(x_q, w.T):
       out = asm_gemm(x_q, w.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(w_inv_scale), w_inv_scale),
-                     mx_w_stored=True).reshape(*x.shape[:-1], w.shape[0])
+                     mx_w_stored=True).reshape(*l_shape, w.shape[0])
     else:
-      x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*x.shape[:-1], x.shape[-1])
+      x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*l_shape, x_q.shape[-1])
       out = x_phys @ (w.cast(dtypes.bfloat16) * _mx_block_scale(w_inv_scale)).T
     return out, (amax_x.detach() if amax_x is not None else None), x_q
   if x_fp8 is None:
@@ -214,8 +216,15 @@ class FlatTransformer:
       x_w3, new_amax, *s = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"], grad_amax_state=kwargs["grad_amax_xw3"])
       amaxs.append(new_amax)
       saves.extend([*s, x_w3])
-      out, new_amax, *s = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
-                                 grad_amax_state=kwargs["grad_amax_xout"])
+      if FUSED_SILU_W13 and MXFP8:
+        from extra.llama_kernels.fused_silu_mul_quantize_mxfp8 import fused_silu_mul_quantize_mxfp8
+        aq, ae8, asi = fused_silu_mul_quantize_mxfp8(x_w1.reshape(-1, x_w1.shape[-1]), x_w3.reshape(-1, x_w3.shape[-1]))
+        out, new_amax, *s = matmul(None, kwargs["w2"], x_prequant_mx=(aq, ae8, asi), amax_x=kwargs["amax_x2"],
+                                   w_inv_scale=kwargs["s_2"], grad_amax_state=kwargs["grad_amax_xout"])
+        out = out.reshape(*x_w1.shape[:-1], kwargs["w2"].shape[0])
+      else:
+        out, new_amax, *s = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
+                                   grad_amax_state=kwargs["grad_amax_xout"])
       amaxs.append(new_amax)
       saves.extend([*s, out])
     else:
