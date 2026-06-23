@@ -9,7 +9,7 @@ def memory_coalesing(sink:UOp):
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[UOp, UOp, UOp], dict[int, list[UOp]]]  = defaultdict(dict)
+  memory: defaultdict[tuple[UOp, UOp, UOp|str, UOp|None], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
     if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace != AddrSpace.REG:
       assert u.src[0].op is Ops.INDEX
@@ -32,7 +32,7 @@ def memory_coalesing(sink:UOp):
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.weakint, full_grp[0])
+        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and offset.divides(l) is not None][0]
         grp = full_grp[:length]
         idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
