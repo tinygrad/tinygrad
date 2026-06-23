@@ -2,7 +2,7 @@ from typing import Any
 import itertools, functools
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.simplify import pm_flatten_range
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, resolve
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, resolve, graph_rewrite
 from tinygrad.dtype import dtypes, AddrSpace, ImageDType, Invalid
 from tinygrad.helpers import all_same, flatten, getenv
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
@@ -142,3 +142,46 @@ pm_reduce_local = PatternMatcher([
 pm_horizontal_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
 ])
+
+# *** memory coalesing ***
+
+def memory_coalesing(sink:UOp):
+  # collect
+  memory: defaultdict[tuple[UOp, UOp, UOp], dict[int, list[UOp]]]  = defaultdict(dict)
+  for u in sink.toposort():
+    if u.op in {Ops.LOAD, Ops.STORE}:
+      assert u.src[0].op is Ops.INDEX
+      buf,idx_u = u.src[0].src
+      idx: Any = idx_u.get_idx()
+      valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
+      if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+      elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
+      elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
+      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
+      else: root_src, arg = idx, 0
+      memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
+
+  # build replacements
+  replacements = {}
+  for (op,buf,base,valid),offsets in memory.items():
+    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    for grp in grouped_offsets:
+      if len(grp) > 1: idx = buf._mop(Ops.SHRINK, arg=[(base+grp[0], len(grp))])
+      else: idx = buf.index(base+grp[0])
+      if op is Ops.STORE:
+        datas = []
+        for i,g in enumerate(grp):
+          assert len(offsets[g]) == 1
+          datas.append(offsets[g][0].src[1])
+        data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
+        store = idx.store(data, valid) if valid is None else idx.store(data)
+        for i,g in enumerate(grp): replacements[offsets[g][0]] = store
+      else:
+        ld = idx.load(idx.vconst_like(0), valid) if valid is not None else idx.load()
+        for i,g in enumerate(grp):
+          for oo in offsets[g]:
+            replacements[oo] = ld.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else ld
+
+  # apply
+  return sink.substitute(replacements, name="memory coalesing")
+

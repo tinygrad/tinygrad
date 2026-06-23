@@ -22,7 +22,7 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
-from tinygrad.codegen.codegen2 import expander2, pm_move_regs, devectorizer2, unbroadcast, pm_reduce_local, pm_horizontal_reduce
+from tinygrad.codegen.codegen2 import expander2, pm_move_regs, devectorizer2, unbroadcast, pm_reduce_local, pm_horizontal_reduce, memory_coalesing
 
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
@@ -114,6 +114,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   #                     ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
+
+  # memory coalesing
+  sink = memory_coalesing(sink)
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
