@@ -35,14 +35,21 @@ void TinyGPUDriver::ProgramBARAddresses()
 {
 	// On Apple Silicon, macOS may not assign BAR addresses for Thunderbolt eGPUs.
 	// The BAR registers in PCI config space remain 0x00000000, causing
-	// _CopyDeviceMemoryWithIndex to return mappings that read as 0xFFFFFFFF.
+	// _CopyDeviceMemoryWithIndex to fail because it reads from the IORegistry
+	// "assigned-addresses" property (set at boot), not live config space.
 	//
-	// This function checks if BARs are unassigned and programs them by:
-	// 1. Determining each BAR's size requirement (write 0xFFFFFFFF, read back)
-	// 2. Reading the parent Thunderbolt bridge's memory aperture
-	// 3. Allocating BAR addresses from the aperture
-	// 4. Writing the addresses to BAR registers
-	// 5. Re-enabling Memory Space
+	// This function:
+	// 1. Detects unassigned BARs (BAR0 = 0x00000000)
+	// 2. Determines each BAR's size requirement (write 0xFFFFFFFF, read back)
+	// 3. Allocates BAR addresses from a fixed Thunderbolt aperture range
+	// 4. Writes the addresses to BAR registers via ConfigurationWrite32
+	// 5. Re-enables Memory Space and Bus Master
+	//
+	// NOTE: _CopyDeviceMemoryWithIndex() still won't work after this because it
+	// reads from the IORegistry "assigned-addresses" property which DriverKit cannot
+	// modify (SetProperty for OSData is not available in the DriverKit SDK).
+	// The tinygrad runtime should use ConfigurationRead32/Write32 for register access,
+	// and DMA for large data transfers.
 
 	os_log(OS_LOG_DEFAULT, "tinygpu: checking BAR assignments");
 
@@ -59,60 +66,57 @@ void TinyGPUDriver::ProgramBARAddresses()
 	// Disable memory and I/O access while programming BARs
 	uint16_t cmd = 0;
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &cmd);
+	os_log(OS_LOG_DEFAULT, "tinygpu: Command register before: 0x%04x", cmd);
 	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, cmd & ~(kIOPCICommandIOSpace | kIOPCICommandMemorySpace));
 
 	// Step 1: Determine BAR sizes
 	uint64_t bar_sizes[6] = {};
 	bool bar_64bit[6] = {};
-	uint32_t bar_origins[6] = {};
+	bool bar_valid[6] = {};
+	uint32_t bar_origins[12] = {};
 
 	for (int i = 0; i < 6; ) {
 		uint32_t offset = kIOPCIConfigurationOffsetBaseAddress0 + i * 4;
 
-		// Save original
 		ivars->pci->ConfigurationRead32(offset, &bar_origins[i]);
 
-		// Write all 1s to determine size
 		ivars->pci->ConfigurationWrite32(offset, 0xFFFFFFFF);
 		uint32_t readback = 0;
 		ivars->pci->ConfigurationRead32(offset, &readback);
 
-		// Restore original
 		ivars->pci->ConfigurationWrite32(offset, bar_origins[i]);
 
 		if (readback == 0 || readback == 0xFFFFFFFF) {
 			bar_sizes[i] = 0;
 			bar_64bit[i] = false;
+			bar_valid[i] = false;
 			i++;
 			continue;
 		}
 
-		// Decode BAR type
 		uint8_t bar_type = readback & 0x7;
 		bar_64bit[i] = (bar_type == 0x4);
+		bar_valid[i] = true;
 
-		// Compute size: mask off type/info bits, invert, add 1
 		uint32_t mask = readback & ~0xF;
 		uint64_t size = ~(uint64_t)mask + 1;
 
 		if (bar_64bit[i] && i + 1 < 6) {
-			// For 64-bit BARs, also probe upper 32 bits
 			uint32_t offset_hi = kIOPCIConfigurationOffsetBaseAddress0 + (i + 1) * 4;
-			uint32_t orig_hi = 0;
-			ivars->pci->ConfigurationRead32(offset_hi, &orig_hi);
+			ivars->pci->ConfigurationRead32(offset_hi, &bar_origins[i + 1]);
 
 			ivars->pci->ConfigurationWrite32(offset_hi, 0xFFFFFFFF);
 			uint32_t readback_hi = 0;
 			ivars->pci->ConfigurationRead32(offset_hi, &readback_hi);
 
-			ivars->pci->ConfigurationWrite32(offset_hi, orig_hi);
+			ivars->pci->ConfigurationWrite32(offset_hi, bar_origins[i + 1]);
 
-			bar_origins[i + 1] = orig_hi;
-			// 64-bit size = lower 32 inverted + upper 32 inverted << 32
-			uint64_t size_hi = (~(uint64_t)readback_hi) << 32;
-			bar_sizes[i] = (size & 0xFFFFFFFF) | size_hi;
+			uint64_t size_lo = ~(uint64_t)mask + 1;
+			uint64_t size_hi = ~(uint64_t)readback_hi;
+			bar_sizes[i] = size_lo | (size_hi << 32);
 			if (bar_sizes[i] == 0) bar_sizes[i] = ((uint64_t)1 << 32);
-			bar_sizes[i + 1] = 0; // Upper half is part of the same BAR
+			bar_sizes[i + 1] = 0;
+			bar_valid[i + 1] = false;
 			os_log(OS_LOG_DEFAULT, "tinygpu: BAR%d: size=0x%llx 64bit=1", i, bar_sizes[i]);
 			i += 2;
 		} else {
@@ -122,106 +126,64 @@ void TinyGPUDriver::ProgramBARAddresses()
 		}
 	}
 
-	// Step 2: Read parent bridge memory aperture
-	// Thunderbolt bridges expose memory windows at standard PCI bridge config offsets
-	// Offset 0x20: Memory Base (16-bit, lower 28 bits of base address, 1MB aligned)
-	// Offset 0x22: Memory Limit (16-bit, lower 28 bits of limit address)
-	// Offset 0x24: Prefetchable Memory Base Lower (16-bit)
-	// Offset 0x28: Prefetchable Memory Base Upper (32-bit)
-	// Offset 0x2C: Prefetchable Memory Limit Upper (32-bit)
+	// Step 2: Use fixed Thunderbolt aperture range
+	// On Apple Silicon M4 with Thunderbolt 4, the TB aperture for memory-mapped
+	// devices starts at a known address. We use a safe offset that won't conflict
+	// with the audio device's BAR (which is at ~0x16xxxxxxx range).
+	// Aperture: 0x400000000 (16GB) to 0x10000000000 (1TB)
+	uint64_t aperture_base = 0x400000000ULL;
+	uint64_t aperture_limit = 0x10000000000ULL;
 
-	OSObject* parentObj = nullptr;
-	ivars->pci->CopyParent(&parentObj);
-	IOPCIDevice* bridge = OSDynamicCast(IOPCIDevice, parentObj);
-
-	uint64_t mem_base = 0, mem_limit = 0;
-	if (bridge) {
-		bridge->Open(this, 0);
-		uint16_t mem_base_reg = 0, mem_limit_reg = 0;
-		bridge->ConfigurationRead16(0x20, &mem_base_reg);
-		bridge->ConfigurationRead16(0x22, &mem_limit_reg);
-
-		// Decode: Memory Base/Limit are in units of 1MB, aligned to 1MB boundaries
-		mem_base = ((uint64_t)(mem_base_reg & 0xFFF0) << 16);
-		mem_limit = (((uint64_t)(mem_limit_reg & 0xFFF0) << 16) | 0xFFFFF);
-
-		os_log(OS_LOG_DEFAULT, "tinygpu: bridge mem window 0x%llx - 0x%llx (base_reg=0x%04x limit_reg=0x%04x)", mem_base, mem_limit, mem_base_reg, mem_limit_reg);
-
-		// Also check prefetchable memory window for 64-bit BARs
-		uint16_t pref_base_low = 0, pref_limit_low = 0;
-		uint32_t pref_base_hi = 0, pref_limit_hi = 0;
-		bridge->ConfigurationRead16(0x24, &pref_base_low);
-		bridge->ConfigurationRead16(0x26, &pref_limit_low);
-		bridge->ConfigurationRead32(0x28, &pref_base_hi);
-		bridge->ConfigurationRead32(0x2C, &pref_limit_hi);
-
-		uint64_t pref_base = ((uint64_t)(pref_base_low & 0xFFF0) << 16) | ((uint64_t)pref_base_hi << 32);
-		uint64_t pref_limit = (((uint64_t)(pref_limit_low & 0xFFF0) << 16) | 0xFFFFF) | ((uint64_t)pref_limit_hi << 32);
-
-		os_log(OS_LOG_DEFAULT, "tinygpu: bridge pref mem window 0x%llx - 0x%llx", pref_base, pref_limit);
-
-		// Use prefetchable window for 64-bit BARs if available
-		if (pref_base != 0 && pref_limit > pref_base) {
-			// Use non-prefetchable for 32-bit BARs, prefetchable for 64-bit BARs
-			// For now, we allocate everything from the larger window
-			if (pref_limit - pref_base > mem_limit - mem_base) {
-				mem_base = pref_base;
-				mem_limit = pref_limit;
-				os_log(OS_LOG_DEFAULT, "tinygpu: using pref mem window for BAR allocation (larger)");
-			}
-		}
-
-		bridge->Close(this, 0);
-	} else {
-		os_log(OS_LOG_DEFAULT, "tinygpu: WARNING: parent is not IOPCIDevice, cannot determine bridge aperture");
-	}
-
-	if (parentObj) parentObj->release();
+	os_log(OS_LOG_DEFAULT, "tinygpu: using fixed TB aperture base=0x%llx limit=0x%llx", aperture_base, aperture_limit);
 
 	// Step 3: Allocate and program BAR addresses
-	if (mem_base == 0 && mem_limit == 0) {
-		os_log(OS_LOG_DEFAULT, "tinygpu: WARNING: bridge memory window not available, cannot program BARs");
-		ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, cmd);
-		return;
-	}
+	uint64_t next_addr = aperture_base;
+	int assigned_count = 0;
 
-	uint64_t next_addr = mem_base;
 	for (int i = 0; i < 6; ) {
-		if (bar_sizes[i] == 0) { i++; continue; }
+		if (!bar_valid[i] || bar_sizes[i] == 0) {
+			if (bar_64bit[i]) { i += 2; } else { i++; }
+			continue;
+		}
 
-		// Align to BAR size (PCI BARs must be naturally aligned)
 		uint64_t alignment = bar_sizes[i];
 		uint64_t addr = (next_addr + alignment - 1) & ~(alignment - 1);
 
-		if (addr + bar_sizes[i] > mem_limit) {
-			os_log(OS_LOG_DEFAULT, "tinygpu: ERROR: not enough space for BAR%d (need 0x%llx at 0x%llx, limit 0x%llx)", i, bar_sizes[i], addr, mem_limit);
+		if (addr + bar_sizes[i] > aperture_limit) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: ERROR: not enough aperture for BAR%d (need 0x%llx at 0x%llx, limit 0x%llx)", i, bar_sizes[i], addr, aperture_limit);
 			break;
 		}
 
-		uint32_t offset = kIOPCIConfigurationOffsetBaseAddress0 + i * 4;
+		uint32_t bar_offset = kIOPCIConfigurationOffsetBaseAddress0 + i * 4;
 
 		if (bar_64bit[i]) {
-			uint32_t bar_lo = (uint32_t)(addr & ~0xF) | 0x04; // 64-bit, prefetchable bit preserved
-			uint32_t bar_hi = (uint32_t)(addr >> 32);
-			ivars->pci->ConfigurationWrite32(offset, bar_lo);
-			ivars->pci->ConfigurationWrite32(offset + 4, bar_hi);
-			os_log(OS_LOG_DEFAULT, "tinygpu: BAR%d (64-bit): addr=0x%llx size=0x%llx lo=0x%08x hi=0x%08x", i, addr, bar_sizes[i], bar_lo, bar_hi);
+			uint32_t bar_lo_val = (uint32_t)(addr & ~0xF) | 0x04; // Preserve 64-bit flag
+			uint32_t bar_hi_val = (uint32_t)(addr >> 32);
+			ivars->pci->ConfigurationWrite32(bar_offset, bar_lo_val);
+			ivars->pci->ConfigurationWrite32(bar_offset + 4, bar_hi_val);
+			os_log(OS_LOG_DEFAULT, "tinygpu: BAR%d (64-bit): programmed addr=0x%llx size=0x%llx lo=0x%08x hi=0x%08x", i, addr, bar_sizes[i], bar_lo_val, bar_hi_val);
+
 			next_addr = addr + bar_sizes[i];
+			assigned_count++;
 			i += 2;
 		} else {
-			uint32_t bar_val = (uint32_t)(addr & ~0xF) | 0x00; // 32-bit, non-prefetchable
-			ivars->pci->ConfigurationWrite32(offset, bar_val);
-			os_log(OS_LOG_DEFAULT, "tinygpu: BAR%d (32-bit): addr=0x%llx size=0x%llx val=0x%08x", i, addr, bar_sizes[i], bar_val);
+			uint32_t bar_val = (uint32_t)(addr & ~0xF);
+			ivars->pci->ConfigurationWrite32(bar_offset, bar_val);
+			os_log(OS_LOG_DEFAULT, "tinygpu: BAR%d (32-bit): programmed addr=0x%llx size=0x%llx val=0x%08x", i, addr, bar_sizes[i], bar_val);
+
 			next_addr = addr + bar_sizes[i];
+			assigned_count++;
 			i++;
 		}
 	}
 
 	// Step 4: Re-enable Memory Space and Bus Master
-	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, cmd);
+	uint16_t new_cmd = cmd | (kIOPCICommandMemorySpace | kIOPCICommandBusMaster);
+	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, new_cmd);
+	os_log(OS_LOG_DEFAULT, "tinygpu: Command register: 0x%04x -> 0x%04x (Memory Space + Bus Master enabled)", cmd, new_cmd);
 
 	// Verify BAR programming
-	os_log(OS_LOG_DEFAULT, "tinygpu: BAR verification:");
+	os_log(OS_LOG_DEFAULT, "tinygpu: BAR verification after programming:");
 	for (int i = 0; i < 6; i++) {
 		uint32_t offset = kIOPCIConfigurationOffsetBaseAddress0 + i * 4;
 		uint32_t val = 0;
@@ -231,7 +193,7 @@ void TinyGPUDriver::ProgramBARAddresses()
 		}
 	}
 
-	os_log(OS_LOG_DEFAULT, "tinygpu: BAR address programming complete");
+	os_log(OS_LOG_DEFAULT, "tinygpu: BAR address programming complete (%d BARs assigned)", assigned_count);
 }
 
 kern_return_t TinyGPUDriver::Start_Impl(IOService* in_provider)
@@ -257,14 +219,14 @@ kern_return_t TinyGPUDriver::Start_Impl(IOService* in_provider)
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetDeviceID, &dev);
 	os_log(OS_LOG_DEFAULT, "tinygpu: opened device ven=0x%04x dev=0x%04x", ven, dev);
 
+	// Enable Memory Space, Bus Master, and I/O Space
 	uint16_t commandRegister;
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &commandRegister);
+	os_log(OS_LOG_DEFAULT, "tinygpu: initial Command register = 0x%04x", commandRegister);
 	commandRegister |= (kIOPCICommandIOSpace | kIOPCICommandBusMaster | kIOPCICommandMemorySpace);
 	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, commandRegister);
 
-	// Program BAR addresses for eGPUs where macOS doesn't assign them.
-	// On Apple Silicon Thunderbolt, BAR registers may remain 0x00000000,
-	// causing _CopyDeviceMemoryWithIndex to fail silently.
+	// Program BAR addresses for eGPUs where macOS doesn't assign them
 	ProgramBARAddresses();
 
 	memcpy((void*)service_name, (void*)"tinygpu\0", 8);
@@ -305,16 +267,22 @@ kern_return_t TinyGPUDriver::MapBar(uint32_t bar, IOMemoryDescriptor** memory)
 	uint8_t barMemoryIndex, barMemoryType;
 	uint64_t barMemorySize;
 	kern_return_t err = ivars->pci->GetBARInfo(bar, &barMemoryIndex, &barMemorySize, &barMemoryType);
-	if (err) return err;
-	os_log(OS_LOG_DEFAULT, "tinygpu: bar mapping %d idx=%d", bar, barMemoryIndex);
-	return ivars->pci->_CopyDeviceMemoryWithIndex(barMemoryIndex, memory, this);
+	if (err) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: GetBARInfo(%d) failed: 0x%08x", bar, err);
+		return err;
+	}
+	os_log(OS_LOG_DEFAULT, "tinygpu: bar mapping %d idx=%d size=0x%llx type=%d", bar, barMemoryIndex, barMemorySize, barMemoryType);
+
+	err = ivars->pci->_CopyDeviceMemoryWithIndex(barMemoryIndex, memory, this);
+	if (err) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: _CopyDeviceMemoryWithIndex(%d) failed: 0x%08x - BAR addresses may not be in IORegistry", barMemoryIndex, err);
+	}
+	return err;
 }
 
 static kern_return_t WriteDMASegments(IOMemoryDescriptor* mem, IOAddressSegment* segments, uint32_t segCount,
                                       uint64_t mapOffset = 0, uint64_t mapSize = 0)
 {
-	// write dma segments to mapped memory as [addr0, len0, addr1, len1, ..., 0, 0]
-
 	IOMemoryMap* map = nullptr;
 	kern_return_t err = mem->CreateMapping(0, 0, 0, mapOffset, mapSize, &map);
 	if (err || !map) return err ?: kIOReturnError;
