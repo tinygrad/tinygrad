@@ -1869,9 +1869,10 @@ def train_flux():
   def optim_step(optim:AdamW):
     optim.step()
 
+  @TinyJit
   @Context(TRAINING=0)
-  def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
-    inputs, noise, labels, latent_dims = prepare_inputs(sample)
+  def eval_step(model:Flux, sample:dict[str, Tensor], timesteps:Tensor) -> Tensor:
+    inputs, noise, labels, latent_dims = prepare_inputs(sample, timesteps=timesteps)
     latent_noise_pred = model(**inputs)
 
     pred = unpack_latents(latent_noise_pred, latent_dims)
@@ -1909,7 +1910,9 @@ def train_flux():
     if timesteps is not None:
       timesteps = timesteps / 8.0
     else:
-      timesteps = Tensor.rand(BS).shard(GPUS, None)
+      timesteps = Tensor.rand(BS)
+
+    timesteps.shard_(GPUS, axis=None)
 
     noise = Tensor.randn_like(labels)
     sigmas = timesteps.view(-1, 1, 1, 1)
@@ -1978,7 +1981,7 @@ def train_flux():
     # eval loop
     if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
       for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
-        eval_loss = eval_step(model, sample)
+        eval_loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
         tqdm.write(f"eval loss: {eval_loss.float().item():.6f}")
 
         if BENCHMARK and j + 1 == min(BENCHMARK, val_total):

@@ -825,7 +825,7 @@ class FluxDataset:
     sample = sample.copy()
     sample.pop("__key__")
 
-    sample = {k: self._deserialize_data(v) if k != "timestep" else Tensor(v) for k, v in sample.items()}
+    sample = {k: self._deserialize_data(v) if k != "timestep" else Tensor.full((), v) for k, v in sample.items()}
     return sample
 
   def _deserialize_data(self, data:bytes) -> Tensor:
