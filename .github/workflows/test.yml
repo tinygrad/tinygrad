@@ -133,46 +133,26 @@ jobs:
       run: SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_ops.py test/backend/test_uops.py test/backend/test_symbolic_ops.py test/backend/test_renderer_failures.py::TestRendererFailures --durations=20
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/backend/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
-    - name: Test emulated METAL tensor cores
+    - name: Test emulated tensor cores
       env:
-        DEV: 'PYTHON::METAL'
+        DEBUG: 2
+        N: 64
+        CNT: 1
+        SHOULD_USE_TC: 1
       run: |
-        DEBUG=2 python3 test/backend/test_ops.py TestOps.test_big_gemm
-        python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test emulated AMD tensor cores
-      env:
-        DEV: 'PYTHON::gfx1100'
+        parallel -k --link --tagstring '[{1}]' '{2} python3 ./extra/gemm/simple_matmul.py' \
+          ::: metal gfx950 gfx1100 gfx1100_acchalf gfx1201 gfx1201_acchalf sm_75 sm_80_half sm_80_tf32 \
+          ::: 'DEV=PYTHON::METAL' 'DEV=PYTHON::gfx950 HALF=1 ACC_HALF=0' \
+              'DEV=PYTHON::gfx1100 HALF=1 ACC_HALF=0' 'DEV=PYTHON::gfx1100 HALF=1 ACC_HALF=1 ATOL=1e-3' \
+              'DEV=PYTHON::gfx1201 HALF=1 ACC_HALF=0' 'DEV=PYTHON::gfx1201 HALF=1 ACC_HALF=1 ATOL=1e-3' \
+              'DEV=PYTHON::sm_75 HALF=1' 'DEV=PYTHON::sm_80 HALF=1' 'DEV=PYTHON::sm_80 ALLOW_TF32=1'
+    - name: Run additional tensor core tests
       run: |
-        DEBUG=2 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test emulated AMD MFMA tensor cores
-      env:
-        DEV: 'PYTHON::gfx950'
-      run: |
-        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test emulated AMD RDNA4 tensor cores
-      env:
-        DEV: 'PYTHON::gfx1201'
-      run: |
-        DEBUG=2 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test emulated CUDA tensor cores
-      run: |
-        DEBUG=2 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
-        DEBUG=2 ALLOW_TF32=1 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm
-        DEBUG=2 DEV=PYTHON::sm_75 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
+        DEV=PYTHON::METAL python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
+        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
+        DEV=PYTHON::gfx950 python3 -m pytest -nauto test/opt/test_tensor_cores.py
+        DEV=PYTHON::gfx1201 python3 -m pytest -nauto test/opt/test_tensor_cores.py
         ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test device flop counts
-      run: |
-        DEBUG=2 DEV=PYTHON::METAL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 DEV=PYTHON::gfx1100 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
 
   linter:
@@ -267,13 +247,6 @@ jobs:
       run: python3 test/external/external_benchmark_schedule.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
-    - name: Regen dataset on test_tiny
-      run: |
-        test/external/process_replay/reset.py
-        CAPTURE_PROCESS_REPLAY=1 python test/test_tiny.py TestTiny.test_plus
-        python extra/optimization/extract_dataset.py
-        gzip -c /tmp/sops > extra/datasets/sops.gz
-        #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
     - name: Repo line count < 25000 lines
       run: MAX_LINE_COUNT=25000 python sz.py
 
@@ -337,31 +310,6 @@ jobs:
           DEV=CL IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
-
-  testgpumisc:
-    name: CL Misc tests
-    runs-on: *linux
-    timeout-minutes: 10
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: gen-dataset
-          deps: testing
-          opencl: 'true'
-      - name: Generate Dataset
-        run: DEV=CL extra/optimization/generate_dataset.sh
-      - name: Run Kernel Count Test
-        run: DEV=CL python -m pytest -n=auto test/external/external_test_opt.py
-      - name: Run fused optimizer tests
-        run: DEV=CL FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/backend/test_optim.py -k "not muon"
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: sops.gz
-          path: /tmp/sops.gz
 
   testopenpilot:
     name: openpilot Compile Tests

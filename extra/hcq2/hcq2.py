@@ -307,7 +307,7 @@ def schedule_inner_sync(ctx:DepsCtx, linear:UOp) -> UOp:
     for (_, lane), dep in latest.items(): deps[dep] += (lane,)
 
     if deps: new_q = new_q.after(*deps, arg=tuple(deps.values())).rtag("deps")
-    new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}), *call.src[1:])))
+    new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}),)))
   return linear.replace(src=tuple(new_src))
 pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_inner_sync)])
 

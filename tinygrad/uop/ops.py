@@ -1669,8 +1669,8 @@ pm_lower_index_dtype = PatternMatcher([
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
-  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("len", dtypes.ints).cast(),), name="shrink"),
-   lambda shrink,buf,idx,len: shrink.replace(src=(buf,idx,len))),
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("slen", dtypes.ints).cast(),), name="shrink"),
+   lambda shrink,buf,idx,slen: shrink.replace(src=(buf,idx,slen))),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
   # remove hanging casts for images
