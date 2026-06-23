@@ -148,13 +148,11 @@ jobs:
               'DEV=PYTHON::sm_75 HALF=1' 'DEV=PYTHON::sm_80 HALF=1' 'DEV=PYTHON::sm_80 ALLOW_TF32=1'
     - name: Run additional tensor core tests
       run: |
-        DEV=PYTHON::METAL python3 -m pytest -nauto test/opt/test_tensor_cores.py
-        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/opt/test_tensor_cores.py
+        DEV=PYTHON::METAL python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
+        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/opt/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
         DEV=PYTHON::gfx950 python3 -m pytest -nauto test/opt/test_tensor_cores.py
         DEV=PYTHON::gfx1201 python3 -m pytest -nauto test/opt/test_tensor_cores.py
         ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-        DEBUG=2 DEV=PYTHON::METAL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 DEV=PYTHON::gfx1100 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
 
   linter:
