@@ -35,6 +35,10 @@ public:
 	kern_return_t CfgWrite(uint32_t off, uint32_t size, uint32_t val) LOCALONLY;
 	kern_return_t ResetDevice() LOCALONLY;
 	IOPCIDevice* GetPCI() LOCALONLY;
+
+	// Program BAR addresses for eGPUs where macOS doesn't assign them.
+	// Called from Start_Impl after enabling Memory Space and Bus Master.
+	void ProgramBARAddresses() LOCALONLY;
 };
 
 #endif /* TinyGPUDriver_h */
