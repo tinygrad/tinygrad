@@ -1,4 +1,4 @@
-from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate
+from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate, DType
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
@@ -8,23 +8,20 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 
 
-# VCC, EXEC_LO = Register("vcc", 0), Register("exec_lo", 0) # hack: special regs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-EXEC = Register("exec", 0)
+VCC, EXEC = Register("vcc", 0), Register("exec", 0)
 
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, -1, AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
-#vccop, execop = def_reg(dtypes.uint32, VCC), def_reg(dtypes.uint32, EXEC_LO)
-
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,)) if x.op is Ops.CONST else x
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
-  if x.op is Ops.BUFFER and x.tag is not None: return None
+  if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -160,19 +157,31 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   }
   return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
 
-#def prepare_gated_load():
-  #pass
+def reg_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
+  return UOp.placeholder((count,), elem_dt, slot, AddrSpace.REG)
+
+# NOTE: wavefront size is 32, use exec_lo
+# this cant be done same as x86 because GLOBAL vs REG loads are lowered
+# differently at compile time, gate result cannot be known ahead of time
+def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
+  # TODO: populate afters with proper dtype/shapes
+  default = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(alt,))
+  saved = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=GP_SGPRS)
+  ld = load(ctx, addr, x)
+  ld = ld.replace(src=(default,) + ld.src).after(saved)
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(saved,), tag=(EXEC,)).after(ld)
+  return ld.after(restore)
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  #(UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
 ])
 
 # PROBLEM: load needs to be lowered ahead of time, maybe just lower it
 # then append gate and alt to src
 isel_matcher = PatternMatcher([
-  # control flow
+  # gated mem ops
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -216,20 +225,6 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
   # normalize and satisfy operand orders/reg types, this should probably be handled per pattern?
   (UPat(Ops.INS, name="x"), legalize_operands),
-])
-
-# meant for line rewrite, handles exec saving etc...
-# problem is I cant allocate new vregs in pre-regalloc ctx?
-# - handle unorthodox allocations in alloc_vregs (RANGE/gated case???), or just pre isel
-def if_else(cmp:UOp, branch1:UOp, branch2:UOp):
-  #exec_mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, 
-  pass
-
-def gated_load(ctx, addr:UOp, gate:UOp, alt:UOp, x:UOp):
-  pass
-
-pre_regalloc_matcher = PatternMatcher([
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
 ])
 
 def encode(x:UOp):
@@ -286,12 +281,15 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
-  pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
 
   # hack for now, should be removed from ISARenderer (should be CPU/GPU agnostic)
+  def is_two_address(self, x:UOp) -> bool:
+    if isinstance(x.arg, InsOp) and x.arg.func in [RDNA3Ops.GLOBAL] and "load" in x.arg.opc and len(x.src) > 3:
+      return True
+    return False
   def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-2])
   def spill(self, disp:UOp, x:UOp) -> UOp: return x
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
