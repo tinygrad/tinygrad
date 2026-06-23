@@ -12,17 +12,17 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
-from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
-from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
-  ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
+from tinygrad.codegen.late.devectorizer import load_store_indexing, ReduceContext, pm_render, pm_make_images
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
+
+from tinygrad.codegen.codegen2 import expander2, pm_move_regs, devectorizer2, unbroadcast, pm_reduce_local, pm_horizontal_reduce, memory_coalesing
 
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
@@ -81,14 +81,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
+  #sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
+  sink = graph_rewrite(sink, pm_reduce_local+pm_horizontal_reduce, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
@@ -96,15 +98,21 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # **** optimizations are done, now we lower to actual code ****
 
   # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  #sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  sink = graph_rewrite(sink, pm_move_regs,  name="** add loads")
 
   # create image buffers
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
     sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
 
+  # hreduce
+  #sink = graph_rewrite(sink, pm_mops+pm_horizontal_reduce, name="hreduce")
+
   # devectorize
-  sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
-                       ctx=ren, name="devectorize")
+  #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
+  #                     ctx=ren, name="devectorize")
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
@@ -113,12 +121,21 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
+  # dtypes
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+
+  # memory coalesing
+  sink = memory_coalesing(sink)
+
+  # again
+  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
+
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions")
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
 
   # GEP/STACK stuff
