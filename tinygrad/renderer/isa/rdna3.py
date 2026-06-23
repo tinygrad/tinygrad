@@ -13,6 +13,7 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 EXEC_SAVE = SGPRS[5]
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[6:]), tuple(VGPRS[1:])
+# NOTE: wavefront size is 32, use exec_lo
 VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 
 lane_ctr = itertools.count()
@@ -110,8 +111,9 @@ def cmp(x:UOp):
   return x.ins(ins, tag=GP_SGPRS)
 
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
-# def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
+  # dsl encoding handles 13 bit offset truncating/2s complement etc..
+  # just store as 16 bit int
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(ctx, const(dtypes.int, disp_scale // 2))
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, const(dtypes.int16, idx.arg * disp_scale))
@@ -129,7 +131,6 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
     return (base + (idx.src[0] << shft), idx.src[1].arg * scale)
   raise NotImplementedError(f"cant fold lds, idx.op={idx.op}")
 
-# def fold_address(ctx, x:UOp): return x.src[:2]
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
 
 # todo: handle 16 bit loads?
@@ -162,12 +163,18 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   }
   return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
 
-# NOTE: wavefront size is 32, use exec_lo
 # this cant be done same as x86 because GLOBAL vs REG loads are lowered
 # differently at compile time, gate result cannot be known ahead of time
+
+
+# TODO: eventually just handle folding in the gate/alt in load/store??
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
   ld = load(ctx, addr, x)
   return ld.replace(src=(to_vgpr(ctx, alt),) + ld.src + (gate,))
+
+def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
+  st = store(ctx, addr, val, x)
+  return st.replace(src=st.src + (gate,))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
@@ -178,6 +185,7 @@ pre_isel_matcher = PatternMatcher([
 # then append gate and alt to src
 isel_matcher = PatternMatcher([
   # gated mem ops
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
@@ -216,7 +224,6 @@ isel_matcher = PatternMatcher([
   # bit shifts
   # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
-  # (UPat(Ops.STACK, name="x"), stack),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
@@ -255,20 +262,27 @@ def encode(x:UOp):
   nx = x.replace(arg=ret)
   return nx
 
-# order cmp -> load alt -> update exec -> load addr -> restore exec -> passthrough buf
-def expand_gated_load(x:UOp):
-  default, gate  = x.src[0], x.src[-1]
-  saved = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=(EXEC_SAVE,))
-  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop, execsaveop), tag=(EXEC,))
-  x = x.replace(src=x.src[1:-1])
-  return default, [default, saved, x, restore]
+# --- control flow ---
+def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
+def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
 
-def is_gated(x:UOp) -> bool: return "load" in x.arg.opc and len(x.src) > 3
+def expand_gated_load(x:UOp):
+  return x.src[0], [x.src[0], updateexec(x.src[-1]), x.replace(src=x.src[1:-1]), restoreexec()]
+
+def expand_gated_store(x:UOp):
+  branch = updateexec(x.src[-1])
+  return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
+
+def lower_control_flow(x:UOp):
+  if "load" in x.arg.opc and len(x.src) > 3: return expand_gated_load(x)
+  if "store" in x.arg.opc and len(x.src) > 4: return expand_gated_store(x)
+  return None
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
-  (UPat(Ops.INS, name="x"), lambda x: expand_gated_load(x) if is_gated(x) else None),
+  (UPat(Ops.INS, name="x"), lower_control_flow),
+  # (UPat(Ops.INS, name="x"), lambda x: expand_gated_load(x) if is_gated(x) else None),
 ])
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
