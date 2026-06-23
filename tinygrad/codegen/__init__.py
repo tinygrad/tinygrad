@@ -114,12 +114,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   #                     ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
-  sink = graph_rewrite(sink, symbolic, name="pre memory coalese")
+
+  # lower the index dtype to a concrete int
+  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # memory coalesing
   sink = memory_coalesing(sink)
 
-  # lower the index dtype to a concrete int
+  # again
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
