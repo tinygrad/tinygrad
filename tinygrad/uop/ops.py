@@ -560,10 +560,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
-  def invalids(shape:tuple[sint, ...]|None=None, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
-    dt = to_dtype(dtype) if dtype is not None else dtypes.from_py(Invalid)
-    return UOp.const(dt, Invalid, shape=shape).clone(device=device)
-  @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
@@ -1194,8 +1190,9 @@ python_alu: dict[Ops, Callable]  = {
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
-  if dtype.count > 1:
-    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+  if any(isinstance(x, tuple) for x in operands):
+    count = max(len(x) for x in operands if isinstance(x, tuple))
+    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.weakint and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
@@ -1676,6 +1673,8 @@ pm_lower_index_dtype = PatternMatcher([
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("slen", dtypes.ints).cast(),), name="shrink"),
+   lambda shrink,buf,idx,slen: shrink.replace(src=(buf,idx,slen))),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
   # remove hanging casts for images

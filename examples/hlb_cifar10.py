@@ -359,7 +359,7 @@ def train_cifar():
   i = 0
   eval_acc_pct = 0.0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
-  with Tensor.train():
+  with Context(TRAINING=1):
     st = time.monotonic()
     while i <= STEPS:
       if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
