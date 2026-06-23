@@ -162,6 +162,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # determine fold lengths
   lengths = []
   must_divide = True
+  if isinstance(buf.dtype, ImageDType):
+    lengths = [4]
   """
   if ctx is not None and ctx.target.device == "DSP":
     lengths = [128,64,32,16,8,4]

@@ -12,11 +12,11 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   # collect
   memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
-    if u.op in {Ops.LOAD, Ops.STORE}:
+    # TODO: this should handle images too, it's just memory coalesing
+    if u.op in {Ops.LOAD, Ops.STORE} and not isinstance(u.src[0].src[0].dtype, ImageDType):
       assert u.src[0].op is Ops.INDEX
       buf, idx_u = u.src[0].src
-      # TODO: this is copied below
-      if buf.addrspace == AddrSpace.REG or isinstance(buf.dtype, ImageDType): continue
+      if buf.addrspace == AddrSpace.REG: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
       valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
@@ -56,7 +56,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
-            assert len(offsets[g]) == 1
+            assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
           data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
           store = idx.store(data, valid) if valid is not None else idx.store(data)
