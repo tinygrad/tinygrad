@@ -192,8 +192,8 @@ spec_program = PatternMatcher([
   # no more of these in programs
   (UPat(Ops.GEP), lambda: False),
 
-  # weakint is not allowed in programs, except on CONST and STACK
-  (UPat(GroupOp.All-{Ops.CONST,Ops.STACK}, dtypes.weakint), lambda: False),
+  # weakint is not allowed in programs
+  (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
