@@ -12,9 +12,11 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   # collect
   memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
-    if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace != AddrSpace.REG:
+    if u.op in {Ops.LOAD, Ops.STORE}:
       assert u.src[0].op is Ops.INDEX
-      buf,idx_u = u.src[0].src
+      buf, idx_u = u.src[0].src
+      # TODO: this is copied below
+      if buf.addrspace == AddrSpace.REG or isinstance(buf.dtype, ImageDType): continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
       valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
@@ -27,7 +29,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   # build replacements
   replacements = {}
   for (op,buf,base,valid),offsets in memory.items():
-    # allowed lengths
+    # allowed lengths (copied in)
     lengths = []
     must_divide = True
     if ctx is not None and ctx.target.device == "DSP":
