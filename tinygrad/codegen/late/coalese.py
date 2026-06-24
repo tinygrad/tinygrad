@@ -1,16 +1,19 @@
-from typing import Any
+from typing import Any, cast
 import itertools
 from collections import defaultdict
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
+from tinygrad.uop.symbolic import uop_given_valid
+from tinygrad.codegen.late.devectorizer import simplify_valid_image_load, _drop_valid_stmts
 
 pm_imageh_store = PatternMatcher([
   # store<imageh>(idx, x) is actually store(idx, x.cast(half)) so we can pull the cast into the store
-  (UPat.var("x", dtypes.float).cast(dtypes.half), lambda x: x),
+  (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda x,c: x if c.dtype.scalar() == dtypes.half and x.dtype.scalar() == dtypes.float else None),
   # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
   (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))), lambda a,b,c: a.where(b,c.cast(dtypes.float))),
+  (UPat(Ops.STACK, name="x"), lambda x: UOp.vectorize(*(s.cast(dtypes.float) for s in x.src)) if x.dtype.scalar() == dtypes.half else None),
   # otherwise, we cast to float
   (UPat(GroupOp.All, name="x"), lambda x: x.cast(dtypes.float))
 ])
@@ -40,22 +43,10 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     for _,buf,_,_ in memory:
       if buf in image_bufs: continue
       ibuf = buf if isinstance(buf.dtype, ImageDType) else None
-      if ibuf is None and buf.op is Ops.PARAM and buf.addrspace is AddrSpace.GLOBAL and (dims:=ImageDType.valid_dims(buf.dtype, ctx.target.arch)):
+      if ibuf is None and buf.op is Ops.PARAM and buf.addrspace is AddrSpace.GLOBAL and isinstance(buf.dtype, PtrDType) and \
+         (dims:=ImageDType.valid_dims(buf.dtype, ctx.target.arch)):
         ibuf = buf.replace(dtype=(dtypes.imageh if buf.dtype.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
-      if ibuf is None: continue
-      can_image = True
-      for (_,membuf,base,_), offsets in memory.items():
-        if membuf is not buf: continue
-        for full_grp in [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]:
-          while full_grp:
-            offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
-            if len(full_grp) < 4 or offset.divides(4) is None:
-              can_image = False
-              break
-            full_grp = full_grp[4:]
-          if not can_image: break
-        if not can_image: break
-      if can_image: image_bufs[buf] = ibuf
+      if ibuf is not None: image_bufs[buf] = ibuf
 
   # build replacements
   replacements = {}
@@ -76,7 +67,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
-    if buf not in image_bufs: lengths.append(1)  # worst case, it's not folded
+    lengths.append(1)  # worst case, it's not folded
     # do the grouping
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
@@ -84,10 +75,25 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
-        ibuf = image_bufs.get(buf) if length == 4 else None
+        ibuf, lane0 = image_bufs.get(buf) if length == 4 else None, None
+        if ibuf is None and op is Ops.LOAD and buf in image_bufs and (lane:=(offset%4).simplify()).op is Ops.CONST:
+          ibuf, lane0 = image_bufs[buf], lane.arg
+        idx_valid = valid
         if ibuf is not None:
-          pix = offset // 4
-          idx = ibuf.index(pix // ibuf.dtype.shape[1], pix % ibuf.dtype.shape[1], ptr=True)
+          if valid is not None and not isinstance(buf.dtype, ImageDType) and isinstance(buf.dtype, PtrDType):
+            best_drop, cands = -1, []
+            for h,w in ImageDType.valid_dims(buf.dtype, ctx.target.arch):
+              cidx = uop_given_valid(valid, UOp.vectorize((offset // 4) % w, offset // (4*w)))
+              if (dropped:=len(_drop_valid_stmts(valid, cidx, h, w))) > best_drop: best_drop, cands = dropped, [(h, w, cidx)]
+              elif dropped == best_drop: cands.append((h, w, cidx))
+            if cands:
+              h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
+              ibuf = buf.replace(dtype=(dtypes.imageh if buf.dtype.base == dtypes.half else dtypes.imagef)((h, w, 4)))
+          idt = cast(ImageDType, ibuf.dtype)
+          idx_y, idx_x = (offset // (4*idt.shape[1])).simplify(), ((offset // 4) % idt.shape[1]).simplify()
+          idx = simplify_valid_image_load(ibuf, idx_y, idx_x, valid) if valid is not None else None
+          if idx is None: idx = ibuf.index(idx_y, idx_x, ptr=True)
+          idx_valid = None
         else:
           idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
@@ -97,14 +103,14 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
             datas.append(offsets[g][0].src[1])
           data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
           if ibuf is not None and ibuf.dtype.itemsize == 2: data = pm_imageh_store.rewrite(data)
-          store = idx.store(data, valid) if valid is not None else idx.store(data)
+          store = idx.store(data, idx_valid) if idx_valid is not None else idx.store(data)
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
-          ld = idx.load(idx.vconst_like(0), valid) if valid is not None else idx.load()
-          if ibuf is not None and buf.dtype.base != dtypes.float: ld = ld.cast(buf.dtype.base)
+          ld = idx.load(idx.vconst_like(0), idx_valid) if idx_valid is not None else idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
-              replacements[oo] = ld.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else ld
+              ret = ld.index(UOp.const(dtypes.int, lane0 if lane0 is not None else i)) if ibuf is not None or len(grp) > 1 else ld
+              replacements[oo] = ret.cast(buf.dtype.base) if ibuf is not None and buf.dtype.base != dtypes.float else ret
         full_grp = full_grp[length:]
 
   # apply
