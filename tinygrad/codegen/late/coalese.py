@@ -14,6 +14,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalesing
     if u.op in {Ops.LOAD, Ops.STORE} and not isinstance(u.src[0].src[0].dtype, ImageDType):
+      assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
@@ -70,4 +71,3 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
 
   # apply
   return sink.substitute(replacements, name="memory coalesing")
-
