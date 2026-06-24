@@ -27,6 +27,7 @@ def to_vgpr(ctx, x:UOp) -> UOp:
   if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
   if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)])
   return x
+def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
@@ -38,6 +39,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # allocate vreg definitions
   defs = []
   # don't generally allocate to SGPRS, only works wave uniform possible future optim
+  # if x.op is Ops.END: defs = [ctx.vreg(GP_SGPRS)] # alloc gate mask
   if isinstance(x.tag, tuple):
     vr = ctx.vreg(x.tag)
     defs = [vr] if isinstance(vr, Register) else [*vr]
@@ -189,18 +191,6 @@ def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
   st = store(ctx, addr, val, x)
   return st.replace(src=st.src + (gate,))
 
-# - range automatically allocated vgpr for acc
-# - allocate mask for cmp output and to save exec?
-def prepare_range(ctx, bnd:UOp, x:UOp):
-  if len(x.src) > 1: return None
-  mask = def_reg(dtypes.uint32, GP_SGPRS)
-  return x.replace(dtype=dtypes.uint32).replace(src=x.src + (mask,))
-
-def prepare_end(ctx, x:UOp):
-  if len(x.src) > 2: return None
-  one = UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 1),))
-  return x.replace(src=x.src + (one,))
-
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
@@ -208,8 +198,11 @@ pre_isel_matcher = PatternMatcher([
 
 isel_matcher = PatternMatcher([
   # control flow
-  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
-  (UPat(Ops.END, name="x"), prepare_end),
+  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"),
+   lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32)
+                           if x.dtype is not dtypes.uint32 else None),
+  (UPat(Ops.END, name="x"), lambda ctx,x:
+   x.replace(src=x.src + (to_vgpr(dtypes.uint32, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1))) if len(x.src) == 2 else None),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
@@ -284,7 +277,6 @@ def encode(x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-  print(opc, args)
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
@@ -304,36 +296,29 @@ def lower_gated(x:UOp):
     return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
 
+
+# - range end requires 2 sgprs, 1 to restore and 1 for gate
+# - gated load/store also needs 2 sgprs, restore mask and gate mask...
+#   - look at llvm and v_cmpx to simplify divergent control flow handling
+# - vcmpx writes directly to exec, no need to allocate mask!
+# lets experiment with this approach for lower end
+
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
   loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
-  lbl = label(ctx, f".LOOP_{loop_label}")
-  # rehaul this, label is in wrong spot
-  # - label needs to target cmp
-  # - original exec mask cant be inside loop
-  # - use v_cmpx?
-  gate = x.src[-1].ins(RDNA3Ops.v_cmp_lt_u32_e64, src=(acc,x.src[0])) # does bnd need to be in vgpr?
-  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_OUT_{loop_label}")
+  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
   ctx.loop_label[acc] = loop_label
-  return acc, [acc, gate, updateexec(x.src[-1]), skip]
-
-# should gate go at loop end?
-#
-# acc = 0 
-# label0:
-#   <body>
-# acc += 1
-# gate = acc < bound
-# exec &= ~gate # retire lanes
-# if any(gate): # execnz
-#   jmp label0
+  ctx.exec_saves[acc] = mask
+  lbl = label(ctx, f".LOOP_{loop_label}")
+  return acc, [acc, mask, lbl]
 
 def lower_end(ctx, x:UOp):
-  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[2]), tag=regs(x.src[1]))
-  branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  lbl = label(ctx, f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
-  return inc, [inc, branch, lbl, restoreexec()]
+  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-2]), tag=(EXEC,))
+  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-1]))
+  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,ctx.exec_saves[x.src[1]]), tag=(EXEC,))
+  return inc, [inc, gate, loop, restore]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
@@ -341,7 +326,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
   (UPat(Ops.INS, name="x"), lower_gated),
-  # (UPat(Ops.INS, name="x"), lambda x: expand_gated_load(x) if is_gated(x) else None),
 ])
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
@@ -356,6 +340,7 @@ def _counter(x:UOp):
 
 @dataclass
 class RDNA3LinearCtx:
+  exec_saves: dict[UOp, UOp] = field(default_factory=dict)
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
 class RDNA3Renderer(ISARenderer):
@@ -415,6 +400,7 @@ class RDNA3Renderer(ISARenderer):
           targets[u.tag] = pc
         continue
       l = encode(u)
+      print(pc, l.arg)
       pc += l.arg.size()
       _asm.append((l,pc))
 
@@ -422,8 +408,9 @@ class RDNA3Renderer(ISARenderer):
     def _reslv(u:UOp,upc:int):
       if isinstance(u.tag, str):
         # if (cond) PC = PC + (SIMM16 *4) +4
-        simm = (targets[u.tag] - upc) // 4
-        u = u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm - 1))
+        simm = (targets[u.tag] - upc - 4) // 4
+        print(f"resolving jump {upc} -> {targets[u.tag]}, {targets[u.tag]} = {upc} + ({simm} * 4) + 4")
+        u = u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
       return u 
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
