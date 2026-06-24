@@ -64,7 +64,8 @@ pm_fix_image_shrink = PatternMatcher([
    lambda img,out,idx: img.reshape(-1, 4).index(idx.src[0]//4) if len(img.shape) == 3 and out.shape == (4,) else None),
   # demote this to non image
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.PARAM, name="img"), UPat())), UPat(name="idx")), name="out"),
-   lambda img,out,idx: img.replace(src=(shape_to_shape_arg((img.max_numel(),)),), dtype=dtypes.float).index(idx) if out.shape == () else None)
+   lambda img,out,idx: img.replace(src=(shape_to_shape_arg((img.max_numel(),)),),
+                                   dtype=dtypes.half if img.dtype.itemsize == 2 else dtypes.float).index(idx) if out.shape == () else None)
 ])+pm_mops
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
