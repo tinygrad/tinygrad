@@ -49,8 +49,8 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return def_reg(dtypes.int, WGIDS[dim])
-    else: return x.ins(RDNA3Ops.v_bfe_u32, src=(def_reg(dtypes.uint32, WIIDS[0]), const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
+    if x.arg[0] == 'g': return def_reg(dtypes.uint32, WGIDS[dim])
+    else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS[0]), const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (UOp.const(dtypes.uint32, offs).rtag(),), tag=ctx.vreg((GP_SGPRS, 2)))
 
@@ -81,6 +81,17 @@ V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e32, dtypes.float32:RDNA3Ops.v_
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
 
+def _build_cvt_table():
+  _valid_casts = {
+    dtypes.int32    : (dtypes.float32, dtypes.float64, dtypes.int16),
+    dtypes.uint32   : (dtypes.float32, dtypes.float64, dtypes.uint16),
+    dtypes.float32  : (dtypes.float64, dtypes.float16, dtypes.int32, dtypes.uint32)
+  }
+  _isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16" }
+  return { src : { targ: getattr(RDNA3Ops, f"v_cvt_{_isa[src]}_{_isa[targ]}_e32") for targ in targets } for src,targets in _valid_casts.items() }
+V_CVT = _build_cvt_table()
+
+
 def legalize_operands(ctx, x:UOp):
   group, opc = x.arg.func, x.arg.opc
   if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
@@ -102,7 +113,7 @@ def legalize_operands(ctx, x:UOp):
   return None
 
 def cmp(x:UOp):
-  dt = x.src[0].dtype
+  dt = x.src[0].dtype.scalar()
   if x.op is Ops.CMPLT: ins = V_CMPLT[dt]
   elif x.op is Ops.CMPEQ: ins = V_CMPEQ[dt]
   elif x.op is Ops.CMPNE: ins = V_CMPNE[dt]
@@ -121,17 +132,23 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   return (idx << shft, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
-def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
+def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
   # scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   scale = 1 
-  print(base.op, idx.op)
-  if idx.op is Ops.CONST: return (base, idx.arg * scale)
-  shft = to_vgpr(ctx, const(dtypes.int, scale // 2))
+  # base doesn't hold a ptr for local addrspace
+  # NOTE: keep base in src to maintain graph dependencies?
+  if idx.op is Ops.CONST:
+    return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), idx.arg * scale, base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
-    return (base + (idx.src[0] << shft), idx.src[1].arg * scale)
-  raise NotImplementedError(f"cant fold lds, idx.op={idx.op}")
+    return (idx.src[0].cast(dtypes.uint32), idx.src[1].arg * scale, base)
+  # shft = to_vgpr(ctx, const(dtypes.int, scale // 2))
+  return (idx.cast(dtypes.uint32), const(dtypes.uint16, 0), base)
+  # return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0))
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
+def cvt(ctx, y:UOp, x:UOp):
+  print(f"cvting {y.dtype} -> {x.dtype}")
+  return x.ins(V_CVT[y.dtype][x.dtype])
 
 # todo: handle 16 bit loads?
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
@@ -163,10 +180,6 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   }
   return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
 
-# this cant be done same as x86 because GLOBAL vs REG loads are lowered
-# differently at compile time, gate result cannot be known ahead of time
-
-
 # TODO: eventually just handle folding in the gate/alt in load/store??
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
   ld = load(ctx, addr, x)
@@ -176,6 +189,15 @@ def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
   st = store(ctx, addr, val, x)
   return st.replace(src=st.src + (gate,))
 
+# range requires the definition of an acc register and gate op
+def prepare_range(ctx, bnd:UOp, x:UOp):
+  if x.src[-1].op is Ops.INS: return None
+  # regs(range) has to represent acc, maybe model this in regs() view?
+  # problem is gate relies on the comparison?
+  acc = def_reg(dtypes.int32, GP_VGPRS)
+  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmp_lt_i32_e64, src=(acc,bnd))
+  return x.replace(src=x.src + (gate,)).replace(tag=(ctx.vreg(GP_VGPRS),))
+
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
@@ -184,7 +206,8 @@ pre_isel_matcher = PatternMatcher([
 # PROBLEM: load needs to be lowered ahead of time, maybe just lower it
 # then append gate and alt to src
 isel_matcher = PatternMatcher([
-  # gated mem ops
+  # control flow
+  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
@@ -193,10 +216,6 @@ isel_matcher = PatternMatcher([
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), abi),
-  # Range and end gets lowered after regalloc
-  # (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
-  #(UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), # wire sgpr execmask into src to model reg dependency
-    #lambda x,rng: x.replace(src=x.src + (rng.src[-1],)) if len(x.src) == 2 else None), 
   # unary alu ops
   (UPat.var("y").log2().named("x"), lambda y,x: x.ins(V_LOG[y.dtype])),
   (UPat.var("y").exp2().named("x"), lambda y,x: x.ins(V_EXP[y.dtype])),
@@ -213,6 +232,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SUB, name="x"), lambda x: x.ins(V_SUB[x.dtype])),
   (UPat(Ops.MAX, name="x"), lambda x: x.ins(V_MAX[x.dtype])),
   (UPat(Ops.XOR, dtype=dt_32bit, name="x"), lambda x: x.ins(RDNA3Ops.v_xor_b32_e32)),
+  # cast
+  (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
   (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
     lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
@@ -265,23 +286,25 @@ def encode(x:UOp):
 # --- control flow ---
 def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
 def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
+def label(name:str) -> UOp: return UOp(Ops.NOOP, tag=(name,))
 
-def expand_gated_load(x:UOp):
-  return x.src[0], [x.src[0], updateexec(x.src[-1]), x.replace(src=x.src[1:-1]), restoreexec()]
-
-def expand_gated_store(x:UOp):
-  branch = updateexec(x.src[-1])
-  return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
-
-def lower_control_flow(x:UOp):
-  if "load" in x.arg.opc and len(x.src) > 3: return expand_gated_load(x)
-  if "store" in x.arg.opc and len(x.src) > 4: return expand_gated_store(x)
+def lower_gated(x:UOp):
+  if "load" in x.arg.opc and len(x.src) > 3: # gated load
+    return x.src[0], [x.src[0], updateexec(x.src[-1]), x.replace(src=x.src[1:-1]), restoreexec()]
+  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
+    branch = updateexec(x.src[-1])
+    return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
+
+def lower_range(x:UOp):
+  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, src=(label("RANGE_END"),))
+  return x.src[0], [x.src[0], updateexec(gate), skip]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
-  (UPat(Ops.INS, name="x"), lower_control_flow),
+  (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.INS, name="x"), lower_gated),
   # (UPat(Ops.INS, name="x"), lambda x: expand_gated_load(x) if is_gated(x) else None),
 ])
 
