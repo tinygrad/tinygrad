@@ -3,11 +3,14 @@ import itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
+
+# image now lives here
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
+  using_image = IMAGE and ctx.target.device in {"QCOM", "CL", "PYTHON", "NULL"}
 
   # collect
   memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
@@ -44,7 +47,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       lengths = [4]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
-      lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
+      lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") and not using_image else [4,2]
     lengths.append(1)  # worst case, it's not folded
     # do the grouping
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
@@ -53,6 +56,9 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
+        if len(grp) == 4 and using_image:
+          print("IMAGE OPTION")
+          pass
         idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []

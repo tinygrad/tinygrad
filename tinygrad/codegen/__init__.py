@@ -114,6 +114,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # add loads and remove invalids
   sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
 
+  # create image buffers
+  #if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
+  #  sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
+
   # devectorize
   sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
                        ctx=ren, name="devectorize")
@@ -131,16 +135,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
 
-  # create image buffers
-  if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
-    sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
-
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
 
   # image fixup
-  if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
-    sink = graph_rewrite(sink, pm_fix_image_shrink, name="fix image shrink")
+  #if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
+  #  sink = graph_rewrite(sink, pm_fix_image_shrink, name="fix image shrink")
 
   # instruction selection decompositions
   pm_decomp = pm_decomp+\

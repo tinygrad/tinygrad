@@ -163,7 +163,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   lengths = []
   must_divide = True
   # TODO: this belongs in coalese
-  if isinstance(buf.dtype, ImageDType): lengths = [4]
+  #if isinstance(buf.dtype, ImageDType): lengths = [4]
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
