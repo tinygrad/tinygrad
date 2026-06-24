@@ -77,7 +77,7 @@ V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e64, dtypes.float32:RDNA3Ops.v_
   dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e64 }
 V_CMPGT = { dtypes.float16:RDNA3Ops.v_cmp_gt_f16_e64, dtypes.float32:RDNA3Ops.v_cmp_gt_f32_e64, dtypes.float64:RDNA3Ops.v_cmp_gt_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_gt_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_gt_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_gt_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_gt_u16_e64 }
-V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_eq_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_eq_f64_e32, dtypes.uint16:RDNA3Ops.v_cmp_eq_u16_e32, dtypes.uint32:RDNA3Ops.v_cmp_eq_u32_e32, dtypes.int16:RDNA3Ops.v_cmp_eq_i16_e32, dtypes.int32:RDNA3Ops.v_cmp_eq_i32_e32 }
+V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e64, dtypes.float32:RDNA3Ops.v_cmp_eq_f32_e64, dtypes.float64:RDNA3Ops.v_cmp_eq_f64_e64, dtypes.uint16:RDNA3Ops.v_cmp_eq_u16_e64, dtypes.uint32:RDNA3Ops.v_cmp_eq_u32_e64, dtypes.int16:RDNA3Ops.v_cmp_eq_i16_e64, dtypes.int32:RDNA3Ops.v_cmp_eq_i32_e64 }
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
 
@@ -194,18 +194,22 @@ def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
 def prepare_range(ctx, bnd:UOp, x:UOp):
   if len(x.src) > 1: return None
   mask = def_reg(dtypes.uint32, GP_SGPRS)
-  return UOp(Ops.RANGE, dtypes.uint32, src=x.src + (mask,))
+  return x.replace(dtype=dtypes.uint32).replace(src=x.src + (mask,))
+
+def prepare_end(ctx, x:UOp):
+  if len(x.src) > 2: return None
+  one = UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 1),))
+  return x.replace(src=x.src + (one,))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
-# PROBLEM: load needs to be lowered ahead of time, maybe just lower it
-# then append gate and alt to src
 isel_matcher = PatternMatcher([
   # control flow
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), prepare_range),
+  (UPat(Ops.END, name="x"), prepare_end),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
@@ -275,22 +279,21 @@ def encode(x:UOp):
     if reg(x) is None: kw["data0"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
-  elif group is RDNA3Ops.SOPP:
-    pass
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
+  elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
+  print(opc, args)
   ret = enc(**kw) if kw is not None else enc(*args)
-  nx = x.replace(arg=ret)
-  return nx
+  return x.replace(arg=ret)
 
 # --- control flow ---
 # NOTE: need to solve exec save sgpr modelling in regalloc, will break on nested flow
 # - also need to get labels working...
 def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
 def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
-def label(name:str) -> UOp: return UOp(Ops.NOOP, tag=(name,))
+def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 
 # TODO: dont use string comparisons, have a clear load/store spec? operands?
 def lower_gated(x:UOp):
@@ -301,17 +304,36 @@ def lower_gated(x:UOp):
     return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
 
-# TODO: labels
-def lower_range(x:UOp):
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
+def lower_range(ctx, x:UOp):
+  loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+  lbl = label(ctx, f".LOOP_{loop_label}")
+  # rehaul this, label is in wrong spot
+  # - label needs to target cmp
+  # - original exec mask cant be inside loop
+  # - use v_cmpx?
   gate = x.src[-1].ins(RDNA3Ops.v_cmp_lt_u32_e64, src=(acc,x.src[0])) # does bnd need to be in vgpr?
-  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, src=(label("END_RANGE"),))
+  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_OUT_{loop_label}")
+  ctx.loop_label[acc] = loop_label
   return acc, [acc, gate, updateexec(x.src[-1]), skip]
 
-def lower_end(x:UOp):
-  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], const(dtypes.uint32, 0),), tag=regs(x.src[1]))
-  branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, src=(label("START_RANGE"),))
-  return inc, [inc, branch, restoreexec()]
+# should gate go at loop end?
+#
+# acc = 0 
+# label0:
+#   <body>
+# acc += 1
+# gate = acc < bound
+# exec &= ~gate # retire lanes
+# if any(gate): # execnz
+#   jmp label0
+
+def lower_end(ctx, x:UOp):
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[2]), tag=regs(x.src[1]))
+  branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  lbl = label(ctx, f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
+  return inc, [inc, branch, lbl, restoreexec()]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
@@ -357,13 +379,13 @@ class RDNA3Renderer(ISARenderer):
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
+    # insert waitcnts
     bld_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
     fill_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
     # maps op that consumes sync dependent register to cnt requirement + pc from which this cnt is required
     tosync: dict[Register, tuple[CounterType, list[tuple[int, int]]]] = {}
     nuops = []
-   
-    waitins = { CounterType.DS_CNT : RDNA3Ops.s_waitcnt_lgkmcnt, CounterType.LOAD_CNT : RDNA3Ops.s_waitcnt_vmcnt, CounterType.STORE_CNT : RDNA3Ops.s_waitcnt_vscnt }
+    waitins = { CounterType.DS_CNT:RDNA3Ops.s_waitcnt_lgkmcnt, CounterType.LOAD_CNT:RDNA3Ops.s_waitcnt_vmcnt, CounterType.STORE_CNT:RDNA3Ops.s_waitcnt_vscnt }
     for i, u in enumerate(lin.src):
       if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
       ctp = _counter(u)
@@ -383,7 +405,27 @@ class RDNA3Renderer(ISARenderer):
       nuops.extend([UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16,n),)) for tp,n in waits.items()])
       nuops.append(u)
 
-    lin = lin.replace(src=tuple(encode(u) for u in nuops if u.arg is not RDNA3Ops.s_nop))
+    # labels + encode
+    pc = 0
+    targets: dict[str, int] = {}
+    _asm: list[tuple[UOp,int]] = []
+    for u in nuops:
+      if u.arg is RDNA3Ops.s_nop:
+        if isinstance(u.tag, str):
+          targets[u.tag] = pc
+        continue
+      l = encode(u)
+      pc += l.arg.size()
+      _asm.append((l,pc))
+
+    # resolve labels
+    def _reslv(u:UOp,upc:int):
+      if isinstance(u.tag, str):
+        # if (cond) PC = PC + (SIMM16 *4) +4
+        simm = (targets[u.tag] - upc) // 4
+        u = u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm - 1))
+      return u 
+    lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
     print(prg.arg)
     for u in lin.src: print(u.arg)
