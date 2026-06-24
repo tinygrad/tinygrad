@@ -189,14 +189,12 @@ def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
   st = store(ctx, addr, val, x)
   return st.replace(src=st.src + (gate,))
 
-# range requires the definition of an acc register and gate op
+# - range automatically allocated vgpr for acc
+# - allocate mask for cmp output and to save exec?
 def prepare_range(ctx, bnd:UOp, x:UOp):
-  if x.src[-1].op is Ops.INS: return None
-  # regs(range) has to represent acc, maybe model this in regs() view?
-  # problem is gate relies on the comparison?
-  acc = def_reg(dtypes.int32, GP_VGPRS)
-  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmp_lt_i32_e64, src=(acc,bnd))
-  return x.replace(src=x.src + (gate,)).replace(tag=(ctx.vreg(GP_VGPRS),))
+  if len(x.src) > 1: return None
+  mask = def_reg(dtypes.uint32, GP_SGPRS)
+  return UOp(Ops.RANGE, dtypes.uint32, src=x.src + (mask,))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
@@ -224,8 +222,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").trunc().named("x"), lambda y,x: x.ins(V_TRUNC[y.dtype])),
   (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("y"),)), lambda y,x: x.ins(V_RCP[y.dtype])),
   # fused multiply add, use FMAC in the future?
-  ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"),
-    lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
+  ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
   # binary alu ops
   ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
   ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
@@ -233,21 +230,20 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.MAX, name="x"), lambda x: x.ins(V_MAX[x.dtype])),
   (UPat(Ops.XOR, dtype=dt_32bit, name="x"), lambda x: x.ins(RDNA3Ops.v_xor_b32_e32)),
   # cast
-  (UPat.var("y").cast(name="x"), cvt),
+  # (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
-  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
-    lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
   # cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"), cmp),
   # mem ops
   (UPat.var("addr").store(UPat.var("val"), name="x"), store),
   (UPat(Ops.LOAD, name="x", src=(UPat.var("addr"))), load),
   # bit shifts
-  # ((UPat(name="a", dtype=dt_16bit) << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b16, src=(b,a))),
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
+  # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
   # normalize and satisfy operand orders/reg types, this should probably be handled per pattern?
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
@@ -274,7 +270,13 @@ def encode(x:UOp):
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
     if reg(x) is None: kw["data"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
+  elif group is RDNA3Ops.DS:
+    kw = dict(addr=_immorreg(oprs[0]), offset1=_immorreg(oprs[1]))
+    if reg(x) is None: kw["data0"]=_fuse(regs(oprs[3]))
+    else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
+  elif group is RDNA3Ops.SOPP:
+    pass
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
@@ -284,10 +286,13 @@ def encode(x:UOp):
   return nx
 
 # --- control flow ---
+# NOTE: need to solve exec save sgpr modelling in regalloc, will break on nested flow
+# - also need to get labels working...
 def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
 def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
 def label(name:str) -> UOp: return UOp(Ops.NOOP, tag=(name,))
 
+# TODO: dont use string comparisons, have a clear load/store spec? operands?
 def lower_gated(x:UOp):
   if "load" in x.arg.opc and len(x.src) > 3: # gated load
     return x.src[0], [x.src[0], updateexec(x.src[-1]), x.replace(src=x.src[1:-1]), restoreexec()]
@@ -296,14 +301,23 @@ def lower_gated(x:UOp):
     return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
 
+# TODO: labels
 def lower_range(x:UOp):
-  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, src=(label("RANGE_END"),))
-  return x.src[0], [x.src[0], updateexec(gate), skip]
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+  gate = x.src[-1].ins(RDNA3Ops.v_cmp_lt_u32_e64, src=(acc,x.src[0])) # does bnd need to be in vgpr?
+  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, src=(label("END_RANGE"),))
+  return acc, [acc, gate, updateexec(x.src[-1]), skip]
+
+def lower_end(x:UOp):
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], const(dtypes.uint32, 0),), tag=regs(x.src[1]))
+  branch = UOp(Ops.INS, arg=RDNA3Ops.s_branch, src=(label("START_RANGE"),))
+  return inc, [inc, branch, restoreexec()]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
   (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.END, name="x"), lower_end),
   (UPat(Ops.INS, name="x"), lower_gated),
   # (UPat(Ops.INS, name="x"), lambda x: expand_gated_load(x) if is_gated(x) else None),
 ])
