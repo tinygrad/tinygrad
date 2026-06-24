@@ -170,14 +170,10 @@ jobs:
     - name: Train MNIST
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
-      # NOTE: this is failing on METAL with "RuntimeError: Internal Error (0000000e:Internal Error)"
-      if: ${{ matrix.dev != 'METAL' }}
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || '200' }}
       run: BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
-      # NOTE: this is failing on METAL with "RuntimeError: Internal Error (0000000e:Internal Error)"
-      if: ${{ matrix.dev != 'METAL' }}
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || '230' }}
       run: BENCHMARK_LOG=cifar_10steps_half STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
