@@ -2899,7 +2899,7 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 
   g = Tensor(gradient, device=aq.device)[:aq.shape[0]].reshape(aq.shape[0]*aq.shape[1], bq.shape[0]).cast(dtypes.bfloat16)
   grad_a = asm_gemm(g, b_phys, mx=True)
-  grad_b = asm_gemm(g.T, a_phys, mx=True)
+  grad_b = asm_gemm(g.T, a_phys, mx=True, a_pretranspose=g)
 
   grad_a = (grad_a * _mx_block_scale(ae8)).reshape(aq.shape)
   if not w_stored: grad_b = grad_b * _mx_block_scale(be8)
@@ -2909,7 +2909,8 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_scale:Tensor|None=None) -> Tensor:
+             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_scale:Tensor|None=None,
+             a_pretranspose:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
@@ -2946,6 +2947,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       if mx_scales is not None:
         a_si, a_e8, b_si, b_e8 = mx_scales
         a_q, b_q = a.reshape(-1, a.shape[-1]), b.T
+      elif (a_pretranspose is not None and getenv("FUSED_GRAD_QUANTIZE", 0) and a_pretranspose.dtype == dtypes.bfloat16
+            and a_pretranspose.shape[0] % 32 == 0 and a_pretranspose.shape[1] % 256 == 0):
+        from extra.llama_kernels.transpose_quantize_mxfp8 import transpose_quantize_mxfp8
+        a_q, a_e8, a_si = transpose_quantize_mxfp8(a_pretranspose)
+        b_q, b_e8, b_si = quantize_mxfp8(b.T)
       else:
         a_q, a_e8, a_si = quantize_mxfp8(a.reshape(-1, a.shape[-1]))
         b_q, b_e8, b_si = quantize_mxfp8(b.T)
