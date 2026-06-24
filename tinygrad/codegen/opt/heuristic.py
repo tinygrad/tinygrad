@@ -101,6 +101,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
     is_masked = k.rngs[axis] in where_gate_rngs
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
+      # upcasting a masked global axis moves that range out of the launch grid into each work-item
+      # under IMAGE, skip the upcast unless enough global work-items remain after it to hide memory latency
+      if IMAGE and k.axis_types[axis] is AxisType.GLOBAL:
+        global_upcast = prod(k.full_shape[i] for i in to_upcast if k.axis_types[i] is AxisType.GLOBAL) * k.full_shape[axis]
+        global_items_after = prod(k.full_shape[i] for i in k.axes_of(AxisType.GLOBAL)) // global_upcast
+        if resolve(global_items_after < getenv("OCCUPANCY_FLOOR", 4096), False): continue
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
