@@ -4,6 +4,7 @@ import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
+from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -58,9 +59,13 @@ pm_no_weakints = PatternMatcher([
 ])
 
 pm_fix_image_shrink = PatternMatcher([
+  # proper image index
   (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.PARAM, name="img"), UPat())), UPat(name="idx"), UPat()), name="out"),
    lambda img,out,idx: img.reshape(-1, 4).index(idx.src[0]//4) if len(img.shape) == 3 and out.shape == (4,) else None),
-])
+  # demote this to non image
+  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.PARAM, name="img"), UPat())), UPat(name="idx")), name="out"),
+   lambda img,out,idx: img.replace(src=(shape_to_shape_arg((img.max_numel(),)),), dtype=dtypes.float).index(idx) if out.shape == () else None)
+])+pm_mops
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -134,7 +139,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # image fixup
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
-    sink = graph_rewrite(sink, pm_mops+pm_fix_image_shrink, name="fix image shrink")
+    sink = graph_rewrite(sink, pm_fix_image_shrink, name="fix image shrink")
 
   # instruction selection decompositions
   pm_decomp = pm_decomp+\
