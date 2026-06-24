@@ -122,7 +122,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower post-coalescing index dtypes")
 
   # instruction selection decompositions
   pm_decomp = pm_decomp+\
