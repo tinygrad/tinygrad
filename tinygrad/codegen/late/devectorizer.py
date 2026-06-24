@@ -14,7 +14,7 @@ from tinygrad.renderer import Renderer
 def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
-  for stmt in valid.split_uop(Ops.AND):
+  for i,stmt in enumerate(valid.split_uop(Ops.AND)):
     if (res:=parse_valid(stmt)) is None: continue
     X, is_upper_bound, c = res
 
@@ -25,12 +25,12 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
         drop_stmt.append(stmt)
         continue
 
-    # if X <= c, check if it's out of bound when X = c+1
-    # if X >= c, check if it's out of bound when X = c-1
-    test_value = c + 1 if is_upper_bound else c - 1
-    for i,b in zip(idx.src, (width, height)):
-      if i.is_increasing():
-        rw = i.substitute({X:X.const_like(test_value)})
+    # check if idx is out of bound when X is on the wrong side of the bound: X in [c+1, vmax] or [vmin, c-1]
+    lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
+    if lo <= hi:
+      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
+      for coord,b in zip(idx.src, (width, height)):
+        rw = coord.substitute({X:fake}).simplify()
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break

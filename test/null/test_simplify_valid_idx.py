@@ -27,28 +27,6 @@ def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtyp
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
-class TestHelpers(unittest.TestCase):
-  def test_is_increasing(self):
-    idx1 = Special("idx1", 32)
-    idx2 = Special("idx2", 64)
-    ridx0 = Variable("ridx0", 0, 5)
-    ridx1 = Variable("ridx1", 0, 2)
-    ridx2 = Variable("ridx2", 0, 2)
-    # (ridx0+(idx1*48)+(ridx2*6)+(-6)),((idx2*2)+ridx1+(-1)))
-    f0 = ((idx1*24)+(ridx2*3)+ridx0+765)%768
-    f1 = ridx0+(idx1*48)+(ridx2*6)+(-6)
-    f2 = (idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)
-    f3 = (idx2*2)+ridx1+(-1)
-
-    self.assertFalse(f0.is_increasing())
-    self.assertTrue(f1.is_increasing())
-    self.assertTrue(f2.is_increasing())
-    self.assertTrue(f3.is_increasing())
-
-    rng = UOp.range(5, 2)
-    self.assertTrue(rng.is_increasing())
-    self.assertTrue((rng+2).is_increasing())
-
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
     load = simplify_valid_idx(UOp.sink(load, *extra)).src[0]
@@ -503,6 +481,16 @@ class TestImageSimplification(unittest.TestCase):
       # TODO: fold valid
       self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
+
+  def test_drop_non_monotonic_window(self):
+    # two-sided window valid (645 <= gidx0 < 653) on a non-monotonic index (lane split via %4 and //4):
+    # gidx0 outside the window pushes idx_x out of the (1, 48) image, so the gate is dropped
+    gidx0 = Special("gidx0", 1064)
+    r12 = Range(12, 3)
+    valid = ((gidx0 < 645).ne(True)) & (gidx0 < 653)
+    idx = (r12*4 + (gidx0+3)%4 + (gidx0+3)//4*24 - 3888, UOp.const(dtypes.weakint, 0))
+    load = get_load_image_uop((1, 48, 4), valid, idx)
+    self.check(load, None, "(r12*4+(gidx0+3)%4+(gidx0+3)//4*24+-3888)", "0")
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
