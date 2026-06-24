@@ -166,7 +166,7 @@ jobs:
       if: ${{ matrix.dev != 'METAL' }}
       run: BENCHMARK_LOG=qwen35_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 -m tinygrad.llm -m qwen3.5:35b-a3b --benchmark --warmup
     - name: Run olmoe
-      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
+      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
     - name: Train MNIST
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
