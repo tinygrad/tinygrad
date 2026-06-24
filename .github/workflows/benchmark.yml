@@ -148,11 +148,11 @@ jobs:
       # TODO: unstable on AMD
       if: ${{ matrix.dev != 'AMD' }}
       env:
-        HALF: ${{ matrix.dev == 'NV' && '1' || '' }}
+        HALF: ${{ matrix.dev == 'NV' && '1' || '0' }}
       run: CAPTURE_PROCESS_REPLAY=0 BIG=2 ${{ matrix.dev == 'METAL' && 'MPS=1' || 'TORCHCUDA=1' }} python3 test/speed/external_test_speed_v_torch.py
     - name: Run Stable Diffusion
       env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'METAL' && '720' || matrix.dev == 'AMD' && '550' || '' }}
+        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'METAL' && '720' || matrix.dev == 'AMD' && '550' || '0' }}
       run: BENCHMARK_LOG=stable_diffusion python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing
     - name: Run SDXL
       if: ${{ matrix.dev != 'NV' }}
