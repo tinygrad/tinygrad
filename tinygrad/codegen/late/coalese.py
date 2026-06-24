@@ -15,7 +15,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     # TODO: this should handle images too, it's just memory coalesing
     if u.op in {Ops.LOAD, Ops.STORE} and not isinstance(u.src[0].src[0].dtype, ImageDType):
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
-      assert u.src[0].op is Ops.INDEX
+      if u.src[0].op is not Ops.INDEX: continue
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
