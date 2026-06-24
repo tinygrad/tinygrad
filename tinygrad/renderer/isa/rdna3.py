@@ -171,6 +171,8 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   base, idx = addr.src[:2]
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
+    # how to guarantee its stored in the same reg as buf/base??
+    # if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(val,))
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
         for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
@@ -202,7 +204,7 @@ isel_matcher = PatternMatcher([
    lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32)
                            if x.dtype is not dtypes.uint32 else None),
   (UPat(Ops.END, name="x"), lambda ctx,x:
-   x.replace(src=x.src + (to_vgpr(dtypes.uint32, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1))) if len(x.src) == 2 else None),
+   x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1))) if len(x.src) == 2 else None),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
@@ -295,7 +297,6 @@ def lower_gated(x:UOp):
     branch = updateexec(x.src[-1])
     return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
-
 
 # - range end requires 2 sgprs, 1 to restore and 1 for gate
 # - gated load/store also needs 2 sgprs, restore mask and gate mask...
@@ -408,7 +409,7 @@ class RDNA3Renderer(ISARenderer):
     def _reslv(u:UOp,upc:int):
       if isinstance(u.tag, str):
         # if (cond) PC = PC + (SIMM16 *4) +4
-        simm = (targets[u.tag] - upc - 4) // 4
+        simm = (targets[u.tag] - upc) // 4
         print(f"resolving jump {upc} -> {targets[u.tag]}, {targets[u.tag]} = {upc} + ({simm} * 4) + 4")
         u = u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
       return u 
