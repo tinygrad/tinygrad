@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, prod
+from tinygrad.helpers import getenv, flatten, prod, OSX, ceildiv
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -60,6 +60,15 @@ load_store_indexing = PatternMatcher([
 
 # ***** load/store grouping *****
 
+# get list of (height, width) that do not require pitch padding
+def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
+  if (ALIGN:=next((int(p.split('=')[1]) for p in arch.split(',') if p.startswith("IMAGE_PITCH_ALIGNMENT=")), 0)) == 0: return []
+  MAXW, pxls = 16384, size // 4
+  if base not in (dtypes.half, dtypes.float) or size > 4*MAXW*MAXW: return []
+  # height=1 images just need to abide by alignment requirements in bytes, not pixels!
+  if size % (ALIGN * 4) != 0: return [] if (base.itemsize * size) % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
+  return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
+
 def expand_index(ctx, buf:UOp, vec:UOp):
   # determine optimal image shapes
   if isinstance(dt:=buf.dtype, ImageDType):
@@ -68,7 +77,7 @@ def expand_index(ctx, buf:UOp, vec:UOp):
     x, valid = idxs.gep(lane), valids.gep(lane)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
-    for ch, cw in ImageDType.valid_dims(dt, ctx.target.arch):
+    for ch, cw in image_valid_dims(dt.base, dt.size, ctx.target.arch):
       if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
         best_drop, cands = dropped, [(ch, cw, cidx)]
       elif dropped == best_drop: cands.append((ch, cw, cidx))
@@ -374,7 +383,7 @@ pm_imageh_store = PatternMatcher([
 
 def make_image(ctx, ls, buf, off):
   if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
-  if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt, ctx)):
+  if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=image_valid_dims(dt.base, dt.size, ctx)):
     buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4))).flatten()
     if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
     if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(ls.dtype.vcount)).cast(dt.base)
