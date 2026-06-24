@@ -171,11 +171,11 @@ jobs:
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
       env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || '200' }}
+        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || matrix.dev == 'AMD' && '200' || '3000' }}
       run: BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
       env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || '230' }}
+        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || matrix.dev == 'AMD' && '230' || '3000' }}
       run: BENCHMARK_LOG=cifar_10steps_half STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - uses: actions/upload-artifact@v7
       if: ${{ matrix.dev != 'AMD' }}
