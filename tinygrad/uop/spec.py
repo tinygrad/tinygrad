@@ -243,10 +243,7 @@ spec_full = PatternMatcher([
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 
-  # TODO: PTRCAT and VCAT need to be deleted
-
-  # PTRCAT is like VECTORIZE, but it functions on ptrs
-  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
+  # TODO: VCAT needs to be deleted
   # VCAT is like VECTORIZE, but the srcs can be vectors
   (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
 ])+spec_tensor+spec_program

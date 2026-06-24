@@ -1,6 +1,4 @@
-from typing import Any, cast
 import functools, itertools
-from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
@@ -80,53 +78,6 @@ def expand_index(ctx, buf:UOp, vec:UOp):
   # generate the individual indexes
   return UOp(Ops.STACK, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
 
-def fold_expanded_index(midx:UOp):
-  buf = midx.src[0].src[0]
-  if not all(s.src[0] is buf for s in midx.src): return None
-  if not all(isinstance(s.dtype, PtrDType) for s in midx.src): return None
-
-  # extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  for i in range(len(midx.src)):
-    idx: Any = midx.src[i].src[1].get_idx()
-    if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
-    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
-    elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
-    else: root_src, arg = idx, 0
-    root_src = (midx.src[i].src[1].get_valid(), root_src)
-    offsets_rootsrc[root_src].setdefault(arg, []).append(i)
-
-  # then rewrite everything we can into groups
-  ret = []
-  idxs: list[int|None] = [None]*len(midx.src)
-  global_offset = 0
-  for offsets in offsets_rootsrc.values():
-    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
-    for grp in grouped_offsets:
-      # get the index offset for this element. using [0] is okay, because they are the same
-      lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(len(grp)).ptr(size=buf.max_numel(), addrspace=buf.addrspace))
-      # set the idxs of the output
-      for i,g in enumerate(grp):
-        for oo in offsets[g]: idxs[oo] = global_offset+i
-      # add this lidx to the CAT
-      ret.append(lidx)
-      global_offset += len(grp)
-  assert None not in idxs, f"some idxs are missing {idxs}"
-  # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.max_numel(), addrspace=buf.addrspace).vec(global_offset), tuple(ret))
-  return post_cat.gep(tuple(cast(list[int], idxs)))
-
-def cat_after_store(cat:UOp, data:UOp):
-  # TODO: this is written in many places
-  offset = 0
-  ret: list[UOp] = []
-  for s in cat.src:
-    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
-    offset += s.dtype.count
-  return UOp.group(*ret)
-
 def gep_on_store(gep:UOp, st:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
   # fake argsort. TODO: handle duplicates
@@ -135,19 +86,33 @@ def gep_on_store(gep:UOp, st:UOp):
   new_arg = tuple(x[1] for x in sorted(a.items()))
   return gep.src[0].store(st.gep(new_arg))
 
+def load_stack(stack:UOp, ld:UOp):
+  offset, ret = 0, []
+  for x in stack.src:
+    src = [x]
+    for s in ld.src[1:]:
+      src.append(s.gep(tuple(range(offset, offset+x.dtype.count))) if s.dtype.vcount > 1 else s)
+    ret.append(ld.replace(dtype=x.dtype.base, src=tuple(src)))
+    offset += x.dtype.count
+  return UOp(Ops.VCAT, stack.dtype.base.vec(stack.dtype.vcount), tuple(ret))
+
+def store_stack(stack:UOp, data:UOp):
+  offset, ret = 0, []
+  for x in stack.src:
+    ret.append(x.store(data.gep(tuple(range(offset, offset+x.dtype.count)))))
+    offset += x.dtype.count
+  return UOp.group(*ret)
+
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=UPat(name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
+  # put STACK of indexes after LOAD/STORE
+  (UPat(Ops.LOAD, src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="stack"),), name="ld", allow_any_len=True), load_stack),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
   # GEP on data of STORE
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
-  # put PTRCAT after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
-   lambda cat,ld: UOp(Ops.VCAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
-  # put PTRCAT after STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data"))), cat_after_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="stack"), UPat(name="data"))), store_stack),
 ])
 
 # *** correct load/store ***
