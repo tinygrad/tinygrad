@@ -83,7 +83,7 @@ jobs:
 
   sharedbenchmarks:
     name: Benchmark (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, ${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}]
+    runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
       matrix:
@@ -192,7 +192,7 @@ jobs:
 
   tinyboxbenchmark:
     name: Tinybox Benchmark (${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, ${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}]
+    runs-on: [self-hosted, Linux, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
       matrix:
