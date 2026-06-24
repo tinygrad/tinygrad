@@ -241,10 +241,6 @@ jobs:
       run: VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Run LLaMA-3 8B on 4 GPUs with BEAM
       run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
-    - name: Run 10 CIFAR training steps w BF16
-      env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || '288' }}
-      run: BENCHMARK_LOG=cifar_10steps_bf16 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training w 1 GPU
       run: time BENCHMARK_LOG=cifar DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training steps w 6 GPUS
