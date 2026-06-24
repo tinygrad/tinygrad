@@ -895,13 +895,10 @@ class Tensor(RandMixin, metaclass=TensorMeta):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = round_up(ox, math.lcm(cout, 64 // dtsz) // cout) - ox
-    if added_ox: x = x.pad_to(None, None, ox + added_ox, None, None, None, None, None, None, None, None)
-
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
-    ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, :, :]
+    ret = ret.reshape(bs, oy, ox, groups, rcout)
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels: ret = ret[:, :, :, :, :-added_output_channels]
     # NCHW output
