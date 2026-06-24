@@ -438,8 +438,8 @@ jobs:
     - name: Setup
       run: |
         ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev == "AMD" && "amd" || "nv" }} rmmod
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev == "AMD" && "amd" || "nv" }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev == 'AMD' && 'amd' || 'nv' }} rmmod
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev == 'AMD' && 'amd' || 'nv' }} kill_pids
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
@@ -477,7 +477,7 @@ jobs:
     - name: Run full CIFAR training w 1 GPU
       run: time BENCHMARK_LOG=cifar DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
-      if: ${{ matrix.dev == "NV" }}
+      if: ${{ matrix.dev == 'NV' }}
       run: BENCHMARK_LOG=resnet_10steps MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
