@@ -59,7 +59,7 @@ pm_no_weakints = PatternMatcher([
 
 pm_fix_image_shrink = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.PARAM, name="img"), UPat())), UPat(name="idx"), UPat()), name="out"),
-   lambda img,out,idx: img.reshape(-1, 4).index(idx.src[0]) if len(img.shape) == 3 else None),
+   lambda img,out,idx: img.reshape(-1, 4).index(idx.src[0]//4) if len(img.shape) == 3 and out.shape == (4,) else None),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -133,7 +133,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = memory_coalesing(sink, ren)
 
   # image fixup
-  sink = graph_rewrite(sink, pm_mops+pm_fix_image_shrink, name="fix image shrink")
+  if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
+    sink = graph_rewrite(sink, pm_mops+pm_fix_image_shrink, name="fix image shrink")
 
   # instruction selection decompositions
   pm_decomp = pm_decomp+\
