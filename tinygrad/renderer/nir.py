@@ -1,4 +1,4 @@
-from typing import Callable, cast, Any
+from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, ImageDType, dtypes, truncate
 from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
 from tinygrad.renderer import Renderer
@@ -216,8 +216,9 @@ class NIRRenderer(Renderer):
         nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
         mesa.nir_pop_loop(self.b, None)
       else:
-        if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
-        self.r[u] = cast(mesa.nir_def, d)
+        d: mesa.nir_def|None = self.def_rewrite.rewrite(u, ctx=self)
+        if d is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
+        self.r[u] = d
     self.postrender(uops)
 
     mesa.nir_validate_shader(self.b.shader, b"after render")

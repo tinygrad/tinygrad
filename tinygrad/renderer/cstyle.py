@@ -1,4 +1,4 @@
-from typing import Literal, Callable, cast
+from typing import Literal, Callable
 import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
@@ -223,7 +223,7 @@ class CStyleLanguage(Renderer):
                   Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
 
-      l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
+      l: str|None = self.string_rewrite.rewrite(u, ctx=self)
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1

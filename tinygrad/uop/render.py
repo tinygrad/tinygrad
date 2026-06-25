@@ -1,4 +1,3 @@
-from typing import cast
 from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
@@ -120,7 +119,7 @@ def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], sp
     op_depth = 1 + max([depth.get(s, 0) for s in u.src], default=0)
     if op_depth > split_depth: to_render.add(u)
     depth[u] = 0 if u in to_render else op_depth
-    ren = cast(str, pm.rewrite(u, ctx=r))
+    ren = pm.rewrite(u, ctx=r)
     assert isinstance(ren, str)
     if u.tag is not None: ren += f".rtag({repr(u.tag)})"
     if u not in to_render: r[u] = ren
