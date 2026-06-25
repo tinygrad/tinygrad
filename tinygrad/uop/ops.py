@@ -724,18 +724,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(usrcs) == 0: return UOp(op, self.dtype, (self,), arg)
     return UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
 
-  # *** uop UNIQUE ***
-
-  # TODO: use this in Buffer
-  unique_num = itertools.count(0)
-  @staticmethod
-  def unique(arg:int|None=None): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num) if arg is None else arg)
-
   # *** uop Buffer stuff ***
+
+  unique_num = itertools.count(0)
 
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
-    return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
+    slot = next(UOp.unique_num) if num is None else num
+    return UOp(Ops.BUFFER, dtype, (shape_to_shape_arg((size,)),), ParamArg(slot, device=device))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
@@ -873,7 +869,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
-    assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
@@ -884,8 +879,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def realized(self) -> Buffer|MultiBuffer|None:
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
-    # ParamArg is LOCAL/REG and never realized
-    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return None
+    # LOCAL/REG scratch buffers are never realized
+    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
