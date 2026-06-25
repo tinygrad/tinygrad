@@ -493,6 +493,24 @@ class TestVizIntegration(unittest.TestCase):
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
     self.assertIn(type(e.exception).__name__, bin_render)
 
+  def test_view_source_alt(self):
+    src = "void E_3(float* data0_3) {}"
+    binary = Device["CPU"].renderer.compiler.compile(src)
+    def custom_binary(X:UOp):
+      sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
+                                   UOp(Ops.BINARY, arg=binary)))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+    with save_viz() as viz:
+      x.realize()
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    assert src_idx is not None, "must have source rendering in list"
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertEqual(src, src_render)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
