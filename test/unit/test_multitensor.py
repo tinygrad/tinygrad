@@ -3,7 +3,6 @@ from tinygrad import Tensor, Variable, Context, Device, TinyJit, GlobalCounters,
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.uop.ops import Ops
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
-from test.backend.test_custom_kernel import custom_elementwise_add_kernel
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
