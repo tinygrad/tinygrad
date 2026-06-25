@@ -193,7 +193,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None)
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None) -> UOp|None:
   for s in get_full_rewrite(viz_data, ctx, depth=depth):
-    if s["upat"] is not None and any(n in s["upat"][1] for n in upats): return s["_sink"]
+    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)) or len(ctx.matches) == 0: return s["_sink"]
   return None
 
 # encoder helpers
