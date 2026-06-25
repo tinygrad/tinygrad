@@ -24,12 +24,12 @@ class TestBitcastSpec(unittest.TestCase):
   def test_bitcast_remove_ones(self):
     pl = placeholder((10,2), dtypes.int, 0)
     out = pl.bitcast(dtypes.long)
-    self.assertEqual(out.shape, (10,))
+    self.assertEqual(out.shape, (10,1))
 
   def test_bitcast_remove_ones_full(self):
     pl = placeholder((2,), dtypes.int, 0)
     out = pl.bitcast(dtypes.long)
-    self.assertEqual(out.shape, ())
+    self.assertEqual(out.shape, (1,))
 
   def test_bitcast_add_ones_full(self):
     pl = placeholder((), dtypes.long, 0)

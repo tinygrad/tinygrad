@@ -315,10 +315,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         ps = self.src[0].shape
         if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
           if ps == ():
-            if output_sz > input_sz: raise RuntimeError(f"shape () must be an expanding bitcast {output_sz=} {input_sz=}")
+            if output_sz > input_sz: raise RuntimeError(f"shape {ps} must be an expanding bitcast {output_sz=} {input_sz=}")
             ps = (1,)
-          ps = ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
-          return ps[:-1] if ps[-1] == 1 else ps # remove trailing one
+          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
       # MULTI marker has no shape
