@@ -653,6 +653,33 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testmetal:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: MacOS (DEV=METAL) (${{ matrix.group }})
+    runs-on: *macos
+    timeout-minutes: 20
+    env:
+      DEV: METAL
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: macos-metal
+        deps: testing_unit
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20 --splits 2 --group ${{ matrix.group }}
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
   testmacos:
     strategy:
       fail-fast: false
@@ -661,7 +688,6 @@ jobs:
           - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:LVP'
-          - 'METAL'
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
@@ -684,8 +710,8 @@ jobs:
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-    - name: Run backend tests
-      run: python -m pytest -n=auto test/backend --durations=20
+    - name: Run test_tiny
+      run: python -m pytest -n=auto test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
