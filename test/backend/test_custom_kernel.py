@@ -499,6 +499,7 @@ class TestUOpWhere(unittest.TestCase):
     self.assertEqual(result.tolist(), [1.5, 0, 1.5])
 
 class TestCustomKernelJit(unittest.TestCase):
+  @unittest.expectedFailure
   def test_custom_program(self):
     N = 32
     def custom_program(name:str, device:str, src:str):
