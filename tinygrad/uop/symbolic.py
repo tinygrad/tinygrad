@@ -4,8 +4,8 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
-from tinygrad.uop.decompositions import threefry2x32, xpow
-from tinygrad.uop.divandmod import div_and_mod_symbolic
+from tinygrad.codegen.decomp.decompositions import threefry2x32, xpow
+from tinygrad.codegen.decomp.divandmod import div_and_mod_symbolic
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
