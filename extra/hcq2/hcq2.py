@@ -145,7 +145,7 @@ def make_ins(op, *srcs):
 
 def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   dt = dtype or val.dtype
-  return UOp(Ops.SHRINK, buf.dtype.base, (buf, UOp.const(dtypes.int, off), UOp.const(dtypes.int, dt.itemsize))).bitcast(dt).store(val.cast(dt))
+  return UOp(Ops.SHRINK, dt, (buf, UOp.const(dtypes.int, off), UOp.const(dtypes.int, 1))).store(val.cast(dt))
 
 def make_cmdbuf(lin, devs, tag):
   blob, patches = b'', []
@@ -541,6 +541,8 @@ pm_resolve_patches = PatternMatcher([
 
   # folders
   (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
+  (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST)))
+    .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
   (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST))).bitcast()
     .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
 ]) + symbolic_simple
