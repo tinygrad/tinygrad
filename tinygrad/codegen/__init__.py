@@ -104,6 +104,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # devectorize
   sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store, ctx=ren, name="devectorize")
 
+  # this is new style (TODO: this should all be removed)
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, load_store_indexing, name="simplify load/store indexing")
   sink = graph_rewrite(sink, pm_lower_index_dtype+gep_pushing, name="lower all index dtypes")
@@ -111,15 +115,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
-  # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
-
   # symbolic after new style
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
+
+  # **** decomps ****
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
