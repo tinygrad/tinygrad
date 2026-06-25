@@ -116,18 +116,20 @@ spec_shared = PatternMatcher([
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 ])
 
+def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
+
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
   # DEVICE
-  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
-   isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
+  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d: is_device(d.arg)),
 
-  # UNIQUE
-  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
 
   # BUFFER
-  (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
+   (isinstance(buf.dtype, DType) and buf.src[0].dtype.scalar() == dtypes.weakint and is_device(buf.arg.device))
+   if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # Tensor variable bindings
