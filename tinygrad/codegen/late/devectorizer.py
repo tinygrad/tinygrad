@@ -169,11 +169,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   buf = idx.src[0]
 
   # determine fold lengths
-  lengths = []
+  lengths = [1]
   must_divide = True
-  # TODO: this belongs in coalese
-  if isinstance(buf.dtype, ImageDType): lengths = [4]
-  lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
   offset, mask = idx.src[1].get_idx(), idx.src[1].get_valid()
