@@ -35,8 +35,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
     if valid is not None:
       cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
       dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
-    else:
-      cidx = cidx.simplify()
+    cidx = cidx.simplify()
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
   # if no candidates, we don't rewrite
