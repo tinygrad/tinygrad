@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
+from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
