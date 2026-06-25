@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -345,7 +345,7 @@ class TestVizIntegration(unittest.TestCase):
     c1 = Tensor.empty(4, device="NULL")
     c2 = Tensor.empty(8, device="NULL")
     # uniquely named A = B + 1 kernel
-    kernel_name = "custom_add1_link_sched_codegen"
+    kernel_name = f"custom_add1_link_sched_codegen_{BEAM.value}"
     def custom_add1(A:UOp, B:UOp): return A[0].store(B[0]+1).sink(arg=KernelInfo(kernel_name))
     with save_viz() as viz:
       c1 = Tensor.custom_kernel(c1, c2, fxn=custom_add1)[0]
