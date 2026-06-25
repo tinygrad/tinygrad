@@ -179,7 +179,7 @@ jobs:
       uses: ./.github/actions/process-replay
 
   llmbenchmark:
-    name: Benchmark (DEV=${{ matrix.dev }})
+    name: LLM Benchmark (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
