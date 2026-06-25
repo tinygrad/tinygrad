@@ -148,7 +148,8 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
 def cvt(ctx, y:UOp, x:UOp):
-  print(f"cvting {y.dtype} -> {x.dtype}")
+  # dt = y.dtype
+  # if dt in (dtypes.uint8,dtypes.bool,dtypes.uint16): dt = dtypes.uint32
   return x.ins(V_CVT[y.dtype][x.dtype])
 
 # todo: handle 16 bit loads?
@@ -198,6 +199,9 @@ def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+  # NOTE: special case, casting comparison output to float should be treated as a where
+  # 0.0/1.0
+  (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
 ])
 
 # - maybe clean up some of these control flow conditions with ctx state?
@@ -233,7 +237,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.MAX, name="x"), lambda x: x.ins(V_MAX[x.dtype])),
   (UPat(Ops.XOR, dtype=dt_32bit, name="x"), lambda x: x.ins(RDNA3Ops.v_xor_b32_e32)),
   # cast
-  # (UPat.var("y").cast(name="x"), cvt),
+  (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
+  (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
   (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
   # cmp shouldn't always be materialized to sgpr, only for where
