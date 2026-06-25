@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid
 
-def transform_to_image(ctx, buf, x, valid=None):
+def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in image_valid_dims(buf.dtype.base, buf.max_numel(), ctx.target.arch):
