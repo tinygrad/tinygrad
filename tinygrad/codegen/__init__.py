@@ -12,8 +12,9 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
-from tinygrad.codegen.decomp.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps, \
-  get_simplifying_rewrite_patterns
+from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
+from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
+from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
