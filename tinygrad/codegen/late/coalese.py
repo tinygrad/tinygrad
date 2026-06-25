@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import getenv, IMAGE, all_same
 from tinygrad.renderer import Renderer
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid, simplify_valid_image_load
+from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid, load_store_indexing
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
@@ -23,8 +23,10 @@ devectorizer2 = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
+def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if not IMAGE or ctx.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
+  valid = None
+  if x.op == Ops.WHERE and x.src[2].op == Ops.CONST and x.src[2].arg == Invalid: valid,x,_= x.src
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in image_valid_dims(buf.dtype.base, buf.max_numel(), ctx.target.arch):
@@ -43,19 +45,18 @@ def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
   buf = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4)))
   if valid is not None:
-    idx = simplify_valid_image_load(buf, cidx.src[1], cidx.src[0], valid)
+    return buf.index(valid.where(cidx.src[1], cidx.src[1].const_like(Invalid)),
+                     valid.where(cidx.src[0], cidx.src[0].const_like(Invalid)))
   else:
-    idx = buf.index(cidx.src[1], cidx.src[0])
-  return idx
+    return buf.index(cidx.src[1], cidx.src[0])
 
 pm_simplify_add_image = PatternMatcher([
-  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))).where(UPat.var("valid"), UPat(arg=Invalid)), transform_to_image),
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
   # image load/store is always float
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
   (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
-])+devectorizer2+symbolic_simple
+])+devectorizer2+symbolic_simple+load_store_indexing
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
