@@ -29,7 +29,14 @@ def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
 
 def fold_const_alu(a:UOp) -> UOp|None:
   vals = [const_arg(s) for s in a.src]
-  return None if any(v is None for v in vals) else a.const_like(exec_alu(a.op, a.dtype, vals, False))
+  if any(v is None for v in vals): return None
+  if any(isinstance(v, tuple) for v in vals):
+    out_len = prod(a.shape)
+    if not all(not isinstance(v, tuple) or len(v) in {1, out_len} for v in vals): return None
+    return a.const_like(tuple(exec_alu(a.op, a.dtype.scalar(),
+      [v[0] if isinstance(v, tuple) and len(v) == 1 else v[i] if isinstance(v, tuple) else v for v in vals], False)
+      for i in range(out_len)))
+  return a.const_like(exec_alu(a.op, a.dtype, vals, False))
 
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)

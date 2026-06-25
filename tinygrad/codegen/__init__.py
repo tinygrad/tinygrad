@@ -1,14 +1,16 @@
 from typing import cast
 from dataclasses import replace
 import itertools
+import functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, all_same, flatten
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
+from tinygrad.uop.ops import AxisType, _align_left, _broadcast_shape, identity_element
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -44,6 +46,98 @@ pm_remove_vec_dtypes = PatternMatcher([
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
 ])+pm_clean_up_group_sink
 
+def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
+pm_move_regs = PatternMatcher([
+  # BITCAST?
+  (UPat(GroupOp.Elementwise, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
+])
+
+pm_lower_weakints = PatternMatcher([
+  (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int)),
+])
+
+def build_range_map(ctx, sink:UOp):
+  for x in sink.toposort():
+    if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
+      ctx[x.arg[0]] = len(ctx)
+
+def fix_reduce(ctx, r:UOp):
+  range_to_axis = {u:ctx[u.arg[0]] for u in r.ended_ranges if u.arg[0] in ctx if u.arg[1] == AxisType.UNROLL}
+  return r.replace(src=tuple([u for u in r.src if u not in range_to_axis]), arg=(r.arg[0], r.arg[1]+tuple(range_to_axis.values())))
+
+expander2 = PatternMatcher([
+  (UPat(Ops.SINK, name="sink"), build_range_map),
+  (UPat(Ops.REDUCE, name="r"), fix_reduce),
+  (UPat(Ops.RANGE, name="r"),
+   lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
+    .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
+])+pm_flatten_range
+
+def broadcast_binary(x:UOp):
+  shapes = [u.shape for u in x.src]
+  if all_same(shapes): return None
+  shaped_aligned = _align_left(*shapes)
+  broadcasted = _broadcast_shape(*shapes)
+  src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
+  return x.replace(src=tuple(src_reshaped))
+
+unbroadcast = PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+])
+
+def do_devectorize(b:UOp):
+  if b.shape == (): return None
+  # broadcasting needs to be already unpacked
+  if not all_same([x.shape for x in b.src]): return None
+  src = []
+  for idx in itertools.product(*[range(x) for x in b.shape]):
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+  return UOp.vectorize(*src).reshape(b.shape)
+
+devectorizer2 = pm_mops+PatternMatcher([
+  # unpack broadcasting
+  (UPat(GroupOp.Elementwise|{Ops.LOAD, Ops.STORE}, name="b"), do_devectorize),
+  # INDEX into STACK is src
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
+  # stacked INDEX is many INDEX
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
+   lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
+  # INDEX into RESHAPE moves the RESHAPE
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.RESHAPE, name="s"))),
+   lambda b,s: b.index(s.src[0]).reshape(s.shape)),
+  # RESHAPE a void is removed (hack for AFTER)
+  (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
+  # reshape of a single element shaped value to scalar is an index
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  # INDEX without src is nothing
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+])
+
+def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
+  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
+  ctx.acc_num += 1
+  topo = r.src[0].toposort()
+  ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
+  input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
+  acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype.scalar()))
+  acc_initted = acc.after(acc_init, *r.src[1:])
+  inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
+  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:])
+  return acc.after(acc_out)
+
+def expand_horizontal_reduce(r:UOp):
+  axes = r.arg[1]
+  vals = [r.src[0].shrink(tuple((idx[axes.index(i)], idx[axes.index(i)]+1) if i in axes else None for i in range(r.src[0].ndim)))
+          for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in axes])]
+  return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
+
+pm_reduce_local = PatternMatcher([
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
+  (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+])+pm_clean_up_group_sink
+
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
   ctx[0] += 1
@@ -58,6 +152,90 @@ pm_no_weakints = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
+  if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(ast))
+  if SPEC: type_verify(ast, spec_tensor)
+  sink = ast
+
+  # preprocess. we need to simplify these
+  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+
+  # this is new style
+  sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
+  # first we optimize
+  if optimize:
+    # do postrange optimization, BEAM or hand_coded_optimizations
+    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+
+  # do expander
+  sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
+
+  # add locals (STAGE -> BUFFER)
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
+
+  # rewrite reduce after optimizations
+  sink = graph_rewrite(sink, pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
+
+  # add gpu dims
+  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+
+  # add loads
+  sink = graph_rewrite(sink, pm_move_regs, name="move to registers", walk=True)
+
+  # symbolic (note: this does POW decomp)
+  sink = graph_rewrite(sink, sym, name="post index symbolic")
+
+  # ***** make it rendererable (within spec, tighten) *****
+
+  # decompositions
+  supported_ops = tuple(ren.code_for_op.keys())
+  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))
+  pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="*** decompositions")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="decompositions more")
+
+  # split ends
+  sink = graph_rewrite(sink, pm_split_ends, name="split ends")
+
+  # this was the linearizer
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
+  # ***** this is where it gets large *****
+
+  # unbroadcast
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
+
+  # devectorizer
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, name="devectorizer")
+
+  # ***** make it rendererable (outside spec, transform) *****
+
+  # final symbolic
+  sink = graph_rewrite(sink, sym, name="post devectorizer sym")
+
+  # move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+
+  # put registers in slots
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  name_to_slot = {x:x.replace(arg=replace(x.arg, slot=num_params+i))
+                  for i,x in enumerate(sorted([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot == -1]))}
+  sink = sink.substitute(name_to_slot, name="put variables in slots")
+
+  # remove all weakints
+  sink = graph_rewrite(sink, pm_lower_weakints, name="lower weakints", bottom_up=True)
+
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+  if SPEC: type_verify(sink, spec_program)
+
+  # return the rewritten sink
+  return sink
+
+def old_full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)

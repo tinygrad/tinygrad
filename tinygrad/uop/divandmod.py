@@ -75,7 +75,9 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
   gcd = UOp.gcd(*all_uops, y).simplify()
   if not (gcd.op is Ops.CONST and gcd.arg==1):
-    ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
+    x_div, y_div = x.divide_exact(gcd), y.divide_exact(gcd)
+    if x_div is None or y_div is None: return None
+    ret = x_div.alu(d.op, y_div)
     return ret*gcd if d.op is Ops.FLOORMOD else ret
 
   # factor_remainder: (d*x+y)//d -> x+y//d
