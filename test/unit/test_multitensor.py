@@ -116,20 +116,27 @@ class TestMultiTensor(unittest.TestCase):
     with Context(RING=use_ring):
       np.testing.assert_equal(t.shard(devices_2, axis=axis).sum().item(), 10)
 
-  def test_no_copy_after_allreduce_cast(self):
-    devices = tuple(f"CPU:{i}" for i in range(2))
-    a_src = Tensor.arange(2*5*6, dtype=dtypes.half).reshape(2, 5, 6).clone().realize()
-    b_src = Tensor.arange(5*6, dtype=dtypes.half).reshape(5, 6).clone().realize()
-    a = a_src.shard(devices, axis=0)
-    b = b_src.to(devices)
-    Tensor.realize(a, b)
-    tst = Tensor(Tensor.empty(1, 5, 6, dtype=dtypes.half, device=devices).uop.multi(0), device=devices)
-    tst = Tensor.custom_kernel(tst, a, b, fxn=custom_elementwise_add_kernel)[0].float().sum(0)
+  def test_allreduce_cast_half(self, assign=False, kernel_count=8):
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    a_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    b_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    a = a_src.shard(devices, axis=0).realize()
+    b = b_src.shard(devices, axis=0).realize()
+    # assigning creates a copy of the output before allreduce
+    if assign:
+      tst = Tensor.empty_like(b)
+      tst.assign(a + b)
+    else:
+      tst = a + b
+    tst = tst.float().sum(0)
     GlobalCounters.reset()
     with Context(ALLREDUCE_CAST=1, RING=0, ALL2ALL=0):
       tst.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 10)
+    kernel_count = GlobalCounters.kernel_count
     np.testing.assert_allclose(tst.numpy(), (a_src.numpy()+b_src.numpy()).sum(0))
+    self.assertEqual(kernel_count, kernel_count)
+
+  def test_allreduce_cast_half_assign(self): self.test_allreduce_cast_half(assign=True, kernel_count=10)
 
   def test_multiple_to_single_device(self):
     kernel_counts = {}
