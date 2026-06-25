@@ -3,7 +3,7 @@ import z3
 from tinygrad import dtypes, Device
 from tinygrad.uop.validate import uops_to_z3, z3_cdiv
 from tinygrad.uop.ops import UOp
-from tinygrad.codegen.decomp.decompositions import fast_idiv
+from tinygrad.codegen.decomp.transcendental import fast_idiv
 random.seed(42)
 
 powers_of_two = [2**i for i in range(64)]
