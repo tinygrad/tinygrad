@@ -124,13 +124,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
-  # do memory coalesing (late)
-  sink = memory_coalesing(sink, ren)
-
   # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
+  # do memory coalesing (late)
+  sink = memory_coalesing(sink, ren)
 
   # late decomps + move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
