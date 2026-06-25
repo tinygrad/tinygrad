@@ -119,11 +119,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
-  # floordiv+mod / dtype decomp (early)
-  supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
-  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
-
   # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
@@ -131,6 +126,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
+
+  # floordiv+mod / dtype decomp (early)
+  supported_ops = tuple(ren.code_for_op.keys())
+  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
+  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
