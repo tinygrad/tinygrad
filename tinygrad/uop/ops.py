@@ -873,8 +873,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
-    if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.arg, rdtype).ref(1)
-    else: ret = Buffer(self.device, self.arg, rdtype).ref(1)
+    if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
+    else: ret = Buffer(self.device, self.max_numel(), rdtype).ref(1)
     buffers[self] = ret
     return ret
   @property
