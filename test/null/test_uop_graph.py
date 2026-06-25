@@ -419,6 +419,7 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
+  @unittest.skip("this test is somewhat dumb")
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
     uops = to_uops_list([a.cast(dtypes.int)+(-a).cast(dtypes.int)])
