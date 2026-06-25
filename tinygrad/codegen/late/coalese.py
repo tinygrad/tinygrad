@@ -110,7 +110,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
           for i,g in enumerate(grp):
             assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
-          store = idx.store(UOp.vectorize(*datas) if len(datas) > 1 else datas[0])
+          store = idx.store(UOp._stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
           ld = idx.load()
