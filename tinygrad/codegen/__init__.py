@@ -114,16 +114,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # lower index dtype
   sink = graph_rewrite(sink, pm_lower_index_dtype, name="lower all index dtypes")
 
-  # symbolic after new style
-  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
-
-  # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
-
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
 
+  # final symbolic before decomp
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
+
   # **** decomps ****
+
+  # optional pre matcher
+  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
