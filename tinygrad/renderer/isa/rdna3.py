@@ -136,17 +136,15 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
-  # scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  scale = 1 
+  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   # base doesn't hold a ptr for local addrspace
   # NOTE: keep base in src to maintain graph dependencies?
   if idx.op is Ops.CONST:
     return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), idx.arg * scale, base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
     return (idx.src[0].cast(dtypes.uint32), idx.src[1].arg * scale, base)
-  # shft = to_vgpr(ctx, const(dtypes.int, scale // 2))
-  return (idx.cast(dtypes.uint32), const(dtypes.uint16, 0), base)
-  # return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0))
+  shft = to_vgpr(ctx, const(dtypes.uint32, scale // 2))
+  return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
 def cvt(ctx, y:UOp, x:UOp):
@@ -173,9 +171,12 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
+    return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
+    """
     if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
         for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
+    """
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
   nregs = (n*val.dtype.itemsize+3)//4
   imap = {
