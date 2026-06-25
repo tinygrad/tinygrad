@@ -94,6 +94,7 @@ def _build_cvt_table():
 V_CVT = _build_cvt_table()
 
 
+# TODO: perform this per isel pattern, dont make it seperate pass
 def legalize_operands(ctx, x:UOp):
   group, opc = x.arg.func, x.arg.opc
   if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
@@ -172,7 +173,10 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
-    # if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(val,))
+    # do we just put it in src as well??, two address?
+    # if base.tag is none allocate it a register and use the same for base?
+    # if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,val), tag=(None,)) # two address op?
+    if val.op is Ops.CONST: base.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
         for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
@@ -198,13 +202,14 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
+# problem: edge betweeen range and end needs to contain exec mask but consumers of range need acc vgpr ref
 isel_matcher = PatternMatcher([
   # control flow
+  # wire exec mask into end src?
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"),
-   lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32)
-                           if x.dtype is not dtypes.uint32 else None),
-  (UPat(Ops.END, name="x"), lambda ctx,x:
-   x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1))) if len(x.src) == 2 else None),
+   lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32) if x.dtype is not dtypes.uint32 else None),
+  (UPat(Ops.END, name="x"), lambda ctx,x: x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1),x.src[1].src[-1]))
+   if len(x.src) == 2 and x.src[1].dtype is dtypes.uint32 else None),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
@@ -284,7 +289,6 @@ def encode(x:UOp):
 
 # --- control flow ---
 # NOTE: need to solve exec save sgpr modelling in regalloc, will break on nested flow
-# - also need to get labels working...
 def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
 def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
@@ -310,15 +314,14 @@ def lower_range(ctx, x:UOp):
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
   mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
   ctx.loop_label[acc] = loop_label
-  ctx.exec_saves[acc] = mask
   lbl = label(ctx, f".LOOP_{loop_label}")
   return acc, [acc, mask, lbl]
 
 def lower_end(ctx, x:UOp):
-  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-2]), tag=(EXEC,))
-  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-1]))
+  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
+  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
   loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,ctx.exec_saves[x.src[1]]), tag=(EXEC,))
+  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,x.src[-1]), tag=(EXEC,))
   return inc, [inc, gate, loop, restore]
 
 post_regalloc_matcher = PatternMatcher([
@@ -341,7 +344,6 @@ def _counter(x:UOp):
 
 @dataclass
 class RDNA3LinearCtx:
-  exec_saves: dict[UOp, UOp] = field(default_factory=dict)
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
 class RDNA3Renderer(ISARenderer):
@@ -401,7 +403,6 @@ class RDNA3Renderer(ISARenderer):
           targets[u.tag] = pc
         continue
       l = encode(u)
-      print(pc, l.arg)
       pc += l.arg.size()
       _asm.append((l,pc))
 
