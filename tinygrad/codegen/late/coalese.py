@@ -2,10 +2,25 @@ from typing import Any
 import itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.helpers import getenv, IMAGE
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.helpers import getenv, IMAGE, all_same
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid, simplify_valid_image_load
+
+def do_devectorize(b:UOp):
+  if b.shape == (): return None
+  # broadcasting needs to be already unpacked
+  if not all_same([x.shape for x in b.src]): return None
+  src = []
+  for idx in itertools.product(*[range(x) for x in b.shape]):
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+  return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+
+devectorizer2 = PatternMatcher([
+  # unpack broadcasting
+  (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
+])
 
 def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
   if not IMAGE or ctx.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
@@ -38,10 +53,7 @@ pm_simplify_add_image = PatternMatcher([
   # image load/store is always float
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
-  (UPat(Ops.CAST, src=(UPat.var("x"),), dtype=dtypes.half).index(UPat.var("idx")).cast(dtypes.float), lambda x,idx: x.index(idx)),
-  (UPat(Ops.STACK, src=UPat(Ops.CAST, dtype=dtypes.half), name="stk").cast(dtypes.float),
-   lambda stk: UOp(Ops.STACK, dtypes.float, src=tuple([x.src[0] for x in stk.src]))),
-])
+])+devectorizer2
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
