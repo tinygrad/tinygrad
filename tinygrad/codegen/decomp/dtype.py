@@ -9,9 +9,11 @@ from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, shr(v.bitcast(dtypes.uint), 16)
-def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off, *idx.src[2:]))
-def lane_index(idx:UOp, off:int) -> UOp:
-  return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.src[1]+off)) if idx.op is Ops.SHRINK else reindex(idx, off, 1)
+def reindex(idx:UOp, off:int, mul=2) -> UOp:
+  if idx.op is Ops.SHRINK:
+    assert mul == 1, "can't reindex SHRINK with mul != 1"
+    return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.src[1]+off))
+  return idx.replace(src=(idx.src[0], idx.src[1]*mul+off, *idx.src[2:]))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -109,13 +111,12 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
-  idx = x.src[0].src[0] if x.src[0].op == Ops.CAST else x.src[0]
   if (n:=x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
-  return UOp(Ops.STACK, to, tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(lane_index(idx, i),)), fr, to) for i in range(n)))
+  return UOp(Ops.STACK, to, tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
-  return UOp.group(*(st.replace(src=(lane_index(idx, i), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
