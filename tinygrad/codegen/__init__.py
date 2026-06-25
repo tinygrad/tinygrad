@@ -108,20 +108,23 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
-  # lower the index dtype to a concrete int
+  # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
 
-  # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic, name="final symbolic")
-
-  # **** decomps ****
+  # extra symbolic before decomp. crashes without this?
+  sink = graph_rewrite(sink, symbolic, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
+
+  # final symbolic before decomp
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
+
+  # **** decomps ****
 
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
