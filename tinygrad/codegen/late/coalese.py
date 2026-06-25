@@ -2,9 +2,39 @@ from typing import Any
 import itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
-from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import getenv
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
+from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid
+
+def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
+  if not IMAGE or ctx.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
+  # search for dims that drop the most valid statements
+  best_drop, cands = -1, []
+  for ch, cw in image_valid_dims(buf.dtype.base, buf.max_numel(), ctx.target.arch):
+    cidx = UOp.vectorize((x//4)%cw, x//(4*cw))
+    dropped = 0
+    if valid is not None:
+      cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
+      dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
+    else:
+      cidx = cidx.simplify()
+    if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
+    elif dropped == best_drop: cands.append((ch, cw, cidx))
+  # if no candidates, we don't rewrite
+  if len(cands) == 0: return None
+  # and tiebreak with indexing complexity (ie. number of nodes)
+  h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
+  idx = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4))).index(cidx.src[1], cidx.src[0])
+  if valid is not None:
+    # TODO: simplify valid here
+    idx = valid.where(idx, UOp(Ops.CONST, dtype=idx.dtype, arg=Invalid))
+  return idx
+
+pm_add_image = PatternMatcher([
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))).where(UPat.var("valid"), UPat(arg=Invalid)), transform_to_image),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
+])
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
