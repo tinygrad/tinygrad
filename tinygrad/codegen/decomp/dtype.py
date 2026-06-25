@@ -10,7 +10,8 @@ from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, shr(v.bitcast(dtypes.uint), 16)
 def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off, *idx.src[2:]))
-def lane_index(idx:UOp, off:int) -> UOp: return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.src[1]+off)) if idx.op is Ops.SHRINK else reindex(idx, off, 1)
+def lane_index(idx:UOp, off:int) -> UOp:
+  return idx.replace(op=Ops.INDEX, src=(idx.src[0], idx.src[1]+off)) if idx.op is Ops.SHRINK else reindex(idx, off, 1)
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -135,7 +136,7 @@ pm_long_decomp = PatternMatcher([
                                        if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx: x.replace(dtype=l2i_dt[x.dtype],src=(reindex(idx, x.tag),))),
   (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-   UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))) if x.tag is not None else None)
+   UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple
