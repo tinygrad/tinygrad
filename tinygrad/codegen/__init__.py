@@ -26,15 +26,6 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing
 
-pm_index_is_shrink = PatternMatcher([
-  # rewrite non-image INDEX to SHRINK
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
-    UOp(Ops.SHRINK, dtype=x.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) \
-      if isinstance(buf.dtype, PtrDType) and x.dtype.count > 1 else None),
-  # rewrite GEP to INDEX
-  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg if len(x.arg) > 1 else x.arg[0]),), arg=None)),
-])
-
 pm_remove_vec_dtypes = PatternMatcher([
   # rewrite PARAM to non pointer
   (UPat((Ops.PARAM, Ops.BUFFER), name="buf"), lambda buf:
@@ -43,6 +34,8 @@ pm_remove_vec_dtypes = PatternMatcher([
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
+  # rewrite GEP to INDEX
+  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg if len(x.arg) > 1 else x.arg[0]),), arg=None)),
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -121,7 +114,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-  sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # do memory coalesing (late)
