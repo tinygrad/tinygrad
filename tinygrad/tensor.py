@@ -859,8 +859,7 @@ class Tensor(RandMixin, metaclass=TensorMeta):
     def is_pow2(v): return v > 0 and v & (v - 1) == 0
     # pad dimension i to amt with invalids
     def ipad(t, i, amt):
-      shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
-      return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+      return t.pad(tuple(None if d != i else (0, amt-s) for d,s in enumerate(t.shape)), value=Invalid) if amt != t.shape[i] else t
     # align a dimension, use at to specify the dimension to pad in, defaults to first
     def pad_align(t, dim, at=None, force=False):
       # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
