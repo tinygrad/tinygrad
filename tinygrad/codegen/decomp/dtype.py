@@ -134,7 +134,8 @@ pm_long_decomp = PatternMatcher([
   (UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
    l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                        if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
-  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx: x.replace(dtype=l2i_dt[x.dtype],src=(reindex(idx, x.tag),))),
+  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag).replace(dtype=l2i_dt[x.dtype]),))),
   (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
    UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
 ])
