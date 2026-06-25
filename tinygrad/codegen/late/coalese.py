@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import getenv, IMAGE, all_same
 from tinygrad.renderer import Renderer
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid, load_store_indexing
+from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None

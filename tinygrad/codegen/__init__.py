@@ -129,7 +129,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = memory_coalesing(sink, ren)
 
   # add image (but should also clean up all indexing)
-  sink = graph_rewrite(sink, pm_simplify_add_image, name="simplify + add image", ctx=ren, bottom_up=True)
+  sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=ren, bottom_up=True)
+  sink = graph_rewrite(sink, load_store_indexing, name="simplify indexing")
 
   # late decomps + move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
