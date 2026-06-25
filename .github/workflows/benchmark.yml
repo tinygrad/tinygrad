@@ -201,6 +201,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+    if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
