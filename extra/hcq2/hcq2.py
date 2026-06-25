@@ -145,7 +145,7 @@ def make_ins(op, *srcs):
 
 def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   dt = dtype or val.dtype
-  return UOp(Ops.SHRINK, dt, (buf, UOp.const(dtypes.int, off), UOp.const(dtypes.int, 1))).store(val.cast(dt))
+  return buf.shrink(off, dt.itemsize).bitcast(dt.ptr()).index(UOp.const(dtypes.int, 0)).store(val.cast(dt))
 
 def make_cmdbuf(lin, devs, tag):
   blob, patches = b'', []
@@ -509,9 +509,10 @@ def fold_blob_store(buf:UOp, blob:UOp) -> UOp:
   for b in (mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)): b.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
+def fold_const_store(buf:UOp, off:UOp, idx:UOp, idx_u:UOp, val:UOp) -> UOp:
+  byte_off = off.arg * buf.dtype.base.itemsize + idx.arg * idx_u.dtype.itemsize
   for b, v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, v.arg)
+    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), byte_off, v.arg)
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
@@ -541,9 +542,7 @@ pm_resolve_patches = PatternMatcher([
 
   # folders
   (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
-  (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST)))
-    .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
-  (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST))).bitcast()
+  (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST))).bitcast().index(UPat.cvar("idx"), name="idx_u")
     .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
 ]) + symbolic_simple
 

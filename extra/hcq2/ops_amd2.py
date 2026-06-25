@@ -157,7 +157,7 @@ def pm4_submit(cmdbuf, devs):
 
   # copy the cmdbuf into the ring and advance the put/write pointers
   copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(
-    UOp(Ops.SHRINK, dtypes.uint32, (cmdbuf, i*4, UOp.const(dtypes.int, 1))).load()).end(i)
+    cmdbuf.shrink(i*4, dtypes.uint32.itemsize).bitcast(dtypes.uint32.ptr()).index(zero).load()).end(i)
   bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
   bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
 
@@ -224,7 +224,7 @@ def sdma_submit(cmdbuf, devs):
   zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
   copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(
-    UOp(Ops.SHRINK, dtypes.uint32, (cmdbuf, i*4, UOp.const(dtypes.int, 1))).load()).end(i)
+    cmdbuf.shrink(i*4, dtypes.uint32.itemsize).bitcast(dtypes.uint32.ptr()).index(zero).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
