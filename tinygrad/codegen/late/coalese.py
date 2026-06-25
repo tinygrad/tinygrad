@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
-from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid
+from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid, simplify_valid_image_load
 
 def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
   if not IMAGE or ctx.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
@@ -25,15 +25,22 @@ def transform_to_image(ctx, buf:UOp, x:UOp, valid:UOp|None=None) -> UOp|None:
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
-  idx = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4))).index(cidx.src[1], cidx.src[0])
+  buf = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4)))
   if valid is not None:
-    # TODO: simplify valid here
-    idx = valid.where(idx, UOp(Ops.CONST, dtype=idx.dtype, arg=Invalid))
+    idx = simplify_valid_image_load(buf, cidx.src[1], cidx.src[0], valid)
+  else:
+    idx = buf.index(cidx.src[1], cidx.src[0])
   return idx
 
-pm_add_image = PatternMatcher([
+pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))).where(UPat.var("valid"), UPat(arg=Invalid)), transform_to_image),
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
+  # image load/store is always float
+  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
+  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
+  (UPat(Ops.CAST, src=(UPat.var("x"),), dtype=dtypes.half).index(UPat.var("idx")).cast(dtypes.float), lambda x,idx: x.index(idx)),
+  (UPat(Ops.STACK, src=UPat(Ops.CAST, dtype=dtypes.half), name="stk").cast(dtypes.float),
+   lambda stk: UOp(Ops.STACK, dtypes.float, src=tuple([x.src[0] for x in stk.src]))),
 ])
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:

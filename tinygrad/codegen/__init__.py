@@ -24,7 +24,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-from tinygrad.codegen.late.coalese import memory_coalesing, pm_add_image
+from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
@@ -124,7 +124,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = memory_coalesing(sink, ren)
 
   # add image (but should also clean up all indexing)
-  sink = graph_rewrite(sink, pm_add_image, name="add image", ctx=ren, bottom_up=True)
+  sink = graph_rewrite(sink, pm_simplify_add_image, name="simplify + add image", ctx=ren, bottom_up=True)
 
   # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
