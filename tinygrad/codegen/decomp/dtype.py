@@ -110,11 +110,11 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   idx = x.src[0].src[0] if x.src[0].op == Ops.CAST else x.src[0]
-  if (n:=x.dtype.count if x.dtype.count > 1 else x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
+  if (n:=x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
   return UOp(Ops.STACK, to, tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(lane_index(idx, i),)), fr, to) for i in range(n)))
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
-  if (n:=val.dtype.count if val.dtype.count > 1 else val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
+  if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(lane_index(idx, i), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
