@@ -109,6 +109,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # lower the index dtype to a concrete int
+  sink = graph_rewrite(sink, load_store_indexing, name="simplify load/store indexing")
+
+  # NOTE: you need load_store_indexing here too for WEBGPU
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
 
   # optional pre matcher
