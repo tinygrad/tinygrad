@@ -30,7 +30,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in image_valid_dims(buf.dtype.base, buf.max_numel(), ctx.target.arch):
-    cidx = UOp.vectorize((x//4)%cw, x//(4*cw)).simplify()
+    cidx = UOp.vectorize((x//4)%cw, x//(4*cw))
     dropped = 0
     if valid is not None:
       cidx = uop_given_valid(valid, cidx)
