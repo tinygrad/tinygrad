@@ -123,14 +123,10 @@ spec_tensor = PatternMatcher([
   # DEVICE
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d: is_device(d.arg)),
 
-  (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
-
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and buf.src[0].dtype.scalar() == dtypes.weakint and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="buf"),
-   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
