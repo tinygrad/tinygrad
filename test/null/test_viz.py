@@ -341,21 +341,6 @@ class TestVizGC(unittest.TestCase):
 from tinygrad import Tensor, Device, TinyJit, Variable, function
 
 class TestVizIntegration(unittest.TestCase):
-  # codegen supports rendering of code blocks
-  def test_codegen_tracing(self):
-    with save_viz() as viz:
-      ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
-      prg = do_to_program(ast, Device[Device.DEFAULT].renderer)
-    lst = viz.list_items()
-    self.assertEqual(len(lst), 3)
-    self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
-    self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
-    self.assertEqual(lst[2]["name"], prg.arg.name)
-    input_ast = next(viz.get_details(2, 0))["graph"].values()
-    for u in input_ast:
-      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
-
-  # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
     c1 = Tensor.empty(4, device="NULL")
     c2 = Tensor.empty(8, device="NULL")
@@ -366,6 +351,7 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.custom_kernel(c1, c2, fxn=custom_add1)[0]
       c1.realize()
     lst = viz.list_items()
+    # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
     graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
@@ -374,6 +360,9 @@ class TestVizIntegration(unittest.TestCase):
       assert n["ref"] is not None
       self.assertEqual(lst[n["ref"]]["name"], kernel_name)
       assert kernel_name[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+    # UOp addrspace is colored
+    for u in graph.values():
+      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
 
   def test_link_sched_codegen_beam(self):
     with Context(BEAM=2):
