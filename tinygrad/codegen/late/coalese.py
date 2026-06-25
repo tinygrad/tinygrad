@@ -56,7 +56,7 @@ pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
   (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
-])+devectorizer2+symbolic_simple+load_store_indexing
+])+devectorizer2+symbolic_simple
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
