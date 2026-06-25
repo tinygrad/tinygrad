@@ -1,4 +1,3 @@
-from typing import cast
 import math, struct, sys
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
@@ -170,9 +169,10 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
+        l: str|None = self.string_rewrite.rewrite(u, ctx=r)
+        if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-        kernel.append(cast(str, l))
+        kernel.append(l)
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 class CPULLVMRenderer(LLVMRenderer):

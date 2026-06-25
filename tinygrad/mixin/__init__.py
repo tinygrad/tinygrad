@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, itertools, string
-from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args, cast
+from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
@@ -441,7 +441,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     for i, (s, x) in enumerate(zip(inputs, xs)):
       for c in set(s):
         while s.count(c) > 1:
-          j, k, n = s.index(c), s.index(c, s.index(c)+1), cast(int, x.shape[s.index(c)])
+          j, k, n = s.index(c), s.index(c, s.index(c)+1), x.shape[s.index(c)]
           perm = [d for d in range(x.ndim) if d not in (j,k)]+[j,k]
           x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1,(n,n+1))[...,0] if x.ndim > 2 else x.diagonal()
           s = s[:k] + s[k+1:]

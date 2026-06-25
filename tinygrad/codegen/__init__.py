@@ -1,4 +1,3 @@
-from typing import cast
 from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
@@ -172,7 +171,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   replaced: dict[UOp, UOp] = {}
   for u in lst:
     nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu, ctx)) or (nu, [nu])
+    ret: tuple[UOp, list[UOp]] = pm.rewrite(nu, ctx) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
   return newlst

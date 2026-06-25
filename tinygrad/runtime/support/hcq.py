@@ -215,7 +215,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
   def _apply_var_vals(self, var_vals:dict[str, int]):
-    resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
+    resolved_syms: list[int|None] = [sym_infer(sym, var_vals) for sym in self.syms]
 
     for off, sym_idx in self.q_sints:
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
@@ -225,7 +225,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       mv[off] = resolved_syms[sym_idx] if mask is None else ((mv[off] & ~mask) | resolved_syms[sym_idx])
 
-    self._prev_resolved_syms = cast(list[int|None], resolved_syms)
+    self._prev_resolved_syms = resolved_syms
 
   def submit(self, dev:HCQDeviceType, var_vals:dict[str, int]|None=None):
     """
