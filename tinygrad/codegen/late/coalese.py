@@ -2,9 +2,17 @@ from typing import Any
 import itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.helpers import getenv
 from tinygrad.renderer import Renderer
+
+pm_new_gater = PatternMatcher([
+  # here we create the alt value for load to be 0s and remove the where Invalid
+  (UPat.var("gate").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid)).load(name="l"),
+   lambda gate,idx,l: idx.load(l.vconst_like(0), gate)),
+  (UPat.var("gate").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid)).store(UPat.var("data")),
+   lambda gate,idx,data: idx.store(data, gate)),
+])
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
@@ -54,20 +62,24 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
         idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
+        # broadcasting!
+        idx = valid.where(idx, UOp(Ops.CONST, idx.dtype, arg=Invalid)) if valid is not None else idx
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
             assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
-          data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
-          store = idx.store(data, valid) if valid is not None else idx.store(data)
+          store = idx.store(UOp.vectorize(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
-          ld = idx.load(idx.vconst_like(0), valid) if valid is not None else idx.load()
+          ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
               replacements[oo] = ld.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
   # apply
-  return sink.substitute(replacements, name="memory coalesing")
+  sink = sink.substitute(replacements, name="memory coalesing")
+  # new gater
+  sink = graph_rewrite(sink, pm_new_gater, "new gater")
+  return sink
