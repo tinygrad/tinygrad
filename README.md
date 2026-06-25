@@ -72,7 +72,7 @@ As it turns out, 90% of what you need for neural networks are a decent autograd/
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
 ```python
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, Context
 
 class LinearNet:
   def __init__(self):
@@ -86,7 +86,7 @@ optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
 x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-with Tensor.train():
+with Context(TRAINING=1):
   for i in range(10):
     optim.zero_grad()
     loss = model(x).sparse_categorical_crossentropy(y).backward()

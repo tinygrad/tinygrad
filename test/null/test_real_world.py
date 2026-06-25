@@ -106,7 +106,7 @@ class TestRealWorld(unittest.TestCase):
   @slow
   def test_train_mnist(self):
     from examples.beautiful_mnist import Model
-    with Tensor.train():
+    with Context(TRAINING=1):
       model = Model()
       optimizer = optim.Adam(get_parameters(model))
       BS = 32
@@ -125,7 +125,7 @@ class TestRealWorld(unittest.TestCase):
   def test_forward_cifar(self):
     BS = 32
     # with training batchnorm still though
-    with Tensor.train():
+    with Context(TRAINING=1):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       @TinyJit
       def run(X): return model(X)
@@ -133,7 +133,7 @@ class TestRealWorld(unittest.TestCase):
 
   @slow
   def test_train_cifar(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
       BS = 32
@@ -151,7 +151,7 @@ class TestRealWorld(unittest.TestCase):
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_train_cifar_hyp(self):
     dtypes.default_float = dtypes.float16
-    with Tensor.train():
+    with Context(TRAINING=1):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
       initial_div_factor = hyp['opt']['initial_div_factor']
@@ -163,7 +163,7 @@ class TestRealWorld(unittest.TestCase):
 
   @slow
   def test_bert(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       args_tiny = {"attention_probs_dropout_prob": 0.0, "hidden_dropout_prob": 0.0, "vocab_size": 30522, "type_vocab_size": 2,
                   "max_position_embeddings": 512, "hidden_size": 128, "intermediate_size": 512, "num_attention_heads": 2, "num_hidden_layers": 2}
       model = BertForPretraining(**args_tiny)

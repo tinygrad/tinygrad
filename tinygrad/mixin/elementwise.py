@@ -3,22 +3,16 @@ from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
-from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
 
-class ElementwiseMixin(DTypeMixin, CreationMixin):
+class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
-
-  @property
-  def _uop(self) -> 'UOp': raise NotImplementedError
-
-  def _wrap_uop(self, u: 'UOp') -> Self: raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x: 'Self|ConstType|UOp') -> Self:
@@ -51,7 +45,11 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def contiguous(self, *args, **kwargs) -> Self: raise NotImplementedError
+  def contiguous(self, **kwargs) -> Self:
+    """
+    Returns a contiguous tensor.
+    """
+    return self._wrap_uop(self._uop.contiguous(**kwargs))
 
   def contiguous_backward(self) -> Self:
     """

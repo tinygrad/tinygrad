@@ -18,7 +18,7 @@ import sys
 sys.setrecursionlimit(10000)
 
 def add_ranges_to_store(ctx, x):
-  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == (): return None
+  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == () or x.src[0].max_numel() == x.src[1].max_numel() == 1: return None
   assert x.src[0].shape == x.src[1].shape, "bad store shape"
   idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
   return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
@@ -542,9 +542,6 @@ to_define_global = PatternMatcher([
 
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
-
-  # remove UNIQUE/DEVICE to dedup CONST
-  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),

@@ -1,13 +1,36 @@
-from typing import Self
-from tinygrad.dtype import DType, dtypes
+from typing import TYPE_CHECKING, Self
+from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype
+
+if TYPE_CHECKING:
+  from tinygrad.uop.ops import UOp
 
 class DTypeMixin:
   @property
   def dtype(self) -> DType: raise NotImplementedError
+  @property
+  def _uop(self) -> 'UOp': raise NotImplementedError
+  def _wrap_uop(self, u:'UOp') -> Self: raise NotImplementedError
 
-  def cast(self, dtype:DType) -> Self: raise NotImplementedError
+  def cast(self, dtype:DTypeLike) -> Self:
+    """
+    Casts `self` to the given `dtype`.
 
-  def bitcast(self, dtype:DType) -> Self: raise NotImplementedError
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.cast(dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.cast(dtypes.uint8)
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.cast(dt))
+
+  def bitcast(self, dtype:DTypeLike) -> Self: raise NotImplementedError
 
   def element_size(self) -> int:
     """

@@ -1,7 +1,7 @@
 # tensor tests that pass on NULL backend (no copyout needed)
 import numpy as np
 import unittest
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -15,7 +15,7 @@ m_init = np.random.randn(1,3).astype(np.float32)
 class TestTrainMode(unittest.TestCase):
   def test_train_mode(self):
     assert not Tensor.training
-    @Tensor.train()
+    @Context(TRAINING=1)
     def f():
       assert Tensor.training
     f()

@@ -20,6 +20,7 @@ include-package-data = true
 packages = [
   'tinygrad',
   'tinygrad.codegen',
+  'tinygrad.codegen.decomp',
   'tinygrad.codegen.opt',
   'tinygrad.codegen.late',
   'tinygrad.engine',
