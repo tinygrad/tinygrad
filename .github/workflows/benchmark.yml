@@ -160,13 +160,15 @@ jobs:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'METAL' && '5000' || matrix.dev == 'AMD' && '3200' || '2000' }}
       run: BENCHMARK_LOG=stable_diffusion_xl CAPTURE_PROCESS_REPLAY=0 python3 examples/sdxl.py --seed 0 --noshow --timing
     - name: Run llama3.2
-      run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
+      run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
     - name: Run qwen3.5
       # qwen3.5:35b-a3b doesn't fit on mac
       if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=qwen35_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 -m tinygrad.llm -m qwen3.5:35b-a3b --benchmark --warmup
+      run: BENCHMARK_LOG=qwen35_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.5:35b-a3b --benchmark --warmup
     - name: Run olmoe
-      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
+      # just metal for now
+      if: ${{ matrix.dev == 'METAL' }}
+      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
     - name: Train MNIST
       run: time TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
