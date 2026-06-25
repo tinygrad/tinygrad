@@ -126,7 +126,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # add image (but should also clean up all indexing)
   sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=ren, bottom_up=True)
   sink = graph_rewrite(sink, load_store_indexing, name="simplify indexing")
-  
+
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
