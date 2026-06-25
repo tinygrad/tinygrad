@@ -53,7 +53,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
-        idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.int, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):

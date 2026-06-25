@@ -122,7 +122,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
@@ -133,6 +132,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # late decomps + move gates from unrenderable INVALID where
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
