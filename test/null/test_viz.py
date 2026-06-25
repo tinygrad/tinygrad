@@ -357,25 +357,23 @@ class TestVizIntegration(unittest.TestCase):
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
+    c1 = Tensor.empty(4, device="NULL")
+    c2 = Tensor.empty(8, device="NULL")
+    # uniquely named A = B + 1 kernel
+    kernel_name = "custom_add1_link_sched_codegen"
+    def custom_add1(A:UOp, B:UOp): return A[0].store(B[0]+1).sink(arg=KernelInfo(kernel_name))
     with save_viz() as viz:
-      c1 = Tensor.empty(4, device="NULL").add(1)
-      c2 = Tensor.empty(8, device="NULL").add(1)
-      with Context(SCACHE=0):
-        sched = c1.schedule_linear(c2)
-      from tinygrad.engine.realize import compile_linear
-      sched = compile_linear(sched)
-      with Context(NO_COLOR=0):
-        prgs = [do_to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
+      c1 = Tensor.custom_kernel(c1, c2, fxn=custom_add1)[0]
+      c1.realize()
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
-    with Context(NO_COLOR=1):
-      graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
+    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
-      self.assertEqual(lst[n["ref"]]["name"], prgs[i])
-      assert ansistrip(prgs[i]) in n["label"], f"CALL must contain kernel name, got {n['label']}"
+      self.assertEqual(lst[n["ref"]]["name"], kernel_name)
+      assert kernel_name[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
   def test_link_sched_codegen_beam(self):
     with Context(BEAM=2):
