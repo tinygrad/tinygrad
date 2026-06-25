@@ -127,18 +127,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
 
-  # instruction selection decompositions
-  pm_decomp = pm_decomp+\
-    get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
-    get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
-
   # this is new style (TODO: this should all be removed)
   sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
-  # move gates from unrenderable INVALID where
+  # late decomps + move gates from unrenderable INVALID where
+  pm_decomp = pm_decomp+\
+    get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
+    get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
