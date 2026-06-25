@@ -53,17 +53,18 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
-        idx = buf._mop(Ops.SHRINK, arg=[(offset, len(grp))]) if len(grp) > 1 else buf.index(offset)
+        # NOTE: we apply the valid again after we determine the length
+        offset = valid.where(offset, UOp(Ops.CONST, offset.dtype, arg=Invalid)) if valid is not None else offset
+        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.int, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
             assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
-          data = UOp.vectorize(*datas) if len(datas) > 1 else datas[0]
-          store = idx.store(data, valid) if valid is not None else idx.store(data)
+          store = idx.store(UOp.vectorize(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
-          ld = idx.load(idx.vconst_like(0), valid) if valid is not None else idx.load()
+          ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
               replacements[oo] = ld.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else ld
