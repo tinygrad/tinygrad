@@ -27,7 +27,7 @@ def transform_to_image(ctx, buf, x, valid=None):
   idx = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4))).index(cidx.src[1], cidx.src[0])
   if valid is not None:
     # TODO: simplify valid here
-    idx = valid.where(idx, UOp(Ops.CONST, dtype=dtypes.idx, arg=Invalid))
+    idx = valid.where(idx, UOp(Ops.CONST, dtype=idx.dtype, arg=Invalid))
   return idx
 
 pm_add_image = PatternMatcher([
@@ -37,8 +37,8 @@ pm_add_image = PatternMatcher([
 
 pm_new_gater = PatternMatcher([
   # here we create the alt value for load to be 0s and remove the where Invalid
-  (UPat.var("gate").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid)).load(name="l"),
-   lambda gate,idx,l: idx.load(l.vconst_like(0), gate)),
+  (UPat.var("gate").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid)).load(),
+   lambda gate,idx: idx.load(idx.vconst_like(0), gate)),
   (UPat.var("gate").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid)).store(UPat.var("data")),
    lambda gate,idx,data: idx.store(data, gate)),
 ])
