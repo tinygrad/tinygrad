@@ -472,6 +472,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
+  def _stack(self, *srcs):
+    # TODO: this should become the real stack
+    return UOp(Ops.STACK, self.dtype, (self,)+srcs)
   def vectorize(self, *srcs):
     return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
