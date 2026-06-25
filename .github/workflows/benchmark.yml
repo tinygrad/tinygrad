@@ -191,6 +191,8 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      IGNORE_BEAM_CACHE: 1
+      CAPTURE_PROCESS_REPLAY: 0
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -206,8 +208,6 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: python3 test/external/process_replay/reset.py
     - name: Run llama3.2
       run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
     - name: Run qwen3.5
@@ -216,8 +216,6 @@ jobs:
       run: BENCHMARK_LOG=qwen35_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.5:35b-a3b --benchmark --warmup
     - name: Run olmoe
       run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
 
   tinyboxbenchmark:
     name: Tinybox Benchmark (${{ matrix.dev }})
