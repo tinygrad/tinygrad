@@ -173,10 +173,7 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
-    # do we just put it in src as well??, two address?
-    # if base.tag is none allocate it a register and use the same for base?
-    # if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,val), tag=(None,)) # two address op?
-    if val.op is Ops.CONST: base.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))
+    if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
     mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
         for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
     return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
@@ -202,10 +199,11 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
 ])
 
-# problem: edge betweeen range and end needs to contain exec mask but consumers of range need acc vgpr ref
+# - maybe clean up some of these control flow conditions with ctx state?
+# - maybe add the range exec mask to end src in pre-regalloc?
+# cleaner than these conditions
 isel_matcher = PatternMatcher([
   # control flow
-  # wire exec mask into end src?
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"),
    lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32) if x.dtype is not dtypes.uint32 else None),
   (UPat(Ops.END, name="x"), lambda ctx,x: x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1),x.src[1].src[-1]))
@@ -254,7 +252,7 @@ isel_matcher = PatternMatcher([
 
 # maybe just make my register viewing another rewrite??
 
-def encode(x:UOp):
+def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   import tinygrad.renderer.amd.dsl as dsl
   def _route(r:Register):
@@ -266,6 +264,9 @@ def encode(x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
+  if ctx.is_two_address(x):
+    x = x.replace(tag=regs(x.src[0]))
+    oprs = oprs[1:]
   # hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM:
@@ -280,10 +281,10 @@ def encode(x:UOp):
     else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
-    args = [_fuse(regs(x))] + [_immorreg(u) for u in x.src]
+    args = [_fuse(regs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
-
+  
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
@@ -356,11 +357,9 @@ class RDNA3Renderer(ISARenderer):
   def __init__(self, target:Target):
     super().__init__(target)
 
-  # hack for now, should be removed from ISARenderer (should be CPU/GPU agnostic)
   def is_two_address(self, x:UOp) -> bool:
-    if isinstance(x.arg, InsOp) and x.arg.func in [RDNA3Ops.GLOBAL] and "load" in x.arg.opc and len(x.src) > 3:
-      return True
-    return False
+    if x.op is not Ops.INS: return False
+    return x.arg.func in [RDNA3Ops.VOP1] and x.src[0].op is Ops.BUFFER and not isinstance(reg(x), Register)
 
   def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-2])
   def spill(self, disp:UOp, x:UOp) -> UOp: return x
@@ -402,7 +401,7 @@ class RDNA3Renderer(ISARenderer):
         if isinstance(u.tag, str):
           targets[u.tag] = pc
         continue
-      l = encode(u)
+      l = encode(self,u)
       pc += l.arg.size()
       _asm.append((l,pc))
 
