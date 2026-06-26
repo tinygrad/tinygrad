@@ -226,7 +226,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.UNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
+      case Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.SINK | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None

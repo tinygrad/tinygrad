@@ -161,7 +161,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
-    if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+    if x.op is Ops.DEVICE: continue
 
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
