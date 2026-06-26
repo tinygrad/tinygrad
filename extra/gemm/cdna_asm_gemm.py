@@ -2851,11 +2851,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=g_scale)
     # wgrad: no w_scale
     g_fp8_2d = g_fp8.reshape(-1, g_fp8.shape[-1])
-    if getenv("FAST_FP8_TRANSPOSE", 0) and g_fp8_2d.shape[0] % 64 == 0 and g_fp8_2d.shape[1] % 64 == 0:
-      from extra.llama_kernels.fp8_transpose import fast_fp8_transpose
-      g_fp8_T = fast_fp8_transpose(g_fp8_2d)
-    else:
-      g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
+    g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
     grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale)
     # wgrad: rescale if not scalar
     if w_post_t is not None:
