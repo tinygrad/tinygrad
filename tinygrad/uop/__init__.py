@@ -136,6 +136,9 @@ class GroupOp:
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
+  # ALU ops valid as the reduce op in REDUCE/ALLREDUCE arg
+  Reduce = {Ops.ADD, Ops.MUL, Ops.MAX}
+
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 

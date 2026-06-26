@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.late.devectorizer import load_store_indexing
+from tinygrad.codegen.late.devectorizer import indexing_simplify
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
@@ -11,45 +11,21 @@ from test.null.test_uop_symbolic import check_uop_against_string
 # symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
-def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+load_store_indexing, name="simplify_image_idx")
+def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
     UOp.param(0, dtypes.float.ptr()).index(idx.valid(valid), ptr=True),
-    UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
     UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
-    UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
-
-class TestHelpers(unittest.TestCase):
-  def test_is_increasing(self):
-    idx1 = Special("idx1", 32)
-    idx2 = Special("idx2", 64)
-    ridx0 = Variable("ridx0", 0, 5)
-    ridx1 = Variable("ridx1", 0, 2)
-    ridx2 = Variable("ridx2", 0, 2)
-    # (ridx0+(idx1*48)+(ridx2*6)+(-6)),((idx2*2)+ridx1+(-1)))
-    f0 = ((idx1*24)+(ridx2*3)+ridx0+765)%768
-    f1 = ridx0+(idx1*48)+(ridx2*6)+(-6)
-    f2 = (idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)
-    f3 = (idx2*2)+ridx1+(-1)
-
-    self.assertFalse(f0.is_increasing())
-    self.assertTrue(f1.is_increasing())
-    self.assertTrue(f2.is_increasing())
-    self.assertTrue(f3.is_increasing())
-
-    rng = UOp.range(5, 2)
-    self.assertTrue(rng.is_increasing())
-    self.assertTrue((rng+2).is_increasing())
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
@@ -506,10 +482,20 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
 
+  def test_drop_non_monotonic_window(self):
+    # two-sided window valid (645 <= gidx0 < 653) on a non-monotonic index (lane split via %4 and //4):
+    # gidx0 outside the window pushes idx_x out of the (1, 48) image, so the gate is dropped
+    gidx0 = Special("gidx0", 1064)
+    r12 = Range(12, 3)
+    valid = ((gidx0 < 645).ne(True)) & (gidx0 < 653)
+    idx = (r12*4 + (gidx0+3)%4 + (gidx0+3)//4*24 - 3888, UOp.const(dtypes.weakint, 0))
+    load = get_load_image_uop((1, 48, 4), valid, idx)
+    self.check(load, None, "(r12*4+(gidx0+3)%4+(gidx0+3)//4*24+-3888)", "0")
+
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
     # test that INDEX with a constant True valid gets simplified to drop the valid
-    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.codegen.late.devectorizer import indexing_simplify
     from tinygrad.uop.ops import graph_rewrite
     from tinygrad.uop.symbolic import sym
     buf = UOp.param(0, dtypes.int.ptr())
@@ -517,7 +503,7 @@ class TestDropTrueGate(unittest.TestCase):
     true_gate = UOp.const(dtypes.bool, True)
     index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx.valid(true_gate)))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, sym+load_store_indexing)
+    result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 

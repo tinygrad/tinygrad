@@ -2,7 +2,7 @@
 from typing import Any, Callable
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.uop.decompositions import f2f
+from tinygrad.codegen.decomp.dtype import f2f
 
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]

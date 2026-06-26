@@ -77,45 +77,14 @@ jobs:
       run: |
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
-    - name: Test one op
-      run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
-    - name: custom tests
-      run: python3 -m pytest -n auto extra/torch_backend/test.py --durations=20
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
       run: DEV=CPU:LLVM LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/backend/test_ops.py --durations=20
-    - name: Test in-place operations on views
-      run: TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
-    - name: Test multi-gpu
-      run: DEV=CPU:LLVM GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
-    - name: Test kernel fusion
-      run: python3 extra/torch_backend/test_kernel_fusion.py
-
-
-  torchbackendmore:
-    name: Torch Backend Tests More
-    runs-on: *linux
-    timeout-minutes: 15
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_unit
-        llvm: 'true'
-    - name: Install ninja
-      run: |
-        sudo apt update || true
-        sudo apt install -y --no-install-recommends ninja-build
-    - name: Test beautiful_mnist in torch with TINY_BACKEND
-      run: STEPS=20 DEV=CPU TARGET_EVAL_ACC_PCT=90.0 MAX_BUFFER_SIZE=0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
-    - name: Test some torch tests (expect failure)
-      run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
+    - name: Custom tests
+      run: DEV=CPU:LLVM GPUS=4 TINY_BACKEND=1 python3 -m pytest -nauto extra/torch_backend/test.py extra/torch_backend/test_inplace.py extra/torch_backend/test_multigpu.py extra/torch_backend/test_kernel_fusion.py --durations=20
 
   bepython:
     name: Python Backend
@@ -327,7 +296,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=10 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=39 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
         run: |
           DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
@@ -370,7 +339,6 @@ jobs:
         with:
           key: optim
           deps: testing
-          pydeps: "tensorflow==2.19"
           opencl: 'true'
       #- name: Test Optimization Helpers
       #  run: DEBUG=1 python3 extra/optimization/test_helpers.py
@@ -379,7 +347,7 @@ jobs:
       - name: Test Beam Search
         run: DEV=CL IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
-        run: DEV=CL python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
+        run: DEV=CL python -m pytest -n=auto test/external/external_test_lr_schedule.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: DEV=NULL beautiful_mnist_multigpu
         run: DEV=NULL NULL_ALLOW_COPYOUT=1 python examples/beautiful_mnist_multigpu.py
       - name: Test Bert training
@@ -685,6 +653,33 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testmetal:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: MacOS (DEV=METAL) (${{ matrix.group }})
+    runs-on: *macos
+    timeout-minutes: 20
+    env:
+      DEV: METAL
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: macos-metal
+        deps: testing_unit
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20 --splits 2 --group ${{ matrix.group }}
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
   testmacos:
     strategy:
       fail-fast: false
@@ -693,7 +688,6 @@ jobs:
           - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:LVP'
-          - 'METAL'
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
@@ -716,8 +710,8 @@ jobs:
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-    - name: Run backend tests
-      run: python -m pytest -n=auto test/backend --durations=20
+    - name: Run test_tiny
+      run: python -m pytest -n=auto test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 

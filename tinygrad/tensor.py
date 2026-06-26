@@ -859,8 +859,7 @@ class Tensor(RandMixin, metaclass=TensorMeta):
     def is_pow2(v): return v > 0 and v & (v - 1) == 0
     # pad dimension i to amt with invalids
     def ipad(t, i, amt):
-      shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
-      return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+      return t.pad(tuple(None if d != i else (0, amt-s) for d,s in enumerate(t.shape)), value=Invalid) if amt != t.shape[i] else t
     # align a dimension, use at to specify the dimension to pad in, defaults to first
     def pad_align(t, dim, at=None, force=False):
       # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
@@ -895,13 +894,10 @@ class Tensor(RandMixin, metaclass=TensorMeta):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = round_up(ox, math.lcm(cout, 64 // dtsz) // cout) - ox
-    if added_ox: x = x.pad_to(None, None, ox + added_ox, None, None, None, None, None, None, None, None)
-
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
-    ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, :, :]
+    ret = ret.reshape(bs, oy, ox, groups, rcout)
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels: ret = ret[:, :, :, :, :-added_output_channels]
     # NCHW output

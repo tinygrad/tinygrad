@@ -7,6 +7,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
+  op, device = red.arg
 
   # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
@@ -19,7 +20,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
-    return functools.reduce(lambda x,y: x.alu(red.arg, y), [buf.mselect(i).copy_to_device(red.src[1]) for i in range(ndev)])
+    return functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)])
 
   # chunk data into ndev pieces
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
@@ -31,19 +32,19 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   for i,(s,e) in enumerate(chunks):
     if use_all2all:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
-      reduced_chunks.append(functools.reduce(lambda x,y: x.alu(red.arg, y), chunks_on_i))
+      reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
     else:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
       for step in range(ndev-1):
         src, dest = (i+step)%ndev, (i+step+1)%ndev
         cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
-        reduced = cp.alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+        reduced = cp.alu(op, chunk.copy_to_device(buf.device[dest], dest))
       reduced_chunks.append(reduced)
 
   # allgather
   copied_chunks:list[UOp] = []
   for i,rc in enumerate(reduced_chunks):
-    if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
+    if isinstance(device, str): copied_chunks.append(rc.copy_to_device(device))
     elif use_all2all: copied_chunks.append(UOp.mstack(*(rc.copy_to_device(buf.device[j]) for j in range(ndev))))
     else:
       chain:list[UOp] = [rc]
@@ -58,5 +59,5 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   if output is None: output = UOp.const(red.dtype, Invalid, shape=red.shape).clone(device=red.device)
   to = red.param_like(0)
   src = buf.param_like(1)
-  red = src.allreduce(red.arg, red.src[1])
+  red = src.allreduce(*red.arg)
   return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))

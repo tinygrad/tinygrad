@@ -360,7 +360,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
-  return t.data().tobytes() if t.dtype == dtypes.uint8 else cast(list[ConstType]|ConstType, t.tolist())
+  return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -1188,7 +1188,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     if reduction == "none": return x.scatter(axis, indices, updates)
-    reduction_ = cast(Literal["sum", "prod", "amin", "amax"], {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}[reduction])
+    reduction_map: dict[Literal["add", "mul", "min", "max"], Literal["sum", "prod", "amin", "amax"]] = \
+      {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}
+    reduction_ = reduction_map[reduction]
     return x.scatter_reduce(axis, indices, updates, reduction_)
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
