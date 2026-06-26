@@ -37,6 +37,8 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
       dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
+    # exit early without valid for speed
+    if valid is None: break
   # if no candidates, we don't rewrite
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
