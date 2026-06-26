@@ -8,12 +8,12 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
 
+# NOTE: wavefront size is 32, use exec_lo
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
 EXEC_SAVE = SGPRS[5]
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[6:]), tuple(VGPRS[1:])
-# NOTE: wavefront size is 32, use exec_lo
 VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 
 lane_ctr = itertools.count()
@@ -26,7 +26,6 @@ def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(ctx, x:UOp) -> UOp:
   if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
-# this is where stack gets expanded
   if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
@@ -151,16 +150,15 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
 def cvt(ctx, y:UOp, x:UOp):
-  # dt = y.dtype
-  # if dt in (dtypes.uint8,dtypes.bool,dtypes.uint16): dt = dtypes.uint32
   return x.ins(V_CVT[y.dtype][x.dtype])
 
-# todo: handle 16 bit loads?
+# TODO: handle 16 bit loads?
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
-def load(ctx, addr:UOp, x:UOp):
+def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
+  def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,)) if gate is not None else o
   if base.addrspace is AddrSpace.REG:
-    return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=addr.src[0].dtype, src=(addr.src[0],))
+    return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=addr.src[0].dtype, src=(addr.src[0],)))
   imap = {
     1 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
     2 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
@@ -168,50 +166,37 @@ def load(ctx, addr:UOp, x:UOp):
   }
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * x.dtype.itemsize+3)//4
-  return x.ins(_insspace(imap[nregs],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs))
+  return _gate(x.ins(_insspace(imap[nregs],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs)))
 
-def store(ctx, addr:UOp, val:UOp, x:UOp):
+def store(ctx, addr:UOp, val:UOp, x:UOp, gate:UOp|None = None):
   base, idx = addr.src[:2]
+  def _gate(o:UOp): return o.replace(src=o.src + (gate,)) if gate is not None else o
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
-    return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
+    return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag()) # two address op?
   nregs = (n*val.dtype.itemsize+3)//4
   imap = {
     1:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     2:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),))
-
-# TODO: eventually just handle folding in the gate/alt in load/store??
-def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
-  ld = load(ctx, addr, x)
-  return ld.replace(src=(to_vgpr(ctx, alt),) + ld.src + (gate,))
-
-def gated_store(ctx, addr:UOp, val:UOp, gate:UOp, x:UOp):
-  st = store(ctx, addr, val, x)
-  return st.replace(src=st.src + (gate,))
+  return _gate(UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  # NOTE: special case, casting comparison output to float should be treated as a where
-  # 0.0/1.0
+  # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
 ])
 
-# - maybe clean up some of these control flow conditions with ctx state?
-# - maybe add the range exec mask to end src in pre-regalloc?
-# cleaner than these conditions
+# NOTE: maybe add the range exec mask to end src in pre-regalloc?
 isel_matcher = PatternMatcher([
   # control flow
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"),
    lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32) if x.dtype is not dtypes.uint32 else None),
   (UPat(Ops.END, name="x"), lambda ctx,x: x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1),x.src[1].src[-1]))
    if len(x.src) == 2 and x.src[1].dtype is dtypes.uint32 else None),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), gated_store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -241,8 +226,10 @@ isel_matcher = PatternMatcher([
   # cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"), cmp),
   # mem ops
-  (UPat.var("addr").store(UPat.var("val"), name="x"), store),
-  (UPat(Ops.LOAD, name="x", src=(UPat.var("addr"))), load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), name="x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(name="x"), load),
   # bit shifts
   ((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
   # barrier
@@ -253,8 +240,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
-# maybe just make my register viewing another rewrite??
-
+# NOTE: maybe just make my register viewing another rewrite??
 def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   import tinygrad.renderer.amd.dsl as dsl
@@ -271,7 +257,6 @@ def encode(ctx, x:UOp):
     x = x.replace(tag=regs(x.src[0]))
     oprs = oprs[1:]
   # hacky fixes, find cleaner way to conform to isa
-  print("encoding", enc)
   kw = args = None
   if group is RDNA3Ops.SMEM:
     kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
@@ -307,12 +292,6 @@ def lower_gated(x:UOp):
     return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
   return None
 
-# - range end requires 2 sgprs, 1 to restore and 1 for gate
-# - gated load/store also needs 2 sgprs, restore mask and gate mask...
-#   - look at llvm and v_cmpx to simplify divergent control flow handling
-# - vcmpx writes directly to exec, no need to allocate mask!
-# lets experiment with this approach for lower end
-
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
   loop_label = "_".join(str(i) for i in x.arg[:-1])
@@ -344,8 +323,8 @@ class CounterType(Enum):
 
 def _counter(x:UOp):
   if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: return CounterType.DS_CNT
-  elif "load" in x.arg.opc: return CounterType.LOAD_CNT
-  else: return CounterType.STORE_CNT
+  elif reg(x) is None: return CounterType.STORE_CNT
+  else: return CounterType.LOAD_CNT
 
 @dataclass
 class RDNA3LinearCtx:
@@ -409,14 +388,11 @@ class RDNA3Renderer(ISARenderer):
       pc += l.arg.size()
       _asm.append((l,pc))
 
-    # resolve labels
+    # if (cond) PC = PC + (SIMM16 *4) +4
     def _reslv(u:UOp,upc:int):
-      if isinstance(u.tag, str):
-        # if (cond) PC = PC + (SIMM16 *4) +4
-        simm = (targets[u.tag] - upc) // 4
-        print(f"resolving jump {upc} -> {targets[u.tag]}, {targets[u.tag]} = {upc} + ({simm} * 4) + 4")
-        u = u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
-      return u 
+      if not isinstance(u.tag, str): return u
+      simm = (targets[u.tag] - upc) // 4
+      return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
     print(prg.arg)
@@ -424,5 +400,3 @@ class RDNA3Renderer(ISARenderer):
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
-
-  # def asm_str(self, uops:list[UOp], function_name:str) -> str:
