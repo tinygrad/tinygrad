@@ -595,7 +595,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
-    return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
+    return UOp(Ops.ALLREDUCE, self.dtype, (self,), (op, device.arg if isinstance(device, UOp) else device))
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
   def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
@@ -777,7 +777,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return self.arg.device
-    if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
+    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
+    if self.op is Ops.ALLREDUCE: return self.arg[1]
     for x in self.src:
       if x.device is not None: return x.device
     return None
