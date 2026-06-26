@@ -156,7 +156,7 @@ spec_tensor = PatternMatcher([
    and isinstance(x.arg[1], tuple) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
   # COPY. TODO: this should not have allow_any_len, but something is adding ranges
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"),), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype and is_device(copy.arg)),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, tuple) and
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 

@@ -41,7 +41,7 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
-               Ops.COPY: 2, Ops.SLICE: 2, Ops.LINEAR: 0}
+               Ops.COPY: 1, Ops.SLICE: 2, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -593,9 +593,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, dtype=self.dtype, src=(self,)+args, **kwargs)
-  def allreduce(self, op, device:str|tuple[str, ...]|UOp):
+  def allreduce(self, op, device:str|tuple[str, ...]):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
-    return UOp(Ops.ALLREDUCE, self.dtype, (self,), (op, device.arg if isinstance(device, UOp) else device))
+    return UOp(Ops.ALLREDUCE, self.dtype, (self,), (op, device))
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
   def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
@@ -664,10 +664,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     copied = self.copy_to_device(devices)
     return copied if axis is None else copied._shard(axis, len(devices)).multi(axis)
 
-  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
+  def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
-    return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
+    return UOp(Ops.COPY, self.dtype, (inp,), arg=device)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, self.dtype, (self,)+srcs)
   @property
@@ -777,7 +777,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return self.arg.device
-    if self.op in {Ops.COPY, Ops.BUFFER}: return self.src[1].device
+    if self.op is Ops.COPY: return self.arg
     if self.op is Ops.ALLREDUCE: return self.arg[1]
     for x in self.src:
       if x.device is not None: return x.device

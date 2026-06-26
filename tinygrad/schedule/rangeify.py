@@ -177,14 +177,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** copy rules **
 
   # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
+   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
   # copying mselect to same device is just mselect (no NOOP kernel)
-  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
 
   # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
 
   # ** store rules **
 
@@ -335,7 +335,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  (UPat(Ops.COPY, src=(UPat.cvar("x"),), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST
