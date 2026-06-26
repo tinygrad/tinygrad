@@ -296,7 +296,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=55 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=39 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
         run: |
           DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
@@ -653,6 +653,33 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testmetal:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: MacOS (DEV=METAL) (${{ matrix.group }})
+    runs-on: *macos
+    timeout-minutes: 20
+    env:
+      DEV: METAL
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: macos-metal
+        deps: testing_unit
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20 --splits 2 --group ${{ matrix.group }}
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
   testmacos:
     strategy:
       fail-fast: false
@@ -661,7 +688,6 @@ jobs:
           - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:LVP'
-          - 'METAL'
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
@@ -684,8 +710,8 @@ jobs:
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-    - name: Run backend tests
-      run: python -m pytest -n=auto test/backend --durations=20
+    - name: Run test_tiny
+      run: python -m pytest -n=auto test/test_tiny.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 

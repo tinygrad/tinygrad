@@ -100,12 +100,12 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.int, full_grp[0])
+        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.weakint, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = valid.where(offset, UOp(Ops.CONST, offset.dtype, arg=Invalid)) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.int, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.weakint, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
@@ -117,7 +117,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
           ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
-              replacements[oo] = ld.index(UOp.const(dtypes.int, i)) if len(grp) > 1 else ld
+              replacements[oo] = ld.index(UOp.const(dtypes.weakint, i)) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
   # apply
