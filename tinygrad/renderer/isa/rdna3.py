@@ -20,12 +20,14 @@ lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
 execop, execsaveop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, EXEC_SAVE)
+lidop = def_reg(dtypes.uint32, WIIDS[0])
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def to_vgpr(ctx, x:UOp) -> UOp:
   if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
-  if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)])
+# this is where stack gets expanded
+  if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
@@ -48,11 +50,12 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
+# lidx bfe should point to same reg def so filling isnt always necessary
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
     if x.arg[0] == 'g': return def_reg(dtypes.uint32, WGIDS[dim])
-    else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS[0]), const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
+    else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (UOp.const(dtypes.uint32, offs).rtag(),), tag=ctx.vreg((GP_SGPRS, 2)))
 
@@ -173,19 +176,13 @@ def store(ctx, addr:UOp, val:UOp, x:UOp):
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
-    """
-    if val.op is Ops.CONST: return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base,to_vgpr(ctx,val))).rtag() # two address op?
-    mvs = [UOp(Ops.INS, dtype=val.dtype.scalar(), arg=RDNA3Ops.v_mov_b32_e32, src=(val.gep(i),), tag=tg)
-        for i, tg in zip(range(n), [GP_VGPRS] if n == 1 else ctx.vreg((GP_VGPRS,n)))]
-    """
-    return UOp.group(*mvs) if len(mvs) > 1 else mvs[0]
   nregs = (n*val.dtype.itemsize+3)//4
   imap = {
     1:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     2:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (val,))
+  return UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),))
 
 # TODO: eventually just handle folding in the gate/alt in load/store??
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp): # assume dst is 1 reg for now
@@ -274,6 +271,7 @@ def encode(ctx, x:UOp):
     x = x.replace(tag=regs(x.src[0]))
     oprs = oprs[1:]
   # hacky fixes, find cleaner way to conform to isa
+  print("encoding", enc)
   kw = args = None
   if group is RDNA3Ops.SMEM:
     kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)

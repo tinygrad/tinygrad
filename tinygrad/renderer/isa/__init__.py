@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools
+import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
@@ -21,6 +21,8 @@ class Register:
     stripes = tuple(tuple(cons[i*n+j] for i in range(len(cons) // n)) for j in range(n))
     return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
 
+# lru cache?
+@functools.cache
 def regs(u:UOp) -> tuple[Register,...]:
   # model view register dependencies through rewrites in here
   if u.op in {Ops.AFTER, Ops.END}: return regs(u.src[0])
