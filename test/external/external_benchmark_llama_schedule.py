@@ -1,16 +1,15 @@
 from tinygrad import nn, Tensor, dtypes
-from tinygrad.helpers import DEV, Timing
+from tinygrad.helpers import DEV, Timing, Context
 
 from extra.models.llama import Transformer
 from examples.llama3 import MODEL_PARAMS
 
 if __name__ == "__main__":
   DEV.value = "NULL"
-  Tensor.training = True
   #model_size = "8B"
   model_size = "405B"
 
-  with Timing("total "):
+  with Context(TRAINING=1), Timing("total "):
     with Timing("***** create model in    "):
       model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=nn.Linear, embedding=nn.Embedding,
                           max_context=1024, jit=True, disable_kv_cache=True)
