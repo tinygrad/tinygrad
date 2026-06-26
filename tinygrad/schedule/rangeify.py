@@ -155,7 +155,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
   # split_reduceop
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)), split_reduceop),
