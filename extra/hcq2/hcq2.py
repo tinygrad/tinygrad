@@ -27,7 +27,7 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value()),
       (UPat(Ops.BUFFER, tag="sentinel_signal"), lambda ctx: ctx.timeline_signal("sentinel", (1 << 64) - 1)),
       (UPat(Ops.BUFFER, name="b"), lambda ctx, b:
-        Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))), # TODO: remove nolru
+        Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))), # TODO: remove nolru
     ])
 
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
@@ -137,7 +137,7 @@ def unwrap_after(uop):
   return uop
 
 def make_getaddr(u, device=None):
-  if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return u
+  if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM): return u
   return UOp(Ops.GETADDR, dtypes.uint64, src=(u, UOp(Ops.DEVICE, arg=device or to_tuple(u.device)[0])))
 
 def make_ins(op, *srcs):
@@ -183,19 +183,19 @@ class HCQInfo:
   def from_call(call:UOp) -> HCQInfo: return HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), get_call_outs_ins(call)[0])
 
 # *****************
-# 1.1. prep runtimes: staging copies
+# 1.1. prep: staging copies
 
 def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS) and not all_devices_in(b.device, HCQ_P2P_DEVS)
 
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
 
-  stage = UOp.new_buffer("CPU", src.buffer.nbytes, dtypes.uint8)
+  stage = UOp.new_buffer("CPU", src.nbytes(), dtypes.uint8)
   return UOp(Ops.LINEAR, dtypes.void, (src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy)])
 
 # *****************
-# 1.2. prep runtimes: programs/kernargs
+# 2.1. hcq lowering: programs/kernargs
 
 @functools.cache
 def get_pm_prep_program(name:str) -> PatternMatcher|None:
@@ -216,7 +216,7 @@ def prep_program(call:UOp, prg:UOp) -> UOp|None:
 def prep_kernargs(call:UOp, prg:UOp) -> UOp:
   (data, info), dev_uop = prg.arg, UOp(Ops.DEVICE, arg=call.src[1].device)
   buf = UOp.new_buffer(dev_uop.arg, data.kernargs_alloc_size, dtypes.uint8).rtag("kernargs")
-  patches = [make_patch(buf, i*8, UOp(Ops.GETADDR, dtypes.uint64, src=(call.src[1+gi], dev_uop))) for i,gi in enumerate(info.globals)] \
+  patches = [make_patch(buf, i*8, make_getaddr(call.src[1+gi], dev_uop.arg)) for i,gi in enumerate(info.globals)] \
           + [make_patch(buf, len(info.globals)*8 + i*4, v, dtypes.uint32) for i,v in enumerate(info.vars)]
   return call.replace(src=(prg.replace(src=prg.src + (buf.after(*patches),), arg=(data, info)),) + call.src[1:])
 
@@ -230,7 +230,7 @@ pm_prep_runtime = PatternMatcher([
 ])
 
 # *****************
-# 2. lowering to hcq ir
+# 2.2. hcq lowering: ops to ir
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   devs:tuple[str, ...] = to_tuple(devs)
@@ -470,15 +470,16 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
   off_per_buf:dict[UOp, int] = {}
   size_per_tag:dict[str, int] = {}
   for b in bufs:
-    if b.tag in maxtags: size_per_tag[b.tag] = max(size_per_tag.get(b.tag, 0), b.arg)
+    bsz = b.max_numel()
+    if b.tag in maxtags: size_per_tag[b.tag] = max(size_per_tag.get(b.tag, 0), bsz)
     elif b.tag in sumtags:
       off_per_buf[b] = round_up(size_per_tag.get(b.tag, 0), {"program": 0x1000}.get(b.tag, 128))
-      size_per_tag[b.tag] = off_per_buf[b] + b.arg
+      size_per_tag[b.tag] = off_per_buf[b] + bsz
 
   count_per_tag = collections.Counter(b.tag for b in bufs)
   ref_bufs = {b.tag:b for b in bufs if count_per_tag[b.tag] > 1}
-  bases = {tag:UOp.new_buffer(b.src[1].arg, size_per_tag[tag], b.dtype).rtag(tag) for tag,b in ref_bufs.items()}
-  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.weakint, off_per_buf.get(b, 0))), b.arg) for b in bufs if b.tag in bases}
+  bases = {tag:UOp.new_buffer(b.device, size_per_tag[tag], b.dtype).rtag(tag) for tag,b in ref_bufs.items()}
+  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.weakint, off_per_buf.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
 pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), pack_hcq_placeholders)])
 
@@ -495,7 +496,7 @@ pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), 
 
 def bufferize_buf(buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  uops = tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=dv), "CPU") for dev in to_tuple(buf.src[1].arg))
+  uops = tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=dv), "CPU") for dev in to_tuple(buf.device))
   return make_mstack(uops)
 pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, name="buf"), bufferize_buf)])
 
