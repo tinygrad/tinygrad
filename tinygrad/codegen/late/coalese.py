@@ -24,12 +24,13 @@ devectorizer2 = PatternMatcher([
 ])
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
-  if not IMAGE or ctx.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
+  shapes, ren = ctx
+  if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
   valid = UOp.const(dtypes.bool, True)
   if x.op == Ops.WHERE and x.src[2].op == Ops.CONST and x.src[2].arg == Invalid: valid,x,_= x.src
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
-  for ch, cw in image_valid_dims(buf.dtype.base, buf.max_numel(), ctx.target.arch):
+  for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype.base, buf.max_numel(), ren.target.arch):
     cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
@@ -39,6 +40,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
   buf = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4)))
+  shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.arg is not True:
     return buf.index(valid.where(cidx.src[1], cidx.src[1].const_like(Invalid)),
                      valid.where(cidx.src[0], cidx.src[0].const_like(Invalid)))

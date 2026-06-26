@@ -109,7 +109,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
-  sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=ren, bottom_up=True)
+  sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   sink = graph_rewrite(sink, symbolic, name="extra symbolic")
