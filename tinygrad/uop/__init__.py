@@ -90,10 +90,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto()
-
-  # local unique
-  LUNIQUE = auto()
+  DEVICE = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()

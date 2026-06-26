@@ -119,8 +119,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort()):
-    # always exclude DEVICE/CONST/UNIQUE
-    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
+    # always exclude DEVICE/CONST
+    if u.op in {Ops.DEVICE, Ops.CONST} and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
