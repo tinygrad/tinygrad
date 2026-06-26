@@ -176,9 +176,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
-  # COPY and source size need to match
+  # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) else None),
+   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
   # copying mselect to same device is just mselect (no NOOP kernel)
   (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
