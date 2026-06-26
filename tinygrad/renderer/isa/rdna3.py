@@ -12,14 +12,13 @@ import itertools
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
-EXEC_SAVE = SGPRS[5]
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[6:]), tuple(VGPRS[1:])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 
 lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
-execop, execsaveop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, EXEC_SAVE)
+execop = def_reg(dtypes.uint32, EXEC)
 lidop = def_reg(dtypes.uint32, WIIDS[0])
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
@@ -156,7 +155,7 @@ def cvt(ctx, y:UOp, x:UOp):
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
-  def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,)) if gate is not None else o
+  def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   if base.addrspace is AddrSpace.REG:
     return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=addr.src[0].dtype, src=(addr.src[0],)))
   imap = {
@@ -170,7 +169,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
 
 def store(ctx, addr:UOp, val:UOp, x:UOp, gate:UOp|None = None):
   base, idx = addr.src[:2]
-  def _gate(o:UOp): return o.replace(src=o.src + (gate,)) if gate is not None else o
+  def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     # how to guarantee its stored in the same reg as buf/base??
@@ -279,17 +278,18 @@ def encode(ctx, x:UOp):
 
 # --- control flow ---
 # NOTE: need to solve exec save sgpr modelling in regalloc, will break on nested flow
-def updateexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(mask,), tag=(EXEC_SAVE,))
-def restoreexec() -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,execsaveop), tag=(EXEC,))
+def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 
 # TODO: dont use string comparisons, have a clear load/store spec? operands?
+# -> also fix exec update/restore to be like RANGE so works nested
 def lower_gated(x:UOp):
   if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    return x.src[0], [x.src[0], updateexec(x.src[-1]), x.replace(src=x.src[1:-1]), restoreexec()]
+    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
   if "store" in x.arg.opc and len(x.src) > 4: # gated store 
-    branch = updateexec(x.src[-1])
-    return branch, [branch, x.replace(src=x.src[:-1]), restoreexec()]
+    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
   return None
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
@@ -305,8 +305,7 @@ def lower_end(ctx, x:UOp):
   gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
   inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
   loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  restore = UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,x.src[-1]), tag=(EXEC,))
-  return inc, [inc, gate, loop, restore]
+  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
