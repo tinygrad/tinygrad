@@ -228,8 +228,14 @@ def alu(ctx, x:UOp):
     elif x.op is Ops.TRUNC: ins = V_TRUNC[x.dtype]
     elif x.op is Ops.RECIPROCAL: ins = V_RCP[x.dtype]
   else:
-    if x.op is Ops.ADD:
-      # TODO: handle signed?
+    # handle consts...
+    a,b = x.src
+    def _bitwise(ins):
+      if dpreciz:
+        lo, hi = x.ins(ins, src=(a.gep(0),b.gep(0))), x.ins(ins, src=(a.gep(1), b.gep(1)))
+        return UOp(Ops.STACK, src=(lo,hi))
+      else: return x.ins(ins)
+    if x.op is Ops.ADD: # TODO: handle signed?
       if dpreciz and not dtypes.is_float(x.dtype):
         a1 = x.ins(RDNA3Ops.v_add_co_u32)
         a2 = x.ins(RDNA3Ops.v_add_co_ci_u32)
@@ -237,25 +243,29 @@ def alu(ctx, x:UOp):
       ins = V_ADD[x.dtype]
     elif x.op is Ops.MUL:
       if dpreciz: 
-        # out = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) (trunc a_hi * b_hi cause ... * 2^64
-        #     = a_lo * b_lo + a_hi * b_lo + a_lo * b_hi
-        a,b = x.src
-        p1 = x.ins(RDNA3Ops.v_mad_u64_u32, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
-        p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, src=(a.gep(1), b.gep(0), p1))
-        return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, src=(a.gep(0), b.gep(1), p2))
+        p1 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
+        p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(1), b.gep(0), p1))
+        return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(1), p2))
       ins = V_MUL[x.dtype]
-    elif x.op is Ops.AND: ins = RDNA3Ops.v_and_b32_e32
-    elif x.op is Ops.OR: ins = RDNA3Ops.v_or_b32_e32
-    elif x.op is Ops.XOR: ins = RDNA3Ops.v_xor_b32_e32
+    elif x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32)
+    elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32)
+    elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32)
     elif x.op is Ops.SHL:
       x = x.replace(src=x.src[::-1])
-      ins = RDNA3Ops.v_lshlrev_b32_e32
+      ins = RDNA3Ops.v_lshlrev_b64 if dpreciz else RDNA3Ops.v_lshlrev_b32_e32 
     elif x.op is Ops.SHR:
       x = x.replace(src=x.src[::-1])
-      ins = RDNA3Ops.v_lshrrev_b32_e32
+      ins = RDNA3Ops.v_lshrrev_b64 if dpreciz else RDNA3Ops.v_lshrrev_b32_e32
   if ins is None:
     raise NotImplementedError(f"alu optype not implemented. op={x.op}, is_unary={len(x.src)==1}")
   return x.ins(ins)
+
+# cdiv of int types needs to be converted to float then cast back after ceil op
+# - we need to cast to float version of this bitwidth..., start with just 32?
+def cdiv(x:UOp):
+  a,b = [u.cast(dtypes.float32) for u in x.src]
+  c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
+  return c.cast(x.dtype)
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
@@ -295,10 +305,7 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(name="x"), load),
   # unified alu experiment
-  # cdiv of int types needs to be converted to float then cast back after ceil op
-  # - we need to cast to float version of this bitwidth..., start with just 32?
-  # NOTE: this needs to be updated
-  (UPat(Ops.CDIV, name="x"), lambda x: UOp(Ops.INS, arg=RDNA3Ops.v_ceil_f32_e32, src=(x.src[0].cast(dtypes.float32).div(x.src[1].cast(dtypes.float32)),))),
+  (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
@@ -359,6 +366,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
+  print("encoding", opc)
   if ctx.is_two_address(x):
     x = x.replace(tag=regs(x.src[0]))
     oprs = oprs[1:]
@@ -375,6 +383,9 @@ def encode(ctx, x:UOp):
     if reg(x) is None: kw["data0"]=_fuse(regs(oprs[3]))
     else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
+  elif group is RDNA3Ops.VOP3SD:
+    kw = dict(vdst=_fuse(regs(x)))
+    for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.VOPC, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     args = [_fuse(regs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
