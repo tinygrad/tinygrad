@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad import dtypes, Device
 from tinygrad.helpers import Context
 
 class TestConv(unittest.TestCase):
@@ -128,6 +129,18 @@ class TestConv(unittest.TestCase):
     x += 1
     x = x.reshape((1, 12, 16, 32))
     x.numpy()
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tcopt2_conv_backward(self):
+    with Context(TC_OPT=2, CACHELEVEL=0):
+      x = Tensor.ones(512, 512, 4, 4, dtype=dtypes.half, device=Device.DEFAULT).realize()
+      w = Tensor.ones(512, 512, 3, 3, dtype=dtypes.half, device=Device.DEFAULT).realize()
+      y = x.conv2d(w, padding=1).square().mean()
+      y.backward()
+      y.realize()
+      assert x.grad is not None and w.grad is not None
+      x.grad.realize()
+      w.grad.realize()
 
 if __name__ == '__main__':
   unittest.main()
