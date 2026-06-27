@@ -378,7 +378,6 @@ class TestDivides(unittest.TestCase):
     result = uop.divides(5)
     self.assertIsNone(result)  # 42 is not divisible by 5
 
-  @unittest.skip("broken")
   def test_divides_variable_and_constant(self):
     # Multiplying a variable by a constant, then dividing by the same constant
     x = UOp.variable('x', 10, 20)

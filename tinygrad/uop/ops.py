@@ -934,8 +934,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return None if any(s is None for s in srcs) else UOp(Ops.STACK, self.dtype, cast(tuple[UOp, ...], srcs))
     if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
     if self.op is Ops.MUL:
-      if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
-      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
+      if (d0:=self.src[0].divides(v)) is not None: return self.src[1] if d0.op is Ops.CONST and d0.arg == 1 else d0 * self.src[1]
+      if (d1:=self.src[1].divides(v)) is not None: return self.src[0] if d1.op is Ops.CONST and d1.arg == 1 else self.src[0] * d1
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
