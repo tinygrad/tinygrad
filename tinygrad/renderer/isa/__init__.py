@@ -16,7 +16,7 @@ class Register:
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
   @staticmethod
-  def contiguous(ctx, cons:tuple[Register,...], n) -> tuple[Register,...]:
+  def contiguous(ctx, cons:tuple[Register,...], n:int) -> tuple[Register,...]:
     gid = next(ctx.group_n)
     stripes = tuple(tuple(cons[i*n+j] for i in range(len(cons) // n)) for j in range(n))
     return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
