@@ -30,7 +30,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if x.op == Ops.WHERE and x.src[2].op == Ops.CONST and x.src[2].arg == Invalid: valid,x,_= x.src
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
-  for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype.base, buf.max_numel(), ren.target.arch):
+  for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
     cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
@@ -85,7 +85,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
+    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass
@@ -93,7 +93,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       lengths = [4]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
-      lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
+      lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
     # do the grouping
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
