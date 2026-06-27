@@ -87,7 +87,7 @@ def load_stack(stack:UOp, ld:UOp):
       src.append(s.gep(tuple(range(offset, offset+x.dtype.count))) if s.dtype.vcount > 1 else s)
     ret.append(ld.replace(dtype=x.dtype.base, src=tuple(src)))
     offset += x.dtype.count
-  return UOp(Ops.STACK, stack.dtype.base.vec(stack.dtype.vcount), tuple(ret))
+  return UOp(Ops.STACK, stack.dtype.base.vec(len(stack.src)), tuple(ret))
 
 def store_stack(stack:UOp, data:UOp):
   offset, ret = 0, []
