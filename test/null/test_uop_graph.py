@@ -790,26 +790,6 @@ class TestLoadStoreFolding(unittest.TestCase):
     self.assertEqual(inner_load.op, Ops.LOAD)
     self.assertEqual(len(inner_load.src), 2)  # INDEX + alt
 
-  def test_gated_load_ptrcat_preserves_alt(self):
-    """Test that LOAD(PTRCAT, alt) preserves alt value after rewrite"""
-    from tinygrad.codegen.late.devectorizer import load_store_folding
-    buf1 = UOp.param(0, dtypes.float.ptr())
-    buf2 = UOp.param(1, dtypes.float.ptr())
-    idx = UOp.const(dtypes.int, 0)
-    idx1 = buf1.index(idx)
-    idx2 = buf2.index(idx)
-    ptrcat = UOp(Ops.PTRCAT, dtypes.float.ptr().vec(2), (idx1, idx2))
-    alt = UOp.const(dtypes.float.vec(2), 42.0)
-    gated_load = ptrcat.load(alt)
-    self.assertEqual(len(gated_load.src), 2)  # PTRCAT + alt
-    result = graph_rewrite(gated_load, load_store_folding, name='test')
-    # After rewrite, should be CAT of LOADs, each preserving alt
-    self.assertEqual(result.op, Ops.VCAT)
-    for inner_load in result.src:
-      self.assertEqual(inner_load.op, Ops.LOAD)
-      self.assertEqual(len(inner_load.src), 2)  # INDEX + alt
-    self.assertEqual(inner_load.src[1].arg, 42.0)  # alt value preserved
-
 class TestConstBufferize(unittest.TestCase):
   def test_const_bufferize_with_ranges(self):
     """Test that CONST.BUFFERIZE with ranges is folded correctly.

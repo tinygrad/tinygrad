@@ -106,7 +106,7 @@ class Ops(FastEnum):
   REDUCE = auto(); ALLREDUCE = auto()
 
   # expander ops
-  UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()
+  UNROLL = auto(); CONTRACT = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}

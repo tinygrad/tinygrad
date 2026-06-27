@@ -227,7 +227,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.SINK | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
+           Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -272,7 +272,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         else:
           return (len(self.src),) + self.src[0].shape
       # TODO: contract and unroll should be deleted
-      case Ops.CONST | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
+      case Ops.CONST | Ops.CONTRACT | Ops.UNROLL:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # some ops init the shape
