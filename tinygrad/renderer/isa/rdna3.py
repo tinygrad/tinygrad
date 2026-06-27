@@ -232,8 +232,8 @@ def alu(ctx, x:UOp):
     a,b = x.src
     def _bitwise(ins):
       if dpreciz:
-        lo, hi = x.ins(ins, src=(a.gep(0),b.gep(0))), x.ins(ins, src=(a.gep(1), b.gep(1)))
-        return UOp(Ops.STACK, src=(lo,hi))
+        lo, hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0),b.gep(0))), UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+        return UOp.group(lo,hi)
       else: return x.ins(ins)
     if x.op is Ops.ADD: # TODO: handle signed?
       if dpreciz and not dtypes.is_float(x.dtype):
@@ -366,7 +366,6 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  print("encoding", opc)
   if ctx.is_two_address(x):
     x = x.replace(tag=regs(x.src[0]))
     oprs = oprs[1:]
