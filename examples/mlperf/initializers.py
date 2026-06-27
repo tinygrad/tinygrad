@@ -2,7 +2,7 @@ import math
 from typing import Union
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix, Context
+from tinygrad.helpers import prod, argfix, Context, TRAINING
 from tinygrad.nn.state import get_parameters
 from extra.models.unet import UNetModel
 
@@ -85,7 +85,7 @@ class FrozenBatchNorm2dRetinaNet(nn.BatchNorm2d):
 
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = super().calc_stats(x.cast(dtypes.float32))
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach().cast(self.running_var.dtype))
       self.num_batches_tracked += 1
