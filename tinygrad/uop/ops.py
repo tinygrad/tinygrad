@@ -1006,9 +1006,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.UNROLL, Ops.STACK}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.GEP: return self.src[0]._min_max
-    # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
-    if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
+    if self.op is Ops.CAST and self.dtype in dtypes.floats:
       return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+    # CAST to signed int is monotone only when the source range fits in the dest, otherwise it wraps to the full range
+    if self.op is Ops.CAST and self.dtype in dtypes.sints+(dtypes.weakint,):
+      if self.dtype.min <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0].vmin, self.src[0].vmax
+    # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property

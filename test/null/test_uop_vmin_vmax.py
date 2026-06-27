@@ -155,6 +155,18 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x_uint.vmin, dtypes.uint.min)
     self.assertEqual(x_uint.vmax, dtypes.uint.max)
 
+  def test_vmin_vmax_cast_narrowing(self):
+    # narrowing int cast wraps when the source range doesn't fit, so it spans the full dest range
+    x = UOp.variable('x', 0, 255, dtypes.int)
+    x_i8 = x.cast(dtypes.int8)
+    self.assertEqual(x_i8.vmin, dtypes.int8.min)
+    self.assertEqual(x_i8.vmax, dtypes.int8.max)
+    # source that fits is preserved (monotone)
+    y = UOp.variable('y', -5, 5, dtypes.int)
+    y_i8 = y.cast(dtypes.int8)
+    self.assertEqual(y_i8.vmin, -5)
+    self.assertEqual(y_i8.vmax, 5)
+
   def test_vmin_vmax_invalid(self):
     i = UOp.invalid()
     self.assertNotEqual(i.vmin, i.vmax)
