@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn.state import get_state_dict
 
 from examples.mlperf.helpers import get_mlperf_bert_model, get_data_bert
@@ -31,8 +31,6 @@ if __name__ == "__main__":
   assert all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files), \
     f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}"
 
-  Tensor.training = False
-
   model = get_mlperf_bert_model(INIT_CKPT_DIR)
 
   for _, x in get_state_dict(model).items():
@@ -41,14 +39,15 @@ if __name__ == "__main__":
   eval_accuracy = []
   eval_it = iter(batch_load_val_bert(EVAL_BS))
 
-  for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps):
-    eval_data = get_data_bert(GPUS, eval_it)
-    eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], \
-                                               eval_data["masked_lm_positions"], eval_data["masked_lm_ids"], \
-                                               eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+  with Context(TRAINING=0):
+    for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps):
+      eval_data = get_data_bert(GPUS, eval_it)
+      eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], \
+                                                 eval_data["masked_lm_positions"], eval_data["masked_lm_ids"], \
+                                                 eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
 
-    mlm_accuracy = eval_result["masked_lm_accuracy"].numpy().item()
-    eval_accuracy.append(mlm_accuracy)
+      mlm_accuracy = eval_result["masked_lm_accuracy"].numpy().item()
+      eval_accuracy.append(mlm_accuracy)
 
   total_lm_accuracy = sum(eval_accuracy) / len(eval_accuracy)
   assert total_lm_accuracy >= 0.34, "Checkpoint loaded incorrectly. Accuracy should be very close to 0.34085 as per MLPerf BERT README."
