@@ -26,6 +26,7 @@ def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 # TODO: Handle 64 bit inputs
 def to_vgpr(ctx, x:UOp) -> UOp:
+  # NOTE: handle sgpr?
   if x.op is Ops.CONST: # is 128 bit consts a thing??
     if x.dtype.itemsize == 8:
       # NOTE: need underpromo dict, just assume uint for now
@@ -33,6 +34,7 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
     else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
   if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
+  print(x.op)
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
@@ -58,11 +60,10 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
-# lidx bfe should point to same reg def so filling isnt always necessary
   i = ctx.func_args.index(x)
-  if x.op is Ops.SPECIAL:
+  if x.op is Ops.SPECIAL: # maintain src edge?
     dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return def_reg(dtypes.uint32, WGIDS[dim])
+    if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
     else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (UOp.const(dtypes.uint32, offs).rtag(),), tag=ctx.vreg((GP_SGPRS, 2)))
@@ -115,7 +116,8 @@ def legalize_operands(ctx, x:UOp):
     suffix = x.src[2:] if len(x.src) > 2 else ()
     a, b = x.src[:2]
     if is_vgpr(b): return None
-    if is_vgpr(a): return x.replace(src=(b,a) + suffix)
+    non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
+    if is_vgpr(a) and not non_commutative: return x.replace(src=(b,a) + suffix)
     return x.replace(src=((a, to_vgpr(ctx, b))) + suffix)
   elif group in [RDNA3Ops.GLOBAL] and "store" in opc: 
     if is_vgpr(x.src[-1]): return None
@@ -276,13 +278,22 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
 ])
 
+def prep_range(ctx, bnd:UOp, x:UOp):
+  if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
+  mask = def_reg(dtypes.uint32, GP_SGPRS)
+  return x.replace(src=x.src + (mask,)).replace(dtype=dtypes.uint32)
+
+def prep_end(ctx, x:UOp, rng:UOp):
+  if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
+  one = const_vgpr(ctx,dtypes.uint32,1)
+  mask, bnd = rng.src[-1], to_vgpr(ctx, rng.src[0])
+  return x.replace(src=x.src + (bnd,one,mask))
+
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 isel_matcher = PatternMatcher([
   # control flow
-  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"),
-   lambda bnd,x: x.replace(src=x.src + (def_reg(dtypes.uint32,GP_SGPRS),)).replace(dtype=dtypes.uint32) if x.dtype is not dtypes.uint32 else None),
-  (UPat(Ops.END, name="x"), lambda ctx,x: x.replace(src=x.src + (to_vgpr(ctx, x.src[1].src[0]),const_vgpr(ctx,dtypes.uint32,1),x.src[1].src[-1]))
-   if len(x.src) == 2 and x.src[1].dtype is dtypes.uint32 else None),
+  (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
+  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
   # noop
   (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
