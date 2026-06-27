@@ -34,7 +34,6 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
     else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
   if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
-  print(x.op)
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
@@ -50,6 +49,9 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   # don't generally allocate to SGPRS, only works wave uniform possible future optim
   # if x.op is Ops.END: defs = [ctx.vreg(GP_SGPRS)] # alloc gate mask
+  # TODO: allocatate vgpr / sgpr based on op group (x.arg.func)
+  # - should almost never need to manually call ctx.vreg
+  # - control flow allocations should also be handled here?
   if isinstance(x.tag, tuple):
     vr = ctx.vreg(x.tag)
     defs = [vr] if isinstance(vr, Register) else [*vr]
@@ -59,6 +61,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   return x.replace(tag=tuple(defs))
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+# TODO: batch param loading? ex. s_load_b128
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL: # maintain src edge?
@@ -66,7 +69,11 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
     if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
     else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (UOp.const(dtypes.uint32, offs).rtag(),), tag=ctx.vreg((GP_SGPRS, 2)))
+  # if AddrSpace is ALU auto load into vgpr??
+  if x.addrspace is AddrSpace.ALU:
+    val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
+    return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=ctx.vreg((GP_SGPRS, 2)))
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2)
@@ -172,10 +179,11 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
   return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
-def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
+# default to global for alu
+def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 
 # TODO: handle 16 bit loads?
-def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
+def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
@@ -281,7 +289,7 @@ pre_isel_matcher = PatternMatcher([
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
   mask = def_reg(dtypes.uint32, GP_SGPRS)
-  return x.replace(src=x.src + (mask,)).replace(dtype=dtypes.uint32)
+  return x.replace(src=(bnd,mask)).replace(dtype=dtypes.uint32)
 
 def prep_end(ctx, x:UOp, rng:UOp):
   if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
@@ -451,6 +459,7 @@ class RDNA3Renderer(ISARenderer):
         for r in regs(u): tosync.setdefault(r,(ctp,[]))[1].append((i,bld_cntstate[ctp]))
       bld_cntstate[ctp] += 1
 
+    # NOTE: broken
     for i, u in enumerate(lin.src):
       if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[_counter(u)] += 1
       deps = [r for s in u.src for r in regs(s) if r in tosync]
