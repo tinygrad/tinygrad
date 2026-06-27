@@ -24,8 +24,14 @@ lidop = def_reg(dtypes.uint32, WIIDS[0])
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
+# TODO: Handle 64 bit inputs
 def to_vgpr(ctx, x:UOp) -> UOp:
-  if x.op is Ops.CONST: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
+  if x.op is Ops.CONST: # is 128 bit consts a thing??
+    if x.dtype.itemsize == 8:
+      # NOTE: need underpromo dict, just assume uint for now
+      lo, hi = const(dtypes.uint32,x.arg), const(dtypes.uint32, x.arg >> 32)
+      return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
+    else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
   if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
@@ -165,17 +171,6 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
-def cvt(ctx, y:UOp, x:UOp):
-  # b32 -> b64
-  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4:
-    # 1. cast if types are different
-    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-    if not (_isa_typref[x.dtype][0] == _isa_typref[y.dtype][0]):
-      x = y.ins(V_CVT[y.dtype][targ])
-    # 2. widen
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(x, const(targ, 0))))
-    # TODO: b64 -> b32/b64 -> b64
-  return x.ins(V_CVT[y.dtype][x.dtype])
 
 # TODO: handle 16 bit loads?
 def _insspace(gl,x): return gl[0] if x.addrspace is AddrSpace.GLOBAL else gl[1]
@@ -207,6 +202,19 @@ def store(ctx, addr:UOp, val:UOp, x:UOp, gate:UOp|None = None):
     4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
   return _gate(UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
+
+# TODO: b64 -> b64
+def cvt(ctx, y:UOp, x:UOp):
+  def _needcast(x:DType, y:DType): return not (_isa_typref[x][0] == _isa_typref[y][0])
+  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
+    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+    lo = y.ins(V_CVT[y.dtype][targ]) if _needcast(y.dtype, targ) else y
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
+  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
+    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
+    if _needcast(src, x.dtype): return x.ins(V_CVT[src][x.dtype], src=(y.gep(0),))
+    else: return y.gep(0)
+  return x.ins(V_CVT[y.dtype][x.dtype])
 
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
@@ -252,6 +260,8 @@ def alu(ctx, x:UOp):
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+  # bitcast is noop?
+  (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
 ])
@@ -269,10 +279,9 @@ isel_matcher = PatternMatcher([
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), abi),
-  # TODO: clean these up
+  # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
-  # (UPat(Ops.XOR, dtype=dt_32bit, name="x"), lambda x: x.ins(RDNA3Ops.v_xor_b32_e32)),
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
