@@ -17,6 +17,7 @@ VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 
 lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
+
 kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
 execop = def_reg(dtypes.uint32, EXEC)
 lidop = def_reg(dtypes.uint32, WIIDS[0])
@@ -87,10 +88,6 @@ V_CMPEQ = { dtypes.float16:RDNA3Ops.v_cmp_eq_f16_e64, dtypes.float32:RDNA3Ops.v_
 V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_cmp_neq_f32_e64,dtypes.float64:RDNA3Ops.v_cmp_neq_f64_e64, dtypes.uint32:RDNA3Ops.v_cmp_ne_u32_e64,
   dtypes.int32:RDNA3Ops.v_cmp_ne_i32_e64, dtypes.int16:RDNA3Ops.v_cmp_ne_i16_e64, dtypes.uint16:RDNA3Ops.v_cmp_ne_u16_e64 }
 
-
-
-# - need to automatically allocate vgpr pairs?
-#   - check dtype in alloc vregs, 64 = pair?
 _isa_typref = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
 def _build_cvt_table():
   _valid_casts = {
@@ -169,13 +166,15 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(ctx, x:UOp): return fold_global(ctx, *x.src[:2]) if x.addrspace is AddrSpace.GLOBAL else fold_lds(ctx, *x.src[:2])
 def cvt(ctx, y:UOp, x:UOp):
-  # todo: fix ts
-  if _isa_typref[y.dtype][0] == _isa_typref[x.dtype][0] and x.dtype.itemsize == 4:
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(dtypes.uint32, 0))))
-  # widening ex. 32 -> 64 bytes needs new register allocation?
-  # maybe just handle in alloc vregs
-  # u32 -> u64 = widen
-  # f32 -> u64 = f32 -> u32 then widen
+  # b32 -> b64
+  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4:
+    # 1. cast if types are different
+    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+    if not (_isa_typref[x.dtype][0] == _isa_typref[y.dtype][0]):
+      x = y.ins(V_CVT[y.dtype][targ])
+    # 2. widen
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(x, const(targ, 0))))
+    # TODO: b64 -> b32/b64 -> b64
   return x.ins(V_CVT[y.dtype][x.dtype])
 
 # TODO: handle 16 bit loads?
@@ -211,7 +210,7 @@ def store(ctx, addr:UOp, val:UOp, x:UOp, gate:UOp|None = None):
 
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
-  dpreciz = x.dtype.itemsize == 4
+  dpreciz = x.dtype.itemsize == 8
   ins = None
   if len(x.src) == 1:
     if x.op is Ops.SQRT: ins = V_SQRT[x.dtype]
@@ -221,17 +220,21 @@ def alu(ctx, x:UOp):
     elif x.op is Ops.TRUNC: ins = V_TRUNC[x.dtype]
     elif x.op is Ops.RECIPROCAL: ins = V_RCP[x.dtype]
   else:
-    if x.op is Ops.ADD: ins = V_ADD[x.dtype]
+    if x.op is Ops.ADD:
+      # TODO: handle signed?
+      if dpreciz and not dtypes.is_float(x.dtype):
+        a1 = x.ins(RDNA3Ops.v_add_co_u32)
+        a2 = x.ins(RDNA3Ops.v_add_co_ci_u32)
+        return a2.after(a1)
+      ins = V_ADD[x.dtype]
     elif x.op is Ops.MUL:
-      # okay u64 x u64 how does this work?
-      # for lower 32 bits use v_mul_hi_* to get upper contribution
-      # then v_mul_lo_* for lower
-      # - how does upper 32 bits work? bit shifts?
       if dpreciz: 
         # out = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) (trunc a_hi * b_hi cause ... * 2^64
         #     = a_lo * b_lo + a_hi * b_lo + a_lo * b_hi
-        # use v_mad_u64_u32
-        pass
+        a,b = x.src
+        p1 = x.ins(RDNA3Ops.v_mad_u64_u32, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
+        p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, src=(a.gep(1), b.gep(0), p1))
+        return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, src=(a.gep(0), b.gep(1), p2))
       ins = V_MUL[x.dtype]
     elif x.op is Ops.AND: ins = RDNA3Ops.v_and_b32_e32
     elif x.op is Ops.OR: ins = RDNA3Ops.v_or_b32_e32
@@ -282,11 +285,10 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(name="x"), load),
-  # bit shifts
-  #((UPat(name="a") << UPat(name="b")).named("x"), lambda a,b,x: x.ins(RDNA3Ops.v_lshlrev_b32_e32, src=(b,a))),
   # unified alu experiment
   # cdiv of int types needs to be converted to float then cast back after ceil op
   # - we need to cast to float version of this bitwidth..., start with just 32?
+  # NOTE: this needs to be updated
   (UPat(Ops.CDIV, name="x"), lambda x: UOp(Ops.INS, arg=RDNA3Ops.v_ceil_f32_e32, src=(x.src[0].cast(dtypes.float32).div(x.src[1].cast(dtypes.float32)),))),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
@@ -296,6 +298,43 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
   # normalize and satisfy operand orders/reg types, this should probably be handled per pattern?
   (UPat(Ops.INS, name="x"), legalize_operands),
+])
+
+# --- control flow ---
+def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
+def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
+
+# TODO: dont use string comparisons, have a clear load/store spec? operands?
+def lower_gated(x:UOp):
+  if "load" in x.arg.opc and len(x.src) > 3: # gated load
+    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
+  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
+    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
+  return None
+
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
+def lower_range(ctx, x:UOp):
+  loop_label = "_".join(str(i) for i in x.arg[:-1])
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
+  ctx.loop_label[acc] = loop_label
+  lbl = label(ctx, f".LOOP_{loop_label}")
+  return acc, [acc, mask, lbl]
+
+def lower_end(ctx, x:UOp):
+  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
+  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
+  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
+
+post_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
+  (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
+  (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.END, name="x"), lower_end),
+  (UPat(Ops.INS, name="x"), lower_gated),
 ])
 
 # NOTE: maybe just make my register viewing another rewrite??
@@ -334,43 +373,6 @@ def encode(ctx, x:UOp):
   
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
-
-# --- control flow ---
-def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
-def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
-
-# TODO: dont use string comparisons, have a clear load/store spec? operands?
-def lower_gated(x:UOp):
-  if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
-  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
-    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
-  return None
-
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
-def lower_range(ctx, x:UOp):
-  loop_label = "_".join(str(i) for i in x.arg[:-1])
-  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
-  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
-  ctx.loop_label[acc] = loop_label
-  lbl = label(ctx, f".LOOP_{loop_label}")
-  return acc, [acc, mask, lbl]
-
-def lower_end(ctx, x:UOp):
-  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
-  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
-  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
-
-post_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
-  (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.END, name="x"), lower_end),
-  (UPat(Ops.INS, name="x"), lower_gated),
-])
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
 from enum import Enum, auto
