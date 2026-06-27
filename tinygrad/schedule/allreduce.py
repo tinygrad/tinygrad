@@ -5,14 +5,13 @@ from tinygrad.uop.ops import UOp, Invalid
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
-  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
   op, device = red.arg
 
   # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_all2all = (ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
-  use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  use_all2all = all_int(shape) and (ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
+  use_ring = all_int(shape) and not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
   # contiguous before we copy it
@@ -23,6 +22,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
     return functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)])
 
   # chunk data into ndev pieces
+  assert isinstance(numel, int)
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
   base, left = divmod(numel // factor,  ndev)
   chunks = list(itertools.pairwise(itertools.accumulate([(base + 1) * factor] * left + [base * factor] * (ndev - left), initial=0)))

@@ -1,9 +1,21 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
+
+_TP_LAYOUT: dict[str, int|str] = {
+  "attn_q.weight":0, "attn_q_b.weight":0, "attn_k.weight":0, "attn_k.bias":0, "attn_v.weight":0, "attn_v.bias":0,
+  "attn_k_b.weight":0, "attn_v_b.weight":0, "attn_output.weight":1,
+  "ffn_gate.weight":0, "ffn_up.weight":0, "ffn_down.weight":1,
+  "ffn_gate_shexp.weight":"replicate", "ffn_up_shexp.weight":"replicate", "ffn_down_shexp.weight":"replicate",
+  "ffn_gate_exps.weight":1, "ffn_up_exps.weight":1, "ffn_down_exps.weight":2,
+  "attn_norm.weight":"replicate", "attn_q_a.weight":"replicate", "attn_q_a_norm.weight":"replicate",
+  "attn_kv_a_mqa.weight":"replicate", "attn_kv_a_norm.weight":"replicate",
+  "ffn_norm.weight":"replicate", "ffn_gate_inp.weight":"replicate", "exp_probs_b.bias":"replicate",
+}
+def _shard_policy(name:str) -> int|str|None: return _TP_LAYOUT.get(name.split(".", 2)[-1] if name.startswith("blk.") else name)
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -304,6 +316,7 @@ class Transformer:
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
+    self.devices: tuple[str, ...]|None = None
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
@@ -312,7 +325,9 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
+    if self.devices is not None: x = x.to(self.devices)
     for block in self.blk: x = block(x, start_pos)
+    if self.devices is not None: x = x.to(self.devices[0])
     logits = self.output(self.output_norm(x))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
@@ -322,9 +337,10 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
+                realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    devices = tuple(Device.canonicalize(f"{Device.DEFAULT}:{i}") for i in range(shard)) if shard > 1 else None
+    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf, devices, shard_policy=_shard_policy)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -382,6 +398,10 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
+    model.devices = devices
+    for k,v in nn.state.get_state_dict(model).items():
+      if (sd:=state_dict.get(k)) is not None and isinstance(sd.device, tuple) and not isinstance(v.device, tuple):
+        v.replace(Tensor.empty(*v.shape, device=sd.device[0]).shard(sd.device, axis=sd.uop.axis))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:

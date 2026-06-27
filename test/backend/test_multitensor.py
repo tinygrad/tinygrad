@@ -472,5 +472,18 @@ class TestMultiTransformer(unittest.TestCase):
     shard_tok = shard_model(Tensor([[last_tok]], device=device), 0)
     self.assertEqual(real_tok.item(), shard_tok.item())
 
+@unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMstackFactorOp(unittest.TestCase):
+  def test_lazy_dequant_gather_numerics(self):
+    Tensor.manual_seed(0)
+    E, O, I = 16, 8, 6
+    quant = (Tensor.rand(E, O, I)*200 - 100).cast(dtypes.int8).realize()
+    scale = (Tensor.rand(E, 1, 1) + 0.5).realize()
+    parts = [(quant[:, i*(O//2):(i+1)*(O//2)].contiguous().to(d).cast(dtypes.float32) * scale.to(d)).uop for i, d in enumerate(devices_2)]
+    w = Tensor(parts[0].mstack(parts[1]).multi(1))
+    sel = Tensor([1, 4, 7], dtype=dtypes.int32)
+    ref = (quant.cast(dtypes.float32) * scale)[sel]
+    self.assertLess((w[sel.to(devices_2)].to(Device.DEFAULT) - ref).abs().max().item(), 1e-4)
+
 if __name__ == '__main__':
   unittest.main()

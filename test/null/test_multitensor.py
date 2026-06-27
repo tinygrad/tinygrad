@@ -2,6 +2,7 @@ import gc, unittest
 from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import Context
+from tinygrad.uop.ops import UOp
 
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
@@ -217,6 +218,27 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(e.device, t.device)
     self.assertEqual(e.uop.axis, 0)
     self.assertTrue(e.uop.has_buffer_identity())
+
+class TestMstackFactorOp(unittest.TestCase):
+  def test_lazy_dequant_gather_fused(self):
+    devs, (E, O, I, k) = ("NULL:1", "NULL:2"), (64, 32, 32, 4)
+    parts = [Tensor.empty(E, O//2, I, dtype=dtypes.int8, device=d).cast(dtypes.float32).uop for d in devs]
+    w = Tensor(parts[0].mstack(parts[1]).multi(1))
+    GlobalCounters.reset()
+    w[Tensor.empty(k, dtype=dtypes.int32).to(devs)].realize()
+    self.assertLess(GlobalCounters.global_mem, E*O*I*4)
+
+class TestSymbolicShard(unittest.TestCase):
+  def test_symbolic_allreduce_over_sharded_axis(self):
+    devs = ("NULL:1", "NULL:2")
+    v = UOp.variable("T", 1, 8).bind(4)
+    Tensor.empty(8, 8).shard(devs, axis=1)[:v].sum(axis=1).realize()
+
+  def test_symbolic_sharded_reshape_axis(self):
+    devs = ("NULL:1", "NULL:2")
+    n = UOp.variable("n", 1, 4)
+    x = Tensor.empty(4, 2).shard(devs, axis=1)[:n]
+    self.assertEqual(x.reshape(n, 1, 2).uop.axis, 2)
 
 if __name__ == '__main__':
   unittest.main()
