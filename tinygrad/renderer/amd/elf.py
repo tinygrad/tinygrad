@@ -1,6 +1,6 @@
 # minimal amdgpu elf packer
 import ctypes
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import ceildiv, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
@@ -12,13 +12,26 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
+def _scratch_inst_size(inst) -> int:
+  if type(inst).__name__ not in {"SCRATCH", "VSCRATCH"}: return 0
+  name = getattr(inst, "op_name", "")
+  if "_B128" in name: return 16
+  if "_B96" in name: return 12
+  if "_B64" in name: return 8
+  if any(x in name for x in ("_B32", "_U32", "_I32")): return 4
+  if any(x in name for x in ("_B16", "_U16", "_I16", "_D16")): return 2
+  if any(x in name for x in ("_B8", "_U8", "_I8")): return 1
+  return 0
+
 def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   insts = [u.arg for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
-  max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0
+  max_vgpr, max_sgpr, max_accvgpr, private_segment_size = 0, 0, 0, 0
   _ACCVGPR_TYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
   for inst in insts:
+    if (scratch_size:=_scratch_inst_size(inst)) != 0:
+      private_segment_size = max(private_segment_size, getattr(inst, "ioffset", getattr(inst, "offset", 0)) + scratch_size)
     # build set of field names that are AccVGPR for this instruction
     accvgpr_fields: set[str] = set()
     for opr_name, (_, _, opr_type) in inst.operands.items():
@@ -35,12 +48,26 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  sink, n_bufs, n_vars, lds_size, gids = prg.src[0], 0, 0, 0, set()
+  sink, n_bufs, n_vars, kernarg_size, lds_size, gids, lids = prg.src[0], 0, 0, 0, 0, set(), set()
   for u in sink.toposort():
-    if u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: n_vars += 1
-    elif u.op is Ops.PARAM: n_bufs += 1
-    elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
+    if u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU:
+      n_vars += 1
+    elif u.op is Ops.PARAM:
+      n_bufs += 1
+    elif u.op is Ops.INS and getattr(u.arg, "name", None) == "KERNARG":
+      kernarg_size = max(kernarg_size, u.src[0].arg + u.dtype.itemsize)
+    elif u.op is Ops.INS and getattr(u.arg, "name", None) == "SCRATCH_SIZE":
+      private_segment_size = max(private_segment_size, u.src[0].arg)
+    elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL:
+      lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize if isinstance(u.dtype, PtrDType) else u.max_numel() * u.dtype.itemsize
+    elif u.op is Ops.INS and getattr(u.arg, "name", None) == "LDS_BASE":
+      lds_size = max(lds_size, (u.src[1].arg if len(u.src) > 1 else lds_size) + u.src[0].arg)
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
+    elif u.op is Ops.SPECIAL and u.arg.startswith("lidx"): lids.add(int(u.arg[-1]))
+  if len(prg.src) > 2 and prg.src[2].op is Ops.LINEAR:
+    for u in prg.src[2].src:
+      if u.op is Ops.INS and getattr(u.arg, "name", None) == "SCRATCH_SIZE":
+        private_segment_size = max(private_segment_size, u.src[0].arg)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
@@ -60,7 +87,8 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
   desc.group_segment_fixed_size = lds_size
-  desc.kernarg_size = n_bufs * 8 + n_vars * 4
+  desc.private_segment_fixed_size = private_segment_size
+  desc.kernarg_size = max(kernarg_size, n_bufs * 8 + n_vars * 4)
   desc.kernel_code_entry_byte_offset = -len(text)
 
   # https://llvm.org/docs/AMDGPUUsage.html#amdgpu-amdhsa-compute-pgm-rsrc1-gfx6-gfx12-table
@@ -72,9 +100,11 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
   desc.compute_pgm_rsrc2 = (2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+                            int(private_segment_size > 0) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT |
                             int(0 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X_SHIFT |
                             int(1 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
-                            int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
+                            int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT |
+                            max(lids, default=0) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT)
   desc.kernel_code_properties = (1 << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR_SHIFT |
                                  (0 if is_cdna else 1) << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32_SHIFT)
   if is_cdna and max_accvgpr > 0:
