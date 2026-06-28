@@ -12,13 +12,11 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
-from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
-from tinygrad.codegen.late.devectorizer import load_store_folding, indexing_simplify, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
-  ReduceContext, pm_render, pm_add_loads, merge_reduce_ends
+from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext, pm_render, merge_reduce_ends
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
@@ -124,7 +122,7 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype.scalar()))
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
-  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:])
+  acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
   return acc.after(acc_out)
 
 def expand_horizontal_reduce(r:UOp):
