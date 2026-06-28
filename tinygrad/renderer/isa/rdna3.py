@@ -118,20 +118,12 @@ def _build_cvt_table():
   return { src : { targ: getattr(RDNA3Ops, f"v_cvt_{_isa_typref[targ]}_{_isa_typref[src]}_e32") for targ in targets } for src,targets in _valid_casts.items() }
 V_CVT = _build_cvt_table()
 
-
-# TODO: perform this per isel pattern, dont make it seperate pass
-def legalize_operands(ctx, x:UOp):
-  group, opc = x.arg.func, x.arg.opc
-  if group in [RDNA3Ops.GLOBAL] and "store" in opc: 
-    if is_vgpr(x.src[-1]): return None
-    return x.replace(src=x.src[:-1] + (to_vgpr(ctx, x.src[-1]),))
-  elif group is RDNA3Ops.VOP3:
-    lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
-    if len(lits) > 1:
-      new = list(x.src)
-      for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
-      return x.replace(src=tuple(new))
-  return None
+def _vop3(ctx, x:UOp):
+  lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
+  if len(lits) <= 1: return x
+  new = list(x.src)
+  for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
+  return x.replace(src=tuple(new))
 
 def _vop2(ctx, x:UOp):
   # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
@@ -142,9 +134,6 @@ def _vop2(ctx, x:UOp):
   if not non_commutative and not _isconst(x.src[0]): 
     return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
-
-# does operand legalization belong to pre-regalloc?
-# what cases need to be reordered? I think just const
 
 def cmp(ctx, x:UOp):
   rlz = []
@@ -261,9 +250,13 @@ def alu(ctx, x:UOp):
     elif x.op is Ops.SIN: ins = V_SIN[x.dtype]
     elif x.op is Ops.TRUNC: ins = V_TRUNC[x.dtype]
     elif x.op is Ops.RECIPROCAL: ins = V_RCP[x.dtype]
-  else: # handle consts...
+  else: 
     a,b = x.src
     def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else _vop2(ctx, x.ins(ins))
+    # how to handle boolean dtype?
+    # ex. AND between 2 bools outputting a bool, should the be an salu op?
+    # - cmp outputs are automatically sgprs
+    # NOTE: booleans should be natively represented as vcc/scc
     if x.op is Ops.ADD: # TODO: handle signed?
       if dpreciz: return add64(x)
       ins = V_ADD[x.dtype]
@@ -323,12 +316,12 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), abi),
   # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
-  ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda a,b,x: x.ins(V_FMA[a.dtype], src=a.src + (b,))),
+  ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
-  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda ctx,m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(ctx,m)))),
+  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda ctx,m,a,b,x: _vop3(ctx, x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(ctx,m))))),
   # cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"), cmp),
   # mem ops
@@ -344,8 +337,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
-  # normalize and satisfy operand orders/reg types, this should probably be handled per pattern?
-  (UPat(Ops.INS, name="x"), legalize_operands),
 ])
 
 # --- control flow ---
@@ -516,8 +507,8 @@ class RDNA3Renderer(ISARenderer):
       return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
-    print(prg.arg)
-    for u in lin.src: print(u.arg)
+    #print(prg.arg)
+    #for u in lin.src: print(u.arg)
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
