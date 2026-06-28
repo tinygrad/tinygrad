@@ -119,6 +119,13 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
+  (UPat((Ops.CDIV, Ops.CMOD), tuple(l2i_dt.keys()), src=(UPat.var("a", tuple(l2i_dt.keys())), UPat.var("b")), name="x"), lambda a,b,x:
+   x.replace(src=(a, b.cast(x.dtype))) if b.dtype not in l2i_dt else None),
+  (UPat(Ops.WHERE, tuple(l2i_dt.keys()), src=(UPat.var("c", dtypes.bool), UPat.var("a"), UPat.var("b")), name="x"), lambda c,a,b,x:
+   x.replace(src=(c, a.cast(x.dtype) if a.dtype not in l2i_dt else a, b.cast(x.dtype) if b.dtype not in l2i_dt else b))
+   if a.dtype not in l2i_dt or b.dtype not in l2i_dt else None),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", tuple(l2i_dt.keys()))), name="x"), lambda buf,idx,x:
+   x.replace(src=(buf, idx.cast(dt))) if (dt:=l2i_dt[idx.dtype]).min <= idx.vmin and idx.vmax <= dt.max else None),
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
    x.replace(dtype=l2i_dt[x.dtype], src=(sz*2,)) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),

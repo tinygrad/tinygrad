@@ -27,6 +27,7 @@ class IselContext:
 
 @dataclass
 class PreRegAllocContext:
+  uops: list[UOp]|None = None
   lock: UOp|None = None
   clobbered: set[UOp] = field(default_factory=set)
 

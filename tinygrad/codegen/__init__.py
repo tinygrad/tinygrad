@@ -137,6 +137,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
+  # late expansions (e.g. xsin's Payne-Hanek reduction) can introduce fresh 64-bit ops; backends that
+  # emulate 64-bit ints must decompose + re-simplify them, otherwise raw ulong CDIV/CMOD reach regalloc.
+  if any(dt not in ren.supported_dtypes() or dt in EMULATED_DTYPES.tolist(dtypes) for dt in (dtypes.long, dtypes.ulong)):
+    sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes (late)")
+    sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions (post-dtype)")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
@@ -182,7 +187,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext(lst))
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
     regalloc_ctx = LinearScanRegallocContext(lst, ctx)
@@ -240,6 +245,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     prog_info = ProgramInfo.from_sink(full_sink)
     # instruction selection
     if isinstance(renderer, ISARenderer):
+      if full_sink.arg.estimates is None:
+        full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(full_sink.toposort()), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=prog_info)
