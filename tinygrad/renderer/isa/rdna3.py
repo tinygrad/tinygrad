@@ -180,6 +180,7 @@ def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
+  alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   if base.addrspace is AddrSpace.REG:
@@ -193,7 +194,8 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   nregs = (n * x.dtype.itemsize+3)//4
   return _gate(x.ins(_insspace(imap[nregs],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs)))
 
-def store(ctx, addr:UOp, val:UOp, x:UOp, gate:UOp|None = None):
+def store(ctx, addr:UOp, x:UOp):
+  val, gate = x.src[1], x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   n = len(val.src) if val.op is Ops.STACK else 1
@@ -325,10 +327,8 @@ isel_matcher = PatternMatcher([
   # cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"), cmp),
   # mem ops
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), name="x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate"), name="x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), load),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(name="x"), load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
   # unified alu experiment
   (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
