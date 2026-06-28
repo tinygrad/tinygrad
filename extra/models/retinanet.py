@@ -1,6 +1,6 @@
 import math
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import flatten, get_child
+from tinygrad.helpers import flatten, get_child, TRAINING
 from examples.mlperf.helpers import generate_anchors, BoxCoder
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
 from extra.models.resnet import ResNet
@@ -141,7 +141,7 @@ class ClassificationHead:
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     out = out[0].cat(*out[1:], dim=1)
 
-    if Tensor.training:
+    if TRAINING:
       assert labels is not None and matches is not None, "labels and matches should be passed in when training"
       return self._compute_loss(out.cast(dtypes.float32), labels, matches)
 
@@ -167,7 +167,7 @@ class RegressionHead:
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     out = out[0].cat(*out[1:], dim=1)
 
-    if Tensor.training:
+    if TRAINING:
       assert bboxes is not None and matches is not None and anchors is not None, "bboxes, matches, and anchors should be passed in when training"
       return self._compute_loss(out, bboxes, matches, anchors)
 
@@ -187,7 +187,7 @@ class RetinaHead:
     self.regression_head = RegressionHead(in_channels, num_anchors)
 
   def __call__(self, x:Tensor, **kwargs) -> Tensor|dict[str, Tensor]:
-    if Tensor.training:
+    if TRAINING:
       return {
         "classification_loss": self.classification_head(x, labels=kwargs["labels"], matches=kwargs["matches"]),
         "regression_loss": self.regression_head(x, bboxes=kwargs["bboxes"], matches=kwargs["matches"], anchors=kwargs["anchors"])

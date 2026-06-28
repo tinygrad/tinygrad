@@ -84,7 +84,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
+  elif len(arg) == 1: return UOp.const(dtypes.weakint, arg[0])
   else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
@@ -280,11 +280,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
-        if isinstance(self.arg, ParamArg):
-          if len(self.src): return self.src[0].as_shape
-          if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
-          return (self.dtype.count,) if self.dtype.count > 1 else ()
-        return (self.arg,)
+        if len(self.src): return self.src[0].as_shape
+        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
+        return (self.dtype.count,) if self.dtype.count > 1 else ()
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
@@ -487,7 +485,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # apply SHRINK for slices that aren't the full range
       bounds = tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) if isinstance(s, slice) else (0, self.shape[i])
                      for i, s in enumerate(idx))
-      src = self if all(b == (0, self.shape[i]) for i, b in enumerate(bounds)) else self.shrink(bounds)
+      src = self.shrink(bounds)
       non_slice_args = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)]
       if not non_slice_args: return src  # all dims are slices, no indexing needed
       perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
@@ -776,7 +774,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
-    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return self.arg.device
+    if self.op is Ops.BUFFER: return self.arg.device
     if self.op is Ops.COPY: return self.arg
     if self.op is Ops.ALLREDUCE: return self.arg[1]
     for x in self.src:
@@ -785,7 +783,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
-    if self.op is Ops.BUFFER: return self.arg.addrspace if isinstance(self.arg, ParamArg) else AddrSpace.GLOBAL
+    if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:
@@ -881,7 +879,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LOCAL/REG scratch buffers are never realized
-    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG): return None
+    if self.op is Ops.BUFFER and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG): return None
     # an unbacked intermediate BUFFER (directly or as an MSTACK source) is not realized
     if any(b.op is Ops.BUFFER and buffers.get(b) is None for b in self.backward_slice_with_self): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
