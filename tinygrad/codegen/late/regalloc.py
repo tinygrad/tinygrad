@@ -33,7 +33,7 @@ class LinearScanRegallocContext:
         for v in regs(u): ranges.append(v)
 
     # allocate registers
-    self.stack_size: int = 0
+    self.spill_size: int = 0
     self.locals: dict[UOp, UOp] = {}
     self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
@@ -78,14 +78,13 @@ class LinearScanRegallocContext:
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
-      print("WARNING: filling")
       if v not in self.spills:
         # the value of a BUFFER is its 64bit address
         dt = self.vdef(v).dtype
         sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.itemsize
-        offset = self.stack_size + (sz - self.stack_size % sz) % sz
+        offset = self.spill_size + (sz - self.spill_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
-        self.stack_size = offset + sz
+        self.spill_size = offset + sz
       r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
@@ -135,11 +134,11 @@ class LinearScanRegallocContext:
             live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
             self.reals.setdefault(i, {})[v] = live[v]
 
-      # allocate stack array
       """
-      if u.op is Ops.DEFINE_LOCAL:
-        self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
-        self.stack_size += u.max.numel() * u.dtype.itemsize()
+      # allocate stack array
+      if u.op is Ops.BUFFER:
+        self.locals[u] = UOp.const(dtypes.int32, self.spill_size)
+        self.spill_size += u.max.numel() * u.dtype.itemsize
       """
 
       # loop prologue, avoid loading inside the loop
@@ -173,22 +172,19 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if i in ctx.reals and any(v in ctx.spills for v in regs(ctx.uops[i].src[j])): nsrc.extend([ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]) for v in regs(ctx.uops[i].src[j])])
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in regs(x)) if isinstance(x.tag, tuple) else regs(x)
-  # TODO: this is unhandled for RDNA3
-  # if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
-  # else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  #if x.op is Ops.BUFFER: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.spill_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  #else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
   nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in regs(x) if v in ctx.spills]
 
-  """
   # alloc/dealloc stack
-  if ctx.stack_size > 0:
-    sp = ctx.ren.stack_pointer()
-    offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
+  if ctx.spill_size > 0:
+    sp = ctx.ren.spill_pointer()
+    offset = UOp(Ops.CONST, sp.dtype, arg=ctx.spill_size)
     if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
     elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
-  """
 
   return nx, before + [nx] + after
 

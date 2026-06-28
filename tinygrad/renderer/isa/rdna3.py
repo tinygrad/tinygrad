@@ -22,6 +22,8 @@ kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KE
 execop = def_reg(dtypes.uint32, EXEC)
 lidop = def_reg(dtypes.uint32, WIIDS[0])
 
+spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
+
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 # TODO: Handle 64 bit inputs
@@ -162,7 +164,6 @@ def cmp(x:UOp):
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
-  # - use voff effectively
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(ctx, const(dtypes.int, disp_scale.bit_length() - 1))
   if idx.op is Ops.CONST:
@@ -171,22 +172,19 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   return (idx << shft, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
+# base doesn't hold a ptr for local addrspace
+# NOTE: keep base in src to maintain graph dependencies?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  # base doesn't hold a ptr for local addrspace
-  # NOTE: keep base in src to maintain graph dependencies?
-  if idx.op is Ops.CONST:
-    return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), idx.arg * scale, base)
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
-    return (idx.src[0].cast(dtypes.uint32), idx.src[1].arg * scale, base)
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), idx.arg * scale, base)
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), idx.src[1].arg * scale, base)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
   return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
-# default to global for alu
-def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
-
 # TODO: handle 16 bit loads?
+def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
+
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
@@ -229,6 +227,26 @@ def cvt(ctx, y:UOp, x:UOp):
     else: return y.gep(0)
   return x.ins(V_CVT[y.dtype][x.dtype])
 
+# -- complex alu --
+def add64(ctx, x:UOp):
+  if dtypes.is_float(x.dtype): return x.ins(V_ADD[x.dtype]) # f64 add is native
+  a1 = x.ins(RDNA3Ops.v_add_co_u32)
+  a2 = x.ins(RDNA3Ops.v_add_co_ci_u32)
+  return a2.after(a1)
+
+# TODO: signed
+def mul64(ctx, x:UOp):
+  a, b = x.src
+  p1 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
+  p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(1), b.gep(0), p1))
+  return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(1), p2))
+
+def bitwise64(ctx, x:UOp, ins):
+  a, b = x.src
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)))
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+  return UOp.group(lo,hi)
+
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
@@ -240,25 +258,14 @@ def alu(ctx, x:UOp):
     elif x.op is Ops.SIN: ins = V_SIN[x.dtype]
     elif x.op is Ops.TRUNC: ins = V_TRUNC[x.dtype]
     elif x.op is Ops.RECIPROCAL: ins = V_RCP[x.dtype]
-  else:
-    # handle consts...
+  else: # handle consts...
     a,b = x.src
-    def _bitwise(ins):
-      if dpreciz:
-        lo, hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0),b.gep(0))), UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
-        return UOp.group(lo,hi)
-      else: return x.ins(ins)
+    def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else x.ins(ins)
     if x.op is Ops.ADD: # TODO: handle signed?
-      if dpreciz and not dtypes.is_float(x.dtype):
-        a1 = x.ins(RDNA3Ops.v_add_co_u32)
-        a2 = x.ins(RDNA3Ops.v_add_co_ci_u32)
-        return a2.after(a1)
+      if dpreciz: return add64(x)
       ins = V_ADD[x.dtype]
     elif x.op is Ops.MUL:
-      if dpreciz: 
-        p1 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
-        p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(1), b.gep(0), p1))
-        return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(1), p2))
+      if dpreciz: return mul64(ctx,x)
       ins = V_MUL[x.dtype]
     elif x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32)
     elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32)
@@ -274,7 +281,7 @@ def alu(ctx, x:UOp):
   return x.ins(ins)
 
 # cdiv of int types needs to be converted to float then cast back after ceil op
-# - we need to cast to float version of this bitwidth..., start with just 32?
+# - we need to cast to float version of this bitwidth..., start with just 32
 def cdiv(x:UOp):
   a,b = [u.cast(dtypes.float32) for u in x.src]
   c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
@@ -391,7 +398,8 @@ def encode(ctx, x:UOp):
   if ctx.is_two_address(x):
     x = x.replace(tag=regs(x.src[0]))
     oprs = oprs[1:]
-  # hacky fixes, find cleaner way to conform to isa
+
+  # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM:
     kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
@@ -444,9 +452,18 @@ class RDNA3Renderer(ISARenderer):
     if x.op is not Ops.INS: return False
     return x.arg.func in [RDNA3Ops.VOP1] and x.src[0].op is Ops.BUFFER and not isinstance(reg(x), Register)
 
-  def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-2])
-  def spill(self, disp:UOp, x:UOp) -> UOp: return x
-  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
+  def spill_pointer(self) -> UOp: return spill_ptr
+  # load spilled value into lds
+  def spill(self, disp:UOp, x:UOp) -> UOp: # disp is the byte offset into spill space
+    ret = isel_matcher.rewrite(self.spill_pointer().index(const(dtypes.uint32, disp//4)).store(x))
+    assert ret is not None
+    return ret
+
+  # this is going to have to handle multiple regs
+  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
+    val = isel_matcher.rewrite(self.spill_pointer().index(const(dtypes.uint32, disp//4)).load())
+    # assume reg is vgpr?
+    return x
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     # insert waitcnts
