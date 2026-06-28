@@ -24,6 +24,7 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
+from tinygrad.codegen.late.expander import pm_group_for_reduce
 from tinygrad.helpers import all_same, flatten
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 
@@ -111,6 +112,9 @@ devectorizer2 = pm_mops+PatternMatcher([
   # RESHAPE+EXPAND -> STACK
   (UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(UPat.var("x"), UPat())), UPat()), name="out"),
    lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if out.shape == (out.max_numel(),) else None),
+  # INDEX on INDEX is INDEX
+  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
+   lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
 ])
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
@@ -144,6 +148,14 @@ pm_move_regs = PatternMatcher([
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
+def add_local_buffer(ctx, x:UOp):
+  buf = UOp.placeholder(x.shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
+  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
+
+pm_add_local_buffers = PatternMatcher([
+  (UPat(Ops.STAGE, name="x"), add_local_buffer),
+])+pm_mops
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -175,9 +187,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
   sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
+  sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
+  #sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
