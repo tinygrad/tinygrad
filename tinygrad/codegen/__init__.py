@@ -20,7 +20,7 @@ from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext,
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
+from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
@@ -149,7 +149,7 @@ pm_move_regs = PatternMatcher([
 ])
 
 def add_local_buffer(ctx, x:UOp):
-  buf = UOp.placeholder(x.shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
+  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
   return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_add_local_buffers = PatternMatcher([
@@ -218,6 +218,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
+
+  # some coalesing misses without this
+  sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)

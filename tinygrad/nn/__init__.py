@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
@@ -358,6 +358,8 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
+    # NOTE: we need .load() here to bring the val to ALU because CUSTOM doesn't do that automatically
+    if grad_val.addrspace != AddrSpace.ALU: grad_val = grad_val.load()
     atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(local_token_id, j, ptr=True), grad_val), arg = atomic_arg)
     return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
