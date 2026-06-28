@@ -37,9 +37,12 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
 
   # ** scan sink for metadata
   n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), set(prginfo.globals)
-  sink, lds_size = prg.src[0], 1024
-  # for u in sink.toposort():
-    # if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
+  sink, lds_size = prg.src[0], 0
+  for u in sink.toposort():
+    if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL:
+      if u.src[0].op is Ops.CONST:
+        lds_size += u.src[0].arg * u.dtype.itemsize
+      # lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
