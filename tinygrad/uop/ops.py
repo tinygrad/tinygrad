@@ -27,7 +27,7 @@ class ParamArg:
   addrspace: AddrSpace|None = AddrSpace.GLOBAL
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
-  hw_dim: str|None = None # hardware indices are represented as PARAMs with hw_dim set
+  hw_dim: str|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None), ("hw_dim", None))
     args = [repr(self.slot)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
@@ -214,7 +214,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   @property
   def ptrdtype(self) -> PtrDType:
@@ -568,7 +568,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def hw_idx(end:sint, name:str, dtype=dtypes.weakint):
     return UOp(Ops.PARAM, dtype=dtype, src=(sint_to_uop(end, dtype),),
-               arg=ParamArg(slot=-1, addrspace=AddrSpace.ALU, hw_dim=name))
+               arg=ParamArg(slot=-2, addrspace=AddrSpace.ALU, hw_dim=name))
   def _rop(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return UOp(Ops.REDUCE, self.dtype, (self,), (op, axis)) if len(axis) else self
