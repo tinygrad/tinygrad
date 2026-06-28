@@ -32,8 +32,8 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
     precedence.get(x.src[1].op,99)<precedence[x.op] else right)
 
 renderer = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda x: x.arg.hw_dim if x.is_hw_idx else None),
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
-  (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda ctx,x,u: f"UNROLL({ctx[x.src[0]]}, {u.arg})"),
@@ -78,7 +78,8 @@ sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"),
-  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].arg}, {repr(x.arg)}, dtype={x.dtype})"),
+  (UPat(Ops.PARAM, src=(UPat(Ops.CONST),), name="x"),
+    lambda x: f"UOp.hw_idx({x.src[0].arg}, {repr(x.arg.hw_dim)}, dtype={x.dtype})" if x.is_hw_idx else None),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
@@ -134,7 +135,7 @@ def pyrender(ast:UOp) -> str:
 
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.DEVICE}
-  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
+  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
                      Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.FUNCTION, Ops.WHERE, Ops.END}
 
   to_render: set[UOp] = {ast}

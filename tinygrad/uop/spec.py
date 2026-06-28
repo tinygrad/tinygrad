@@ -78,7 +78,9 @@ spec_shared = PatternMatcher([
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
   # PARAM
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.PARAM, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"),
+   lambda s,x: (s.dtype == x.dtype and isinstance(s.arg.hw_dim, str)) if s.is_hw_idx else None),
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg) and not x.is_hw_idx),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
    isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
@@ -96,8 +98,6 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
-  # SPECIAL. TODO: this should only be in spec_program
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
@@ -224,7 +224,7 @@ spec_full = PatternMatcher([
 
   (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
-  # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
+  # codegen may end ranges after gpudims has replaced RANGE with PARAM.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # allow any AFTER

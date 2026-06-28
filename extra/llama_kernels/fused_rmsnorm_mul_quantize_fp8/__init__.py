@@ -13,7 +13,7 @@ def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
                 x:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(NUM_WG, "gidx0")
   mem = n_elems * 2 + n_elems + MBS * SEQ * 4 + n_elems + HIDDEN * 2 + NUM_WG * 4 + 4
   sink = UOp.sink(fp8_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
                   x.base, weight.base, amax_state.base, threads, workgroups,
@@ -30,7 +30,7 @@ def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax
                     x:UOp, residual:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(NUM_WG, "gidx0")
   mem = n_elems * 2 * 4 + MBS * SEQ * 4 + HIDDEN * 2 + NUM_WG * 4 + 4
   sink = UOp.sink(fp8_out.base, h_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
                   x.base, residual.base, weight.base, amax_state.base, threads, workgroups,
@@ -47,7 +47,7 @@ def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,
                 grad_fp8:UOp, x_normed:UOp, rrms:UOp, weight:UOp, amax_state:UOp, dname:str) -> UOp:
   MBS, SEQ, HIDDEN = x_normed.shape
   n_elems = MBS * SEQ * HIDDEN
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(NUM_WG, "gidx0")
   mem = n_elems * 2 * 3 + NUM_WG * HIDDEN * 4 + MBS * SEQ * 4 + HIDDEN * 2 + 4
   sink = UOp.sink(grad_x.base, grad_weight_partial.base,
                   grad_fp8.base, x_normed.base, rrms.base, weight.base, amax_state.base, threads, workgroups,

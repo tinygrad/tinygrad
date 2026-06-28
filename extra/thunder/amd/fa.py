@@ -94,8 +94,8 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (H, (math.ceil((N // Q_BLOCK_SIZE) / NUM_WARPS)), B)
   lsz = (NUM_THREADS, 1, 1)
-  threadIdx_x = UOp.special(lsz[0], "lidx0")
-  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
+  threadIdx_x = UOp.hw_idx(lsz[0], "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.hw_idx(gsz[0], "gidx0"), UOp.hw_idx(gsz[1], "gidx1"), UOp.hw_idx(gsz[2], "gidx2")
 
   el = q.dtype.itemsize
   mem = (2*B*N*H*D + 2*B*N*H_KV*D) * el + B*H*N * l_vec.dtype.itemsize
@@ -124,8 +124,8 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (B, H, N // (DOT_SLICE_QO * NUM_WARPS))
   lsz = (NUM_THREADS, 1, 1)
-  threadIdx_x = UOp.special(lsz[0], "lidx0")
-  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
+  threadIdx_x = UOp.hw_idx(lsz[0], "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.hw_idx(gsz[0], "gidx0"), UOp.hw_idx(gsz[1], "gidx1"), UOp.hw_idx(gsz[2], "gidx2")
 
   el = o.dtype.itemsize
   mem = 3*B*H*N*D * el + B*H*N * delta_vec.dtype.itemsize
@@ -154,8 +154,8 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (H, N // BLOCK_SIZE_KV, B)
   lsz = (NUM_THREADS, 1, 1)
-  threadIdx_x = UOp.special(lsz[0], "lidx0")
-  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
+  threadIdx_x = UOp.hw_idx(lsz[0], "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.hw_idx(gsz[0], "gidx0"), UOp.hw_idx(gsz[1], "gidx1"), UOp.hw_idx(gsz[2], "gidx2")
 
   el = q.dtype.itemsize
   mem = (3*B*H*N*D + 4*B*H_KV*N*D) * el + 2*B*H*N * l_vec.dtype.itemsize
@@ -184,8 +184,8 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (B, H, N // (DOT_SLICE_QO * NUM_WARPS))
   lsz = (NUM_THREADS, 1, 1)
-  threadIdx_x = UOp.special(lsz[0], "lidx0")
-  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
+  threadIdx_x = UOp.hw_idx(lsz[0], "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.hw_idx(gsz[0], "gidx0"), UOp.hw_idx(gsz[1], "gidx1"), UOp.hw_idx(gsz[2], "gidx2")
 
   el = dq_out.dtype.itemsize
   mem = 2*B*H*N*D * el

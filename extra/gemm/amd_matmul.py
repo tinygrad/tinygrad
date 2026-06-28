@@ -12,9 +12,9 @@ run_count = 5
 
 def make_matmul_kernel(name:str, src:str, local_size:int):
   def fxn(a:UOp, b:UOp, c:UOp) -> UOp:
-    threads = UOp.special(local_size, "lidx0")
-    wg_x = UOp.special(N//128, "gidx0")
-    wg_y = UOp.special(N//128, "gidx1")
+    threads = UOp.hw_idx(local_size, "lidx0")
+    wg_x = UOp.hw_idx(N//128, "gidx0")
+    wg_y = UOp.hw_idx(N//128, "gidx1")
     sink = UOp.sink(a.base, b.base, c.base, threads, wg_x, wg_y, arg=KernelInfo(name, estimates=Estimates(ops=2*N**3, mem=3*N*N*4)))
     lib = Device[Device.DEFAULT].compiler.compile_cached(src)
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),

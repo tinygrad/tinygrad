@@ -128,7 +128,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
-      UOp(Ops.STACK, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
+      UOp(Ops.STACK, dtypes.int.vec(4), arg=None, src=(UOp.hw_idx(32, 'lidx0', dtypes.int),)*4),
       UOp.const(dtypes.int.vec(4), (0, 256, 512, 768))))
     rhs = UOp.const(dtypes.int.vec(4), 2)
     unopt = lhs<rhs

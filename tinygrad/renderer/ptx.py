@@ -81,7 +81,9 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
 string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x:
+   f"mov.u32 %{x.arg.hw_dim}, %{'ctaid' if x.arg.hw_dim[0] == 'g' else 'tid'}.{chr(120+int(x.arg.hw_dim[-1]))};"
+   if x.is_hw_idx else None),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
   # address computation: addr = buf + idx*itemsize
@@ -159,7 +161,7 @@ class PTXRenderer(Renderer):
   def render_kernel(self, kernel, function_name, bufs, regs, uops) -> str:
     def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
     kernel = '\n'.join(map(fmt, [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]))
-    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
+    local_dims = [u.src[0] for u in uops if u.is_hw_idx and u.arg.hw_dim[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     params = ',\n\t'.join([f".param .{'u64' if u.addrspace is AddrSpace.GLOBAL else self.types[u.dtype]} {name}" for name,u in bufs])
     return f"{self.kernel_prefix.format(launch_bounds=launch_bounds)} {function_name} (\n\t{params}\n)\n.maxntid {launch_bounds}\n{{\n{kernel}\n}}"
@@ -198,7 +200,7 @@ class PTXRenderer(Renderer):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
         r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].arg]
         continue
-      if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
+      if u.is_hw_idx: r[u] = "%" + u.arg.hw_dim
       elif u.op is Ops.LOAD:
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
       elif u.op is Ops.PARAM: bufs.append((f"data{u.arg.slot}", u))
@@ -208,9 +210,12 @@ class PTXRenderer(Renderer):
                        [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.src[0].dtype.scalar().itemsize)],
                        [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.scalar().itemsize)]]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())]
-      prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
+      prefix, dtype = {
+        Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
-        Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
+        Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None) if not u.is_hw_idx else (None, None),
+        **{op: ("alu", None) for op in GroupOp.ALU}
+      }.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
       l: str|list[str]|None = string_rewrite.rewrite(u, ctx=self)
@@ -218,7 +223,7 @@ class PTXRenderer(Renderer):
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
-      if u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg};"] + kernel
+      if u.is_hw_idx: kernel = [f".reg .u32 %{u.arg.hw_dim};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items(), uops)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()

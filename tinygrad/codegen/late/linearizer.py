@@ -23,6 +23,7 @@ def linearize(sink:UOp) -> list[UOp]:
     extra = None
     match u.op:
       # the order and placement of these defines is important
+      case Ops.PARAM if u.is_hw_idx: priority = 0
       case Ops.PARAM: priority, extra = -20, u.arg.slot
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early

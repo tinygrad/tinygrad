@@ -33,8 +33,8 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     inst = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
   insts = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
   def fxn(A:UOp) -> UOp:
-    threads = UOp.special(WAVE_SIZE * NUM_WAVES, "lidx0")
-    gidx = UOp.special(NUM_WORKGROUPS, "gidx0")
+    threads = UOp.hw_idx(WAVE_SIZE * NUM_WAVES, "lidx0")
+    gidx = UOp.hw_idx(NUM_WORKGROUPS, "gidx0")
     FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
     sink = UOp.sink(A.base, threads, gidx, arg=KernelInfo(inst.op.name.lower(), estimates=Estimates(ops=FLOPs, mem=0)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))

@@ -38,8 +38,8 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   # ---------------------------
   # block indices
   # ---------------------------
-  block_id_n = UOp.special(N // BLOCK_N, "gidx0")
-  block_id_m = UOp.special(M // BLOCK_M, "gidx1")
+  block_id_n = UOp.hw_idx(N // BLOCK_N, "gidx0")
+  block_id_m = UOp.hw_idx(M // BLOCK_M, "gidx1")
 
   # index the output with the globals
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
@@ -55,7 +55,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   # ---------------------------
   # GLOBAL -> LOCAL (A_local, B_local)
   # ---------------------------
-  tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
+  tid = UOp.hw_idx(THREADS_PER_BLOCK, "lidx0")
 
   # A: read BM x BK tiles (permute on store into locals)
   BM_A_local_stride = (BLOCK_M + 4) if is_kernel5 else BLOCK_M

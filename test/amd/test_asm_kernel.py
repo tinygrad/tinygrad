@@ -17,7 +17,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype.base), f"buffer dtype must be float32, got {A.dtype}"
-  threads = UOp.special(A.numel(), "lidx0")
+  threads = UOp.hw_idx(A.numel(), "lidx0")
   insts = [
     s_load_b64(s[0:1], s[0:1], soffset=NULL),
     s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
@@ -35,7 +35,7 @@ def custom_add_one(A:UOp) -> UOp:
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert A.dtype.base == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
-  threads = UOp.special(A.numel(), "lidx0")
+  threads = UOp.hw_idx(A.numel(), "lidx0")
   var = UOp.param(2, dtypes.weakint, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
   insts = [
     s_load_b128(s[4:7], s[0:1]),
@@ -54,8 +54,8 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
   # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
   # s_sleep yields the SIMD so waves from different WGs interleave, causing barrier packet reordering
-  threads = UOp.special(128, "lidx0")
-  wg = UOp.special(1024, "gidx0")
+  threads = UOp.hw_idx(128, "lidx0")
+  wg = UOp.hw_idx(1024, "gidx0")
   insts = []
   for _ in range(4):
     insts.append(s_sleep(4))
@@ -68,8 +68,8 @@ def custom_wave_sync(A:UOp, arch:str) -> UOp:
 def custom_lds_sync(A:UOp, arch:str) -> UOp:
   A = A.flatten()
   num_threads = A.shape[0]
-  threads = UOp.special(num_threads, "lidx0")
-  wg = UOp.special(1, "gidx0")
+  threads = UOp.hw_idx(num_threads, "lidx0")
+  wg = UOp.hw_idx(1, "gidx0")
   lds = UOp.placeholder((512,), dtypes.uint8, 0, AddrSpace.LOCAL)  # 128 * 4 bytes
   isa = r4 if arch == "rdna4" else r3
   wait_kmcnt = [isa.s_wait_kmcnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)]
@@ -101,8 +101,8 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
 
 def custom_handwritten(A:UOp) -> UOp:
   A = A.flatten()
-  threads = UOp.special(128, "lidx0")
-  wg = UOp.special(1, "gidx0")
+  threads = UOp.hw_idx(128, "lidx0")
+  wg = UOp.hw_idx(1, "gidx0")
   lds = UOp.placeholder((512,), dtypes.uint8, 0, AddrSpace.LOCAL)  # 128 * 4 bytes
   pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
   k = Kernel()
@@ -147,7 +147,7 @@ def custom_handwritten(A:UOp) -> UOp:
 
 def custom_data_deps(A:UOp) -> UOp:
   A = A.flatten()
-  threads = UOp.special(A.numel(), "lidx0")
+  threads = UOp.hw_idx(A.numel(), "lidx0")
   k = Kernel()
   k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
   k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))

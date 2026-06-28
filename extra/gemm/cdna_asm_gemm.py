@@ -2616,8 +2616,8 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   batch, M, K = A.shape
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
-  lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
-  gidx = UOp.special(NUM_WG, "gidx0")
+  lidx = UOp.hw_idx(WORKGROUP_SIZE, "lidx0")
+  gidx = UOp.hw_idx(NUM_WG, "gidx0")
   insts = build_kernel(batch, M, N, K, A.dtype.base)
   lds = UOp.placeholder((133_120,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
@@ -2636,8 +2636,8 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
   block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  threads = UOp.hw_idx(64 * 8, "lidx0")
+  workgroups = UOp.hw_idx((M // block_size) * (N // block_size), "gidx0")
   sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
   sink = UOp.sink(*sink_inputs,
                   arg=KernelInfo(f"hk_fp8_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
@@ -2658,8 +2658,8 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
   block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  threads = UOp.hw_idx(64 * 8, "lidx0")
+  workgroups = UOp.hw_idx((M // block_size) * (N // block_size), "gidx0")
   e_a = extra[0].base if len(extra) >= 1 else scale_A.base
   e_b = extra[1].base if len(extra) >= 2 else scale_B.base
   sink_inputs = (C.base, A.base, B.base, scale_A.base, scale_B.base, e_a, e_b, threads, workgroups)
@@ -2750,8 +2750,8 @@ def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   assert K == K2, f"{A.shape} {B.shape}"
   block_m, block_n, block_k, num_warps = 256, 256, 64, 8
   assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 tile {(block_m, block_n, block_k)} for {(M, N, K)}"
-  threads = UOp.special(64 * num_warps, "lidx0")
-  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  threads = UOp.hw_idx(64 * num_warps, "lidx0")
+  workgroups = UOp.hw_idx((M // block_m) * (N // block_n), "gidx0")
   b_extra = args[0].base if len(args) >= 1 else B.base
   sink = UOp.sink(C.base, A.base, B.base, b_extra, threads, workgroups,
                   arg=KernelInfo(f"hk_bf16_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
@@ -2769,8 +2769,8 @@ def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   assert K == K2, f"{A.shape} {B.shape}"
   block_m, block_n, block_k, num_warps = 256, 256, 64, 8
   assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 atb tile {(block_m, block_n, block_k)} for {(M, N, K)}"
-  threads = UOp.special(64 * num_warps, "lidx0")
-  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  threads = UOp.hw_idx(64 * num_warps, "lidx0")
+  workgroups = UOp.hw_idx((M // block_m) * (N // block_n), "gidx0")
   sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
                   arg=KernelInfo(f"hk_bf16_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
