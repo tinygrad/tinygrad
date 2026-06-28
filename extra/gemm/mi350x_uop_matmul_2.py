@@ -68,7 +68,7 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
   return acc_store.end(M_inner_loop, N_inner_loop, K_inner_loop)
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
-  gx, gy = UOp.special(M//BLOCK_M, "gidx0"), UOp.special(N//BLOCK_N, "gidx1")
+  gx, gy = UOp.hw_idx(M//BLOCK_M, "gidx0"), UOp.hw_idx(N//BLOCK_N, "gidx1")
   K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
 
   # split out the globals into blocks
@@ -79,7 +79,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
   # ---------------------------
-  tid = UOp.special(TID_SIZE, "lidx0")
+  tid = UOp.hw_idx(TID_SIZE, "lidx0")
   warpgroup, warp = tid//WARP_SIZE, tid%WARP_SIZE
 
   A_view = A.reshape(-1, TID_SIZE, 8)

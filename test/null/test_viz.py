@@ -823,8 +823,8 @@ class TestCfg(unittest.TestCase):
   def get_cfg(self, name:str, k:Kernel):
     insts = k.finalize()
     def fxn(out:UOp) -> UOp:
-      lidx = UOp.special(1, "lidx0")
-      gidx = UOp.special(1, "gidx0")
+      lidx = UOp.hw_idx(1, "lidx0")
+      gidx = UOp.hw_idx(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with save_viz() as viz:

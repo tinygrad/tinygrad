@@ -10,9 +10,9 @@ def mat_idx(buf, g0, g1, warp, u):
   return buf[g0, l[4]*4 + l[2]*2 + l[1], g1, l[3]*4 + l[0]*2 + u]
 
 def hand_spec_tc_cores():
-  gx = UOp.special(N // 8, "gidx0")
-  gy = UOp.special(N // 8, "gidx1")
-  warp = UOp.special(32, "lidx0")
+  gx = UOp.hw_idx(N // 8, "gidx0")
+  gy = UOp.hw_idx(N // 8, "gidx1")
+  warp = UOp.hw_idx(32, "lidx0")
 
   c = UOp.placeholder((N, N), dtypes.float, slot=0).reshape((N//8, 8, N//8, 8))
   a = UOp.placeholder((N, N), dtypes.float, slot=1).reshape((N//8, 8, N//8, 8))

@@ -403,7 +403,7 @@ isel_matcher = PatternMatcher([
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
     if not x.src or x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
-  (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
+  (UPat(Ops.PARAM, name="x"), abi),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),

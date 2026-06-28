@@ -39,7 +39,7 @@ pm_remove_vec_dtypes = PatternMatcher([
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
-  if x.arg.slot != -1: return None
+  if x.arg.slot != -1 or x.is_hw_idx: return None
   ctx[0] += 1
   return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
 

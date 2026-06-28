@@ -34,7 +34,7 @@ class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
     a = UOp.param(0, dtypes.int.ptr(4))
-    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
+    gate_alu = (lidx0:=UOp.hw_idx(4, 'lidx0', dtypes.int)).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu), ptr=True), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 1, 1])[0]
@@ -43,8 +43,8 @@ class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu_2d(self):
     a = UOp.param(0, dtypes.int.ptr(8))
-    gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
-    gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
+    gate_alu_0 = (lidx0:=UOp.hw_idx(4, 'lidx0', dtypes.int)).ne(0)
+    gate_alu_1 = (lidx1:=UOp.hw_idx(2, 'lidx1', dtypes.int)).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1), ptr=True), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
@@ -88,7 +88,7 @@ class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
   def test_gated_store_with_if(self):
     a = UOp.param(0, dtypes.int.ptr())
-    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
+    gate_alu = (lidx0:=UOp.hw_idx(4, 'lidx0', dtypes.int)).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))

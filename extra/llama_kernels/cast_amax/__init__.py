@@ -15,7 +15,7 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_buf:UOp,
                           xw13:UOp, grad_x2:UOp, amax_state:UOp, grad_amax_state:UOp, dname:str) -> UOp:
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(NUM_WG, "gidx0")
   mem = n_elems * 2 * 3 + n_elems * 2 + NUM_WG * 4 + 4
   sink = UOp.sink(grad_xw13_fp8.base, grad_amax_buf.base,
                   xw13.base, grad_x2.base, amax_state.base, grad_amax_state.base, threads, workgroups,
@@ -29,7 +29,7 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:
   # NOTE: grad_amax_state is plumbed through as an unused fwd input so the bwd kernel can read it via kernel.src
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(NUM_WG, "gidx0")
   mem = n_elems * 2 * 2 + n_elems + NUM_WG * 4
   sink = UOp.sink(fp8_out.base, amax_buf.base, xw13.base, amax_state.base, threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))

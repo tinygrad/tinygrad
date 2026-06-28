@@ -58,9 +58,9 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert C.shape[1] == B.shape[1]
   assert A.shape[1] == B.shape[0]
 
-  gx, gy = UOp.special(M//BLOCK_M, "gidx0"), UOp.special(N//BLOCK_N, "gidx1")
-  warp = UOp.special(WARP_SIZE, "lidx0")
-  warpgroup = UOp.special(WARPGROUP_SIZE, "lidx1")
+  gx, gy = UOp.hw_idx(M//BLOCK_M, "gidx0"), UOp.hw_idx(N//BLOCK_N, "gidx1")
+  warp = UOp.hw_idx(WARP_SIZE, "lidx0")
+  warpgroup = UOp.hw_idx(WARPGROUP_SIZE, "lidx1")
 
   # generic copy logic (not good)
   def generic_copy(glbl, gargs, lcl, rng):

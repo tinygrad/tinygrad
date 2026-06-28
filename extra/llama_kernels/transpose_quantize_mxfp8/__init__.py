@@ -12,7 +12,7 @@ BLK = 32
 def _custom_transpose_quantize_mxfp8(q:UOp, e8:UOp, g:UOp, dname:str) -> UOp:
   M, N = g.shape
   num_wg = (M // BLK) * (N // TILE_N)
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(num_wg, "gidx0")
+  threads, workgroups = UOp.hw_idx(THREADS_PER_WG, "lidx0"), UOp.hw_idx(num_wg, "gidx0")
   mem = M * N * 2 + M * N + (M // BLK) * N   # read bf16, write fp8 + e8
   sink = UOp.sink(q.base, e8.base, g.base, threads, workgroups,
                   arg=KernelInfo(f"transpose_quantize_mxfp8_{M}_{N}", estimates=Estimates(ops=M*N, mem=mem)))

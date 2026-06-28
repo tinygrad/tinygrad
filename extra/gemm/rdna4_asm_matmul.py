@@ -217,8 +217,8 @@ def test_matmul():
 
   dname = Device.DEFAULT
   def asm_kernel(A, B, C):
-    gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
-    lidxs = [UOp.special(THREADS, "lidx0")]
+    gidxs = [UOp.hw_idx(n, f"gidx{i}") for i,n in enumerate(grid)]
+    lidxs = [UOp.hw_idx(THREADS, "lidx0")]
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC",2))
     lds = UOp.placeholder((lds_size,), dtypes.uint8, 0, AddrSpace.LOCAL)
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs,

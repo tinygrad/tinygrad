@@ -23,7 +23,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
     UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
+def HwIdx(expr, nmax): return UOp.hw_idx(nmax, expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
@@ -35,8 +35,8 @@ class TestValidIdxSimplification(unittest.TestCase):
     check_uop_against_string(self, off.get_valid(), svalid)
 
   def test_cumsum(self):
-    gidx0 = Special("gidx0", 5)
-    lidx0 = Special("lidx0", 4)
+    gidx0 = HwIdx("gidx0", 5)
+    lidx0 = HwIdx("lidx0", 4)
     gate = (gidx0*4+lidx0<19).ne(True)
     idx = gidx0*4+lidx0-19
     load = get_gated_load_uop(gate, idx)
@@ -57,7 +57,7 @@ class TestValidIdxSimplification(unittest.TestCase):
       "((((r0*3)+r1)<8)&((((r2*3)+r3)%4)<2))")
 
   def test_simplify_within_valid2(self):
-    gidx0 = Special("gidx0", 56)
+    gidx0 = HwIdx("gidx0", 56)
     ridx0 = Range(0, 3)
     alu0 = gidx0+ridx0
     valid = (alu0 < 57) & (alu0 >= 1)
@@ -71,8 +71,8 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.assertEqual(simplify_valid(v1&v0).render(), "(r0<1)")
 
   def test_valid_order_matters2(self):
-    gidx0 = Special("gidx0", 13)
-    gidx1 = Special("gidx1", 13)
+    gidx0 = HwIdx("gidx0", 13)
+    gidx1 = HwIdx("gidx1", 13)
     ridx0 = Range(0, 4)
     alu0 = (gidx1+(ridx0*13))
     v0 = (gidx0+11)%14<11
@@ -119,8 +119,8 @@ class TestValidIdxSimplification(unittest.TestCase):
     # from FUSE_ARANGE=1 python test/test_ops.py TestOps.test_scatter_add
     # can lead to OOB
     ridx2 = Range(2, 4)
-    lidx0 = Special("lidx0", 3)
-    gidx0 = Special("gidx0", 2)
+    lidx0 = HwIdx("lidx0", 3)
+    gidx0 = HwIdx("gidx0", 2)
     idx=(((lidx0+(gidx0*3))+(ridx2*5))+40)
     valid = (lidx0+(gidx0*3)) < 5
     val7 = get_gated_load_uop(valid, idx)
@@ -212,8 +212,8 @@ class TestImageSimplification(unittest.TestCase):
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
     # (idx1 < c+1).ne(True) -> idx > c
-    gidx0 = Special("gidx0", 32)
-    gidx1 = Special("gidx1", 32)
+    gidx0 = HwIdx("gidx0", 32)
+    gidx1 = HwIdx("gidx1", 32)
     shape = (10, 10, 4)
     load = get_load_image_uop(shape, (gidx1<1).ne(True), (gidx0, gidx1-1))
     self.check(load, None, "gidx0", "(gidx1+-1)")
@@ -231,8 +231,8 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
-    gidx0 = Special("gidx0", 32)
-    gidx1 = Special("gidx1", 32)
+    gidx0 = HwIdx("gidx0", 32)
+    gidx1 = HwIdx("gidx1", 32)
     load = get_load_image_uop((10, 10, 4), gidx1<10, (gidx0, gidx1))
     self.check(load, None, "gidx0", "gidx1")
 
@@ -246,8 +246,8 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_generic_idx_lt_bound(self):
     # (idx1 < image_bound - c) ? (..., idx1 + c) : 0 can drop the valid
-    gidx0 = Special("gidx0", 32)
-    gidx1 = Special("gidx1", 32)
+    gidx0 = HwIdx("gidx0", 32)
+    gidx1 = HwIdx("gidx1", 32)
     shape = (10, 10, 4)
     load = get_load_image_uop(shape, (gidx1<8), (gidx0, gidx1+2))
     self.check(load, None, "gidx0", "(gidx1+2)")
@@ -256,8 +256,8 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "gidx0", "(gidx1+5)")
 
   def test_valid_empty_set(self):
-    gidx0 = Special("gidx0", 32)
-    gidx1 = Special("gidx1", 32)
+    gidx0 = HwIdx("gidx0", 32)
+    gidx1 = HwIdx("gidx1", 32)
     shape = (32, 32, 4)
     idx = (gidx0%2, gidx1+2)
     # not empty
@@ -273,8 +273,8 @@ class TestImageSimplification(unittest.TestCase):
   def test_openpilot_conv1(self):
     # first conv in openpilot
     # kernel in tinygrad ae5d1407ee844a97a52ad3756835d38e7e2b9e1b https://gist.github.com/chenyuxyz/39c2d4e9a076b46731c67d345ff066b6
-    idx1 = Special("idx1", 32)
-    idx2 = Special("idx2", 64)
+    idx1 = HwIdx("idx1", 32)
+    idx2 = HwIdx("idx2", 64)
     # ridx0 = Variable("ridx0", 0, 5)
     # ridx1 = Variable("ridx1", 0, 2)
     # ridx2 = Variable("ridx2", 0, 2)
@@ -294,8 +294,8 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
-    idx1 = Special("idx1", 32)
-    idx2 = Special("idx2", 64)
+    idx1 = HwIdx("idx1", 32)
+    idx2 = HwIdx("idx2", 64)
     # ridx0 = Variable("ridx0", 0, 2)
     # ridx1 = Variable("ridx1", 0, 2)
     # ridx2 = Variable("ridx2", 0, 2)
@@ -315,9 +315,9 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_openpilot_conv3(self):
     # in openpilot 0.9.7
-    idx0 = Special("idx0", 64)
-    idx1 = Special("idx1", 2)
-    idx2 = Special("idx2", 4)
+    idx0 = HwIdx("idx0", 64)
+    idx1 = HwIdx("idx1", 2)
+    idx2 = HwIdx("idx2", 4)
     ridx0 = Range(0, 7)
     ridx1 = Range(1, 7)
 
@@ -338,7 +338,7 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
-    gidx = Special("gidx", 512)
+    gidx = HwIdx("gidx", 512)
     valid = (gidx<488) & (gidx<480).ne(True)
     idx = ((gidx*3+18)%26, (gidx*3+18)//26-56)
     load = get_load_image_uop((1, 26, 4), valid, idx)
@@ -346,7 +346,7 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_simplify2(self):
     # from DEV=CL DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
-    lidx = Special("lidx", 4)
+    lidx = HwIdx("lidx", 4)
     valid = (lidx<3) & (lidx<1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)
     load = get_load_image_uop((1, 2, 4), valid, idx)
@@ -354,14 +354,14 @@ class TestImageSimplification(unittest.TestCase):
 
   def test_simplify3(self):
     # from openpilot
-    idx0 = Special("idx0", 265)
+    idx0 = HwIdx("idx0", 265)
     valid = (idx0<201).ne(True)
     idx = ((idx0+55)%64, (idx0+55)//64-4)
     load = get_load_image_uop((1, 64, 4), valid, idx)
     self.check(load, None, "(idx0+-201)", "0")
 
   def test_simplify4(self):
-    idx0 = Special("idx0", 512)
+    idx0 = HwIdx("idx0", 512)
     shape = (4, 64, 4)
     alu2 = ((idx0*4+1)%32)
     alu3 = ((idx0*4+2)%32)
@@ -385,8 +385,8 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify5(self):
     # openpilot 0.9.7, chunk replacement to simplify
     shape = (10, 384, 4)
-    idx0 = Special("idx0", 16)
-    idx1 = Special("idx1", 24)
+    idx0 = HwIdx("idx0", 16)
+    idx1 = HwIdx("idx1", 24)
     alu0 = idx0*4
     alu1 = (idx1*256)+alu0
     alu2 = idx1//3
@@ -400,8 +400,8 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify6(self):
     # from openpilot
     # the valid implies the numerator of the div/mod is positive and can be simplified with floordiv rules
-    idx1 = Special("idx1", 16)
-    idx2 = Special("idx2", 64)
+    idx1 = HwIdx("idx1", 16)
+    idx2 = HwIdx("idx2", 64)
     ridx3 = Range(3, 3)
     ridx4 = Range(4, 3)
     ridx5 = Range(5, 3)
@@ -414,9 +414,9 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify7(self):
     # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
     # kernel 143
-    gidx0 = Special("gidx0", 32)
-    lidx0 = Special("lidx0", 16)
-    lidx1 = Special("lidx1", 8)
+    gidx0 = HwIdx("gidx0", 32)
+    lidx0 = HwIdx("lidx0", 16)
+    lidx1 = HwIdx("lidx1", 8)
     r0 = Range(0, 7)
 
     # buf.render()='UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((32, 1024, 4)), arg=1, src=())'
@@ -436,10 +436,10 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify8(self):
     # from openpilot compile3, kernel r_4_16_8_16_4_4_3_3n1
     # valid guarantees A >= 0, so divmod simplifies and gate is removed
-    gidx0 = Special("gidx0", 16)
-    gidx1 = Special("gidx1", 4)
-    lidx0 = Special("lidx0", 8)
-    lidx1 = Special("lidx1", 16)
+    gidx0 = HwIdx("gidx0", 16)
+    gidx1 = HwIdx("gidx1", 4)
+    lidx0 = HwIdx("lidx0", 8)
+    lidx1 = HwIdx("lidx1", 16)
     A = gidx0 + gidx1*8192 + lidx0*1024 + lidx1*64 - 1040
     valid = ((lidx1 < 1).ne(True)) & (((gidx1 + lidx0) < 1).ne(True))
     load = get_load_image_uop((32, 1024, 4), valid, (A % 1024, A // 1024))
@@ -448,9 +448,9 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify9(self):
     # from openpilot compile3, kernel r_32_16_8_4_4_7_7 (image 1x16384)
     # valid guarantees A1 >= 0 and A1 < 512, gate should be removable
-    gidx0 = Special("gidx0", 32)
-    lidx0 = Special("lidx0", 16)
-    lidx1 = Special("lidx1", 8)
+    gidx0 = HwIdx("gidx0", 32)
+    lidx0 = HwIdx("lidx0", 16)
+    lidx1 = HwIdx("lidx1", 8)
     r0 = Range(0, 7)
     A1 = lidx0*32 + r0*32 + lidx1*4 - 99
     valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 19)
@@ -466,10 +466,10 @@ class TestImageSimplification(unittest.TestCase):
   def test_simplify10(self):
     # from openpilot compile3, kernel r_16_8_4_4_4_4_7_7 (image 1x8192)
     # valid guarantees A1 >= 0 and A1 < 128, gate should be removable
-    gidx0 = Special("gidx0", 16)
-    lidx0 = Special("lidx0", 8)
-    lidx1 = Special("lidx1", 4)
-    lidx2 = Special("lidx2", 4)
+    gidx0 = HwIdx("gidx0", 16)
+    lidx0 = HwIdx("lidx0", 8)
+    lidx1 = HwIdx("lidx1", 4)
+    lidx2 = HwIdx("lidx2", 4)
     r0 = Range(0, 7)
     A1 = lidx0*16 + r0*16 + lidx1*4 - 51
     valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 11)
@@ -485,7 +485,7 @@ class TestImageSimplification(unittest.TestCase):
   def test_drop_non_monotonic_window(self):
     # two-sided window valid (645 <= gidx0 < 653) on a non-monotonic index (lane split via %4 and //4):
     # gidx0 outside the window pushes idx_x out of the (1, 48) image, so the gate is dropped
-    gidx0 = Special("gidx0", 1064)
+    gidx0 = HwIdx("gidx0", 1064)
     r12 = Range(12, 3)
     valid = ((gidx0 < 645).ne(True)) & (gidx0 < 653)
     idx = (r12*4 + (gidx0+3)%4 + (gidx0+3)//4*24 - 3888, UOp.const(dtypes.weakint, 0))

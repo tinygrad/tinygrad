@@ -52,9 +52,9 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
-      special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
-      name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
+      hw_idx_uops = sorted([x for x in self.ast.toposort() if x.is_hw_idx], key=lambda x: x.arg.hw_dim)
+      hw_idx_ops = [colored(str(x.vmax+1), "blue" if x.arg.hw_dim[0] == "g" else "cyan") for x in hw_idx_uops]
+      name = k_type + colored('_', 'BLACK').join(['']+hw_idx_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')

@@ -135,7 +135,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool.ptr(16))
       buf_int = UOp.param(1, dtypes.int.ptr(8))
-      gidx = UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, 16),), "gidx0")
+      gidx = UOp.hw_idx(16, "gidx0")
       ld_bool = buf_bool.index(gidx, ptr=True).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool), ptr=True).load()])  # gidx 0..15, buf_int size 8
@@ -149,8 +149,8 @@ class TestValidateOOB(unittest.TestCase):
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
 
       # Define indices, valids and barrier
-      gidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 416),), "gidx0")
-      lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 10),), "lidx0")
+      gidx = UOp.hw_idx(416, "gidx0", dtypes.int)
+      lidx = UOp.hw_idx(10, "lidx0", dtypes.int)
 
       gate = (gidx<400) & (lidx<8)
 
