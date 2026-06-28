@@ -18,7 +18,7 @@ from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifyin
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, indexing_simplify, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
-  ReduceContext, pm_render, pm_add_loads
+  ReduceContext, pm_render, pm_add_loads, merge_reduce_ends
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
@@ -136,6 +136,7 @@ def expand_horizontal_reduce(r:UOp):
 pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
+  (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
@@ -194,14 +195,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   #sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
   sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
 
+  # this is new style (TODO: this should all be removed)
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
-
-  # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
@@ -211,7 +212,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, symbolic, name="extra symbolic")
+  sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
