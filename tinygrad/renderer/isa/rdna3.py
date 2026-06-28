@@ -119,6 +119,7 @@ V_CVT = _build_cvt_table()
 def legalize_operands(ctx, x:UOp):
   group, opc = x.arg.func, x.arg.opc
   if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
+    # NOTE: is_vgpr fails on index, makes this check fragile
     if any(s.tag is None for s in x.src[:2]): return None
     suffix = x.src[2:] if len(x.src) > 2 else ()
     a, b = x.src[:2]
@@ -157,14 +158,16 @@ def cmp(x:UOp):
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
 
+# NOTE: ISA spec 11.2
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
-  # dsl encoding handles 13 bit offset truncating/2s complement etc..
-  # just store as 16 bit int
+  # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
+  # - use voff effectively
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(ctx, const(dtypes.int, disp_scale.bit_length() - 1))
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32, 0),)), base, const(dtypes.int16, idx.arg * disp_scale))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, const(dtypes.int16, idx.src[1].arg * disp_scale))
+  if idx.op is Ops.CONST:
+    return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
+  # if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, const(dtypes.int16, idx.src[1].arg * disp_scale))
   return (idx << shft, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
@@ -409,6 +412,7 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   
+  #print("encoding", opc)
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
@@ -492,8 +496,8 @@ class RDNA3Renderer(ISARenderer):
       return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
-    print(prg.arg)
-    for u in lin.src: print(u.arg)
+    #print(prg.arg)
+    #for u in lin.src: print(u.arg)
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
