@@ -46,7 +46,9 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   # already allocated vregs
   # NOTE: this is getting shitty, whats the heuristic for cons vs group of registers?
-  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0]._cons: return None
+  if isinstance(x.tag, tuple):
+    assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0]._cons: return None # how can this receive an empty tuple???
   # allocate vreg definitions
   defs = []
   # don't generally allocate to SGPRS, only works wave uniform possible future optim
@@ -107,11 +109,11 @@ V_CMPNE = { dtypes.float16:RDNA3Ops.v_cmp_neq_f16_e64,dtypes.float32:RDNA3Ops.v_
 _isa_typref = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
 def _build_cvt_table():
   _valid_casts = {
-      dtypes.float64 : (dtypes.int32, dtypes.float32, dtypes.uint32),
-      dtypes.int32 : (dtypes.float64, dtypes.float32),
-      dtypes.uint32 : (dtypes.float32, dtypes.float64),
-      dtypes.float32 : (dtypes.float64, dtypes.uint32, dtypes.int32, dtypes.float64),
-      dtypes.float16 : (dtypes.float32,),
+      dtypes.float64    : (dtypes.int32, dtypes.float32, dtypes.uint32),
+      dtypes.int32      : (dtypes.float64, dtypes.float32),
+      dtypes.uint32     : (dtypes.float32, dtypes.float64),
+      dtypes.float32    : (dtypes.float64, dtypes.uint32, dtypes.int32, dtypes.float64),
+      dtypes.float16    : (dtypes.float32,),
   }
   return { src : { targ: getattr(RDNA3Ops, f"v_cvt_{_isa_typref[targ]}_{_isa_typref[src]}_e32") for targ in targets } for src,targets in _valid_casts.items() }
 V_CVT = _build_cvt_table()
@@ -120,16 +122,7 @@ V_CVT = _build_cvt_table()
 # TODO: perform this per isel pattern, dont make it seperate pass
 def legalize_operands(ctx, x:UOp):
   group, opc = x.arg.func, x.arg.opc
-  if group in [RDNA3Ops.VOP2, RDNA3Ops.VOPC]:
-    # NOTE: is_vgpr fails on index, makes this check fragile
-    if any(s.tag is None for s in x.src[:2]): return None
-    suffix = x.src[2:] if len(x.src) > 2 else ()
-    a, b = x.src[:2]
-    if is_vgpr(b): return None
-    non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-    if is_vgpr(a) and not non_commutative: return x.replace(src=(b,a) + suffix)
-    return x.replace(src=((a, to_vgpr(ctx, b))) + suffix)
-  elif group in [RDNA3Ops.GLOBAL] and "store" in opc: 
+  if group in [RDNA3Ops.GLOBAL] and "store" in opc: 
     if is_vgpr(x.src[-1]): return None
     return x.replace(src=x.src[:-1] + (to_vgpr(ctx, x.src[-1]),))
   elif group is RDNA3Ops.VOP3:
@@ -140,16 +133,27 @@ def legalize_operands(ctx, x:UOp):
       return x.replace(src=tuple(new))
   return None
 
-def cmp(x:UOp):
+def _vop2(ctx, x:UOp):
+  # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
+  def _isconst(u:UOp): return u.op is Ops.CONST
+  if not _isconst(x.src[1]): return x
+  rest = x.src[2:] if len(x.src) > 2 else ()
+  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
+  if not non_commutative and not _isconst(x.src[0]): 
+    return x.replace(src=(x.src[1], x.src[0]) + rest)
+  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
+
+# does operand legalization belong to pre-regalloc?
+# what cases need to be reordered? I think just const
+
+def cmp(ctx, x:UOp):
   rlz = []
-  for u in x.src:
-    # convert cmp outputs and const bools to vgpr
-    # NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
+  # NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
+  # NOTE: also maybe add this to pre_isel?
+  for u in x.src: # convert cmp outputs and const bools to vgpr
     if u.dtype is dtypes.bool:
-      if u.op is Ops.CONST:
-        rlz.append(const(dtypes.uint32, 1) if u.arg else const(dtypes.uint32,0))
-      else:
-        rlz.append(u.where(const(dtypes.uint32,1), const(dtypes.uint32,0)))
+      if u.op is Ops.CONST: rlz.append(const(dtypes.uint32, 1) if u.arg else const(dtypes.uint32,0))
+      else: rlz.append(u.where(const(dtypes.uint32,1), const(dtypes.uint32,0)))
     else: rlz.append(u)
   x = x.replace(src=tuple(rlz))
   dt = x.src[0].dtype.scalar()
@@ -159,6 +163,7 @@ def cmp(x:UOp):
   else: ins = V_CMPGT[dt]
   # else: raise NotImplementedError("comparison type instruction dne")
   return x.ins(ins, tag=GP_SGPRS)
+  # return _vop2(ctx, x.ins(ins, tag=GP_SGPRS))
 
 # NOTE: ISA spec 11.2
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
@@ -230,8 +235,7 @@ def cvt(ctx, y:UOp, x:UOp):
 # -- complex alu --
 def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(V_ADD[x.dtype]) # f64 add is native
-  a1 = x.ins(RDNA3Ops.v_add_co_u32)
-  a2 = x.ins(RDNA3Ops.v_add_co_ci_u32)
+  a1, a2 = x.ins(RDNA3Ops.v_add_co_u32), x.ins(RDNA3Ops.v_add_co_ci_u32)
   return a2.after(a1)
 
 # TODO: signed
@@ -243,8 +247,7 @@ def mul64(ctx, x:UOp):
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)))
-  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+  lo, hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0))), UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
   return UOp.group(lo,hi)
 
 # TODO: handle 16/64 bit semantics
@@ -260,7 +263,7 @@ def alu(ctx, x:UOp):
     elif x.op is Ops.RECIPROCAL: ins = V_RCP[x.dtype]
   else: # handle consts...
     a,b = x.src
-    def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else x.ins(ins)
+    def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else _vop2(ctx, x.ins(ins))
     if x.op is Ops.ADD: # TODO: handle signed?
       if dpreciz: return add64(x)
       ins = V_ADD[x.dtype]
@@ -278,7 +281,7 @@ def alu(ctx, x:UOp):
       ins = RDNA3Ops.v_lshrrev_b64 if dpreciz else RDNA3Ops.v_lshrrev_b32_e32
   if ins is None:
     raise NotImplementedError(f"alu optype not implemented. op={x.op}, is_unary={len(x.src)==1}")
-  return x.ins(ins)
+  return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # cdiv of int types needs to be converted to float then cast back after ceil op
 # - we need to cast to float version of this bitwidth..., start with just 32
@@ -325,7 +328,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
-  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(m)))),
+  (UPat.var("m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"), lambda ctx,m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(ctx,m)))),
   # cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison, dtypes.bool, name="x"), cmp),
   # mem ops
@@ -513,8 +516,8 @@ class RDNA3Renderer(ISARenderer):
       return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
-    #print(prg.arg)
-    #for u in lin.src: print(u.arg)
+    print(prg.arg)
+    for u in lin.src: print(u.arg)
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
