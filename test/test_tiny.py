@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, OSX
 
 class TestTiny(unittest.TestCase):
 
@@ -89,6 +89,7 @@ class TestTiny(unittest.TestCase):
 
   # *** BEAM (for Kernel speed) ***
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU's timestamp-query is unreliable on dawn's metal backend")
   def test_beam(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_plus()
 

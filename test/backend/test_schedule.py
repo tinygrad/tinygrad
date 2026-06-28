@@ -448,6 +448,14 @@ class TestCopyFolding(unittest.TestCase):
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
+  def test_permute_copy_to_device(self):
+    b = Tensor([[0, 1, 2, 3], [4, 5, 6, 7]], device="CPU").permute(1, 0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [[0, 4], [1, 5], [2, 6], [3, 7]])
+
+  def test_flip_copy_to_device(self):
+    b = Tensor([0, 1, 2, 3], device="CPU").flip(0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [3, 2, 1, 0])
+
 class TestUOpBecome(unittest.TestCase):
   def test_setitem_offset(self):
     a = Tensor.full((16,), 0.).contiguous().realize()

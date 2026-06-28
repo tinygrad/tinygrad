@@ -165,7 +165,7 @@ from extra.datasets import fetch_mnist
 Now we have everything we need to start training our neural network.
 We will be training for 1000 steps with a batch size of 64.
 
-We use `with Context(TRAINING=1)` to set the internal flag `Tensor.training` to `True` during training.
+We use `with Context(TRAINING=1)` to enable training mode.
 Upon exit, the flag is restored to its previous value by the context manager.
 
 ```python

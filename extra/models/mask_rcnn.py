@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from tinygrad import nn, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.helpers import get_child, fetch
+from tinygrad.helpers import get_child, fetch, TRAINING
 from tinygrad.nn.state import torch_load
 from examples.mlperf.helpers import BoxCoder
 from extra.models.resnet import ResNet
@@ -1069,7 +1069,7 @@ class RoIBoxHead:
   def __call__(self, features, proposals, targets=None):
     x = self.feature_extractor(features, proposals)
     class_logits, box_regression = self.predictor(x)
-    if not Tensor.training:
+    if not TRAINING:
       result = self.post_processor((class_logits, box_regression), proposals)
       return x, result, {}
 
@@ -1111,7 +1111,7 @@ class Mask:
     x = self.feature_extractor(features, proposals)
     if x is not None:
       mask_logits = self.predictor(x)
-      if not Tensor.training:
+      if not TRAINING:
         result = self.post_processor(mask_logits, proposals)
         return x, result, {}
     return x, [], {}

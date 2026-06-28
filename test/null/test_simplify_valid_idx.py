@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.late.devectorizer import load_store_indexing
+from tinygrad.codegen.late.devectorizer import indexing_simplify
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
@@ -11,7 +11,7 @@ from test.null.test_uop_symbolic import check_uop_against_string
 # symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
-def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+load_store_indexing, name="simplify_image_idx")
+def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -495,7 +495,7 @@ class TestImageSimplification(unittest.TestCase):
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
     # test that INDEX with a constant True valid gets simplified to drop the valid
-    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.codegen.late.devectorizer import indexing_simplify
     from tinygrad.uop.ops import graph_rewrite
     from tinygrad.uop.symbolic import sym
     buf = UOp.param(0, dtypes.int.ptr())
@@ -503,7 +503,7 @@ class TestDropTrueGate(unittest.TestCase):
     true_gate = UOp.const(dtypes.bool, True)
     index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx.valid(true_gate)))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, sym+load_store_indexing)
+    result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 

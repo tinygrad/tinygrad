@@ -155,7 +155,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
-  bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.src[1].arg*bufs[1].dtype.itemsize)
+  bv = bufs[1].view(resolved[0].max_numel(), ast.dtype, ast.src[1].arg*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
   return None
 
@@ -265,12 +265,18 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_schedule
-    linear = hcq_schedule(linear)
+    from extra.hcq2.hcq2 import hcq_compile
+    linear = hcq_compile(linear)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
+def link_linear(linear:UOp) -> UOp:
+  if getenv("HCQ2"):
+    from extra.hcq2.hcq2 import hcq_link
+    linear = hcq_link(linear)
+  return linear
+
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
-  if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU))
   ctx = ExecContext(var_vals or {}, input_uops, update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
@@ -280,5 +286,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-  call = compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0).src[0]
+  call = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0)).src[0]
   return pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False))

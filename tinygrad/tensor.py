@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing, disable_gc, TRAINING
+from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -58,14 +58,7 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-# TODO: deprecate this, always use TRAINING
-class TensorMeta(type):
-  @property
-  def training(cls) -> bool: return bool(TRAINING.value)
-  @training.setter
-  def training(cls, mode:bool): TRAINING.value = int(mode)
-
-class Tensor(RandMixin, metaclass=TensorMeta):
+class Tensor(RandMixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 

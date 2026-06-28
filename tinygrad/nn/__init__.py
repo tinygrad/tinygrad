@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -40,7 +40,7 @@ class BatchNorm:
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
-    if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -52,7 +52,7 @@ class BatchNorm:
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1

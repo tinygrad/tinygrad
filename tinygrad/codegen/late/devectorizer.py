@@ -1,12 +1,9 @@
-from typing import Any, cast
 import functools, itertools
-from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, prod, OSX, ceildiv
-from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
@@ -51,7 +48,7 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
   idx_y, idx_x = idx.gep(1), idx.gep(0)
   return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), ptr=True) if new_valid is not None else buf.index(idx_y, idx_x, ptr=True)
 
-load_store_indexing = PatternMatcher([
+indexing_simplify = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("valid").where(UPat.var("idx_y"), UPat(arg=Invalid)),
@@ -70,157 +67,32 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 def expand_index(ctx, buf:UOp, vec:UOp):
-  # determine optimal image shapes
-  if isinstance(dt:=buf.dtype, ImageDType):
-    idxs, valids = vec.get_idx(), vec.get_valid()
-    lane = next((i for i in range(vec.dtype.count) if valids.gep(i).vmax != 0), 0)
-    x, valid = idxs.gep(lane), valids.gep(lane)
-    # search for dims that drop the most valid statements
-    best_drop, cands = -1, []
-    for ch, cw in image_valid_dims(dt.base, dt.size, ctx.target.arch):
-      if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
-        best_drop, cands = dropped, [(ch, cw, cidx)]
-      elif dropped == best_drop: cands.append((ch, cw, cidx))
-    # and tiebreak with indexing complexity (ie. number of nodes)
-    h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
-    assert buf.op is Ops.RESHAPE
-    buf = buf.src[0].replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4))).flatten()
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
   return UOp(Ops.STACK, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
 
-def fold_expanded_index(midx:UOp):
-  buf = midx.src[0].src[0]
-  if not all(s.src[0] is buf for s in midx.src): return None
-  if not all(isinstance(s.dtype, PtrDType) for s in midx.src): return None
+def load_stack(stack:UOp, ld:UOp):
+  offset, ret = 0, []
+  for x in stack.src:
+    src = [x]
+    for s in ld.src[1:]:
+      src.append(s.gep(tuple(range(offset, offset+x.dtype.count))) if s.dtype.vcount > 1 else s)
+    ret.append(ld.replace(dtype=x.dtype.base, src=tuple(src)))
+    offset += x.dtype.count
+  return UOp(Ops.STACK, stack.dtype.base.vec(len(stack.src)), tuple(ret))
 
-  # extract all the relevant offsets
-  offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  for i in range(len(midx.src)):
-    idx: Any = midx.src[i].src[1].get_idx()
-    if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-    elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
-    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
-    elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
-    else: root_src, arg = idx, 0
-    root_src = (midx.src[i].src[1].get_valid(), root_src)
-    offsets_rootsrc[root_src].setdefault(arg, []).append(i)
-
-  # then rewrite everything we can into groups
-  ret = []
-  idxs: list[int|None] = [None]*len(midx.src)
-  global_offset = 0
-  for offsets in offsets_rootsrc.values():
-    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
-    for grp in grouped_offsets:
-      # get the index offset for this element. using [0] is okay, because they are the same
-      lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(len(grp)).ptr(size=buf.max_numel(), addrspace=buf.addrspace))
-      # set the idxs of the output
-      for i,g in enumerate(grp):
-        for oo in offsets[g]: idxs[oo] = global_offset+i
-      # add this lidx to the CAT
-      ret.append(lidx)
-      global_offset += len(grp)
-  assert None not in idxs, f"some idxs are missing {idxs}"
-  # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.max_numel(), addrspace=buf.addrspace).vec(global_offset), tuple(ret))
-  return post_cat.gep(tuple(cast(list[int], idxs)))
-
-def cat_after_store(cat:UOp, data:UOp):
-  # TODO: this is written in many places
-  offset = 0
-  ret: list[UOp] = []
-  for s in cat.src:
-    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
-    offset += s.dtype.count
+def store_stack(stack:UOp, data:UOp):
+  offset, ret = 0, []
+  for x in stack.src:
+    ret.append(x.store(data.gep(tuple(range(offset, offset+x.dtype.count)))))
+    offset += x.dtype.count
   return UOp.group(*ret)
-
-def gep_on_store(gep:UOp, st:UOp):
-  # NOTE: we need to invert the gep here, but it may be an expanding gep
-  # fake argsort. TODO: handle duplicates
-  a = {}
-  for i,x in enumerate(gep.arg): a[x] = i
-  new_arg = tuple(x[1] for x in sorted(a.items()))
-  return gep.src[0].store(st.gep(new_arg))
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=UPat(name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
-  # GEP after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
-   lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
-  # GEP on data of STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
-  # put PTRCAT after LOAD
-  (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
-   lambda cat,ld: UOp(Ops.VCAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
-  # put PTRCAT after STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data"))), cat_after_store),
-])
-
-# *** correct load/store ***
-
-def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
-  # this splits loads and stores into multiple chunks
-
-  # if there's only one element to load/store, no splitting needed
-  if (sz:=ls.src[0].dtype.count) == 1: return None
-  buf = idx.src[0]
-
-  # determine fold lengths
-  lengths = []
-  must_divide = True
-  # TODO: this belongs in coalese
-  if isinstance(buf.dtype, ImageDType): lengths = [4]
-  lengths.append(1)  # worst case, it's not folded
-
-  # filter fold lengths that don't divide
-  offset, mask = idx.src[1].get_idx(), idx.src[1].get_valid()
-  if must_divide: lengths = [x for x in lengths if offset.divides(x) is not None]
-
-  # split based on the fold lengths
-  global_offset = 0
-  ret = []
-  while global_offset < sz:
-    # with 1 at the end of the lengths list, this will always hit
-    for fold_length in lengths:
-      if global_offset+fold_length > sz: continue
-      lidx = buf.index((offset + global_offset).valid(mask), ptr=True)
-      if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.max_numel(), addrspace=buf.addrspace))
-      if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))))
-      else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
-      global_offset += fold_length
-      break
-
-  # if it wasn't split, we return None. otherwise we CAT them
-  if len(ret) <= 1: return None
-  return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
-
-def get_image_idx(idx:UOp, width:int):
-  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
-  idx_x, idx_y = (x // 4) % width, x // (4*width)
-  assert idx.src[0].op is Ops.RESHAPE, "image idx must be on reshape"
-  return idx.replace(src=(idx.src[0].src[0], idx_y.valid(valid), idx_x.valid(valid)))
-
-def image_fixup(ls:UOp):
-  # normal image load or store, with the CAST from expand_index
-  if isinstance(dt:=ls.src[0].src[0].dtype, ImageDType) and ls.src[0].op is Ops.CAST:
-    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
-
-  # this is an unprocessed image without a cast, we should just make it a buffer
-  if isinstance(dt, ImageDType) and len(ls.src[0].src) == 2:
-    off = ls.src[0].src[1]
-    assert ls.src[0].src[0].op is Ops.RESHAPE, "image idx must be on reshape"
-    idx = ls.src[0].src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
-    return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
-
-correct_load_store = PatternMatcher([
-  # split LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ls", allow_any_len=True), split_load_store),
-  # image indexing, including unfoldable images
-  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
+  # put STACK of indexes after LOAD/STORE
+  (UPat(Ops.LOAD, src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="stack"),), name="ld", allow_any_len=True), load_stack),
+  (UPat(Ops.STORE, src=(UPat(Ops.STACK, src=UPat(Ops.INDEX), name="stack"), UPat(name="data"))), store_stack),
 ])
 
 # *** uop expander ***
@@ -239,7 +111,6 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
-  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.STACK, alu.dtype, alus)
 
@@ -368,29 +239,4 @@ pm_add_loads = PatternMatcher([
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
   (UPat(Ops.LOAD, src=(UPat(Ops.LOAD),), allow_any_len=True, name="l"), lambda l: l.replace(src=(l.src[0].src[0],)+l.src[1:])),
-])
-
-# make images
-
-pm_imageh_store = PatternMatcher([
-  # store<imageh>(idx, x) is actually store(idx, x.cast(half)) so we can pull the cast into the store
-  (UPat.var("x", dtypes.float).cast(dtypes.half), lambda x: x),
-  # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
-  (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))), lambda a,b,c: a.where(b,c.cast(dtypes.float))),
-  # otherwise, we cast to float
-  (UPat(GroupOp.All, name="x"), lambda x: x.cast(dtypes.float))
-])
-
-def make_image(ctx, ls, buf, off):
-  if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
-  if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=image_valid_dims(dt.base, dt.size, ctx)):
-    buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4))).flatten()
-    if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
-    if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(ls.dtype.vcount)).cast(dt.base)
-    return buf.index(off, ptr=True).store(pm_imageh_store.rewrite(ls.src[1]) if dt.base == dtypes.half else ls.src[1])
-
-pm_make_images = PatternMatcher([
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), allow_any_len=True, name="ls"), make_image),
-  # load<imageh> is actually load<half>.cast(float), so load<imageh>.half().float() -> load<half>.float().half().float() -> load<half>.float()
-  (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
 ])

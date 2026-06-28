@@ -176,6 +176,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # STACK on INDEX CONST (TODO: remove all the GEP crap)
   (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].arg for x in stk.src] else None),
+  # INDEX on STACK
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="stk"), UPat(Ops.CONST, name="c"))), lambda stk,c: stk.src[c.arg]),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
@@ -227,9 +229,6 @@ gep_pushing = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu').f(Ops.GEP, dtype=dtypes.weakint, name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
      if not isinstance(gep.dtype, PtrDType) and not isinstance(alu.dtype, PtrDType) else None),
-  # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.VCAT, name="x"), lambda x: UOp(Ops.STACK, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
-    if not isinstance(x.dtype, PtrDType) else None),
   # VECTORIZE on same GEP
   (UPat(Ops.STACK, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
   # push some GEPs through WMMAs
@@ -318,9 +317,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
                         else y.src for y in x.src[1:]]))))),
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
-  # VECTORIZE/CONST
-  (UPat(Ops.STACK, src=UPat(Ops.CONST), name="vec"),
-    lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src)) if len(vec.src) > 0 else None),
 ])+div_and_mod_symbolic+gep_pushing
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********

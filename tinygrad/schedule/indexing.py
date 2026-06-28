@@ -56,10 +56,11 @@ class IndexingContext:
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.STAGE, Ops.INDEX}: return None
   new_srcs = []
-  for s in x.src:
+  for i, s in enumerate(x.src):
     new_src = s
+    # shape args of movement ops are at src[1:] and should not be indexed
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
-      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
+      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
@@ -161,7 +162,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
-    if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+    if x.op is Ops.DEVICE: continue
 
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue

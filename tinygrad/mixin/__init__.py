@@ -97,7 +97,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       if index is not None: dim += 1
 
     # apply view ops then dim injection (None) and collapse (int)
-    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
+    x = self._apply_view_ops(mops := [p for p in indices_parsed if p["index"] is not None])
     x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
     x = x.reshape(tuple(p["size"] for p in x_dims))
 
