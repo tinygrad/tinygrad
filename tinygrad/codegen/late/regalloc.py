@@ -35,6 +35,10 @@ class LinearScanRegallocContext:
     self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
+    # prologue/epilogue must attach to real emitted instructions: skip leading/trailing PSEUDO_OPS and the SINK
+    # terminator (regalloc_rewrite never processes SINK), otherwise stack alloc/dealloc would be dropped.
+    real_idxs = [i for i,u in enumerate(uops) if u.op not in PSEUDO_OPS and u.op is not Ops.SINK]
+    self.first_real_idx, self.last_real_idx = (real_idxs[0], real_idxs[-1]) if real_idxs else (-1, -1)
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
 
@@ -127,8 +131,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if ctx.stack_size > 0:
     sp = ctx.ren.stack_pointer()
     offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
-    if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
-    elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+    if i == ctx.first_real_idx: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
+    elif i == ctx.last_real_idx: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
 
   return nx, before + [nx] + after
 
