@@ -78,6 +78,8 @@ class TestRandomness(unittest.TestCase):
       if ast.op is Ops.SINK:
         prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
         for u in tuple(prg.src[2].src):
+          # Assembly backends can carry 64-bit buffer pointers as ABI kernarg loads; this test is about threefry math.
+          if u.op is Ops.INS and getattr(u.arg, "name", None) == "KERNARG": continue
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):
