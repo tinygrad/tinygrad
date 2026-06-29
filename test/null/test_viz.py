@@ -222,6 +222,16 @@ class TestViz(unittest.TestCase):
       graph_rewrite(a + 4, TrackedPatternMatcher(_substitute.patterns), {a:a+1}, walk=True)
     list(viz.get_details(0, 0))
 
+  def test_enter_calls_rewrite(self):
+    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
+    with save_viz() as viz:
+      inner = UOp.const(dtypes.int, 3)
+      func = UOp(Ops.FUNCTION, src=(UOp(Ops.SINK, src=(inner,)),))
+      call = UOp(Ops.CALL, src=(func,))
+      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+    details = list(viz.get_details(0, 0))
+    self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
+
   def test_const_node_visibility(self):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
