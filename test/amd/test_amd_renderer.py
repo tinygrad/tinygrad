@@ -90,6 +90,12 @@ def _half_add_program():
   to_program_cache.clear()
   return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
 
+def _padded_load_program():
+  with Context(BEAM=0, DEV="MOCKKFD+AMD:AMD"):
+    ast = Tensor.empty(3).pad((0, 1)).contiguous().schedule_linear().src[0].src[0]
+  to_program_cache.clear()
+  return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
+
 def _uint_var_program():
   out = UOp.placeholder((16,), dtypes.uint32, 0)
   inp = UOp.placeholder((16,), dtypes.uint32, 1)
@@ -1047,6 +1053,13 @@ class TestAMDRenderer(unittest.TestCase):
     inst_names = _amd_inst_names(prg)
     self.assertNotIn("GLOBAL_LOAD_B128", inst_names)
     self.assertNotIn("GLOBAL_STORE_B128", inst_names)
+
+  def test_padded_load_does_not_use_wide_global_load(self):
+    prg = _padded_load_program()
+    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    inst_names = _amd_inst_names(prg)
+    self.assertNotIn("GLOBAL_LOAD_B128", inst_names)
+    self.assertIn("GLOBAL_LOAD_B32", inst_names)
 
   def test_int_signed_widen_cast_sign_extends(self):
     prg = _int_signed_widen_cast_program()
