@@ -27,8 +27,7 @@ def create_bounded(name:str, vmin:int, vmax:int, z3ctx:z3.Context) -> tuple[z3.A
 z3_renderer = PatternMatcher([
   (UPat.var("cond").where(UPat.var("x"), UPat.const(dtypes.weakint, Invalid)), lambda x,cond,ctx: (ctx[1][x], ctx[1][cond])),
   # variables
-  (UPat(Ops.PARAM, name="x"), lambda x,ctx:
-   create_bounded(x.arg.hw_dim, 0, ctx[1][x.src[0]]-1, ctx[0]) if x.is_hw_idx else None),
+  (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.hw_dim, 0, ctx[1][x.src[0]]-1, ctx[0]) if x.is_hw_idx else None),
   (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0]) if not x.is_hw_idx else None),
   (UPat(Ops.RANGE, name="x"), lambda x,ctx: create_bounded(x.render(simplify=False), 0, ctx[1][x.src[0]]-1, ctx[0])),
   # loads are variables bounded by the min/max of the dtype. non-pointer INDEX is also a LOAD
@@ -48,6 +47,8 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,),src=(UPat.var("x", dtypes.bool),)), lambda x,ctx: (z3.If(ctx[1][x], 1, 0), None)),
   (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,), src=(UPat.var("x", dtypes.ints+(dtypes.weakint,)),)), lambda x,ctx: (ctx[1][x], None)),
   (UPat(Ops.CAST, dtypes.bool, name="x"), lambda x,ctx: (ctx[1][x.src[0]]!=0, None)),
+  # BITCAST between int types is a no-op in Z3's integer model (Z3 has no concept of bit reinterpretation)
+  (UPat(Ops.BITCAST, dtypes.ints+(dtypes.weakint,), src=(UPat.var("x", dtypes.ints+(dtypes.weakint,)),)), lambda x,ctx: (ctx[1][x], None)),
   (UPat(GroupOp.ALU, name="x"), lambda x,ctx: (z3_alu[x.op](*(ctx[1][s] for s in x.src)), None)),
 ])
 
