@@ -40,6 +40,8 @@ class AMDOps(FastEnum):
   SCRATCH_ADDR = auto()
   KERNARG = auto()
   MOV = auto()
+  PACK = auto()
+  EXTRACT = auto()
   ADD = auto()
   SUB = auto()
   MUL = auto()
@@ -83,11 +85,31 @@ _F32_UNARY = {AMDOps.RECIPROCAL: r3.v_rcp_f32_e32, AMDOps.EXP2: r3.v_exp_f32_e32
               AMDOps.SQRT: r3.v_sqrt_f32_e32, AMDOps.TRUNC: r3.v_trunc_f32_e32}
 
 def _is_float(dt:DType) -> bool: return dt.scalar() in (dtypes.float16, dtypes.float32)
+def _reg_slots(dt:DType) -> int: return max(1, (dt.itemsize + 3) // 4)
+def _mem_itemsize(dt:DType) -> int: return dt.scalar().itemsize
 def _reg_to_amd(reg:Register, sz:int=1) -> Reg:
   if reg.index >= 256:
     idx = reg.index - 256
     return v[idx] if sz == 1 else v[idx:idx+sz-1]
   return s[reg.index] if sz == 1 else s[reg.index:reg.index+sz-1]
+def _reg_lane(reg:Register, lane:int) -> Reg:
+  return _reg_to_amd(Register(f"{reg.name}_{lane}", reg.index + lane))
+def _parallel_vmov(moves:list[tuple[Reg, Reg|int|float]]) -> list:
+  pending = [(dst, src) for dst,src in moves if not isinstance(src, Reg) or dst != src]
+  ret = []
+  while pending:
+    src_regs = {src for _,src in pending if isinstance(src, Reg)}
+    for i,(dst,src) in enumerate(pending):
+      if not isinstance(src, Reg) or dst not in src_regs:
+        ret.append(r3.v_mov_b32_e32(dst, src))
+        pending.pop(i)
+        break
+    else:
+      src = pending[0][1]
+      if not isinstance(src, Reg): raise RuntimeError("parallel copy cycle without a register source")
+      ret.append(r3.v_mov_b32_e32(TMP_VDATA, src))
+      pending = [(dst, TMP_VDATA if isinstance(s, Reg) and s == src else s) for dst,s in pending]
+  return ret
 
 def _src(x:UOp):
   if x.op is Ops.AFTER: return _src(x.src[0])
@@ -96,11 +118,16 @@ def _src(x:UOp):
     if x.dtype.scalar() is dtypes.float16: return struct.unpack("H", struct.pack("e", float(x.arg)))[0]
     return int(x.arg)
   if not isinstance(x.reg, Register): raise CompileError(f"AMD renderer expected register source for {x}")
-  return _reg_to_amd(x.reg, 2 if x.dtype.itemsize == 8 else 1)
+  if x.dtype.count > 1: return _reg_lane(x.reg, 0)
+  return _reg_to_amd(x.reg, _reg_slots(x.dtype))
 
 def _dst(x:UOp) -> Reg:
   if not isinstance(x.reg, Register): raise CompileError(f"AMD renderer expected destination register for {x}")
-  return _reg_to_amd(x.reg, 2 if x.dtype.itemsize == 8 else 1)
+  return _reg_to_amd(x.reg, _reg_slots(x.dtype))
+
+def _full_src(x:UOp) -> Reg:
+  if not isinstance(x.reg, Register): raise CompileError(f"AMD renderer expected register source for {x}")
+  return _reg_to_amd(x.reg, _reg_slots(x.dtype))
 
 def _reg_idxs(x:UOp) -> set[int]:
   if x.op is Ops.AFTER: return set().union(*(_reg_idxs(s) for s in x.src))
@@ -117,6 +144,9 @@ def _wait_domain_for_load(u:UOp) -> str|None:
   return None
 
 def _global_load(dt:DType):
+  if dt.count > 1:
+    if dt.scalar() is not dtypes.float32: return None
+    return {8: r3.global_load_b64, 16: r3.global_load_b128}.get(dt.itemsize)
   return {
     dtypes.bool: r3.global_load_u8, dtypes.uint8: r3.global_load_u8, dtypes.int8: r3.global_load_i8,
     dtypes.uint16: r3.global_load_u16, dtypes.int16: r3.global_load_i16, dtypes.float16: r3.global_load_u16,
@@ -124,6 +154,9 @@ def _global_load(dt:DType):
   }.get(dt.scalar())
 
 def _global_store(dt:DType):
+  if dt.count > 1:
+    if dt.scalar() is not dtypes.float32: return None
+    return {8: r3.global_store_b64, 16: r3.global_store_b128}.get(dt.itemsize)
   return {
     dtypes.bool: r3.global_store_b8, dtypes.uint8: r3.global_store_b8, dtypes.int8: r3.global_store_b8,
     dtypes.uint16: r3.global_store_b16, dtypes.int16: r3.global_store_b16, dtypes.float16: r3.global_store_b16,
@@ -131,6 +164,7 @@ def _global_store(dt:DType):
   }.get(dt.scalar())
 
 def _scratch_load(dt:DType):
+  if dt.count > 1: return None
   return {
     dtypes.bool: r3.scratch_load_u8, dtypes.uint8: r3.scratch_load_u8, dtypes.int8: r3.scratch_load_i8,
     dtypes.uint16: r3.scratch_load_u16, dtypes.int16: r3.scratch_load_i16, dtypes.float16: r3.scratch_load_u16,
@@ -138,6 +172,7 @@ def _scratch_load(dt:DType):
   }.get(dt.scalar())
 
 def _scratch_store(dt:DType):
+  if dt.count > 1: return None
   return {
     dtypes.bool: r3.scratch_store_b8, dtypes.uint8: r3.scratch_store_b8, dtypes.int8: r3.scratch_store_b8,
     dtypes.uint16: r3.scratch_store_b16, dtypes.int16: r3.scratch_store_b16, dtypes.float16: r3.scratch_store_b16,
@@ -145,6 +180,9 @@ def _scratch_store(dt:DType):
   }.get(dt.scalar())
 
 def _local_load(dt:DType):
+  if dt.count > 1:
+    if dt.scalar() is not dtypes.float32: return None
+    return {8: r3.ds_load_b64, 16: r3.ds_load_b128}.get(dt.itemsize)
   return {
     dtypes.bool: r3.ds_load_u8, dtypes.uint8: r3.ds_load_u8, dtypes.int8: r3.ds_load_i8,
     dtypes.uint16: r3.ds_load_u16, dtypes.int16: r3.ds_load_i16, dtypes.float16: r3.ds_load_u16,
@@ -152,6 +190,9 @@ def _local_load(dt:DType):
   }.get(dt.scalar())
 
 def _local_store(dt:DType):
+  if dt.count > 1:
+    if dt.scalar() is not dtypes.float32: return None
+    return {8: r3.ds_store_b64, 16: r3.ds_store_b128}.get(dt.itemsize)
   return {
     dtypes.bool: r3.ds_store_b8, dtypes.uint8: r3.ds_store_b8, dtypes.int8: r3.ds_store_b8,
     dtypes.uint16: r3.ds_store_b16, dtypes.int16: r3.ds_store_b16, dtypes.float16: r3.ds_store_b16,
@@ -268,15 +309,22 @@ def _new_promoted_reg(ctx:PreRegAllocContext, val:UOp) -> UOp:
   ctx.amd_reg_n += 1
   return UOp(Ops.INS, val.dtype, (val,), AMDOps.MOV, (Register(f"reg{n}", 0, _cons=VGPR),))
 
-def _load_ins(x:UOp, a:UOp) -> UOp:
+def _load_ins(x:UOp, a:UOp, alt:UOp|None=None, gate:UOp|None=None) -> UOp:
+  load_dtype = x.dtype.vec(a.src[2].arg) if a.op is Ops.SHRINK and x.dtype.count == 1 and a.src[2].op is Ops.CONST else x.dtype
+  if alt is not None and gate is not None:
+    raw = UOp(Ops.LOAD, load_dtype, (a,))
+    if load_dtype.count == 1: return gate.where(raw, alt)
+    return UOp(Ops.STACK, load_dtype, tuple(
+      gate.where(raw.index(UOp.const(dtypes.int32, i)), alt.index(UOp.const(dtypes.int32, i)) if alt.dtype.count > 1 else alt)
+      for i in range(load_dtype.count)))
   if _is_lds_ref(a.src[0]):
-    if _local_load(x.dtype) is None: raise CompileError(f"AMDRenderer does not support LDS loads for {x.dtype}")
-    return x.ins(AMDOps.LLOAD, src=(a.src[0], a.src[1]))
+    if _local_load(load_dtype) is None: raise CompileError(f"AMDRenderer does not support LDS loads for {load_dtype}")
+    return x.ins(AMDOps.LLOAD, dtype=load_dtype, src=(a.src[0], a.src[1]))
   if _is_scratch_ref(a.src[0]):
-    if _scratch_load(x.dtype) is None: raise CompileError(f"AMDRenderer does not support scratch loads for {x.dtype}")
-    return x.ins(AMDOps.SLOAD, src=(a.src[0], a.src[1]))
-  if _global_load(x.dtype) is None: raise CompileError(f"AMDRenderer does not support global loads for {x.dtype}")
-  return x.ins(AMDOps.LOAD, src=(a.src[0], a.src[1]))
+    if _scratch_load(load_dtype) is None: raise CompileError(f"AMDRenderer does not support scratch loads for {load_dtype}")
+    return x.ins(AMDOps.SLOAD, dtype=load_dtype, src=(a.src[0], a.src[1]))
+  if _global_load(load_dtype) is None: raise CompileError(f"AMDRenderer does not support global loads for {load_dtype}")
+  return x.ins(AMDOps.LOAD, dtype=load_dtype, src=(a.src[0], a.src[1]))
 
 def _store_ins(x:UOp, a:UOp, val:UOp) -> UOp:
   if _is_lds_ref(a.src[0]):
@@ -287,6 +335,26 @@ def _store_ins(x:UOp, a:UOp, val:UOp) -> UOp:
     return x.ins(AMDOps.SSTORE, src=(a.src[0], a.src[1], val))
   if _global_store(val.dtype) is None: raise CompileError(f"AMDRenderer does not support global stores for {val.dtype}")
   return x.ins(AMDOps.STORE, src=(a.src[0], a.src[1], val))
+
+def _lane_const(x:UOp) -> int|None:
+  if x.op is Ops.CONST: return x.arg
+  if x.op is Ops.INS and x.arg is AMDOps.MOV and len(x.src) == 1 and x.src[0].op is Ops.CONST: return x.src[0].arg
+  return None
+
+def _extract_vec_lane(x:UOp) -> UOp|None:
+  if len(x.src) != 2 or (lane:=_lane_const(x.src[1])) is None: return None
+  if x.src[0].dtype.count == 1 and lane == 0 and not isinstance(x.src[0].dtype, PtrDType): return x.src[0]
+  if x.src[0].dtype.count == 1: return None
+  if x.src[0].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer cannot extract scalar lanes from {x.src[0].dtype}")
+  if not 0 <= lane < x.src[0].dtype.count: raise CompileError(f"AMDRenderer vector lane {lane} out of range for {x.src[0].dtype}")
+  return UOp(Ops.INS, x.src[0].dtype.scalar(), (x.src[0], UOp.const(dtypes.int32, lane).rtag()), AMDOps.EXTRACT)
+
+def _pack_vec(x:UOp) -> UOp|None:
+  if x.dtype.count == 1 and len(x.src) <= 1: return None
+  pack_dtype = x.dtype.vec(len(x.src)) if x.dtype.count == 1 else x.dtype
+  if pack_dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer cannot pack {pack_dtype}")
+  if len(x.src) != pack_dtype.count: raise CompileError(f"AMDRenderer cannot pack {len(x.src)} values into {pack_dtype}")
+  return UOp(Ops.INS, pack_dtype, x.src, AMDOps.PACK, x.tag)
 
 AMD_ATOMIC_ADD = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
 def _atomic_add_ins(x:UOp) -> UOp|None:
@@ -457,6 +525,8 @@ def make_isel_matcher(sgpr_pool:tuple[Register, ...]=SGPR, vgpr_pool:tuple[Regis
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x: _lds_base(ctx, x)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x:
      UOp(Ops.INS, dtypes.uint32, (x.rtag(),), AMDOps.MOV, (ctx.vreg(_special_reg(x.arg)),)) if x.tag is None else None),
+    (UPat(Ops.INDEX, name="x"), _extract_vec_lane),
+    (UPat(Ops.STACK, name="x"), _pack_vec),
     (UPat.cvar("x", dtypes.ints+(dtypes.bool, dtypes.float16, dtypes.float32)), lambda x:
      x.ins(AMDOps.MOV, src=(x.rtag(),)) if not x.tag else None),
     ((UPat(Ops.MUL, (dtypes.float16, dtypes.float32), name="a") + UPat.var("b")).named("c"), _fused_mulacc),
@@ -484,8 +554,9 @@ def make_isel_matcher(sgpr_pool:tuple[Register, ...]=SGPR, vgpr_pool:tuple[Regis
     (UPat(Ops.CMPNE, name="x"), lambda x: x.ins(AMDOps.CMPNE, dtype=dtypes.bool)),
     (UPat(Ops.CMPEQ, name="x"), lambda x: x.ins(AMDOps.CMPEQ, dtype=dtypes.bool)),
     (UPat.var("m").where(UPat.var("a"), UPat.var("b")).named("x"), lambda m,a,b,x: x.ins(AMDOps.WHERE, src=(m, a, b))),
-    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, name="a"),), name="x"), _load_ins),
-    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="a"), UPat.var("val")), name="x"), _store_ins),
+    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool)), name="x"), _load_ins),
+    (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), name="a"),), name="x"), _load_ins),
+    (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat.var("val")), name="x"), _store_ins),
     (UPat(Ops.CUSTOM, name="x"), _atomic_add_ins),
     (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(AMDOps.BARRIER)),
     (UPat((Ops.INS, Ops.BUFFER), name="x"), lambda ctx,x,sgpr_pool=sgpr_pool,vgpr_pool=vgpr_pool: _alloc_vregs(ctx, x, sgpr_pool, vgpr_pool)),
@@ -547,9 +618,17 @@ def _vcc_rematerialize(ctx, x:UOp):
 def _lower_late_index(x:UOp) -> tuple[UOp, list[UOp]]:
   return x, []
 
-def _lower_late_store(x:UOp, a:UOp, val:UOp) -> tuple[UOp, list[UOp]]:
-  st = _store_ins(x, a, val)
-  return st, [st]
+def _store_addr(a:UOp) -> UOp:
+  return a if a.op in (Ops.INDEX, Ops.SHRINK) else UOp(Ops.INDEX, a.dtype, (a, UOp.const(dtypes.int32, 0).rtag()))
+
+def _lower_late_store(ctx, x:UOp, a:UOp, val:UOp, gate:UOp|None=None) -> tuple[UOp, list[UOp]]:
+  st = _store_ins(x, _store_addr(a), val)
+  if gate is None: return st, [st]
+  mif = UOp(Ops.INS, dtypes.void, (gate,), AMDOps.IF_MASK)
+  remat = _vcc_rematerialize(ctx, mif)
+  pre = remat[1] if remat is not None else [mif]
+  mend = UOp(Ops.INS, dtypes.void, (mif,), AMDOps.END_MASK)
+  return mend, [*pre, st, mend]
 
 def _promote_reg_buffer(ctx:PreRegAllocContext, x:UOp) -> tuple[UOp, list[UOp]]|None:
   if x.addrspace is not AddrSpace.REG or x not in _reg_promotable_buffers(ctx): return None
@@ -582,7 +661,9 @@ def _lower_late_endif(x:UOp) -> tuple[UOp, list[UOp]]:
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), _lower_late_index),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="a"), UPat.var("val")), name="x"), _lower_late_store),
+  (UPat(Ops.STORE, src=(UPat.var("a"), UPat.var("val"), UPat.var("gate", dtype=dtypes.bool)), name="x"), _lower_late_store),
+  (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat.var("val")), name="x"), _lower_late_store),
+  (UPat(Ops.STORE, src=(UPat.var("a"), UPat.var("val")), name="x"), _lower_late_store),
   (UPat(Ops.BUFFER, name="x"), _promote_reg_buffer),
   (UPat(Ops.INS, name="x"), _promote_reg_access),
   (UPat(Ops.IF, name="x"), _lower_late_if),
@@ -594,7 +675,8 @@ class AMDRenderer(ISARenderer):
   device = "AMD"
   has_local = True
   has_shared = True
-  supports_float4 = False
+  supports_float4 = True
+  float4_dtypes = (dtypes.float32,)
   preferred_reduce_group = 16
   global_max = (0x8fffffff, 0x8fffffff, 0x8fffffff)
   local_max = (1024, 1, 1)
@@ -646,8 +728,20 @@ class AMDRenderer(ISARenderer):
       case AMDOps.MOV:
         if not u.src or u.src[0].op is Ops.SPECIAL: return []
         if (sregs:=_reg_idxs(u.src[0])) and sregs == _reg_idxs(u): return []
+        if _reg_slots(u.dtype) > 1:
+          if not isinstance(u.src[0].reg, Register): raise CompileError(f"AMDRenderer expected vector register source for {u}")
+          return _parallel_vmov([(_reg_lane(u.reg, i), _reg_lane(u.src[0].reg, i)) for i in range(_reg_slots(u.dtype))])
         if u.reg.index < 256: return [r3.s_mov_b32(_dst(u), _src(u.src[0]))]
         return [r3.v_mov_b32_e32(_dst(u), _src(u.src[0]))]
+      case AMDOps.PACK:
+        if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports PACK for float32 vectors, got {u.dtype}")
+        return _parallel_vmov([(_reg_lane(u.reg, i), _src(s)) for i,s in enumerate(u.src)])
+      case AMDOps.EXTRACT:
+        lane = u.src[1].arg
+        if u.src[0].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports EXTRACT for float32 vectors, got {u.src[0].dtype}")
+        if not isinstance(u.src[0].reg, Register): raise CompileError(f"AMDRenderer expected vector register source for {u}")
+        src = _reg_lane(u.src[0].reg, lane)
+        return [] if isinstance(u.reg, Register) and u.reg.index == u.src[0].reg.index+lane else [r3.v_mov_b32_e32(_dst(u), src)]
       case AMDOps.ADD:
         if u.dtype.scalar() is dtypes.float16: return [r3.v_add_f16_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
         if u.dtype.scalar() is dtypes.float32: return [r3.v_add_f32_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
@@ -756,12 +850,12 @@ class AMDRenderer(ISARenderer):
         return pre + [r3.v_cndmask_b32_e32(_dst(u), _src(u.src[2]), true_val)]
       case AMDOps.LOAD:
         if (global_load:=_global_load(u.dtype)) is None: raise CompileError(f"AMDRenderer does not support global loads for {u.dtype}")
-        pre, addr = _scaled_addr(_dst(u), u.src[1], u.dtype.itemsize)
+        pre, addr = _scaled_addr(_dst(u) if _reg_slots(u.dtype) == 1 else TMP_VADDR, u.src[1], _mem_itemsize(u.dtype))
         return pre + [global_load(_dst(u), addr, saddr=_src(u.src[0]))]
       case AMDOps.STORE:
         if (global_store:=_global_store(u.src[2].dtype)) is None: raise CompileError(f"AMDRenderer does not support global stores for {u.src[2].dtype}")
-        pre, addr = _scaled_addr(TMP_VADDR, u.src[1], u.src[2].dtype.itemsize)
-        dpre, data = _vgpr_data(TMP_VDATA, u.src[2])
+        pre, addr = _scaled_addr(TMP_VADDR, u.src[1], _mem_itemsize(u.src[2].dtype))
+        dpre, data = ([], _full_src(u.src[2])) if _reg_slots(u.src[2].dtype) > 1 else _vgpr_data(TMP_VDATA, u.src[2])
         return pre + dpre + [global_store(addr=addr, data=data, saddr=_src(u.src[0]))]
       case AMDOps.ATOMIC_ADD:
         if u.src[2].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports f32 atomic add, got {u.src[2].dtype}")
@@ -771,12 +865,12 @@ class AMDRenderer(ISARenderer):
                              r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
       case AMDOps.LLOAD:
         if (local_load:=_local_load(u.dtype)) is None: raise CompileError(f"AMDRenderer does not support LDS loads for {u.dtype}")
-        pre, addr = _local_addr(u.src[0], u.src[1], u.dtype.itemsize)
+        pre, addr = _local_addr(u.src[0], u.src[1], _mem_itemsize(u.dtype))
         return pre + [local_load(vdst=_dst(u), addr=addr)]
       case AMDOps.LSTORE:
         if (local_store:=_local_store(u.src[2].dtype)) is None: raise CompileError(f"AMDRenderer does not support LDS stores for {u.src[2].dtype}")
-        pre, addr = _local_addr(u.src[0], u.src[1], u.src[2].dtype.itemsize)
-        dpre, data = _vgpr_data(TMP_VDATA, u.src[2])
+        pre, addr = _local_addr(u.src[0], u.src[1], _mem_itemsize(u.src[2].dtype))
+        dpre, data = ([], _full_src(u.src[2])) if _reg_slots(u.src[2].dtype) > 1 else _vgpr_data(TMP_VDATA, u.src[2])
         return pre + dpre + [local_store(addr=addr, data0=data), r3.s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)]
       case AMDOps.SLOAD:
         if (scratch_load:=_scratch_load(u.dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch loads for {u.dtype}")

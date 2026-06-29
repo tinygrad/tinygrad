@@ -1,7 +1,7 @@
 from typing import Any
 import itertools
 from collections import defaultdict
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType, PtrDType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import getenv, IMAGE, all_same
 from tinygrad.renderer import Renderer
@@ -60,13 +60,35 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
 
   # collect
   memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
-  for u in sink.toposort():
+  uops = sink.toposort()
+  def base_scalar(dt): return dt.base.scalar() if isinstance(dt, PtrDType) else dt.scalar()
+  if ctx is not None and ctx.float4_dtypes is not None and any(base_scalar(u.dtype) in (dtypes.bfloat16, *dtypes.fp8s) for u in uops):
+    return sink
+  uses: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  for u in uops:
+    for s in u.src: uses[s].append(u)
+  # Some ISA backends can only preserve vector memory semantics for a narrow dtype set.
+  # If a kernel mixes other storage dtypes, leave the whole memory graph scalar.
+  float4_safe = True
+  if ctx is not None and ctx.float4_dtypes is not None:
+    for u in uops:
+      if u.op not in {Ops.LOAD, Ops.STORE} or isinstance(u.src[0].src[0].dtype, ImageDType) or u.src[0].op is not Ops.INDEX: continue
+      value_dtype = u.src[1].dtype if u.op is Ops.STORE else u.dtype
+      if base_scalar(u.src[0].src[0].dtype) not in ctx.float4_dtypes or value_dtype.scalar() not in ctx.float4_dtypes:
+        float4_safe = False
+        break
+  for u in uops:
     # TODO: this should handle images too, it's just memory coalesing
     if u.op in {Ops.LOAD, Ops.STORE} and not isinstance(u.src[0].src[0].dtype, ImageDType):
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
       if u.src[0].op is not Ops.INDEX: continue
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
+      value_dtype = u.src[1].dtype if u.op is Ops.STORE else u.dtype
+      if ctx is not None and ctx.float4_dtypes is not None and not float4_safe: continue
+      if ctx is not None and ctx.float4_dtypes is not None and base_scalar(buf.dtype) != value_dtype.scalar(): continue
+      if ctx is not None and ctx.float4_dtypes is not None and u.op is Ops.LOAD and any(v.op in {Ops.CAST, Ops.BITCAST} for v in uses[u]): continue
+      if ctx is not None and ctx.float4_dtypes is not None and u.op is Ops.STORE and u.src[1].op is Ops.BITCAST: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
       valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
@@ -91,7 +113,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       pass
     elif isinstance(buf.dtype, ImageDType):
       lengths = [4]
-    elif ctx is not None and ctx.supports_float4:
+    elif ctx is not None and ctx.supports_float4 and (ctx.float4_dtypes is None or buf.dtype.scalar() in ctx.float4_dtypes):
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded

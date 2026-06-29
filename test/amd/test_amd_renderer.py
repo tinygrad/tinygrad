@@ -29,6 +29,9 @@ def _amd_desc(prg):
   _, sections, _ = elf_loader(prg.src[4].arg)
   return amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(next(s.content for s in sections if s.name == ".rodata"))
 
+def _amd_inst_names(prg):
+  return [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+
 def _assert_abi_reg_isolation(testcase, prg):
   fixed_sgpr, fixed_vgpr = {0, 1, 2, 3, 4}, {256, 257, 258}
   for u in prg.src[2].src:
@@ -66,6 +69,24 @@ def _two_load_add_program():
 def _matmul64_program():
   with Context(BEAM=0):
     ast = (Tensor.empty(64, 64, device="AMD") @ Tensor.empty(64, 64, device="AMD")).schedule_linear().src[-1].src[0]
+  to_program_cache.clear()
+  return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
+
+def _float4_add_program():
+  with Context(BEAM=0):
+    ast = (Tensor.empty(2, 8, device="AMD") + Tensor.empty(2, 8, device="AMD")).schedule_linear().src[0].src[0]
+  to_program_cache.clear()
+  return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
+
+def _float4_lds_program():
+  with Context(BEAM=0):
+    ast = (Tensor.empty(1, 64, device="AMD").contiguous() @ Tensor.empty(64, 64, device="AMD").contiguous()).schedule_linear().src[0].src[0]
+  to_program_cache.clear()
+  return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
+
+def _half_add_program():
+  with Context(BEAM=0):
+    ast = (Tensor.empty(2, 8, device="AMD", dtype=dtypes.half) + Tensor.empty(2, 8, device="AMD", dtype=dtypes.half)).schedule_linear().src[0].src[0]
   to_program_cache.clear()
   return to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
 
@@ -677,7 +698,7 @@ class TestAMDRenderer(unittest.TestCase):
     renderer = AMDRenderer(Target("AMD", arch="gfx1100"))
     self.assertTrue(renderer.has_shared)
     self.assertTrue(renderer.has_local)
-    self.assertFalse(renderer.supports_float4)
+    self.assertTrue(renderer.supports_float4)
     self.assertEqual(renderer.local_prod_max, 1024)
 
   def test_scheduler_rejects_oversized_local_workgroup(self):
@@ -987,6 +1008,45 @@ class TestAMDRenderer(unittest.TestCase):
             for i,s in enumerate(scalars)]
     ctx = LinearScanRegallocContext(scalars + [vec] + uses, renderer)
     self.assertEqual(ctx.reals[len(scalars)][vvec].index, amd_isa.VGPR[0].index)
+
+  def test_parallel_vmov_preserves_overlapping_vector_pack_sources(self):
+    insts = amd_isa._parallel_vmov([(amd_isa.v[4], amd_isa.v[5]), (amd_isa.v[5], amd_isa.v[4])])
+    self.assertEqual([getattr(i, "op_name", "") for i in insts], ["V_MOV_B32_E32"] * 3)
+    self.assertEqual([str(i) for i in insts], [
+      "v_mov_b32_e32(v[254], v[5])",
+      "v_mov_b32_e32(v[5], v[4])",
+      "v_mov_b32_e32(v[4], v[254])",
+    ])
+
+  def test_float4_global_memory_uses_b128_and_scalarized_alu(self):
+    prg = _float4_add_program()
+    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is not Ops.INS for u in prg.src[2].src))
+    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertEqual(linear_ops.count(AMDOps.LOAD), 2)
+    self.assertEqual(linear_ops.count(AMDOps.STORE), 1)
+    self.assertIn(AMDOps.EXTRACT, linear_ops)
+    self.assertIn(AMDOps.PACK, linear_ops)
+    inst_names = _amd_inst_names(prg)
+    self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 2)
+    self.assertEqual(inst_names.count("GLOBAL_STORE_B128"), 1)
+
+  def test_float4_lds_memory_uses_ds_b128(self):
+    prg = _float4_lds_program()
+    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is not Ops.INS for u in prg.src[2].src))
+    inst_names = _amd_inst_names(prg)
+    self.assertIn("DS_STORE_B128", inst_names)
+    self.assertIn("DS_LOAD_B128", inst_names)
+
+  def test_half_memory_does_not_use_float4_coalescing(self):
+    prg = _half_add_program()
+    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertNotIn(AMDOps.PACK, linear_ops)
+    inst_names = _amd_inst_names(prg)
+    self.assertNotIn("GLOBAL_LOAD_B128", inst_names)
+    self.assertNotIn("GLOBAL_STORE_B128", inst_names)
 
   def test_int_signed_widen_cast_sign_extends(self):
     prg = _int_signed_widen_cast_program()
