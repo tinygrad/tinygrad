@@ -1,6 +1,6 @@
 import math, unittest
 from dataclasses import replace
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Context
 from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 _strip_unique_pm = PatternMatcher([
@@ -395,6 +395,24 @@ class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_3d(self):
     w = _t(1, 1, 2, 2, 2).float()
     _check(self, _t(1, 1, 3, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_winograd(self):
+    w, a = _t(2, 2, 3, 3).float(), _t(1, 2, 6, 6).float()
+    with Context(WINO=0): direct = a.conv2d(w).uop
+    with Context(WINO=1):
+      self.assertIsNot(a.conv2d(w).uop, direct)
+      _check(self, a, lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_image(self):
+    w, a = _t(4, 4, 3, 3).float(), _t(1, 4, 8, 8).float()
+    with Context(IMAGE=0): direct = a.conv2d(w).uop
+    with Context(IMAGE=1):
+      self.assertIsNot(a.conv2d(w).uop, direct)
+      _check(self, a, lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_dot_image(self):
+    y, a = _t(4, 3).float(), _t(2, 4).float()
+    with Context(IMAGE=0): direct = a.dot(y).uop
+    with Context(IMAGE=1):
+      self.assertIsNot(a.dot(y).uop, direct)
+      _check(self, a, lambda x: x.dot(y if isinstance(x, Tensor) else y.uop))
   def test_conv_transpose2d_basic(self):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop))
