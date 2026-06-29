@@ -181,16 +181,13 @@ def get_backend_pm(device:str|tuple[str,...], pm:str) -> PatternMatcher|None:
 
 @dataclass(frozen=True)
 class HCQInfo:
-  name:str = ""
-  estimates:Estimates = Estimates()
-  outs:tuple[int, ...] = ()
-  devs:tuple[str, ...] = ()
+  name:str
+  estimates:Estimates
+  device:tuple[str, ...]
+  queue:str
 
   params:tuple[int, ...] = ()
   inputs:int|None = None
-
-  @staticmethod
-  def from_call(call:UOp) -> HCQInfo: return HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), get_call_outs_ins(call)[0])
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -211,6 +208,167 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   stage = UOp.new_buffer("CPU", src.max_numel()*src.dtype.base.itemsize, dtypes.uint8)
   return UOp(Ops.LINEAR, dtypes.void, (src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy)])
+
+# *****************
+# 2.1. early hcq calls tracking
+
+def tag_hcq_calls(ctx:itertools.count, call:UOps):
+  if (hcq_devs:=next((b.device for b in call.src[1:] if b.device.split(":")[0] in HCQ_DEVS), None)) is None: return None
+
+  queue = "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0"
+  info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), to_tuple(hcq_devs), queue)
+  return call.replace(arg=replace(call.arg, aux=info)).rtag(next(ctx))
+pm_tag_hcq_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), tag_hcq_calls)])
+
+# *****************
+# 2.2. early deps tracking
+# device.timeline_signal/value are the per-device schedule epoch. Before a schedule queue accesses memory owned by device N for the first time,
+# it waits for device[N].timeline_signal >= device[N].timeline_value - 1. This orders the schedule after all prior schedules that touched device N.
+#
+# queue.timeline_signal/value are per-queue progress counters used only inside a schedule.
+# Only the owner queue signals its queue.timeline_signal. Values are monotonic.
+#
+# At schedule end, one finalizer queue per touched device[N] waits for every active queue on device[N] to reach its schedule-local
+# final queue.timeline value, then signals device[N].timeline_signal with the schedule's reserved device epoch. After that, buffers/transients
+# for device N from this schedule are safe for the next schedule
+#
+# C programs reserve and bump timeline values, then patch command buffers with the concrete wait/signal values.
+
+class HCQDepsTracker(DepsTracker):
+  def _key(self, u:UOp) -> tuple[Any, int, int]:
+    if u.op is Ops.SLICE: return (r:=self._key(u.src[0]))[0], r[1]+(o:=u.src[1].arg*u.dtype.itemsize), r[1]+o+u.arg*u.dtype.itemsize
+    if u.op is Ops.MSELECT:
+      if u.src[0].op is Ops.MSTACK: return self._key(u.src[0].src[u.arg])
+      if u.src[0].op is Ops.PARAM: return ((r:=self._key(u.src[0]))[0], u.arg), r[1], r[2]
+      b = u.src[0].buffer.bufs[u.arg]
+      return id(b.base), b.offset, b.offset+b.nbytes
+    return (u.arg.slot, u.arg.name), 0, u.max_numel()*u.dtype.base.itemsize
+
+# *****************
+# 2.1. deps tracking
+
+def sched_sync(ctx:HCQDepsTracker, call:UOp) -> UOp|None:
+  if not isinstance(call.arg.aux, HCQInfo): return None
+
+  refs = get_call_arg_uops(call)
+  outs, _ = get_call_outs_ins(call)
+  devices, queue = call.arg.aux.device, call.arg.aux.queue
+
+  dep_lanes:list[tuple[UOp, int]] = []
+  for lane, d in enumerate(devices):
+    lane_refs = [b.mselect(lane) for b in refs] if len(devices) > 1 else refs
+    for dep, dlane in ctx.access_resources(lane_refs, outs, (call, lane)): dep_lanes.append((dep, dlane, lane))
+
+  if devices[0].split(":")[0] in {"AMD", "QCOM"} or queue.startswith("COPY"):
+    dep_lanes = [(dep, lane) for dep, dlane, lane in dep_lanes if (dep.arg.aux.device[dlane], dep.arg.aux.queue) != (devices[lane], queue)]
+
+  latest = {(dep.arg, lane): dep for dep, lane in sorted(dep_lanes, key=lambda x: x[0].tag)}
+  deps:dict[UOp, tuple[int, ...]] = collections.defaultdict(tuple)
+  for (_, lane), dep in latest.items(): deps[dep] += (lane,)
+
+  return call.after(*deps, arg=tuple(deps.values()))
+pm_sched_sync = PatternMatcher([(UPat(Ops.CALL, name="call"), sched_sync)])
+
+# *****************
+# 2.2. merge queues
+
+def _merged_hcq_call(calls:list[UOp]):
+  info = replace(unwrap_after(calls[0]).arg.aux, estimates=sum((unwrap_after(c).arg.aux.estimates for c in calls), start=Estimates()))
+  cmdbuf = make_submit(*calls, devs=info.device, queue=info.queue)
+  return UOp.custom_function("hcq", cmdbuf.sink()).call(aux=info)
+
+def merge_queues(linear:UOp) -> UOp:
+  new_src:list[UOp] = []
+  opened_qs:dict[tuple[tuple[str, ...], str], list[UOp]] = {} # (devs, queue) -> list of calls, kept in submit order
+
+  for call in linear.src:
+    if not isinstance(unwrap_after(call).arg.aux, HCQInfo):
+      new_src += [_merged_hcq_call(opened_qs.pop(k)) for k in list(opened_qs)] + [call]
+      continue
+
+    devices, queue = unwrap_after(call).arg.aux.device, unwrap_after(call).arg.aux.queue
+
+    if (old:=opened_qs.pop((devices, queue), None)) is not None: new_rec = old + [call]
+    else:
+      # no such queue opened: close every open submit on this queue that shares a device, so submit order is kept
+      closing = [k for k in opened_qs if k[1] == queue and set(k[0]) & set(devs)]
+      new_src += [_merged_hcq_call(opened_qs.pop(k)) for k in closing]
+      new_rec = [call]
+    opened_qs[(devices, queue)] = new_rec
+  return linear.replace(src=tuple(new_src + [_merged_hcq_call(c) for c in opened_qs.values()]))
+pm_merge_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), merge_queues)])
+
+# *****************
+# 2.2. finalizer
+
+def add_finalizer(ctx:itertools.count, linear:UOp) -> UOp:
+  # collect by device type
+  parts:dict[str, list[UOp]] = collections.defaultdict(list)
+  for call in linear.src:
+    if (c:=unwrap_after(call)).src[0].op is not Ops.CUSTOM_FUNCTION or c.src[0].arg != "hcq": continue
+    parts[c.arg.aux.device[0].split(':')[0]].append(unwrap_after(get_submit(call).src[0].src[0]))
+
+  nbump = next(ctx)
+  finalizers = []
+  for calls in parts.values():
+    devs = tuple(dedup(d for call in calls for d in unwrap_after(call).arg.aux.device))
+    zero = UOp.const(dtypes.int, 0)
+    tl = make_signal_value(devs)
+
+    # split each (multi-device) call into per-device deps, then store the device timeline value into the device signal after them
+    deps:dict[UOp, tuple[int, ...]] = collections.defaultdict(tuple)
+    for call in calls:
+      for d in unwrap_after(call).arg.aux.device: deps[call] += (devs.index(d),)
+    store = make_signal(devs).store(tl.index(zero)).after(*deps, arg=tuple(deps.values())).rtag("deps")
+    submit = make_submit(store, devs=devs, queue="COMPUTE:0")
+
+    upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), nbump) for qn in dedup([unwrap_after(call).arg.aux.queue for call in calls])]
+    patches = [s.after(submit).index(zero, dtype=s.dtype.ptr()).store(s.index(zero) + inc) for s, inc in upd]
+    finalizers.append(UOp.custom_function("hcq", UOp.barrier(*patches).sink()).call(aux=HCQInfo("hcq finalizer", Estimates(), devs, "COMPUTE:0")))
+  return linear.replace(src=linear.src + tuple(finalizers))
+pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finalizer)])
+
+# *****************
+# 2.4. global sync
+
+def add_global_sync(ctx:set[tuple[str, ...]], submit:UOp, q:UOp) -> UOp|None:
+  if (devs:=q.arg[0]) in ctx: return None
+  ctx.add(devs)
+
+  # some devices from a command buffer might be used for the first time this schedule, so we wait for their global timeline epoch.
+  wait = make_signal(devs).wait(make_signal_value(devs).index(UOp.const(dtypes.int, 0)) - 1)
+  return submit.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), wait, *q.src)),))
+pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_global_sync)])
+
+# *****************
+# 3.1. lower loads/stores
+
+def add_loads(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
+  if (deps:=next((s for s in q.src if s.op is Ops.AFTER), None)) is None: return None
+  cur_devs = q.arg[0]
+
+  waits = []
+  for lanes, dep in zip(deps.arg, deps.src[1:]):
+    devs, queue = dep.arg.aux.device, dep.arg.aux.queue
+    ctx.add(dep.tag) # mark op to update signal.
+
+    # for lanes that need this dep, wait on the dep device's signal/value; other lanes get a passing sentinel
+    lanes = set(lanes)
+    sig = make_mstack([make_signal(devs[j] if j in lanes else d, queue=queue, sentinel=j not in lanes) for j, d in enumerate(cur_devs)])
+    val = make_mstack([make_signal_value(devs[j] if j in lanes else d, queue=queue) for j, d in enumerate(cur_devs)]).index(UOp.const(dtypes.int, 0))
+    waits.append(sig.wait(val + dep.tag))
+  return submit.replace(src=(q.replace(src=tuple(deps.src[0].replace(src=tuple(waits) + deps.src[0].src) if s is deps else s for s in q.src)),))
+pm_add_inner_loads = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_loads)])
+
+def add_stores(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
+  sub = {}
+  devs, queue = q.arg
+  for op in q.src:
+    if (sigval:=unwrap_after(op).tag) in ctx:
+      sig = make_signal(devs, queue=queue).store(make_signal_value(devs, queue=queue).index(UOp.const(dtypes.int, 0)) + sigval)
+      sub[op] = UOp(Ops.LINEAR, dtypes.void, src=(op, sig))
+  return submit.substitute(sub, walk=True) if sub else None
+pm_add_inner_stores = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_stores)])
 
 # *****************
 # 2.1. hcq lowering: programs/kernargs
@@ -276,149 +434,77 @@ pm_lower_ops = PatternMatcher([
 #
 # C programs reserve and bump timeline values, then patch command buffers with the concrete wait/signal values.
 
-@dataclass
-class DepsCtx:
-  deps:DepsTracker = field(default_factory=DepsTracker)
-  opid:itertools.count = field(default_factory=lambda: itertools.count(0))
-  last_per_queue:weakref.WeakValueDictionary[tuple[Any, str], UOp] = field(default_factory=weakref.WeakValueDictionary)
-  params:dict[tuple[int, int], Buffer] = field(default_factory=dict)
+# @dataclass
+# class DepsCtx:
+#   deps:DepsTracker = field(default_factory=DepsTracker)
+#   opid:itertools.count = field(default_factory=lambda: itertools.count(0))
+#   last_per_queue:weakref.WeakValueDictionary[tuple[Any, str], UOp] = field(default_factory=weakref.WeakValueDictionary)
+#   params:dict[tuple[int, int], Buffer] = field(default_factory=dict)
 
-def get_dep_buf(ctx:DepsCtx, u:UOp, lane:int) -> Buffer:
-  # TODO: should this be a part of DepsTracker?
-  if u.op is Ops.PARAM: return ctx.params.setdefault((u.arg.slot, lane), Buffer("NULL", u.max_numel(), u.dtype.base))
-  if u.op is Ops.MSTACK: return get_dep_buf(ctx, u.src[lane], 0)
-  if u.op in (Ops.SLICE, Ops.MSELECT): return get_dep_buf(ctx, u.src[0], u.arg if u.op is Ops.MSELECT else lane)
-  return b.bufs[lane] if isinstance(b:=u.buffer, MultiBuffer) else b
+# def get_dep_buf(ctx:DepsCtx, u:UOp, lane:int) -> Buffer:
+#   # TODO: should this be a part of DepsTracker?
+#   if u.op is Ops.PARAM: return ctx.params.setdefault((u.arg.slot, lane), Buffer("NULL", u.max_numel(), u.dtype.base))
+#   if u.op is Ops.MSTACK: return get_dep_buf(ctx, u.src[lane], 0)
+#   if u.op in (Ops.SLICE, Ops.MSELECT): return get_dep_buf(ctx, u.src[0], u.arg if u.op is Ops.MSELECT else lane)
+#   return b.bufs[lane] if isinstance(b:=u.buffer, MultiBuffer) else b
 
-def schedule_inner_sync(ctx:DepsCtx, linear:UOp) -> UOp:
-  new_src = []
-  for call in linear.src:
-    if call.src[0].op is not Ops.CUSTOM_FUNCTION or call.src[0].arg != "hcq":
-      new_src.append(call)
-      continue
+# def schedule_inner_sync(ctx:DepsCtx, linear:UOp) -> UOp:
+#   new_src = []
+#   for call in linear.src:
+#     if call.src[0].op is not Ops.CUSTOM_FUNCTION or call.src[0].arg != "hcq":
+#       new_src.append(call)
+#       continue
 
-    new_q = ctx.last_per_queue[q.arg] = (q:=get_submit(call.src[0]).src[0]).rtag(next(ctx.opid))
-    qdevs, refs = to_tuple(new_q.arg[0]), get_call_arg_uops(new_q.src[0])
+#     new_q = ctx.last_per_queue[q.arg] = (q:=get_submit(call.src[0]).src[0]).rtag(next(ctx.opid))
+#     qdevs, refs = to_tuple(new_q.arg[0]), get_call_arg_uops(new_q.src[0])
 
-    # per-lane deps, tracked per (device, queue). skip self
-    dep_lanes:list[tuple[UOp, int]] = []
-    for lane, d in enumerate(qdevs):
-      for dep in ctx.deps.access_resources([get_dep_buf(ctx, b, lane) for b in refs], call.arg.aux.outs, new_q.replace(arg=(d, new_q.arg[1]))):
-        if dep.tag != new_q.tag: dep_lanes.append((dep, lane))
+#     # per-lane deps, tracked per (device, queue). skip self
+#     dep_lanes:list[tuple[UOp, int]] = []
+#     for lane, d in enumerate(qdevs):
+#       for dep in ctx.deps.access_resources([get_dep_buf(ctx, b, lane) for b in refs], call.arg.aux.outs, new_q.replace(arg=(d, new_q.arg[1]))):
+#         if dep.tag != new_q.tag: dep_lanes.append((dep, lane))
 
-    # drop self-queue waits, queue self-orders
-    if qdevs[0].split(":")[0] in {"AMD", "QCOM"} or new_q.arg[1].startswith("COPY"):
-      dep_lanes = [(dep, lane) for dep, lane in dep_lanes if dep.arg != (qdevs[lane], new_q.arg[1])]
+#     # drop self-queue waits, queue self-orders
+#     if qdevs[0].split(":")[0] in {"AMD", "QCOM"} or new_q.arg[1].startswith("COPY"):
+#       dep_lanes = [(dep, lane) for dep, lane in dep_lanes if dep.arg != (qdevs[lane], new_q.arg[1])]
 
-    # keep latest dep per lane, group lanes
-    latest = {(dep.arg, lane): dep for dep, lane in sorted(dep_lanes, key=lambda x: x[0].tag)}
-    deps:dict[UOp, tuple[int, ...]] = collections.defaultdict(tuple)
-    for (_, lane), dep in latest.items(): deps[dep] += (lane,)
+#     # keep latest dep per lane, group lanes
+#     latest = {(dep.arg, lane): dep for dep, lane in sorted(dep_lanes, key=lambda x: x[0].tag)}
+#     deps:dict[UOp, tuple[int, ...]] = collections.defaultdict(tuple)
+#     for (_, lane), dep in latest.items(): deps[dep] += (lane,)
 
-    if deps: new_q = new_q.after(*deps, arg=tuple(deps.values())).rtag("deps")
-    new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}),)))
-  return linear.replace(src=tuple(new_src))
-pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_inner_sync)])
+#     if deps: new_q = new_q.after(*deps, arg=tuple(deps.values())).rtag("deps")
+#     new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}),)))
+#   return linear.replace(src=tuple(new_src))
+# pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_inner_sync)])
 
 # *****************
 # 3.2. finalizer
 
-def make_finalizer(queues:list[UOp], nbump:int) -> UOp:
-  devs = tuple(dedup([d for q in queues for d in to_tuple(q.arg[0])]))
-  zero = UOp.const(dtypes.int, 0)
-  tl = make_signal_value(devs)
+# def make_finalizer(queues:list[UOp], nbump:int) -> UOp:
+#   devs = tuple(dedup([d for q in queues for d in to_tuple(q.arg[0])]))
+#   zero = UOp.const(dtypes.int, 0)
+#   tl = make_signal_value(devs)
 
-  # queue is inc with deps
-  submit = make_submit(make_signal(devs).store(tl.index(zero)), devs=devs, queue="COMPUTE:0")
+#   # queue is inc with deps
+#   submit = make_submit(make_signal(devs).store(tl.index(zero)), devs=devs, queue="COMPUTE:0")
 
-  # split each (multi-device) queue into per-device deps so each finalizer lane waits on the matching device's signal
-  lane_queues = [(q.replace(arg=(d, q.arg[1])), (devs.index(d),)) for q in queues for d in to_tuple(q.arg[0])]
-  submit = submit.replace(src=(submit.src[0].after(*(q for q, _ in lane_queues), arg=tuple(l for _, l in lane_queues)).rtag("deps"),))
+#   # split each (multi-device) queue into per-device deps so each finalizer lane waits on the matching device's signal
+#   lane_queues = [(q.replace(arg=(d, q.arg[1])), (devs.index(d),)) for q in queues for d in to_tuple(q.arg[0])]
+#   submit = submit.replace(src=(submit.src[0].after(*(q for q, _ in lane_queues), arg=tuple(l for _, l in lane_queues)).rtag("deps"),))
 
-  upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), nbump) for qn in dedup([q.arg[1] for q in queues])]
-  patches = [s.after(submit).index(zero, dtype=s.dtype.ptr()).store(s.index(zero) + inc) for s, inc in upd]
-  return UOp.barrier(*patches).sink().call(aux=HCQInfo("hcq finalizer")).rtag("hcq")
+#   upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), nbump) for qn in dedup([q.arg[1] for q in queues])]
+#   patches = [s.after(submit).index(zero, dtype=s.dtype.ptr()).store(s.index(zero) + inc) for s, inc in upd]
+#   return UOp.barrier(*patches).sink().call(aux=HCQInfo("hcq finalizer")).rtag("hcq")
 
-def add_finalizer(ctx:DepsCtx, linear:UOp) -> UOp:
-  parts:dict[str, list[UOp]] = collections.defaultdict(list)
-  for d, q in ctx.last_per_queue.items(): parts[to_tuple(d[0])[0].split(':')[0]].append(q)
+# def add_finalizer(ctx:DepsCtx, linear:UOp) -> UOp:
+#   parts:dict[str, list[UOp]] = collections.defaultdict(list)
+#   for d, q in ctx.last_per_queue.items(): parts[to_tuple(d[0])[0].split(':')[0]].append(q)
 
-  nbump = next(ctx.opid)
-  return linear.replace(src=linear.src + tuple([make_finalizer(queues, nbump) for queues in parts.values()]))
-pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finalizer)])
+#   nbump = next(ctx.opid)
+#   return linear.replace(src=linear.src + tuple([make_finalizer(queues, nbump) for queues in parts.values()]))
+# pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finalizer)])
 
-# *****************
-# 3.3. lower loads/stores
-
-def add_loads(ctx:set[int], deps:UOp) -> UOp:
-  cur_devs = to_tuple((cur:=deps.src[0]).arg[0])
-
-  waits = []
-  for lanes, dep in zip(deps.arg, deps.src[1:]):
-    dep_dev, queue = dep.arg # dep_dev is a single device (deps are recorded per-device)
-    ctx.add(dep.tag) # mark op to update signal.
-
-    # for lanes that need this dep, wait on the dep device's signal/value; other lanes get a passing sentinel
-    lanes = set(lanes)
-    sig = make_mstack([make_signal(dep_dev if j in lanes else d, queue=queue, sentinel=j not in lanes) for j, d in enumerate(cur_devs)])
-    val = make_mstack([make_signal_value(dep_dev if j in lanes else d, queue=queue) for j, d in enumerate(cur_devs)]).index(UOp.const(dtypes.int, 0))
-    waits.append(sig.wait(val + dep.tag))
-  return cur.replace(src=tuple(waits) + cur.src)
-pm_add_inner_loads = PatternMatcher([(UPat(Ops.AFTER, tag="deps", name="deps"), add_loads)])
-
-def add_stores(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
-  if q.tag not in ctx: return None
-  devs, queue = q.arg
-  src = q.src + (make_signal(devs, queue=queue).store(make_signal_value(devs, queue=queue).index(UOp.const(dtypes.int, 0)) + q.tag),)
-  return submit.replace(src=(q.replace(src=src, tag=None),))
-pm_add_inner_stores = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_stores)])
-
-# *****************
-# 4.1. merge queues
-
-def merge_sink(sinks:list[UOp]) -> UOp:
-  if len(sinks) == 1: return sinks[0]
-  submits = [get_submit(sink) for sink in sinks]
-  queues = [submit.src[0] for submit in submits]
-  anchor = submits[-1].replace(src=(queues[-1].replace(src=tuple(x for q in queues for x in q.src)),))
-  for sink, submit in zip(sinks[:-1], submits[:-1]):
-    if sink.src[0] is not submit: anchor = sink.src[0].substitute({submit: anchor}, walk=True)
-  return sinks[-1].substitute({submits[-1]: anchor}, walk=True)
-
-def merge_queues(linear:UOp) -> UOp:
-  new_src:list[UOp] = []
-  opened_qs:dict[tuple[tuple[str, ...], str], tuple[list[UOp], HCQInfo]] = {} # (devs, queue) -> (sinks, aux), kept in submit order
-
-  for call in linear.src:
-    # finalizer cannot be merged, since it bumps inner signal (this introduces race when multidevs).
-    if call.tag != "hcq" or (call.tag == "hcq" and call.arg.aux.name == "hcq finalizer"):
-      new_src += [merge_sink((sa:=opened_qs.pop(k))[0]).call(aux=sa[1]).rtag("hcq") for k in list(opened_qs)] + [call]
-      continue
-
-    devs, queue = get_submit(new_sink:=call.src[0]).src[0].arg
-    new_rec = ([new_sink], call.arg.aux)
-    if (old:=opened_qs.pop((devs, queue), None)) is not None:
-      new_rec = (old[0] + [new_sink], replace(new_rec[1], name=f"{queue.lower()} submit", estimates=old[1].estimates + new_rec[1].estimates))
-    else:
-      # no such queue opened: close every open submit on this queue that shares a device, so submit order is kept
-      closing = [k for k in opened_qs if k[1] == queue and set(k[0]) & set(devs)]
-      new_src += [merge_sink((sa:=opened_qs.pop(k))[0]).call(aux=sa[1]).rtag("hcq") for k in closing]
-    opened_qs[(devs, queue)] = new_rec
-
-  return linear.replace(src=tuple(new_src + [merge_sink(sinks).call(aux=aux).rtag("hcq") for sinks, aux in opened_qs.values()]))
-pm_merge_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), merge_queues)])
-
-# *****************
-# 4.2. global sync
-
-def add_global_sync(ctx:set[tuple[str, ...]], submit:UOp, q:UOp) -> UOp|None:
-  if (devs:=q.arg[0]) in ctx: return None
-  ctx.add(devs)
-
-  # some devices from a command buffer might be used for the first time this schedule, so we wait for their global timeline epoch.
-  wait = make_signal(devs).wait(make_signal_value(devs).index(UOp.const(dtypes.int, 0)) - 1)
-  return submit.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), wait, *q.src)),))
-pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_global_sync)])
 
 # *****************
 # 4.3. annotate exec devs
@@ -581,9 +667,27 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), callif
 @track_rewrites(lambda _,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_replace_buffers, ctx=(buffers_map:={}), walk=True, enter_calls=True, name="replace buffer")
+
+  # schedule
   linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
+  linear = graph_rewrite(linear, pm_tag_hcq_calls, ctx=(enumerator:=itertools.count(0)), walk=True, name="tag hcq calls")
+  linear = graph_rewrite(linear, pm_sched_sync, ctx=(deps_ctx:=HCQDepsTracker()), walk=True, name="schedule sync")
+  linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
+  linear = graph_rewrite(linear, pm_add_finalizer, ctx=enumerator, walk=True, name="add finalizer")
+  linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
+
+  # lowering to hcq ir
+  linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
+
+  # linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
+  # linear = graph_rewrite(linear, pm_lower_ops, name="lower ops into hcq ir")
+  exit(0)
+
   linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
   linear = graph_rewrite(linear, pm_lower_ops, name="lower ops into hcq ir")
+
+  exit(0)
 
   linear = graph_rewrite(linear, pm_schedule_inner_sync, ctx=(deps_ctx:=DepsCtx()), walk=True, name="schedule inner sync")
 
