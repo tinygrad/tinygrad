@@ -951,6 +951,18 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertIs(out.src[1], val)
     self.assertEqual(lst, [out])
 
+  def test_regalloc_rewrites_surviving_shrink(self):
+    renderer = AMDRenderer(Target("AMD", arch="gfx1100"))
+    src = UOp(Ops.INS, dtypes.float32, (UOp.const(dtypes.float32, 1.0).rtag(),), AMDOps.MOV,
+              (amd_isa.Register("src", 0, _cons=amd_isa.VGPR),))
+    shrink = UOp(Ops.SHRINK, dtypes.float32, (src, UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 1)), tag=(
+      amd_isa.Register("shrunk", 1, _cons=amd_isa.VGPR),))
+    dst = UOp(Ops.INS, dtypes.float32, (shrink,), AMDOps.MOV, (amd_isa.Register("dst", 2, _cons=amd_isa.VGPR),))
+    out = line_rewrite([src, shrink, dst], pm_regalloc_rewrite, LinearScanRegallocContext([src, shrink, dst], renderer))
+    self.assertEqual([u.op for u in out], [Ops.INS, Ops.SHRINK, Ops.INS])
+    self.assertIsInstance(out[1].reg, amd_isa.Register)
+    self.assertIs(out[2].src[0], out[1])
+
   def test_int_signed_widen_cast_sign_extends(self):
     prg = _int_signed_widen_cast_program()
     self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
