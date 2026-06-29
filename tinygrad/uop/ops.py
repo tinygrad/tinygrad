@@ -84,7 +84,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
+  elif len(arg) == 1: return UOp.const(dtypes.weakint, arg[0])
   else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
@@ -811,6 +811,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     numel = self.numel()
     out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
+    if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
     if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
       if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
       return out.src[1].arg
