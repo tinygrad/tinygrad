@@ -1259,6 +1259,20 @@ class TestAMDRenderer(unittest.TestCase):
           scratch = next(i for i in insts if type(i).__name__ == "SCRATCH")
           self.assertEqual(scratch.addr, amd_isa.TMP_VADDR)
 
+  def test_vector_vgpr_spill_expands_to_scalar_scratch_lanes(self):
+    renderer = AMDRenderer(Target("AMD", arch="gfx1100"))
+    disp = UOp.const(dtypes.int32, 64)
+    src = UOp(Ops.INS, dtypes.float32.vec(4), arg=AMDOps.DEFINE, tag=(amd_isa.Register("v20", 276),))
+    spill = UOp(Ops.INS, dtypes.void, (disp, src), AMDOps.SPILL)
+    fill = UOp(Ops.INS, dtypes.float32.vec(4), (disp,), AMDOps.FILL, (amd_isa.Register("v40", 296),))
+    spill_insts, fill_insts = renderer._insts_for_uop(spill), renderer._insts_for_uop(fill)
+    self.assertEqual([getattr(i, "op_name", "") for i in spill_insts], ["V_MOV_B32_E32"] + ["SCRATCH_STORE_B32"]*4 + ["S_WAITCNT_VMCNT"])
+    self.assertEqual([i.offset for i in spill_insts[1:5]], [64, 68, 72, 76])
+    self.assertEqual([i.data for i in spill_insts[1:5]], [amd_isa.v[20], amd_isa.v[21], amd_isa.v[22], amd_isa.v[23]])
+    self.assertEqual([getattr(i, "op_name", "") for i in fill_insts], ["V_MOV_B32_E32"] + ["SCRATCH_LOAD_B32"]*4)
+    self.assertEqual([i.offset for i in fill_insts[1:]], [64, 68, 72, 76])
+    self.assertEqual([i.vdst for i in fill_insts[1:]], [amd_isa.v[40], amd_isa.v[41], amd_isa.v[42], amd_isa.v[43]])
+
   def test_range_loop_assembles_with_branch_fixups(self):
     prg = _range_program()
     self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))

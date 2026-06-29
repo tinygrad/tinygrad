@@ -885,12 +885,22 @@ class AMDRenderer(ISARenderer):
         return [r3.s_barrier()]
       case AMDOps.FILL:
         if u.reg.index < 256: raise CompileError("AMDRenderer does not support SGPR scratch fills yet")
-        if u.src[0].arg >= 4096: raise CompileError("AMDRenderer scratch fill offset exceeds 13-bit immediate range")
+        slots = _reg_slots(u.dtype)
+        if u.src[0].arg + (slots-1)*4 >= 4096: raise CompileError("AMDRenderer scratch fill offset exceeds 13-bit immediate range")
+        if slots > 1:
+          if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer does not support vector scratch fills for {u.dtype}")
+          return [r3.v_mov_b32_e32(TMP_VADDR, 0)] + [r3.scratch_load_b32(addr=TMP_VADDR, vdst=_reg_lane(u.reg, i), offset=u.src[0].arg + i*4) for i in range(slots)]
         if (scratch_load:=_scratch_load(u.dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch fills for {u.dtype}")
         return [r3.v_mov_b32_e32(TMP_VADDR, 0), scratch_load(addr=TMP_VADDR, vdst=_dst(u), offset=u.src[0].arg)]
       case AMDOps.SPILL:
         if u.src[1].reg.index < 256: raise CompileError("AMDRenderer does not support SGPR scratch spills yet")
-        if u.src[0].arg >= 4096: raise CompileError("AMDRenderer scratch spill offset exceeds 13-bit immediate range")
+        slots = _reg_slots(u.src[1].dtype)
+        if u.src[0].arg + (slots-1)*4 >= 4096: raise CompileError("AMDRenderer scratch spill offset exceeds 13-bit immediate range")
+        if slots > 1:
+          if u.src[1].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer does not support vector scratch spills for {u.src[1].dtype}")
+          return [r3.v_mov_b32_e32(TMP_VADDR, 0)] + \
+                 [r3.scratch_store_b32(addr=TMP_VADDR, data=_reg_lane(u.src[1].reg, i), offset=u.src[0].arg + i*4) for i in range(slots)] + \
+                 [r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
         if (scratch_store:=_scratch_store(u.src[1].dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch spills for {u.src[1].dtype}")
         return [r3.v_mov_b32_e32(TMP_VADDR, 0), scratch_store(addr=TMP_VADDR, data=_src(u.src[1]), offset=u.src[0].arg),
                 r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
