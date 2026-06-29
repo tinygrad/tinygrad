@@ -91,7 +91,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       if ctx is not None and ctx.float4_dtypes is not None and u.op is Ops.STORE and u.src[1].op is Ops.BITCAST: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
       valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
-      # Wide ISA loads cannot be guarded per lane; padded/OOB accesses must stay scalar.
+      # A wide ISA memory op touches every physical lane before a valid mask can discard padded/OOB lanes.
       if ctx is not None and ctx.float4_dtypes is not None and valid is not None: continue
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
