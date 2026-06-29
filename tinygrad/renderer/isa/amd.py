@@ -595,6 +595,7 @@ class AMDRenderer(ISARenderer):
   has_local = True
   has_shared = True
   supports_float4 = False
+  preferred_reduce_group = 16
   global_max = (0x8fffffff, 0x8fffffff, 0x8fffffff)
   local_max = (1024, 1, 1)
   local_prod_max = 1024

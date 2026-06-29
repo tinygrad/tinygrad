@@ -81,6 +81,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k
 
+  # simple partial reductions benefit from GROUP over GROUPTOP on backends that opt in.
+  if k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and k.ren.preferred_reduce_group is not None and \
+     len(k.axes_of(AxisType.REDUCE)) == 1 and k.reduceop.src[0].op is Ops.INDEX and resolve(prod(k.output_shape) > 1, False):
+    try: k.apply_opt(Opt(OptOps.GROUP, 0, k.ren.preferred_reduce_group))
+    except KernelOptError: pass
+    else: return k
+
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
     for axis, sz in itertools.product((0, 1, 2), (16,)):

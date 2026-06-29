@@ -682,6 +682,13 @@ class TestAMDRenderer(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       to_program(ast.replace(arg=replace(ast.arg, opts_to_apply=(Opt(OptOps.GROUP, 0, 0),))), AMDRenderer(Target("AMD", arch="gfx1100")))
 
+  def test_scheduler_prefers_group_for_simple_partial_sum(self):
+    with Context(DEV="MOCKKFD+AMD:AMD"):
+      ast = Tensor.empty(10_000_000).sum().schedule_linear().src[0].src[0]
+    prg = to_program(ast, AMDRenderer(Target("AMD", arch="gfx1100")))
+    self.assertEqual(prg.src[0].arg.applied_opts, (Opt(OptOps.GROUP, 0, 16),))
+    self.assertEqual(prg.arg.local_size, (16, 1, 1))
+
   def test_to_program_assembles_elf(self):
     prg = _simple_add_program()
     self.assertIs(prg.src[3].op, Ops.SOURCE)
