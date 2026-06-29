@@ -811,6 +811,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     numel = self.numel()
     out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
+    if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
     if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
       if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
       return out.src[1].arg
