@@ -578,8 +578,8 @@ def callify_hcq(call:UOp) -> UOp:
   return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(prg,), arg="hcq").call(*call.src[1:], aux=call.arg.aux)
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), callify_hcq)])
 
-@track_rewrites(lambda _,ret: f"HCQ Schedule {pluralize('Kernel', len(ret.src))}")
-def hcq_schedule(linear:UOp) -> UOp:
+@track_rewrites(lambda _,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_replace_buffers, ctx=(buffers_map:={}), walk=True, enter_calls=True, name="replace buffer")
   linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
   linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
@@ -597,13 +597,11 @@ def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
   linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
   linear = graph_rewrite(linear, pm_pack_placeholders, walk=True, name="pack placeholders")
-  linear = graph_rewrite(linear, pm_hold_call_buffers, walk=True, name="hold call buffers")
-  return hcq_realize(linear)
+  return graph_rewrite(linear, pm_hold_call_buffers, walk=True, name="hold call buffers")
 
-def hcq_realize(linear:UOp) -> UOp:
+@track_rewrites(lambda _,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, bottom_up=True, walk=True, name="bufferize placeholders", enter_calls=True)
   linear = graph_rewrite(linear, pm_resolve_patches, bottom_up=False, name="simplify patches", enter_calls=True)
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, walk=True, name="parametrize host buffers")
-  linear = graph_rewrite(linear, pm_callify_hcq, name="callify hcq")
-
-  return linear
+  return graph_rewrite(linear, pm_callify_hcq, name="callify hcq")
