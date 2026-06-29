@@ -3,7 +3,7 @@ from typing import cast, Any, Callable
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, make_getaddr, make_ins, make_cmdbuf
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_getaddr, make_ins, make_cmdbuf
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -102,11 +102,12 @@ def pm4_timestamp(ctx, dst):
   return release_mem(ctx, make_getaddr(dst, ctx.devs), 0, ctx.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
                      ctx.pm4.int_sel__mec_release_mem__none)
 
-def pm4_program(ctx, prg):
+def pm4_program(ctx, call, prg):
   data, info = prg.arg
-  lib_gpu, args = prg.src
+  lib_gpu = prg.src[0]
+  args = encode_kernargs_clike(call, prg, ctx.devs)
   prog_addr = make_getaddr(lib_gpu, ctx.devs) + data.entry_point_offset
-  scratch_addr = make_getaddr(UOp.new_buffer(lib_gpu.device, data.private_segment_size, dtypes.uint8).rtag("scratch"), ctx.devs)
+  scratch_addr = make_getaddr(UOp.new_buffer(ctx.devs, data.private_segment_size, dtypes.uint8).rtag("scratch"), ctx.devs)
   args_addr = make_getaddr(args, ctx.devs)
 
   user_regs = []
@@ -136,7 +137,7 @@ def pm4_program(ctx, prg):
 pm_pm4_opsel = PatternMatcher([
   (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
   (UPat(Ops.BARRIER), pm4_barrier),
-  (UPat(Ops.PROGRAM, name="prg"), pm4_program),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
   (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), pm4_timestamp),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
 ])
@@ -522,14 +523,13 @@ class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf a
   gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
 
 def encode_queue(q:UOp) -> UOp|None:
-  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
   ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
   opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
   return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
 
 pm_lower = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
 ])
 
 class AMDDevice(HCQ2Compiled):

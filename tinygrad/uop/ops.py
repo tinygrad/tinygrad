@@ -1072,6 +1072,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].expr, addrspace)
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
+  @staticmethod
+  def custom_function(name:str, *src:UOp, dtype:DType=dtypes.void) -> UOp:
+    return UOp(Ops.CUSTOM_FUNCTION, dtype, src=src, arg=name)
+
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
