@@ -215,6 +215,13 @@ class TestViz(unittest.TestCase):
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
 
+  def test_walk_rewrite(self):
+    from tinygrad.uop.ops import _substitute
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      graph_rewrite(a + 4, TrackedPatternMatcher(_substitute.patterns), {a:a+1}, walk=True)
+    list(viz.get_details(0, 0))
+
   def test_const_node_visibility(self):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)

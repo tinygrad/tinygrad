@@ -1396,6 +1396,7 @@ class TrackedGraphRewrite:
   name:str                                      # name of the rewrite
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
+  walk:bool
 
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -1452,7 +1453,8 @@ def profile_matches(fxn:Callable):
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
       dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
-      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False),
+                                                               kwargs.get("walk", False)))
       active_rewrites.append(ctx)
       with cpu_profile(name, "TINY"):
         ret = fxn(*args, **kwargs)
