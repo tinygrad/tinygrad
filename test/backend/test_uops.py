@@ -249,7 +249,7 @@ class TestAssembly(unittest.TestCase):
     opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = to_program(ast, Device[Device.DEFAULT].renderer)
-    uops = tuple(program.src[2].src)
+    uops = tuple(program.src[1].src)
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):

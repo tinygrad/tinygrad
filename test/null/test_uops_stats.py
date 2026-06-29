@@ -185,7 +185,7 @@ class TestStatsOptimized(unittest.TestCase):
                       renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
-    print(p.src[3].arg)
+    print(p.src[2].arg)
     self.check_gemm(p)
 
   # this is a good lesson about why UPCASTing is a good idea

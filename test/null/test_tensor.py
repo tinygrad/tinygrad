@@ -57,7 +57,7 @@ class TestIdxUpcast(unittest.TestCase):
       if ast.op is Ops.SINK:
         renderer = Device[si.src[1].buffer.device].renderer
         prg = to_program(ast, renderer)
-        return tuple(prg.src[2].src)
+        return tuple(prg.src[1].src)
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
