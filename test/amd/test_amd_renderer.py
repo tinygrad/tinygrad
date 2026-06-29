@@ -1051,7 +1051,8 @@ class TestAMDRenderer(unittest.TestCase):
     inst_names = [getattr(i, "op_name", "") for i in insts]
     self.assertIn("V_CVT_F32_I32_E32", inst_names)
     rcp_idx = inst_names.index("V_RCP_F32_E32")
-    self.assertEqual(inst_names[rcp_idx:rcp_idx+4], ["V_RCP_F32_E32", "V_MUL_F32_E32", "V_SUB_F32_E32", "V_FMA_F32"])
+    self.assertEqual(inst_names[rcp_idx:rcp_idx+6],
+                     ["V_RCP_F32_E32", "V_MUL_F32_E32", "V_SUB_F32_E32", "V_FMA_F32", "V_CMP_EQ_F32_E32", "V_CNDMASK_B32_E32"])
     insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_float_to_int_cast_program().src[2])
     self.assertIn("V_CVT_I32_F32_E32", [getattr(i, "op_name", "") for i in insts])
 
