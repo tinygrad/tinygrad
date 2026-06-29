@@ -610,6 +610,9 @@ class AMDRenderer(ISARenderer):
     super().__init__(target)
 
   def stack_pointer(self) -> UOp: return UOp(Ops.INS, dtypes.uint32, arg=AMDOps.SCRATCH_BASE)
+  def register_slots(self, x:UOp, v:Register|None=None) -> int:
+    if v is None or x.dtype.count == 1 or not all(c.index >= 256 for c in v.cons): return 1
+    return max(1, (x.dtype.itemsize + 3) // 4)
   def copy(self, x:UOp, reg:Register) -> UOp:
     return UOp(Ops.INS, x.dtype, (x,), AMDOps.MOV, (reg,))
   def spill(self, disp:UOp, x:UOp) -> UOp:

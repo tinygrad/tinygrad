@@ -42,13 +42,22 @@ class LinearScanRegallocContext:
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
 
-    def alloc(cons:tuple[Register, ...], i:int) -> Register:
-      live_inv = {v:k for k,v in live.items()}
+    def slots(v:Register) -> int: return ren.register_slots(self.vdef(v), v)
+
+    def alloc(cons:tuple[Register, ...], i:int, nslots:int=1, allowed:tuple[Register, ...]|None=None) -> Register:
+      allowed_idxs = {r.index for r in (allowed if allowed is not None else cons)}
+      def blockers(reg:Register) -> tuple[Register, ...]:
+        occupied = set(range(reg.index, reg.index+nslots))
+        return tuple(v for v,r in live.items() if occupied & set(range(r.index, r.index+slots(v))))
+      def next_use(v:Register) -> int:
+        return next((j-i for j in lr[v] if j >= i), len(uops))
+      candidates = [(r, blockers(r)) for r in cons if all(x in allowed_idxs for x in range(r.index, r.index+nslots))]
       # allocate the best register. Registers not in live or not used again are free and have priority,
-      # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
-      reg,vreg = max(((r,live_inv.get(r)) for r in cons),
-                    key=lambda rv: next((j-i for j in ([] if rv[1] is None else lr[rv[1]]) if j >= i), len(uops)))
-      return live.pop(vreg) if vreg is not None else reg
+      # otherwise pick the one whose earliest evicted value has the furthest next use. Regs that appear
+      # first in cons have priority in case of a tie.
+      reg,vregs = max(candidates, key=lambda rv: min((next_use(v) for v in rv[1]), default=len(uops)))
+      for v in vregs: live.pop(v, None)
+      return reg
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
@@ -59,7 +68,7 @@ class LinearScanRegallocContext:
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
-      r = alloc(cons if cons is not None else v.cons, i)
+      r = alloc(cons if cons is not None else v.cons, i, slots(v), v.cons)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
@@ -84,7 +93,7 @@ class LinearScanRegallocContext:
             uses = tuple(live.get(s.reg) for s in u.src)
             cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
-          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
+          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i, slots(v), v.cons)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate stack array

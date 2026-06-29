@@ -22,6 +22,9 @@ class TinyVGPRAMDRenderer(AMDRenderer):
 class OneVGPRAMDRenderer(AMDRenderer):
   isel_matcher = amd_isa.make_isel_matcher(amd_isa.SGPR, amd_isa.VGPR[:1])
 
+class FourVGPRAMDRenderer(AMDRenderer):
+  isel_matcher = amd_isa.make_isel_matcher(amd_isa.SGPR, amd_isa.VGPR[:4])
+
 def _amd_desc(prg):
   _, sections, _ = elf_loader(prg.src[4].arg)
   return amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(next(s.content for s in sections if s.name == ".rodata"))
@@ -962,6 +965,28 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertEqual([u.op for u in out], [Ops.INS, Ops.SHRINK, Ops.INS])
     self.assertIsInstance(out[1].reg, amd_isa.Register)
     self.assertIs(out[2].src[0], out[1])
+
+  def test_regalloc_vector_vgpr_reserves_consecutive_slots(self):
+    renderer = AMDRenderer(Target("AMD", arch="gfx1100"))
+    vvec = amd_isa.Register("vec", 0, _cons=amd_isa.VGPR)
+    vscalar = amd_isa.Register("scalar", 1, _cons=amd_isa.VGPR)
+    vuse = amd_isa.Register("use", 2, _cons=amd_isa.VGPR)
+    vec = UOp(Ops.INS, dtypes.float32.vec(4), arg=AMDOps.DEFINE, tag=(vvec,))
+    scalar = UOp(Ops.INS, dtypes.float32, arg=AMDOps.DEFINE, tag=(vscalar,))
+    use = UOp(Ops.INS, dtypes.float32.vec(4), (vec,), AMDOps.MOV, (vuse,))
+    out = line_rewrite([vec, scalar, use], pm_regalloc_rewrite, LinearScanRegallocContext([vec, scalar, use], renderer))
+    self.assertNotIn(out[1].reg.index, range(out[0].reg.index, out[0].reg.index + 4))
+
+  def test_regalloc_vector_group_can_evict_live_scalars(self):
+    renderer = FourVGPRAMDRenderer(Target("AMD", arch="gfx1100"))
+    scalar_regs = [amd_isa.Register(f"s{i}", i, _cons=amd_isa.VGPR[:4]) for i in range(4)]
+    scalars = [UOp(Ops.INS, dtypes.float32, arg=AMDOps.DEFINE, tag=(r,)) for r in scalar_regs]
+    vvec = amd_isa.Register("vec", 4, _cons=amd_isa.VGPR[:4])
+    vec = UOp(Ops.INS, dtypes.float32.vec(4), arg=AMDOps.DEFINE, tag=(vvec,))
+    uses = [UOp(Ops.INS, dtypes.float32, (s,), AMDOps.MOV, (amd_isa.Register(f"use{i}", 5+i, _cons=amd_isa.VGPR[:4]),))
+            for i,s in enumerate(scalars)]
+    ctx = LinearScanRegallocContext(scalars + [vec] + uses, renderer)
+    self.assertEqual(ctx.reals[len(scalars)][vvec].index, amd_isa.VGPR[0].index)
 
   def test_int_signed_widen_cast_sign_extends(self):
     prg = _int_signed_widen_cast_program()
