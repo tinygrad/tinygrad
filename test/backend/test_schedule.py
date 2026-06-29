@@ -166,6 +166,12 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(t.device, dev)
     np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
 
+  def test_copy_multi_scalar(self):
+    devs = ("CPU:0", "CPU:1")
+    x = Tensor.ones(2, device="CPU").realize().shard(devs, axis=0)
+    out = (x.sum()*2).reshape(1).to("CPU").realize()
+    np.testing.assert_equal(out.numpy(), [4.])
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
