@@ -686,7 +686,14 @@ class AMDRenderer(ISARenderer):
           op = r3.v_cvt_i32_f32_e32 if u.dtype.scalar() in dtypes.sints else r3.v_cvt_u32_f32_e32
           return pre + [op(_dst(u), src)]
         raise CompileError(f"AMDRenderer cannot cast {u.src[0].dtype} to {u.dtype}")
-      case AMDOps.RECIPROCAL | AMDOps.EXP2 | AMDOps.LOG2 | AMDOps.SQRT | AMDOps.TRUNC:
+      case AMDOps.RECIPROCAL:
+        if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports RECIPROCAL for float32, got {u.dtype}")
+        pre, val = _vgpr_data(TMP_VDATA, u.src[0])
+        dst = _dst(u)
+        # V_RCP_F32 is approximate; one Newton-Raphson step keeps f32 division/truncation from drifting by one near exact quotients.
+        return pre + [r3.v_rcp_f32_e32(TMP_VADDR, val), r3.v_mul_f32_e32(dst, val, TMP_VADDR),
+                      r3.v_sub_f32_e32(dst, 1.0, dst), r3.v_fma_f32(dst, TMP_VADDR, dst, TMP_VADDR)]
+      case AMDOps.EXP2 | AMDOps.LOG2 | AMDOps.SQRT | AMDOps.TRUNC:
         if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports {u.arg.name} for float32, got {u.dtype}")
         pre, val = _vgpr_data(TMP_VDATA, u.src[0])
         return pre + [_F32_UNARY[u.arg](_dst(u), val)]
