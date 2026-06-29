@@ -1,7 +1,8 @@
 import os, struct, unittest, tempfile, pathlib, sys
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.helpers import disable_gc
-from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.helpers import disable_gc, prod
+from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load, _shard_tensor
+from test.helpers import not_support_multi_device
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -60,6 +61,24 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq2_s(self): self._test_dequantization(GGMLQuantizationType.IQ2_S)
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
+
+  @unittest.skipIf(not_support_multi_device(), "no multi device")
+  def test_shard_tensor(self):
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    def q8_0_bytes(shape):
+      nblk = prod(shape)//32
+      scale = Tensor.ones(nblk, 1, dtype=dtypes.float16).bitcast(dtypes.uint8)
+      quants = (Tensor.arange(nblk*32) % 256).cast(dtypes.uint8).reshape(nblk, 32)
+      return scale.cat(quants, dim=1).flatten()
+    def f16_bytes(shape): return Tensor([i % 64 for i in range(prod(shape))], dtype=dtypes.float16).bitcast(dtypes.uint8)
+    for ggml_type, mkbytes in ((GGMLQuantizationType.Q8_0.value, q8_0_bytes), (GGMLQuantizationType.F16.value, f16_bytes)):
+      for shape, shard_axis in (((64,128),0), ((4,32,64),1), ((4,32,64),2)):
+        data = mkbytes(shape)
+        unsharded = ggml_data_to_tensor(data, prod(shape), ggml_type).reshape(shape)
+        sharded = _shard_tensor(data, 0, ("w", tuple(reversed(shape)), ggml_type, 0), devices, shard_axis)
+        self.assertEqual(sharded.uop.axis, shard_axis)
+        self.assertEqual(sharded.tolist(), unsharded.tolist())
+
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):

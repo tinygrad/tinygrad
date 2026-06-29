@@ -145,12 +145,11 @@ def _shard_tensor(tensor:Tensor, data_start:int, t_info:tuple[str, tuple[int, ..
     Tensor.realize(*raws)
     parts = [ggml_data_to_tensor(r, row_count*row_elems, typ).reshape(row_count, *shape[1:]) for r in raws]
     return Tensor(parts[0].uop.mstack(*[p.uop for p in parts[1:]]).multi(0))
-  assert typ in _GGML_QUANT, f"{name}: native type {typ} only supports axis-0 shard"
-  nelems, nbytes = _GGML_QUANT[typ]
-  assert shape[-1] % nelems == 0, f"{name}: quantized last dim {shape[-1]} does not divide {nelems}"
+  nelems, nbytes = _GGML_QUANT[typ] if typ in _GGML_QUANT else (1, _GGML_NATIVE[typ].itemsize)
+  assert shape[-1] % nelems == 0, f"{name}: last dim {shape[-1]} does not divide block size {nelems}"
   nblk, per_dev = shape[-1] // nelems, shape[axis] // ndev
   blk = tensor[start:start + (prod(shape)//nelems)*nbytes].to("CPU").realize().reshape(*shape[:-1], nblk*nbytes)
-  assert axis != len(dims)-1 or nblk % ndev == 0, f"{name}: quantized shard axis size {shape[-1]//ndev} does not divide {nelems}"
+  assert axis != len(dims)-1 or nblk % ndev == 0, f"{name}: last dim {nblk} blocks does not divide {ndev} devices"
   cnt, shard_shape = blk.shape[axis] // ndev, (*shape[:axis], per_dev, *shape[axis+1:])
   raws = [blk[tuple(slice(i*cnt, (i+1)*cnt) if a==axis else slice(None) for a in range(len(shape)))].contiguous().to(d) for i,d in enumerate(devices)]
   Tensor.realize(*raws)
