@@ -114,7 +114,7 @@ runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
+    runtime = Device[device].runtime(ast.arg.function_name, ast.src[3].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
     if cache: runtime_cache[key] = runtime
   return runtime
 

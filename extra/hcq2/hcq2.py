@@ -222,7 +222,7 @@ def prep_kernargs(call:UOp, prg:UOp) -> UOp:
 
 pm_prep_runtime = PatternMatcher([
   # bind generic PROGRAM device to the call's actual dev(s), then run device-specific lowering
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"),),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"),),
     name="call", allow_any_len=True), prep_program),
 
   # lower kernargs (PROGRAM.src[0] is now AFTER(BUFFER, COPY) — the lowered program image)

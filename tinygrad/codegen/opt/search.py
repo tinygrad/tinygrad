@@ -64,7 +64,7 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
     st = time.perf_counter()
     prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
     et = time.perf_counter() - st
-    uops = prg.src[2].src
+    uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
@@ -146,7 +146,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
       for i, proc in ((map if beam_pool is None else beam_pool.imap_unordered)(_try_compile, enumerate(candidates))):
         if proc is None: continue
         prg, compile_et = proc
-        if (lib:=prg.src[4].arg) in seen_libs: continue
+        if (lib:=prg.src[3].arg) in seen_libs: continue
         # filter out kernels that use 1000x more compute than the smallest
         estimates = prg.src[0].arg.estimates
         least_compute_ops = min(this_compute_ops:=sym_infer(estimates.ops if estimates is not None else 0, var_vals), least_compute_ops)
@@ -163,7 +163,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
           raise
         timed.append((candidates[i], min(tms)))
         if BEAM_DEBUG > 1:
-          print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(prg.src[2].src):5d} uops",
+          print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(prg.src[1].src):5d} uops",
                 f"{time_to_str(compile_et, w=12)} compile/{time_to_str(timed[-1][1], w=12)} run",
                 f"      {len(timed):4d}/{len(candidates):4d}         {timed[-1][0].colored_shape()}")
         elif DEBUG >= 2:

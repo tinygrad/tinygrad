@@ -619,16 +619,16 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, viz_data.trace.rewrites[i][data])) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[2].src)))}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, viz_data.trace.rewrites[i][data], depth=1)) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[3].arg, "lang":"cpp"}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
     renderer, idx = data
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, viz_data.trace.rewrites[i][idx], depth=1)) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-    lib:bytes = sink.src[4].arg
+    lib:bytes = sink.src[3].arg
     if renderer.target.arch.startswith("gfx"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))

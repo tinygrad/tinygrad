@@ -43,10 +43,10 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   call = linear.src[-1]
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:
-    old_name = prg.src[3].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
-    new_src = replace_src + "/* DSP boilerplate */" + prg.src[3].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
+    old_name = prg.src[2].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
+    new_src = replace_src + "/* DSP boilerplate */" + prg.src[2].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
     # drop BINARY and replace SOURCE so run_linear recompiles
-    prg = prg.replace(src=prg.src[:3] + (UOp(Ops.SOURCE, arg=new_src),))
+    prg = prg.replace(src=prg.src[:2] + (UOp(Ops.SOURCE, arg=new_src),))
   linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))
   for _ in range(run_count): run_linear(linear)
 
@@ -81,7 +81,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     with Context(QUANTIZE=1):
       linear = run_onnx({"input":inp})["output"].schedule_linear()
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
-      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
+      daccs = [u for u in tuple(prg.src[1].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
