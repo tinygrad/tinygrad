@@ -23,22 +23,22 @@
   let image = null, origSvg = imgBtn.innerHTML;
   fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3Vl')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
   async function handleFile(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    if (!e.target.files[0]) return;
     const reader = new FileReader();
     reader.onload = () => { image = reader.result; imgBtn.style.padding = '0'; imgBtn.innerHTML = `<img src="${reader.result}" style="width:100%;height:100%;border-radius:24px;object-fit:cover">`; };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(e.target.files[0]);
   }
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   async function send() {
     if (!input.value.trim()) return;
     const content = [{type:'input_text',text:input.value.trim()}];
-    if (image) content.push({type:'input_image',image_url:image});
-    const msg = {role:'user', content};
     chat.innerHTML += '<div class="msg user">' + (image ? `<img src="${image}" style="max-width:160px;max-height:160px;border-radius:12px;display:block;margin-bottom:8px">` : '') + input.value.trim().replace(/</g, '&lt;') + '</div>';
-    if (image) { image = null; imgBtn.innerHTML = origSvg; imgBtn.style.padding = ''; }
-    msgs.push(msg);
+    if (image) {
+      content.push({type:'input_image',image_url:image});
+      image = null; imgBtn.innerHTML = origSvg; imgBtn.style.padding = '';
+    }
+    msgs.push({role:'user', content});
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
