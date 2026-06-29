@@ -1,8 +1,10 @@
 import math, struct, unittest
+from dataclasses import replace
 
 from tinygrad import Tensor
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, to_program, to_program_cache
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
+from tinygrad.codegen.opt import KernelOptError, Opt, OptOps
 from tinygrad.device import CompileError, Device
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
 from tinygrad.helpers import Context, Target
@@ -673,6 +675,12 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertTrue(renderer.has_shared)
     self.assertTrue(renderer.has_local)
     self.assertFalse(renderer.supports_float4)
+    self.assertEqual(renderer.local_prod_max, 1024)
+
+  def test_scheduler_rejects_oversized_local_workgroup(self):
+    ast = Tensor.empty(4000, device="AMD").sum().schedule_linear().src[0].src[0]
+    with self.assertRaises(KernelOptError):
+      to_program(ast.replace(arg=replace(ast.arg, opts_to_apply=(Opt(OptOps.GROUP, 0, 0),))), AMDRenderer(Target("AMD", arch="gfx1100")))
 
   def test_to_program_assembles_elf(self):
     prg = _simple_add_program()

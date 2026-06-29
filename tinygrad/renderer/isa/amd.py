@@ -597,6 +597,7 @@ class AMDRenderer(ISARenderer):
   supports_float4 = False
   global_max = (0x8fffffff, 0x8fffffff, 0x8fffffff)
   local_max = (1024, 1, 1)
+  local_prod_max = 1024
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher

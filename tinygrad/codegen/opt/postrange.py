@@ -173,6 +173,9 @@ class Scheduler:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
+      if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} and self.ren.local_prod_max is not None:
+        local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]) * amt
+        check(local_sz <= self.ren.local_prod_max, f"exceeds maximum local workgroup size: needs {local_sz}, max {self.ren.local_prod_max}")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
