@@ -3,6 +3,7 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
+from tinygrad.helpers import Context
 from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
@@ -45,11 +46,7 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
 
 @slow
 class TestOptim(unittest.TestCase):
-  def setUp(self):
-    self.old_training = Tensor.training
-    Tensor.training = True
-  def tearDown(self):
-    Tensor.training = self.old_training
+  def setUp(self): self.enterContext(Context(TRAINING=1))
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
     for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),
@@ -157,13 +154,11 @@ class TestOptim(unittest.TestCase):
     t = Tensor.ones((1,1))
     optimizer = Adam([t])
     optimizer.zero_grad()
-    old_state = Tensor.training
     t.sum().backward()
-    Tensor.training = False
-    self.assertRaises(RuntimeError, optimizer.step)
-    Tensor.training = True
-    optimizer.step()
-    Tensor.training = old_state
+    with Context(TRAINING=0):
+      self.assertRaises(RuntimeError, optimizer.step)
+    with Context(TRAINING=1):
+      optimizer.step()
 
   def test_lamb_cpu_offload(self):
     # test that LAMB works when optimizer params (m, v, b1_t, b2_t) are moved to CPU

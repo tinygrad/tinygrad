@@ -1,10 +1,9 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math, itertools, functools, sys, inspect, pathlib, hashlib, weakref
-from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
@@ -64,14 +63,13 @@ class Tensor(RandMixin):
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
   ```python exec="true" session="tensor"
-  from tinygrad import Tensor, dtypes, nn
+  from tinygrad import Tensor, dtypes, nn, Context
   import numpy as np
   import math
   np.set_printoptions(precision=4)
   ```
   """
   __slots__ = "uop", "is_param", "grad"
-  training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None):
@@ -125,9 +123,9 @@ class Tensor(RandMixin):
   @suppress_finalizing
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, extra_args=(), **kwargs) -> Tensor:
+  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
-    new_uop: UOp = fxn(*[t.uop for t in srcs], *extra_args, **kwargs)
+    new_uop: UOp = fxn(*[t.uop for t in srcs], **kwargs)
     if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
@@ -147,11 +145,6 @@ class Tensor(RandMixin):
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
     return self
-
-  class train(ContextDecorator):
-    def __init__(self, mode:bool = True): self.mode = mode
-    def __enter__(self): self.prev, Tensor.training = Tensor.training, self.mode
-    def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   def __repr__(self):
     ld = self.uop
@@ -264,6 +257,7 @@ class Tensor(RandMixin):
     x = self.cast(self.dtype.base).contiguous()
     if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
+
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
   def data(self) -> memoryview:
@@ -279,19 +273,7 @@ class Tensor(RandMixin):
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
-    return self._buffer().as_memoryview().cast(self.dtype.base.fmt, self.shape)
-
-  def item(self) -> PyConst:
-    """
-    Returns the value of this tensor as a standard Python number.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(42)
-    print(t.item())
-    ```
-    """
-    assert self.numel() == 1, "must have one element for item"
-    return self.data()[(0,) * len(self.shape)]
+    return self._data().cast(self.dtype.base.fmt, self.shape)
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -515,25 +497,6 @@ class Tensor(RandMixin):
     high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
     return Tensor._device_seeds[device], low.cat(high)
 
-  # ***** creation helper functions *****
-
-  def full_like(self, fill_value:ConstType, dtype=None, device=None) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with the given value.
-    If `dtype` is not specified, the dtype of `self` is used.
-
-    You can pass in the `device` keyword argument to control device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.full_like(t, 42).numpy())
-    ```
-    """
-    if isinstance(self.device, tuple):
-      if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
-      return self._multi_like(lambda shape, dev: Tensor.full(shape, fill_value, dtype=dtype or self.dtype, device=dev))
-    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device)
-
   # ***** toposort and backward pass *****
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
@@ -560,7 +523,7 @@ class Tensor(RandMixin):
 
   # ***** movement ops *****
 
-  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
+  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, op=op, arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
@@ -592,68 +555,6 @@ class Tensor(RandMixin):
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
-
-  def masked_select(self, mask, size:int|None=None, fill_value:ConstType=0):
-    """
-    Selects elements from `self` based on the boolean `mask`.
-
-    With `size=None` (default), output length equals the number of `True` values (not jittable).
-    With `size=N`, output length is `N`, padded with `fill_value` or truncated (jittable).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-    mask = Tensor([[True, False, True], [False, True, False], [False, False, True]])
-    print(t.numpy())
-    print(mask.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.masked_select(mask).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.masked_select(mask, size=6, fill_value=-1).numpy())
-    ```
-    """
-    if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
-    x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
-    mask_cumsum = mask.cumsum()
-    if size is None:
-      counts = Tensor.zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, buffer=False)
-      return x[counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()]
-    counts = Tensor.zeros(size, dtype=dtypes.int32, buffer=False).scatter(0, mask_cumsum, 1, reduce='add')
-    return (Tensor.arange(size) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
-
-  def nonzero(self, size:int|None=None, fill_value:ConstType=0) -> Tensor:
-    """
-    Returns the indices of the elements that are non-zero.
-
-    With `size=None` (default), output shape is `(n_nonzero, ndim)` (not jittable).
-    With `size=N`, output shape is `(N, ndim)`, padded with `fill_value` or truncated (jittable).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 0, 2, 0, 3])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0], [0, 2]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.nonzero(size=3, fill_value=-1).numpy())
-    ```
-    """
-    if self.ndim == 0:
-      return Tensor.zeros(size if size is not None else int((self != 0).item()), 0, dtype=dtypes.int32, device=self.device)
-    mask = (self != 0).flatten()
-    indices = Tensor.stack(*[Tensor.arange(s).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
-                             for i, s in enumerate(self.shape)], dim=-1)
-    return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim),
-                                 size=size*self.ndim if size is not None else None, fill_value=fill_value).reshape(-1, self.ndim)
 
   # ***** reduce ops *****
 
@@ -760,11 +661,11 @@ class Tensor(RandMixin):
 
     g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
 
-    # compute 6x6 winograd tiles: GgGt, BtdB
+    # compute 6x6 winograd tiles: GgGt, BtdB. contiguous so the transforms are materialized once
     # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
     # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
-    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
+    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)
 
     # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
     ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
@@ -810,14 +711,6 @@ class Tensor(RandMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
-
-  # ***** unary ops *****
-
-  def contiguous(self, *args, **kwargs) -> Tensor:
-    """
-    Returns a contiguous tensor.
-    """
-    return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
 
   # ***** broadcasted elementwise ops *****
 
@@ -878,79 +771,7 @@ class Tensor(RandMixin):
     fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
-  # ***** functional nn ops *****
-
-  def dropout(self, p=0.5) -> Tensor:
-    """
-    Applies dropout to `self`.
-
-    NOTE: dropout is only applied when `Tensor.training` is `True`.
-
-    - Paper: https://jmlr.org/papers/v15/srivastava14a.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 2)
-    with Tensor.train():
-      print(t.dropout().numpy())
-    ```
-    """
-    if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
-    if not Tensor.training or p == 0: return self
-    if p == 1: return self.const_like(0)
-    return (Tensor.rand_like(self, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
-
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
-                                   is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
-    """
-    Computes scaled dot-product attention.
-    `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
-
-    - Paper: https://arxiv.org/abs/1706.03762v7
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    q = Tensor.randn(2, 4, 8)
-    k = Tensor.randn(2, 4, 8)
-    v = Tensor.randn(2, 4, 8)
-    print(q.scaled_dot_product_attention(k, v).numpy())
-    ```
-    """
-    # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
-    if enable_gqa:
-      key = key.repeat_interleave(int(self.shape[-3] // key.shape[-3]), dim=-3)
-      value = value.repeat_interleave(int(self.shape[-3] // value.shape[-3]), dim=-3)
-
-    q = self
-    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
-    # handle attention mask
-    if is_causal:
-      if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.const_like(1).cast(dtypes.bool).tril()
-    if attn_mask is not None:
-      if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
-      qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
   # ***** cast ops *****
-
-  def cast(self, dtype:DTypeLike) -> Tensor:
-    """
-    Casts `self` to the given `dtype`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2.5, 3], dtype=dtypes.float)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.cast(dtypes.uint8)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
@@ -1031,8 +852,7 @@ class Tensor(RandMixin):
     def is_pow2(v): return v > 0 and v & (v - 1) == 0
     # pad dimension i to amt with invalids
     def ipad(t, i, amt):
-      shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
-      return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+      return t.pad(tuple(None if d != i else (0, amt-s) for d,s in enumerate(t.shape)), value=Invalid) if amt != t.shape[i] else t
     # align a dimension, use at to specify the dimension to pad in, defaults to first
     def pad_align(t, dim, at=None, force=False):
       # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
@@ -1067,13 +887,10 @@ class Tensor(RandMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = round_up(ox, math.lcm(cout, 64 // dtsz) // cout) - ox
-    if added_ox: x = x.pad_to(None, None, ox + added_ox, None, None, None, None, None, None, None, None)
-
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
-    ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, :, :]
+    ret = ret.reshape(bs, oy, ox, groups, rcout)
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels: ret = ret[:, :, :, :, :-added_output_channels]
     # NCHW output

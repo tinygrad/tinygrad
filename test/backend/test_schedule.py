@@ -166,6 +166,13 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(t.device, dev)
     np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
 
+  def test_copy_multi_scalar(self):
+    devs = ("CPU:0", "CPU:1")
+    x = Tensor.ones(2, device="CPU").shard(devs, axis=0).realize()
+    out = (x.sum()*2).reshape(1).to("CPU")
+    run_linear(*check_schedule(out, 5))
+    np.testing.assert_equal(out.numpy(), [4.])
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
@@ -447,6 +454,14 @@ class TestCopyFolding(unittest.TestCase):
     b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
+
+  def test_permute_copy_to_device(self):
+    b = Tensor([[0, 1, 2, 3], [4, 5, 6, 7]], device="CPU").permute(1, 0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [[0, 4], [1, 5], [2, 6], [3, 7]])
+
+  def test_flip_copy_to_device(self):
+    b = Tensor([0, 1, 2, 3], device="CPU").flip(0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [3, 2, 1, 0])
 
 class TestUOpBecome(unittest.TestCase):
   def test_setitem_offset(self):

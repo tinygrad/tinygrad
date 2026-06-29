@@ -213,7 +213,8 @@ class PTXRenderer(Renderer):
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
-      if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:
+      l: str|list[str]|None = string_rewrite.rewrite(u, ctx=self)
+      if l is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 

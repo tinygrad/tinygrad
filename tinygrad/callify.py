@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace, PtrDType, ImageDType
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, ParamArg, graph_rewrite, track_rewrites
 from tinygrad.helpers import VIZ, pluralize, all_int
 
 @dataclass
@@ -193,7 +193,8 @@ pm_finalize_call = PatternMatcher([
 
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
-  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
+   replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
   (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.weakint)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache

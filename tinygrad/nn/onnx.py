@@ -4,7 +4,7 @@ import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, stru
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.mixin import ReductionStr
-from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
+from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN, Context
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import Device
 from tinygrad.uop.ops import sint
@@ -360,7 +360,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 }
 
 def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
-  return t.data().tobytes() if t.dtype == dtypes.uint8 else cast(list[ConstType]|ConstType, t.tolist())
+  return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -385,9 +385,6 @@ class OnnxRunner:
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
-
-    self.old_training = Tensor.training
-    Tensor.training = self.is_training
 
     self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
@@ -446,36 +443,35 @@ class OnnxRunner:
     return cached
 
   def __call__(self, inputs:dict[str, Any], debug=debug):
-    for name, input_spec in self.graph_inputs.items():
-      if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
-      self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
+    with Context(TRAINING=int(self.is_training)):
+      for name, input_spec in self.graph_inputs.items():
+        if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
+        self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
-    for num, node in enumerate(self.graph_nodes):
-      inps = [self._get_python_const(name, node.op, i) for i,name in enumerate(node.inputs)]
-      opts = node.opts
+      for num, node in enumerate(self.graph_nodes):
+        inps = [self._get_python_const(name, node.op, i) for i,name in enumerate(node.inputs)]
+        opts = node.opts
 
-      # provide additional opts
-      if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
-      # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
-      if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
-        idx_name, cache = node.inputs[1], self._python_const_cache
-        if (cached := cache.get(idx_name)) is None: cached = cache[idx_name] = _to_python_const(self.graph_values[idx_name])
-        inps[1] = cached
+        # provide additional opts
+        if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
+        if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
+        # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
+        if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
+          idx_name, cache = node.inputs[1], self._python_const_cache
+          if (cached := cache.get(idx_name)) is None: cached = cache[idx_name] = _to_python_const(self.graph_values[idx_name])
+          inps[1] = cached
 
-      if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
-      if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
-      ret = ret if isinstance(ret, tuple) else (ret,)
-      if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
+        if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
+        if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
+        ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
+        ret = ret if isinstance(ret, tuple) else (ret,)
+        if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
-      self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
+        self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
-      if num == limit:
-        Tensor.training = self.old_training
-        return {name:self.graph_values[name] for name in node.outputs}
-    Tensor.training = self.old_training
-    return {name:self.graph_values[name] for name in self.graph_outputs}
+        if num == limit:
+          return {name:self.graph_values[name] for name in node.outputs}
+      return {name:self.graph_values[name] for name in self.graph_outputs}
 
 ####################
 ##### ONNX OPS #####
@@ -1188,7 +1184,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     if reduction == "none": return x.scatter(axis, indices, updates)
-    reduction_ = cast(Literal["sum", "prod", "amin", "amax"], {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}[reduction])
+    reduction_map: dict[Literal["add", "mul", "min", "max"], Literal["sum", "prod", "amin", "amax"]] = \
+      {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}
+    reduction_ = reduction_map[reduction]
     return x.scatter_reduce(axis, indices, updates, reduction_)
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices

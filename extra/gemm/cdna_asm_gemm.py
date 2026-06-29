@@ -2675,8 +2675,8 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
   *batch, K = x.shape
-  scale_K, k_iters = K // 32, K // 128
-  amax = x.detach().float().reshape(rows, scale_K, 32).abs().max(axis=-1)
+  scale_K = K // 32
+  amax = x.detach().float().reshape(*batch, scale_K, 32).abs().max(axis=-1)
   e8 = (amax.maximum(1e-38).log2().floor() + 127).clamp(0, 254).cast(dtypes.uint8)
   qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(*batch, scale_K, 1).expand(*batch, scale_K, 32).reshape(*batch, K)
   x_scaled = x.float() * qscale
@@ -2851,11 +2851,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=g_scale)
     # wgrad: no w_scale
     g_fp8_2d = g_fp8.reshape(-1, g_fp8.shape[-1])
-    if getenv("FAST_FP8_TRANSPOSE", 0) and g_fp8_2d.shape[0] % 64 == 0 and g_fp8_2d.shape[1] % 64 == 0:
-      from extra.llama_kernels.fp8_transpose import fast_fp8_transpose
-      g_fp8_T = fast_fp8_transpose(g_fp8_2d)
-    else:
-      g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
+    g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
     grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale)
     # wgrad: rescale if not scalar
     if w_post_t is not None:
@@ -2899,7 +2895,7 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 
   g = Tensor(gradient, device=aq.device)[:aq.shape[0]].reshape(aq.shape[0]*aq.shape[1], bq.shape[0]).cast(dtypes.bfloat16)
   grad_a = asm_gemm(g, b_phys, mx=True)
-  grad_b = asm_gemm(g.T, a_phys, mx=True)
+  grad_b = asm_gemm(g.T, a_phys, mx=True, a_pretranspose=g)
 
   grad_a = (grad_a * _mx_block_scale(ae8)).reshape(aq.shape)
   if not w_stored: grad_b = grad_b * _mx_block_scale(be8)
@@ -2909,7 +2905,8 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_scale:Tensor|None=None) -> Tensor:
+             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_scale:Tensor|None=None,
+             a_pretranspose:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
@@ -2946,6 +2943,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       if mx_scales is not None:
         a_si, a_e8, b_si, b_e8 = mx_scales
         a_q, b_q = a.reshape(-1, a.shape[-1]), b.T
+      elif (a_pretranspose is not None and getenv("FUSED_GRAD_QUANTIZE", 0) and a_pretranspose.dtype == dtypes.bfloat16
+            and a_pretranspose.shape[0] % 32 == 0 and a_pretranspose.shape[1] % 256 == 0):
+        from extra.llama_kernels.transpose_quantize_mxfp8 import transpose_quantize_mxfp8
+        a_q, a_e8, a_si = transpose_quantize_mxfp8(a_pretranspose)
+        b_q, b_e8, b_si = quantize_mxfp8(b.T)
       else:
         a_q, a_e8, a_si = quantize_mxfp8(a.reshape(-1, a.shape[-1]))
         b_q, b_e8, b_si = quantize_mxfp8(b.T)

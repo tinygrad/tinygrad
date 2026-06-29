@@ -1,10 +1,14 @@
 import unittest
 import torch
 import tinygrad.nn.torch
-torch.set_default_device("tiny")
 import numpy as np
 
 class TestTorchBackendInplace(unittest.TestCase):
+  def setUp(self):
+    self._prev_device = torch.get_default_device()
+    torch.set_default_device("tiny")
+  def tearDown(self): torch.set_default_device(self._prev_device)
+
   def test_zero(self):
     a = torch.ones(4)
     a.zero_()

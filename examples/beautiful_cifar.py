@@ -122,7 +122,7 @@ if __name__ == "__main__":
     return ret.mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
   @TinyJit
-  @Tensor.train()
+  @Context(TRAINING=1)
   def train_step(idxs:Tensor) -> Tensor:
     X, Y = X_train[idxs], Y_train[idxs]
     if len(GPUS) > 1:

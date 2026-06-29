@@ -10,7 +10,7 @@ from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
+from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod, TRAINING
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
@@ -44,7 +44,7 @@ class UnsyncedBatchNorm:
     return ret.reshape(x.shape).cast(x.dtype)
 
   def calc_stats(self, x:Tensor):
-    if Tensor.training:
+    if TRAINING:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -359,11 +359,11 @@ def train_cifar():
   i = 0
   eval_acc_pct = 0.0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
-  with Tensor.train():
+  with Context(TRAINING=1):
     st = time.monotonic()
     while i <= STEPS:
       if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
-        # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
+        # Using Context(TRAINING=0) here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
         losses = []

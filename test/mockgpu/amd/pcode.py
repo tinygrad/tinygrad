@@ -2,7 +2,7 @@
 from typing import Any, Callable
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.uop.decompositions import f2f
+from tinygrad.codegen.decomp.dtype import f2f
 
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
@@ -831,7 +831,7 @@ class Parser:
     def mindex(idx:UOp, ptr=False): return mem.index(idx.valid(active) if active is not None else idx, ptr=ptr)
     byte_mem = mem.dtype.base == dtypes.uint8
     if byte_mem:
-      idx = addr.cast(dtypes.int)
+      idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
         for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
@@ -845,10 +845,10 @@ class Parser:
         val = _u32(0)
         for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
-      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
+      idx = addr >> _const(addr.dtype, 2)
       val = mindex(idx)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        idx2 = (addr + _const(adt, 4)) >> _const(adt, 2)
         val = val.cast(dtypes.uint64) | (mindex(idx2).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16):
