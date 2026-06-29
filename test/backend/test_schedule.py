@@ -168,8 +168,9 @@ class TestSchedule(unittest.TestCase):
 
   def test_copy_multi_scalar(self):
     devs = ("CPU:0", "CPU:1")
-    x = Tensor.ones(2, device="CPU").realize().shard(devs, axis=0)
-    out = (x.sum()*2).reshape(1).to("CPU").realize()
+    x = Tensor.ones(2, device="CPU").shard(devs, axis=0).realize()
+    out = (x.sum()*2).reshape(1).to("CPU")
+    run_linear(*check_schedule(out, 5))
     np.testing.assert_equal(out.numpy(), [4.])
 
 class TestLimitBufs(unittest.TestCase):
