@@ -115,9 +115,9 @@ isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
 insdefs = [
-  (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32"], False),
-  (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_u32_e32"], False),
-  (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "i32_i24_e32", "lo_u32", "lo_u16"], False),
+  (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
+  (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
+  (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "i32_i24_e32", "lo_u32", "lo_u16"], False), # TODO: mul i16?
   (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
   (Ops.EXP2, "v_exp", ["f16_e32", "f32_e32"], False),
@@ -252,14 +252,14 @@ def store(ctx, addr:UOp, x:UOp):
     assert idx.op is Ops.CONST
     return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base.gep(idx.arg),to_vgpr(ctx,val))).rtag()) # two address op?
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
-  nregs = (n*val.dtype.itemsize+3)//4
+  nregs = (n*addr.dtype.itemsize+3)//4
   imap = {
     2:(RDNA3Ops.global_store_b16,RDNA3Ops.ds_store_b16),
     4:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     8:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
     16:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
-  return _gate(UOp(Ops.INS, arg=_insspace(imap[n * val.dtype.itemsize],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
+  return _gate(UOp(Ops.INS, arg=_insspace(imap[n * addr.dtype.itemsize],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
 
 # -- complex alu --
 def add64(ctx, x:UOp):
@@ -316,6 +316,12 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
+def widenshort(y:UOp, x:UOp):
+  mid = dtypes.int32 if y.dtype is dtypes.int16 else dtypes.uint32
+  y = y.cast(mid).cast(dtypes.float32)
+  if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
+  else: return y
+
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
@@ -324,12 +330,14 @@ pre_isel_matcher = PatternMatcher([
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # cast to float has to be widened first
-  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(dtype=dtypes.float32),
-    lambda y: y.cast(dtypes.uint32 if y.dtype is dtypes.uint16 else dtypes.int32).cast(dtypes.float32)),
-  # non-float narrow cast is noop
+  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.float32,dtypes.float64)), widenshort),
+  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
+  # uint narrow is noop
   (UPat.var("y", dtype=dtypes.uint32).cast(dtypes.uint16), lambda y: y), 
-  # 16 bit indexes get expanded into extract moves/shifts
-  # this only works for const indexes (everything but load/store?)
+  (UPat.var("y", dtype=dtypes.float32).cast(dtypes.uint16), lambda y: y.cast(dtypes.uint32)),
+  (UPat.var("y", dtype=dtypes.float32).cast(dtypes.int16), lambda y: y.cast(dtypes.int32)),
+
+  # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
 ])
 
