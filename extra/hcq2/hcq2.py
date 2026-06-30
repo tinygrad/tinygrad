@@ -217,7 +217,7 @@ pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UP
 # 2.1. early hcq calls tracking
 
 def tag_hcq_calls(ctx:itertools.count, call:UOp):
-  if (hcq_devs:=next((b.device for b in call.src[1:] if b.device.split(":")[0] in HCQ_DEVS), None)) is None: return None
+  if (hcq_devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is None: return None
 
   queue = "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0"
   info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), to_tuple(hcq_devs), queue)
@@ -349,7 +349,7 @@ pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdb
 # 2.4. replace params with per-submit input address loads
 
 def replace_params(call:UOp) -> UOp|None:
-  if not (params:={u:u.arg.slot for u in call.src[0].toposort() if u.op is Ops.PARAM and u.addrspace is AddrSpace.GLOBAL}): return None
+  if not (params:={u:u.arg.slot for u in call.src[0].toposort(enter_calls=False) if u.op is Ops.PARAM and u.addrspace is AddrSpace.GLOBAL}): return None
 
   # fill new info
   hcqinfo = replace(call.arg.aux, params=tuple(sorted(set(params.values()))), inputs=len(get_call_arg_uops(call)))
@@ -519,8 +519,8 @@ def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
     struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, v.arg)
   return UOp(Ops.NOOP)
 
-def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
-  if buf.op not in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT): return buf
+def resolve_getaddr(buf:UOp, g:UOp) -> UOp|None:
+  if buf.op not in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT): return None
   devs, b = to_tuple(g.src[1].arg), buf.buffer
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
@@ -585,16 +585,14 @@ def hcq_compile(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
   linear = graph_rewrite(linear, pm_add_finalizer, ctx=enumerator, walk=True, name="add finalizer")
   linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
-  # linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
-  # linear = linear.substitute({p: b for b, p in buffers_map.items()}, name="restore buffers", walk=True, enter_calls=True)
+  linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
 
   # lowering to hcq ir
   linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
   linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
-  # linear = graph_rewrite(linear, pm_lower_ops, name="lower ops into hcq ir")
-
   linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
   linear = graph_rewrite(linear, pm_hold_call_buffers, walk=True, name="hold call buffers")
+  # linear = graph_rewrite(linear, pm_resolve_patches, bottom_up=False, name="simplify patches", enter_calls=True)
   return linear
   # linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
 
