@@ -969,6 +969,19 @@ class TestAMDRenderer(unittest.TestCase):
     inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
     self.assertFalse(any("SCRATCH" in name for name in inst_names))
 
+  def test_matmul_default_schedule_uses_float4_memory_tile(self):
+    prg = _matmul64_program()
+    self.assertEqual(prg.src[0].arg.applied_opts, (
+      Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4),
+      Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.LOCAL, 1, 16)))
+    self.assertEqual(prg.arg.local_size, (128, 1, 1))
+    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertEqual(linear_ops.count(AMDOps.MULACC), 64)
+    inst_names = _amd_inst_names(prg)
+    self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
+    self.assertEqual(inst_names.count("GLOBAL_STORE_B128"), 4)
+    self.assertEqual(inst_names.count("V_FMA_F32"), 64)
+
   def test_reg_store_spill_falls_back_to_scratch(self):
     # a promoted accumulator that regalloc spilled appears as a FILL; the store must write back to that scratch
     # slot instead of crashing (regressed test_ops conv2d, which spills its accumulators under register pressure).
