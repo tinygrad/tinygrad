@@ -133,6 +133,7 @@ spec_tensor = PatternMatcher([
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
+  (UPat(Ops.WAIT, name="x"), lambda x: True),
 
   # CALL
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),

@@ -210,14 +210,14 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   if call.arg.aux.inputs is not None:
-    for j,dev in enumerate(call.arg.aux.devs):
+    for j,dev in enumerate(call.arg.aux.device):
       addrs = [(b.bufs[j] if isinstance(b:=ctx.input_uops[i].buffer, MultiBuffer) else b).get_buf(dev).va_addr for i in call.arg.aux.params]
       buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
       buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
 
-  for d in call.arg.aux.devs:
+  for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
   return None

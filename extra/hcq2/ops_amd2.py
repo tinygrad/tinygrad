@@ -135,9 +135,10 @@ def pm4_program(ctx, call, prg):
   return UOp(Ops.LINEAR, dtypes.void, tuple(ins))
 
 pm_pm4_opsel = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
+
   (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
   (UPat(Ops.BARRIER), pm4_barrier),
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
   (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), pm4_timestamp),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
 ])
@@ -174,12 +175,14 @@ pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
 
 class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TRAP = auto(); TIMESTAMP = auto()  # noqa: E702
 
-def sdma_copy(ctx, dst, src, copy):
+def sdma_copy(ctx, call):
+  dst, src = call.src[1], call.src[2]
+  sz = src.max_numel() * src.dtype.base.itemsize
   src_addr, dst_addr = make_getaddr(src, ctx.devs), make_getaddr(dst, ctx.devs)
   return UOp(Ops.LINEAR, dtypes.void, tuple([make_ins(SDMAOps.COPY,
      ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
-     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(copy.arg - off, ctx.max_copy_size) - 1), 0,
-     *data64_le(src_addr + off), *data64_le(dst_addr + off)) for off in range(0, copy.arg, ctx.max_copy_size)]))
+     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz - off, ctx.max_copy_size) - 1), 0,
+     *data64_le(src_addr + off), *data64_le(dst_addr + off)) for off in range(0, sz, ctx.max_copy_size)]))
 
 def sdma_wait(ctx, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
@@ -197,9 +200,10 @@ def sdma_timestamp(ctx, dst):
   return make_ins(SDMAOps.TIMESTAMP, op, *data64_le(make_getaddr(dst, ctx.devs)))
 
 pm_sdma_opsel = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
+
   (UPat(Ops.BARRIER), lambda: UOp(Ops.NOOP, dtypes.void, ())),
   (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), sdma_wait),
-  (UPat(Ops.COPY, src=(UPat(name="dst"), UPat(name="src")), name="copy"), sdma_copy),
   (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), sdma_timestamp),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), sdma_store),
 ])
@@ -240,13 +244,24 @@ pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
   lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0]), "copy"), to_tuple(lin.arg[0])))])
 
 @dataclass(frozen=True)
+class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
+  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
+  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
+
+def encode_queue(q:UOp) -> UOp|None:
+  # TODO: fix this shit
+  d = Device[(devs:=to_tuple(q.arg[0]))[0]]
+  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
+  opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
+  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
+
+@dataclass(frozen=True)
 class AMDProgramData:
   entry_point_offset:int; rsrc1:int; rsrc2:int; rsrc3:int; wave32:bool
   private_segment_size:int; kernargs_segment_size:int; kernargs_alloc_size:int
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
 _amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
-
 def amd_build_program(prg:UOp) -> UOp:
   dev = Device[prg.src[1].arg] # TODO: rm this
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[4].arg, dev.device))) is None:
@@ -259,21 +274,18 @@ def amd_build_program(prg:UOp) -> UOp:
     if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
       raise RuntimeError("Too many resources requested: group_segment_size")
     edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    cached = _amd_program_cache[key] = (AMDProgramData(
-      entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
+
+    data = AMDProgramData(entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
       rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
       rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
-      wave32=bool(desc.kernel_code_properties & 0x400),
-      private_segment_size=desc.private_segment_fixed_size,
-      kernargs_segment_size=desc.kernarg_size,
-      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0),
-      enable_dispatch_ptr=edp,
-      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER), bytes(image))
+      wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
+      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
+      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+    # buf = UOp.placeholder((len(image),), dtypes.uint8, 0).rtag("program")
+    buf = UOp.new_buffer(dev.device, len(image), dtypes.uint8).rtag("program")
+    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=bytes(image)))),), arg=(data, prg.arg))
+    # cached = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, arg=bytes(image)))),), arg=data)
   return cached
-
-pm_prep_program = PatternMatcher([
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE, arg="AMD"), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
-])
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
@@ -517,22 +529,15 @@ class PCIIface(PCIIfaceBase):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-@dataclass(frozen=True)
-class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
-  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
-  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
-
-def encode_queue(q:UOp) -> UOp|None:
-  d = Device[(devs:=to_tuple(q.arg[0]))[0]]
-  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
-  opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
-  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
-
-pm_lower = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
-])
-
 class AMDDevice(HCQ2Compiled):
+  pm_lower = PatternMatcher([
+    # prep program
+    (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE, arg="AMD"), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
+
+    # encoding of cmdbuf
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
+  ])
+
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
 
   ifaces = [KFDIface, PCIIface]
