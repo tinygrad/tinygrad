@@ -17,7 +17,7 @@ class TestRegalloc(unittest.TestCase):
     store_out = out.index(idx).store(local.index(idx).load())
     sink = UOp.sink(store_local, store_out, arg=KernelInfo(name="x86_regalloc_stack_dealloc"))
     to_program_cache.clear()
-    lin = to_program(sink, renderer).src[2].src
+    lin = to_program(sink, renderer).src[1].src
 
     sub = [i for i,u in enumerate(lin) if u.op is Ops.INS and u.arg is X86Ops.SUBi]
     add = [i for i,u in enumerate(lin) if u.op is Ops.INS and u.arg is X86Ops.ADDi]
