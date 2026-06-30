@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools
+import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
@@ -24,6 +24,12 @@ class IselContext:
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
+
+@functools.cache
+def reg(u:UOp) -> Register:
+  if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return reg(u.src[0])
+  if isinstance(u.tag, tuple): return u.tag[0]
+  return u.tag
 
 @dataclass
 class PreRegAllocContext:

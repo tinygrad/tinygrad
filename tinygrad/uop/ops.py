@@ -601,13 +601,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       for s in self.src: yield from s.split_uop(sep)
     else: yield self
 
-  @property
-  def reg(self:UOp):
-    # TODO: add a way to access the nth element in src
-    if self.op in (Ops.NOOP, Ops.AFTER) and self.src: return self.src[0].reg
-    if isinstance(self.tag, tuple): return self.tag[0]
-    return self.tag
-
   # *** multi-device helpers ***
 
   def multi(self, axis:int|None):
