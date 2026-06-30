@@ -1,4 +1,3 @@
-import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.renderer.isa import ISARenderer, Register
