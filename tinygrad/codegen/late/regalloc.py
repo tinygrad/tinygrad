@@ -1,5 +1,5 @@
 from tinygrad.helpers import dedup
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes
 
@@ -123,6 +123,10 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = ctx.regalloc_i
   if x.op in PSEUDO_OPS: return None
+  if x.op in (Ops.LOAD, Ops.STORE) and not ctx.insert_before.get(i):
+    spilled = any(i in ctx.reals and isinstance(v:=ctx.uops[i].src[j].reg, Register) and v in ctx.spills
+                  for j in range(len(x.src)))
+    if not spilled and i not in (ctx.first_real_idx, ctx.last_real_idx): return None
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
@@ -147,5 +151,4 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 pm_regalloc_rewrite = PatternMatcher([
   (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.SHRINK, Ops.LOAD, Ops.STORE} | PSEUDO_OPS, name="x"),
         regalloc_rewrite),
-  (UPat(GroupOp.All - {Ops.SINK}, name="x"), regalloc_rewrite),
 ])

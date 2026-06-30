@@ -164,18 +164,18 @@ _WIDE_STORE = {8: (r3.global_store_b64, r3.ds_store_b64), 16: (r3.global_store_b
 def _mem_load(kind:int, dt:DType):
   if dt.count > 1:
     if dt.scalar() is not dtypes.float32: return None
-    ops = _WIDE_LOAD.get(dt.itemsize)
-    return None if ops is None else ops[0 if kind == 0 else 1]
-  ops = _SCALAR_LOAD.get(dt.scalar())
-  return None if ops is None else ops[kind]
+    wide_ops = _WIDE_LOAD.get(dt.itemsize)
+    return None if wide_ops is None else wide_ops[0 if kind == 0 else 1]
+  scalar_ops = _SCALAR_LOAD.get(dt.scalar())
+  return None if scalar_ops is None else scalar_ops[kind]
 
 def _mem_store(kind:int, dt:DType):
   if dt.count > 1:
     if dt.scalar() is not dtypes.float32: return None
-    ops = _WIDE_STORE.get(dt.itemsize)
-    return None if ops is None else ops[0 if kind == 0 else 1]
-  ops = _SCALAR_STORE.get(dt.scalar())
-  return None if ops is None else ops[kind]
+    wide_ops = _WIDE_STORE.get(dt.itemsize)
+    return None if wide_ops is None else wide_ops[0 if kind == 0 else 1]
+  scalar_ops = _SCALAR_STORE.get(dt.scalar())
+  return None if scalar_ops is None else scalar_ops[kind]
 
 def _global_load(dt:DType): return _mem_load(0, dt)
 def _global_store(dt:DType): return _mem_store(0, dt)
