@@ -72,6 +72,10 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       X.shard_(devices_3, 0)
 
+  def test_shard_reshape_cross_boundary(self):
+    X = Tensor.ones(5, 4).contiguous().realize().shard(devices_2, 1)
+    with self.assertRaises(RuntimeError): X.reshape(10, 2).uop.axis
+
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.uop)
