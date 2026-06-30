@@ -149,8 +149,8 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   bufs = [b.buffer for b in resolved]
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
-    vars = call.src[0].arg.vars if call.src[0].op is Ops.PROGRAM else call.src[0].variables()
-    dnum = next((x.expr for x in vars if x.expr == '_device_num'), None)
+    call_vars = call.src[0].arg.vars if call.src[0].op is Ops.PROGRAM else call.src[0].variables()
+    dnum = next((x.expr for x in call_vars if x.expr == '_device_num'), None)
     for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
 
 def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:

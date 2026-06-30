@@ -449,11 +449,11 @@ def _cmp_bool_const(x:UOp, m:UOp, c:UOp) -> UOp:
 
 def _materialize_compare_flags(x:UOp) -> UOp|None:
   src, changed = [], False
-  for s in x.src:
-    if s.op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ):
-      src.append(s.where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False)))
+  for src_u in x.src:
+    if src_u.op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ):
+      src.append(src_u.where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False)))
       changed = True
-    else: src.append(s)
+    else: src.append(src_u)
   return x.replace(src=tuple(src)) if changed else None
 
 def _materialize_store_compare_flag(x:UOp) -> UOp|None:
