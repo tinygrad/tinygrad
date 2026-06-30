@@ -39,7 +39,7 @@ pm_remove_vec_dtypes = PatternMatcher([
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
-  if x.arg.slot != -1: return None
+  if x.arg.slot != -1 or x.is_hw_idx: return None
   ctx[0] += 1
   return x.replace(arg=replace(x.arg, slot=ctx[0]-1))
 
@@ -148,7 +148,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot >= 0])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")

@@ -65,7 +65,7 @@ def example_2_hip(a:Tensor, correct):
     from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     lib = HIPCCCompiler(Device[Device.DEFAULT].renderer.target.arch, []).compile_cached(code)
     # the sink specifies the GLOBAL and LOCAL sizes, along with the input buffers and name
-    sink = UOp.sink(UOp.special(GLOBALS, 'gidx0'), UOp.special(THREADS, 'lidx0'), out, buf,
+    sink = UOp.sink(UOp.hw_idx(GLOBALS, 'gidx0'), UOp.hw_idx(THREADS, 'lidx0'), out, buf,
                     arg=KernelInfo(name="hip_reduce_sum_kernel"))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
   eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
@@ -207,7 +207,7 @@ def example_5_custom_assembly(a:Tensor, correct):
 
     k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
     k.emit(s_endpgm())
-    return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf, arg=KernelInfo(name="asm_reduce")))
+    return k.finalize(UOp.sink(UOp.hw_idx(CU_COUNT, 'gidx0'), UOp.hw_idx(LANES, 'lidx0'), out, buf, arg=KernelInfo(name="asm_reduce")))
 
   out = Tensor.zeros(1,).contiguous().realize()
   eval_harness("RDNA3 assembly kernel", a, lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)

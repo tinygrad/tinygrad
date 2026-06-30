@@ -99,7 +99,7 @@ class WGSLRenderer(CStyleLanguage):
   def render_load(self, x:str, u:UOp) -> str: return f"atomicLoad(&{x})" if is_packed(u) else x
   def buf_map(self, u:UOp) -> str: return "atomic<u32>" if is_packed(u) else self.type_map[u.dtype.base]
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
-    local_size = [u.src[0].ssimplify() for u in sorted([u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == 'l'], key=lambda u: u.arg)]
+    local_size = [u.src[0].ssimplify() for u in sorted([u for u in uops if u.is_hw_idx and u.arg.hw_dim[0] == 'l'],key=lambda u: u.arg.hw_dim)]
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
     external_local_bufs = [line.lstrip() for line in kernel if "var<workgroup>" in line]

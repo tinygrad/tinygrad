@@ -27,7 +27,8 @@ base_rewrite = PatternMatcher([
 
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg.hw_dim[0]](x.arg.hw_dim[-1])}; /* {(x.src[0]).render()} */"
+   if x.is_hw_idx else None),
 
   # const
   (UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x, ctx.infinity)})"),
@@ -144,7 +145,7 @@ class CStyleLanguage(Renderer):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     buftypes = [(name, self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable)+self.buffer_suffix \
                  if u.addrspace == AddrSpace.GLOBAL else self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
-    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
+    local_dims = [u.src[0] for u in uops if u.is_hw_idx and u.arg.hw_dim[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
@@ -209,14 +210,14 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op is Ops.PARAM:
+      if u.op is Ops.PARAM and not u.is_hw_idx:
         r[u] = f"data{u.arg.slot}_" + '_'.join([str(x) for x in u.shape])
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 
       # naming
       prefix = None
-      if u.op is Ops.SPECIAL: r[u] = u.arg
+      if u.is_hw_idx: r[u] = u.arg.hw_dim
       elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.arg[-1]]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.CONST: "const", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
@@ -234,7 +235,7 @@ class CStyleLanguage(Renderer):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.STORE, Ops.BUFFER} and u.dtype != dtypes.void:
-          l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+          l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if not u.is_hw_idx else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
@@ -328,7 +329,7 @@ class OpenCLRenderer(CStyleLanguage):
 
   def aux(self, uops:list[UOp]):
     arg_dtypes:list[list[tuple[int, DType]]] = []
-    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
+    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM and not u.is_hw_idx):
       while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
       arg_dtypes[u.arg.slot].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
@@ -536,7 +537,7 @@ class HIPRenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(u.op is Ops.CONST and not math.isfinite(u.arg) for u in uops):
       prefix += ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))"]
-    if any(u.op is Ops.SPECIAL for u in uops):
+    if any(u.is_hw_idx for u in uops):
       prefix.append("typedef long unsigned int size_t;")
       ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}

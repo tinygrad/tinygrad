@@ -265,11 +265,11 @@ class TestLinearizer(unittest.TestCase):
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
     ast = helper_linearizer_opt(t+1)
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
-    idxs = sorted(idxs, key=lambda uop: uop.arg)
-    assert (idxs[0].arg, idxs[0].src[0].arg) == ('gidx0', 6), idxs[0]
-    assert (idxs[1].arg, idxs[1].src[0].arg) == ('gidx1', 5), idxs[1].arg
-    assert (idxs[2].arg, idxs[2].src[0].arg) == ('gidx2', 4), idxs[2].arg
+    idxs = dedup([uop for uop in uops if uop.is_hw_idx])
+    idxs = sorted(idxs, key=lambda uop: uop.arg.hw_dim)
+    assert (idxs[0].arg.hw_dim, idxs[0].src[0].arg) == ('gidx0', 6), idxs[0]
+    assert (idxs[1].arg.hw_dim, idxs[1].src[0].arg) == ('gidx1', 5), idxs[1].arg
+    assert (idxs[2].arg.hw_dim, idxs[2].src[0].arg) == ('gidx2', 4), idxs[2].arg
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
@@ -306,7 +306,7 @@ class TestLinearizer(unittest.TestCase):
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
-      assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
+      assert len(set(u.is_hw_idx for u in uops if u.op is Ops.RANGE or u.is_hw_idx)) <= 1, "has either hw_idx or ranges, not both"
       reg_stores = [u for u in uops if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace == AddrSpace.REG]
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"

@@ -11,13 +11,10 @@ class FastEnum(IntEnum):
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
-  # ** 1 -- defines/special **
+  # ** 1 -- defines **
 
   # BIND pairs a symbolic PARAM with a concrete value
   BIND = auto()
-
-  # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
-  SPECIAL = auto()
 
   # BUFFER allocates global/local/register storage depending on its addrspace
   BUFFER = auto()
@@ -121,7 +118,7 @@ class GroupOp:
 
   Defines = {Ops.PARAM, Ops.BUFFER}
 
-  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM}
+  Irreducible = {Ops.CONST, Ops.RANGE, Ops.PARAM}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   # BinaryOps that can be flipped

@@ -35,7 +35,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
-  raw_idxs = [UOp.special(s, f"{prefix}{i}") for i,s in enumerate(limited)]
+  raw_idxs = [UOp.hw_idx(s, f"{prefix}{i}") for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise RuntimeError(f"get_contraction should not be None {dims=} {limited=}")
@@ -58,7 +58,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   s_topo = list(s.toposort())
-  if any(x.op is Ops.SPECIAL for x in s_topo): return None
+  if any(x.is_hw_idx for x in s_topo): return None
 
   # get ranges
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
@@ -82,7 +82,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   else:
     # define indexes for GPU-like execution
     local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
-    hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
+    hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.is_hw_idx]
     global_max = ctx.global_max if ctx.global_prod_max is None else \
       tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
     idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs

@@ -20,10 +20,10 @@ class Kernel(AbstractContextManager):
   def __init__(self, name:str, grid_size:tuple[int, int, int], block_size:int):
     self.name = name
 
-    self.blockIdx_x = UOp.special(grid_size[0], "gidx0")
-    self.blockIdx_y = UOp.special(grid_size[1], "gidx1")
-    self.blockIdx_z = UOp.special(grid_size[2], "gidx2")
-    self.threadIdx_x = UOp.special(block_size, "lidx0")
+    self.blockIdx_x = UOp.hw_idx(grid_size[0], "gidx0")
+    self.blockIdx_y = UOp.hw_idx(grid_size[1], "gidx1")
+    self.blockIdx_z = UOp.hw_idx(grid_size[2], "gidx2")
+    self.threadIdx_x = UOp.hw_idx(block_size, "lidx0")
 
     self.range_stack: list[_tk_range] = []
     self.store_stack: list[tuple[UOp, UOp]] = []

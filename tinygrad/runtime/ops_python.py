@@ -85,6 +85,9 @@ class PythonProgram:
           i += 1
           continue
         if u.op is Ops.AFTER: values[u] = src_values[0]
+        elif u.is_hw_idx:
+          if u.arg.hw_dim[0] == 'g': values[u] = [idxs[2-int(u.arg.hw_dim[-1])]] * warp_size
+          elif u.arg.hw_dim[0] == 'l': values[u] = [x[2-int(u.arg.hw_dim[-1])] for x in warp]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype.base.scalar())
@@ -96,9 +99,6 @@ class PythonProgram:
           else:
             buf = memoryview(bytearray(u.max_numel()*u.dtype.itemsize)) if u.op is not Ops.PARAM else pbufs.pop(0)
             values[u] = [buf.cast(storage_fmt)] * warp_size
-        elif u.op is Ops.SPECIAL:
-          if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
-          elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
         elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []

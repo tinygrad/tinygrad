@@ -25,7 +25,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
   # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
-  for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
+  for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM or x.is_hw_idx) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM or x.is_hw_idx):
     if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
@@ -78,7 +78,9 @@ spec_shared = PatternMatcher([
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
   # PARAM
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.PARAM, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"),
+   lambda s,x: (s.dtype == x.dtype and isinstance(s.arg.hw_dim, str)) if s.is_hw_idx else None),
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg) and not x.is_hw_idx),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
    isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
@@ -96,8 +98,6 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
-  # SPECIAL. TODO: this should only be in spec_program
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
@@ -224,7 +224,7 @@ spec_full = PatternMatcher([
 
   (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
-  # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
+  # codegen may end ranges after gpudims has replaced RANGE with PARAM.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # allow any AFTER
