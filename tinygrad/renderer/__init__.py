@@ -71,6 +71,7 @@ class Renderer:
   local_prod_max: int|None = None
   global_prod_max: tuple[int, ...]|None = None
   preferred_reduce_group: int|None = None
+  wide_regalloc: bool = False
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   pre_matcher: PatternMatcher|None = None

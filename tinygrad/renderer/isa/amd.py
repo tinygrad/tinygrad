@@ -654,6 +654,7 @@ class AMDRenderer(ISARenderer):
   has_shared = True
   supports_float4 = True
   float4_dtypes = (dtypes.float32,)
+  wide_regalloc = True
   preferred_reduce_group = 16
   global_max = (0x8fffffff, 0x8fffffff, 0x8fffffff)
   local_max = (1024, 1, 1)

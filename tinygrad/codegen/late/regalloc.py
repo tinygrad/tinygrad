@@ -1,3 +1,4 @@
+import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
@@ -11,6 +12,9 @@ class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops = uops
     self.ren = ren
+    self.wide = ren.wide_regalloc
+    self.idx = itertools.count()
+    self.regalloc_i = 0
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
 
@@ -33,30 +37,37 @@ class LinearScanRegallocContext:
     self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
-    self.regalloc_i = 0
-    # prologue/epilogue must attach to real emitted instructions: skip leading/trailing PSEUDO_OPS and the SINK
-    # terminator (regalloc_rewrite never processes SINK), otherwise stack alloc/dealloc would be dropped.
-    real_idxs = [i for i,u in enumerate(uops) if u.op not in PSEUDO_OPS and u.op is not Ops.SINK]
-    self.first_real_idx, self.last_real_idx = (real_idxs[0], real_idxs[-1]) if real_idxs else (-1, -1)
+    if self.wide:
+      # prologue/epilogue must attach to real emitted instructions: skip leading/trailing PSEUDO_OPS and the SINK
+      # terminator (regalloc_rewrite never processes SINK), otherwise stack alloc/dealloc would be dropped.
+      real_idxs = [i for i,u in enumerate(uops) if u.op not in PSEUDO_OPS and u.op is not Ops.SINK]
+      self.first_real_idx, self.last_real_idx = (real_idxs[0], real_idxs[-1]) if real_idxs else (-1, -1)
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
 
     def slots(v:Register) -> int: return ren.register_slots(self.vdef(v), v)
 
-    def alloc(cons:tuple[Register, ...], i:int, nslots:int=1, allowed:tuple[Register, ...]|None=None) -> Register:
-      allowed_idxs = {r.index for r in (allowed if allowed is not None else cons)}
+    def alloc_narrow(cons:tuple[Register, ...], i:int) -> Register:
+      live_inv = {v:k for k,v in live.items()}
+      reg,vreg = max(((r,live_inv.get(r)) for r in cons),
+                    key=lambda rv: next((j-i for j in ([] if rv[1] is None else lr[rv[1]]) if j >= i), len(uops)))
+      return live.pop(vreg) if vreg is not None else reg
+
+    def alloc_wide(cons:tuple[Register, ...], i:int, nslots:int, allowed:tuple[Register, ...]) -> Register:
+      allowed_idxs = {r.index for r in allowed}
       def blockers(reg:Register) -> tuple[Register, ...]:
         occupied = set(range(reg.index, reg.index+nslots))
         return tuple(v for v,r in live.items() if occupied & set(range(r.index, r.index+slots(v))))
       def next_use(v:Register) -> int:
         return next((j-i for j in lr[v] if j >= i), len(uops))
       candidates = [(r, blockers(r)) for r in cons if all(x in allowed_idxs for x in range(r.index, r.index+nslots))]
-      # allocate the best register. Registers not in live or not used again are free and have priority,
-      # otherwise pick the one whose earliest evicted value has the furthest next use. Regs that appear
-      # first in cons have priority in case of a tie.
       reg,vregs = max(candidates, key=lambda rv: min((next_use(v) for v in rv[1]), default=len(uops)))
       for v in vregs: live.pop(v, None)
       return reg
+
+    def alloc(cons:tuple[Register, ...], i:int, v:Register) -> Register:
+      if self.wide: return alloc_wide(cons, i, slots(v), v.cons)
+      return alloc_narrow(cons, i)
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
@@ -67,7 +78,7 @@ class LinearScanRegallocContext:
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
-      r = alloc(cons if cons is not None else v.cons, i, slots(v), v.cons)
+      r = alloc(cons if cons is not None else v.cons, i, v)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
@@ -92,7 +103,7 @@ class LinearScanRegallocContext:
             uses = tuple(live.get(s.reg) for s in u.src)
             cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
-          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i, slots(v), v.cons)
+          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i, v)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # allocate stack array
@@ -121,9 +132,10 @@ class LinearScanRegallocContext:
           if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i = ctx.regalloc_i
+  if not ctx.wide and x.op in (Ops.LOAD, Ops.STORE, Ops.SHRINK): return None
+  i = ctx.regalloc_i if ctx.wide else next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
-  if x.op in (Ops.LOAD, Ops.STORE) and not ctx.insert_before.get(i):
+  if ctx.wide and x.op in (Ops.LOAD, Ops.STORE) and not ctx.insert_before.get(i):
     spilled = any(i in ctx.reals and isinstance(v:=ctx.uops[i].src[j].reg, Register) and v in ctx.spills
                   for j in range(len(x.src)))
     if not spilled and i not in (ctx.first_real_idx, ctx.last_real_idx): return None
@@ -143,8 +155,12 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if ctx.stack_size > 0:
     sp = ctx.ren.stack_pointer()
     offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
-    if i == ctx.first_real_idx: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
-    elif i == ctx.last_real_idx: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+    if ctx.wide:
+      if i == ctx.first_real_idx: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
+      elif i == ctx.last_real_idx: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+    else:
+      if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
+      elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
 
   return nx, before + [nx] + after
 
