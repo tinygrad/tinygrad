@@ -89,7 +89,7 @@ class TestTinygradIntegration(unittest.TestCase):
     assert len(sink_items) > 0, "No SINK in schedule"
     renderer = AMDLLVMRenderer(Target("AMD", arch='gfx1100'))
     prg = to_program(sink_items[0].src[0], renderer)
-    lib = renderer.compiler.compile(prg.src[3].arg)
+    lib = renderer.compiler.compile(prg.src[2].arg)
     return next(s.content for s in elf_loader(lib)[1] if s.name == ".text")
 
   def test_simple_add_kernel(self):

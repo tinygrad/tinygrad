@@ -83,8 +83,8 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
             buf_data[dst_id] = src_data
       elif ast.op is Ops.PROGRAM:
         info = ast.arg
-        if len(ast.src) > 4 and ast.src[4].op is Ops.BINARY:
-          lib = bytes(ast.src[4].arg)
+        if len(ast.src) > 3 and ast.src[3].op is Ops.BINARY:
+          lib = bytes(ast.src[3].arg)
           _, sections, _ = elf_loader(lib)
           for sec in sections:
             if sec.name == '.text':
@@ -98,7 +98,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
                 buf_sizes.append(b.nbytes)
               kernels.append(KernelSnapshot(
                 code=bytes(sec.content),
-                src=ast.src[3].arg,
+                src=ast.src[2].arg,
                 global_size=tuple(info.global_size),
                 local_size=tuple(info.local_size),
                 buf_idxs=buf_idxs,

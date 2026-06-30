@@ -25,16 +25,20 @@ class OneVGPRAMDRenderer(AMDRenderer):
 class FourVGPRAMDRenderer(AMDRenderer):
   isel_matcher = amd_isa.make_isel_matcher(amd_isa.SGPR, amd_isa.VGPR[:4])
 
+def _prg_lin(prg): return prg.src[1]
+def _prg_src(prg): return prg.src[2]
+def _prg_bin(prg): return prg.src[3]
+
 def _amd_desc(prg):
-  _, sections, _ = elf_loader(prg.src[4].arg)
+  _, sections, _ = elf_loader(_prg_bin(prg).arg)
   return amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(next(s.content for s in sections if s.name == ".rodata"))
 
 def _amd_inst_names(prg):
-  return [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+  return [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
 
 def _assert_abi_reg_isolation(testcase, prg):
   fixed_sgpr, fixed_vgpr = {0, 1, 2, 3, 4}, {256, 257, 258}
-  for u in prg.src[2].src:
+  for u in _prg_lin(prg).src:
     if not isinstance((reg_uop:=getattr(u, "reg", None)), amd_isa.Register): continue
     reg = reg_uop.index
     # Fixed ABI registers should only enter linear IR through hardware SPECIAL definitions.
@@ -721,11 +725,11 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_to_program_assembles_elf(self):
     prg = _simple_add_program()
-    self.assertIs(prg.src[3].op, Ops.SOURCE)
-    self.assertIs(prg.src[4].op, Ops.BINARY)
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertIn("load", prg.src[3].arg.lower())
-    self.assertIn("store", prg.src[3].arg.lower())
+    self.assertIs(_prg_src(prg).op, Ops.SOURCE)
+    self.assertIs(_prg_bin(prg).op, Ops.BINARY)
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertIn("load", _prg_src(prg).arg.lower())
+    self.assertIn("store", _prg_src(prg).arg.lower())
     self.assertEqual(_amd_desc(prg).kernarg_size, 16)
 
   def test_program_estimates_survive_instruction_selection(self):
@@ -736,14 +740,14 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_linear_contains_amd_ops(self):
     prg = _simple_add_program()
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.KERNARG, linear_ops)
     self.assertIn(AMDOps.LOAD, linear_ops)
     self.assertIn(AMDOps.STORE, linear_ops)
 
   def test_two_global_loads_share_waitcnt(self):
     prg = _two_load_add_program()
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     first_load = inst_names.index("GLOBAL_LOAD_B32")
     second_load = inst_names.index("GLOBAL_LOAD_B32", first_load + 1)
     first_wait = inst_names.index("S_WAITCNT_VMCNT")
@@ -758,15 +762,15 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_uint32_alu_param_offsets(self):
     prg = _uint_var_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    kernarg_offsets = [u.src[0].arg for u in prg.src[2].src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    kernarg_offsets = [u.src[0].arg for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
     self.assertEqual(sorted(kernarg_offsets), [0, 8, 16])
     self.assertEqual(_amd_desc(prg).kernarg_size, 20)
 
   def test_multiple_alu_params_are_dense_after_buffers(self):
     prg = _two_uint_var_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    kernarg_offsets = [u.src[0].arg for u in prg.src[2].src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    kernarg_offsets = [u.src[0].arg for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
     self.assertEqual(sorted(kernarg_offsets), [0, 8, 16, 20])
     self.assertEqual(_amd_desc(prg).kernarg_size, 24)
 
@@ -774,12 +778,12 @@ class TestAMDRenderer(unittest.TestCase):
     for dtype in (dtypes.bool, dtypes.uint8, dtypes.int8, dtypes.uint16, dtypes.int16):
       with self.subTest(dtype=dtype):
         prg = _copy_program(dtype)
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
 
   def test_reserved_v254_v255_not_allocated(self):
     for prg in (_simple_add_program(), _range_program(), _var_range_program()):
       with self.subTest(name=prg.arg.name):
-        regs = [u.reg.index for u in prg.src[2].src if isinstance(getattr(u, "reg", None), amd_isa.Register)]
+        regs = [u.reg.index for u in _prg_lin(prg).src if isinstance(getattr(u, "reg", None), amd_isa.Register)]
         self.assertLess(max(regs, default=0), 256 + 254)
 
   def test_abi_fixed_registers_are_not_temp_allocated(self):
@@ -789,7 +793,7 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_kernarg_sgpr_pairs_do_not_overlap(self):
     prg = _uint_var_program()
-    kernarg_bases = [u.reg.index for u in prg.src[2].src if u.op is Ops.INS and u.arg is AMDOps.KERNARG and u.dtype.itemsize == 8]
+    kernarg_bases = [u.reg.index for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.KERNARG and u.dtype.itemsize == 8]
     self.assertEqual(kernarg_bases, sorted(kernarg_bases))
     for a, b in zip(kernarg_bases, kernarg_bases[1:]):
       self.assertGreaterEqual(b - a, 2)
@@ -797,32 +801,32 @@ class TestAMDRenderer(unittest.TestCase):
   def test_linear_has_no_explicit_end_op(self):
     for prg in (_simple_add_program(), _range_program(), _nested_range_program(), _var_range_program()):
       with self.subTest(name=prg.arg.name):
-        self.assertFalse(any(u.op is Ops.END for u in prg.src[2].src))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertFalse(any(u.op is Ops.END for u in _prg_lin(prg).src))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertNotIn("END", [getattr(op, "name", op) for op in linear_ops])
 
   def test_compare_where_assembles(self):
     for dtype in (dtypes.uint32, dtypes.int32, dtypes.float32):
       with self.subTest(dtype=dtype):
         prg = _where_program(dtype)
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertIn(AMDOps.CMPLT, linear_ops)
         self.assertIn(AMDOps.WHERE, linear_ops)
 
   def test_where_sgpr_true_materializes_vsrc1(self):
     prg = _where_sgpr_true_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     cndmask = next(i for i in insts if getattr(i, "op_name", "") == "V_CNDMASK_B32_E32")
     self.assertEqual(cndmask.vsrc1, amd_isa.TMP_VDATA)
     self.assertTrue(any(getattr(i, "op_name", "") == "V_MOV_B32_E32" and i.vdst == amd_isa.TMP_VDATA for i in insts))
 
   def test_where_compare_value_materializes_flag(self):
     prg = _where_compare_value_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
     compare_ops = {AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ}
-    for u in prg.src[2].src:
+    for u in _prg_lin(prg).src:
       if u.op is Ops.INS and u.arg is AMDOps.WHERE:
         for value in u.src[1:]:
           self.assertFalse(value.op is Ops.INS and value.arg in compare_ops)
@@ -831,31 +835,31 @@ class TestAMDRenderer(unittest.TestCase):
     for dtype in (dtypes.uint32, dtypes.int32, dtypes.float32):
       with self.subTest(dtype=dtype):
         prg = _eq_where_program(dtype)
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertIn(AMDOps.CMPEQ, linear_ops)
         self.assertIn(AMDOps.WHERE, linear_ops)
 
   def test_float_cmpne_uses_float_compare(self):
     prg = _float_cmpne_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CMPNE, linear_ops)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     self.assertIn("V_CMP_NEQ_F32_E32", [getattr(i, "op_name", "") for i in insts])
 
   def test_cmpne_compare_flag_simplifies(self):
     prg = _cmpne_compare_flag_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CMPLT, linear_ops)
     self.assertIn(AMDOps.WHERE, linear_ops)
     self.assertNotIn(AMDOps.CMPNE, linear_ops)
 
   def test_bool_and_compare_flags_materializes(self):
     prg = _bool_and_compare_flags_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CMPLT, linear_ops)
     self.assertIn(AMDOps.CMPNE, linear_ops)
     self.assertIn(AMDOps.AND, linear_ops)
@@ -863,57 +867,57 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_bool_compare_store_materializes_flag(self):
     prg = _bool_compare_store_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CMPLT, linear_ops)
     self.assertIn(AMDOps.WHERE, linear_ops)
     self.assertIn(AMDOps.STORE, linear_ops)
 
   def test_float16_where_assembles(self):
     prg = _float16_where_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.WHERE, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     for name in ("GLOBAL_LOAD_U16", "GLOBAL_STORE_B16", "V_CNDMASK_B32_E32"):
       self.assertIn(name, inst_names)
 
   def test_float16_cast_assembles(self):
     prg = _float16_cast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CAST, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     for name in ("V_CVT_F32_F16_E32", "V_CVT_F16_F32_E32"):
       self.assertIn(name, inst_names)
 
   def test_bfloat16_tagged_param_lowers_to_kernarg(self):
     prg = _bfloat16_store_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is Ops.PARAM for u in prg.src[2].src))
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is Ops.PARAM for u in _prg_lin(prg).src))
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertIn("GLOBAL_STORE_B16", inst_names)
 
   def test_emulated_uint64_upcast_assembles(self):
     prg = _emulated_uint64_upcast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is Ops.CAST for u in prg.src[2].src))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is Ops.CAST for u in _prg_lin(prg).src))
 
   def test_emulated_int64_cmod_const_assembles(self):
     prg = _emulated_int64_cmod_const_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
 
   def test_emulated_int64_index_cmod_assembles(self):
     prg = _emulated_int64_index_cmod_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is Ops.CMOD for u in prg.src[2].src))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is Ops.CMOD for u in _prg_lin(prg).src))
 
   def test_narrow_variable_mod_widens_before_regalloc(self):
     for dtype in (dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16):
       with self.subTest(dtype=dtype):
         prg = _narrow_var_mod_program(dtype)
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        self.assertFalse(any(u.op is Ops.CMOD for u in prg.src[2].src))
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        self.assertFalse(any(u.op is Ops.CMOD for u in _prg_lin(prg).src))
 
   def test_software_sin_decomposes_late_64bit_divmod(self):
     sinks = _software_sin_lowered_sinks()
@@ -924,27 +928,27 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_custom_atomic_add_lowers_to_global_atomic(self):
     prg = _atomic_add_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is Ops.CUSTOM for u in prg.src[2].src))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is Ops.CUSTOM for u in _prg_lin(prg).src))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.ATOMIC_ADD, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertIn("GLOBAL_ATOMIC_ADD_F32", inst_names)
     self.assertIn("S_WAITCNT_VMCNT", inst_names)
 
   def test_int_narrow_cast_assembles(self):
     prg = _int_narrow_cast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.CAST, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertIn("V_AND_B32_E32", inst_names)
     self.assertIn("GLOBAL_STORE_B16", inst_names)
 
   def test_int_signed_narrow_cast_sign_extends(self):
     prg = _int_signed_narrow_cast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     # signed narrowing must sign-extend (shift left then arithmetic shift right), not mask
     self.assertIn("V_LSHLREV_B32_E64", inst_names)
     self.assertIn("V_ASHRREV_I32_E64", inst_names)
@@ -954,7 +958,7 @@ class TestAMDRenderer(unittest.TestCase):
     # two independent global loads feeding one add should batch into a single vmcnt wait,
     # not one wait per load (s_waitcnt vmcnt stalls the wave, so batching overlaps latency)
     prg = _two_load_add_program()
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertEqual(inst_names.count("GLOBAL_LOAD_B32"), 2)
     self.assertEqual(inst_names.count("S_WAITCNT_VMCNT"), 1)
     # the single wait must come after both loads (before the consuming add)
@@ -963,10 +967,10 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_matmul_reg_accumulators_promote_off_scratch(self):
     prg = _matmul64_program()
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertNotIn(AMDOps.SLOAD, linear_ops)
     self.assertNotIn(AMDOps.SSTORE, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertFalse(any("SCRATCH" in name for name in inst_names))
 
   def test_matmul_default_schedule_uses_float4_memory_tile(self):
@@ -975,7 +979,7 @@ class TestAMDRenderer(unittest.TestCase):
       Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4),
       Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.LOCAL, 1, 16)))
     self.assertEqual(prg.arg.local_size, (128, 1, 1))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertEqual(linear_ops.count(AMDOps.MULACC), 64)
     inst_names = _amd_inst_names(prg)
     self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
@@ -1039,9 +1043,9 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_float4_global_memory_uses_b128_and_scalarized_alu(self):
     prg = _float4_add_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is not Ops.INS for u in prg.src[2].src))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is not Ops.INS for u in _prg_lin(prg).src))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertEqual(linear_ops.count(AMDOps.LOAD), 2)
     self.assertEqual(linear_ops.count(AMDOps.STORE), 1)
     self.assertIn(AMDOps.EXTRACT, linear_ops)
@@ -1052,16 +1056,16 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_float4_lds_memory_uses_ds_b128(self):
     prg = _float4_lds_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is not Ops.INS for u in prg.src[2].src))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is not Ops.INS for u in _prg_lin(prg).src))
     inst_names = _amd_inst_names(prg)
     self.assertIn("DS_STORE_B128", inst_names)
     self.assertIn("DS_LOAD_B128", inst_names)
 
   def test_half_memory_does_not_use_float4_coalescing(self):
     prg = _half_add_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertNotIn(AMDOps.PACK, linear_ops)
     inst_names = _amd_inst_names(prg)
     self.assertNotIn("GLOBAL_LOAD_B128", inst_names)
@@ -1069,15 +1073,15 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_padded_load_does_not_use_wide_global_load(self):
     prg = _padded_load_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
     inst_names = _amd_inst_names(prg)
     self.assertNotIn("GLOBAL_LOAD_B128", inst_names)
     self.assertIn("GLOBAL_LOAD_B32", inst_names)
 
   def test_int_signed_widen_cast_sign_extends(self):
     prg = _int_signed_widen_cast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     # signed widening sign-extends from the source width via the same shift pair, not a mask
     self.assertIn("V_LSHLREV_B32_E64", inst_names)
     self.assertIn("V_ASHRREV_I32_E64", inst_names)
@@ -1085,41 +1089,41 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_float16_unary_promotes_to_float32(self):
     prg = _float16_unary_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.CAST, AMDOps.SQRT, AMDOps.LOG2, AMDOps.TRUNC, AMDOps.RECIPROCAL, AMDOps.SIN):
       self.assertIn(op, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     for name in ("V_CVT_F32_F16_E32", "V_CVT_F16_F32_E32", "V_SIN_F32_E32"):
       self.assertIn(name, inst_names)
 
   def test_bitwise_assembles(self):
     prg = _bitwise_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.AND, AMDOps.OR, AMDOps.XOR, AMDOps.SHR):
       self.assertIn(op, linear_ops)
 
   def test_cmod_pow2_legalizes_to_and(self):
     prg = _cmod_pow2_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op is Ops.CMOD for u in prg.src[2].src))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op is Ops.CMOD for u in _prg_lin(prg).src))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.AND, linear_ops)
 
   def test_const_divmod_legalizes(self):
     prg = _const_divmod_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op in (Ops.CDIV, Ops.CMOD) for u in prg.src[2].src))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op in (Ops.CDIV, Ops.CMOD) for u in _prg_lin(prg).src))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.SHR, linear_ops)
     self.assertIn(AMDOps.MUL, linear_ops)
 
   def test_var_divmod_legalizes(self):
     prg = _var_divmod_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    self.assertFalse(any(u.op in (Ops.CDIV, Ops.CMOD) for u in prg.src[2].src))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    self.assertFalse(any(u.op in (Ops.CDIV, Ops.CMOD) for u in _prg_lin(prg).src))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.SHL, AMDOps.SHR, AMDOps.CMPLT, AMDOps.WHERE):
       self.assertIn(op, linear_ops)
 
@@ -1127,35 +1131,35 @@ class TestAMDRenderer(unittest.TestCase):
     for dtype in (dtypes.uint32, dtypes.int32, dtypes.float32):
       with self.subTest(dtype=dtype):
         prg = _max_program(dtype)
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertIn(AMDOps.MAX, linear_ops)
 
   def test_mulacc_assembles(self):
     for prg in (_mulacc_program(), _fused_mulacc_program()):
       with self.subTest(name=prg.arg.name):
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertIn(AMDOps.MULACC, linear_ops)
-        insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+        insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
         self.assertIn("V_FMA_F32", [getattr(i, "op_name", "") for i in insts])
 
   def test_fused_mulacc_is_isel_only(self):
     self.assertNotIn(Ops.MULACC, AMDRenderer.code_for_op)
     prg = _fused_mulacc_program()
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.MULACC, linear_ops)
     self.assertNotIn(AMDOps.MUL, linear_ops)
     self.assertNotIn(AMDOps.ADD, linear_ops)
 
   def test_float16_fused_mulacc_uses_f16_fma(self):
     prg = _float16_fused_mulacc_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.MULACC, linear_ops)
     self.assertNotIn(AMDOps.MUL, linear_ops)
     self.assertNotIn(AMDOps.ADD, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertIn("V_FMA_F16", inst_names)
 
   def test_sgpr_sub_uses_scalar_instruction(self):
@@ -1174,42 +1178,42 @@ class TestAMDRenderer(unittest.TestCase):
   def test_cast_and_reciprocal_assemble(self):
     for prg in (_cast_reciprocal_program(), _float_to_int_cast_program()):
       with self.subTest(name=prg.arg.name):
-        self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-        linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+        self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+        linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
         self.assertIn(AMDOps.CAST, linear_ops)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_cast_reciprocal_program().src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(_cast_reciprocal_program()))
     inst_names = [getattr(i, "op_name", "") for i in insts]
     self.assertIn("V_CVT_F32_I32_E32", inst_names)
     rcp_idx = inst_names.index("V_RCP_F32_E32")
     self.assertEqual(inst_names[rcp_idx:rcp_idx+6],
                      ["V_RCP_F32_E32", "V_MUL_F32_E32", "V_SUB_F32_E32", "V_FMA_F32", "V_CMP_EQ_F32_E32", "V_CNDMASK_B32_E32"])
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_float_to_int_cast_program().src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(_float_to_int_cast_program()))
     self.assertIn("V_CVT_I32_F32_E32", [getattr(i, "op_name", "") for i in insts])
 
   def test_exp2_assembles(self):
     prg = _exp2_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.EXP2, linear_ops)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     self.assertIn("V_EXP_F32_E32", [getattr(i, "op_name", "") for i in insts])
 
   def test_unary_math_assembles(self):
     prg = _unary_math_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.SQRT, AMDOps.LOG2, AMDOps.TRUNC):
       self.assertIn(op, linear_ops)
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     for name in ("V_SQRT_F32_E32", "V_LOG_F32_E32", "V_TRUNC_F32_E32"):
       self.assertIn(name, inst_names)
 
   def test_sin_assembles_with_inline_cody_waite_reduction(self):
     prg = _sin_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.SIN, linear_ops)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     reduce_insts = [i for i in insts if getattr(i, "op_name", "") in
                     ("V_MUL_F32_E32", "V_ADD_F32_E32", "V_FRACT_F32_E32", "V_SUB_F32_E32", "V_SIN_F32_E32")]
     self.assertEqual([getattr(i, "op_name", "") for i in reduce_insts],
@@ -1231,20 +1235,20 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_uint32_wrap_literal_assembles(self):
     prg = _uint_wrap_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.ADD, linear_ops)
 
   def test_uint32_mul_alu_param_assembles(self):
     prg = _uint_var_mul_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.MUL, linear_ops)
 
   def test_vgpr_spill_assembles_with_private_segment(self):
     prg = _spill_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertIn(AMDOps.SPILL, linear_ops)
     self.assertIn(AMDOps.FILL, linear_ops)
     desc = _amd_desc(prg)
@@ -1254,15 +1258,15 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_vgpr_multiple_spill_slots_size_private_segment(self):
     prg = _multi_spill_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    spill_ops = [u for u in prg.src[2].src if u.op is Ops.INS and u.arg in (AMDOps.SPILL, AMDOps.FILL)]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    spill_ops = [u for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg in (AMDOps.SPILL, AMDOps.FILL)]
     self.assertEqual(sorted({u.src[0].arg for u in spill_ops}), [0, 4])
     self.assertGreaterEqual(_amd_desc(prg).private_segment_fixed_size, 8)
 
   def test_vgpr_spill_uses_explicit_zero_scratch_addr(self):
     prg = _spill_program()
     renderer = TinyVGPRAMDRenderer(Target("AMD", arch="gfx1100"))
-    for u in prg.src[2].src:
+    for u in _prg_lin(prg).src:
       if u.op is Ops.INS and u.arg in (AMDOps.SPILL, AMDOps.FILL):
         with self.subTest(op=u.arg.name):
           insts = renderer._insts_for_uop(u)
@@ -1288,11 +1292,11 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_range_loop_assembles_with_branch_fixups(self):
     prg = _range_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.LABEL, AMDOps.CMP_GE, AMDOps.CBRANCH_SCC1, AMDOps.BRANCH):
       self.assertIn(op, linear_ops)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     branches = [i.simm16 if i.simm16 < 0x8000 else i.simm16 - 0x10000 for i in insts
                 if getattr(i, "op_name", "") in ("S_CBRANCH_SCC1", "S_BRANCH")]
     self.assertEqual(len(branches), 2)
@@ -1309,7 +1313,7 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_loop_where_rematerializes_vcc_before_each_cndmask(self):
     prg = _loop_vcc_remat_program()
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     names = [getattr(i, "op_name", "") for i in insts]
     cndmask_idxs = [i for i,n in enumerate(names) if n == "V_CNDMASK_B32_E32"]
     self.assertGreaterEqual(len(cndmask_idxs), 2)
@@ -1319,12 +1323,12 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_nested_range_loop_assembles_with_branch_fixups(self):
     prg = _nested_range_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertEqual(linear_ops.count(AMDOps.LABEL), 4)
     self.assertEqual(linear_ops.count(AMDOps.CBRANCH_SCC1), 2)
     self.assertEqual(linear_ops.count(AMDOps.BRANCH), 2)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     branches = [i.simm16 if i.simm16 < 0x8000 else i.simm16 - 0x10000 for i in insts
                 if getattr(i, "op_name", "") in ("S_CBRANCH_SCC1", "S_BRANCH")]
     self.assertEqual(sum(x > 0 for x in branches), 2)
@@ -1332,19 +1336,19 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_variable_range_loop_materializes_sgpr_index_and_data(self):
     prg = _var_range_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    kernargs = [(u.dtype, u.src[0].arg) for u in prg.src[2].src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    kernargs = [(u.dtype, u.src[0].arg) for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.KERNARG]
     self.assertIn((dtypes.uint32, 8), kernargs)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     self.assertTrue(any(i.op_name == "V_MOV_B32_E32" and i.vdst == amd_isa.TMP_VDATA for i in insts))
     self.assertTrue(any(getattr(i, "op_name", "") == "GLOBAL_STORE_B32" and i.data == amd_isa.TMP_VDATA for i in insts))
 
   def test_global_range_uses_launch_dims(self):
     prg = _global_dim_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
     self.assertNotEqual(prg.arg.global_size, (1, 1, 1))
     self.assertNotEqual(prg.arg.local_size, (1, 1, 1))
-    self.assertFalse(any(u.op is Ops.RANGE for u in prg.src[2].src))
+    self.assertFalse(any(u.op is Ops.RANGE for u in _prg_lin(prg).src))
     specials = [u.arg for u in prg.src[0].toposort() if u.op is Ops.SPECIAL]
     self.assertIn("gidx0", specials)
     self.assertIn("lidx0", specials)
@@ -1354,29 +1358,29 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_lds_load_store_barrier_assembles(self):
     prg = _local_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.LDS_BASE, AMDOps.LSTORE, AMDOps.BARRIER, AMDOps.LLOAD):
       self.assertIn(op, linear_ops)
-    self.assertFalse(any(u.op is Ops.AFTER for u in prg.src[2].src))
+    self.assertFalse(any(u.op is Ops.AFTER for u in _prg_lin(prg).src))
     desc = _amd_desc(prg)
     self.assertGreaterEqual(desc.group_segment_fixed_size, 16 * dtypes.uint32.itemsize)
     self.assertEqual(desc.private_segment_fixed_size, 0)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     op_names = [getattr(i, "op_name", "") for i in insts]
     for name in ("DS_STORE_B32", "S_BARRIER", "DS_LOAD_B32"):
       self.assertIn(name, op_names)
 
   def test_reg_buffer_uses_private_scratch(self):
     prg = _reg_buffer_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     for op in (AMDOps.SCRATCH_SIZE, AMDOps.SCRATCH_ADDR, AMDOps.SSTORE, AMDOps.SLOAD):
       self.assertIn(op, linear_ops)
     desc = _amd_desc(prg)
     self.assertGreaterEqual(desc.private_segment_fixed_size, 16 * dtypes.uint32.itemsize)
     self.assertTrue(desc.compute_pgm_rsrc2 & (1 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT))
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     op_names = [getattr(i, "op_name", "") for i in insts]
     self.assertIn("SCRATCH_STORE_B32", op_names)
     self.assertIn("SCRATCH_LOAD_B32", op_names)
@@ -1390,8 +1394,8 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_gated_load_rematerializes_vcc(self):
     prg = _gated_load_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_ops = [u.arg for u in prg.src[2].src if u.op is Ops.INS]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_ops = [u.arg for u in _prg_lin(prg).src if u.op is Ops.INS]
     self.assertGreaterEqual(linear_ops.count(AMDOps.CMPLT), 4)
     self.assertGreaterEqual(linear_ops.count(AMDOps.WHERE), 4)
     self.assertIn(AMDOps.LOAD, linear_ops)
@@ -1411,13 +1415,13 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_after_global_load_keeps_64bit_saddr(self):
     prg = _after_global_load_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    loads = [i for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2]) if getattr(i, "op_name", "") == "GLOBAL_LOAD_B32"]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    loads = [i for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg)) if getattr(i, "op_name", "") == "GLOBAL_LOAD_B32"]
     self.assertTrue(loads)
     self.assertTrue(all(i.saddr.sz == 2 for i in loads))
 
   def test_lds_uses_reserved_vgprs_for_addr_and_scalar_data(self):
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_local_sgpr_data_program().src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(_local_sgpr_data_program()))
     ds_ops = [i for i in insts if getattr(i, "op_name", "").startswith("DS_")]
     self.assertTrue(ds_ops)
     self.assertTrue(all(i.addr == amd_isa.TMP_VADDR for i in ds_ops))
@@ -1426,26 +1430,26 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_narrow_lds_copy_assembles(self):
     prg = _local_program(dtypes.uint8)
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
     self.assertGreaterEqual(_amd_desc(prg).group_segment_fixed_size, 16 * dtypes.uint8.itemsize)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     op_names = [getattr(i, "op_name", "") for i in insts]
     self.assertIn("DS_STORE_B8", op_names)
     self.assertIn("DS_LOAD_U8", op_names)
 
   def test_byte_lds_lidx0_uses_byte_addr_directly(self):
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_local_program(dtypes.uint8).src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(_local_program(dtypes.uint8)))
     ds_ops = [i for i in insts if getattr(i, "op_name", "").startswith("DS_")]
     self.assertTrue(ds_ops)
     self.assertTrue(all(i.addr == amd_isa.v[0] for i in ds_ops))
 
   def test_multiple_lds_buffers_get_distinct_offsets(self):
     prg = _multi_local_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    bases = [u for u in prg.src[2].src if u.op is Ops.INS and u.arg is AMDOps.LDS_BASE]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    bases = [u for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.LDS_BASE]
     self.assertEqual(sorted((u.src[0].arg, u.src[1].arg) for u in bases), [(64, 0), (64, 64)])
     self.assertGreaterEqual(_amd_desc(prg).group_segment_fixed_size, 128)
-    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])
+    insts = AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))
     self.assertTrue(any(i.op_name == "V_ADD_NC_U32_E64" and i.vdst == amd_isa.TMP_VADDR for i in insts))
 
   def test_duplicate_lds_slot_rejected(self):
@@ -1454,14 +1458,14 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_gidx_metadata_survives_for_descriptor(self):
     prg = _gidx_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
     specials = [u.arg for u in prg.src[0].toposort() if u.op is Ops.SPECIAL]
     self.assertIn("gidx0", specials)
 
   def test_multi_dim_specials_set_descriptor_bits(self):
     prg = _multi_dim_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_regs = {u.reg.index for u in prg.src[2].src if getattr(u, "reg", None) is not None}
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_regs = {u.reg.index for u in _prg_lin(prg).src if getattr(u, "reg", None) is not None}
     self.assertIn(256, linear_regs)
     self.assertIn(257, linear_regs)
     self.assertIn(3, linear_regs)
@@ -1471,8 +1475,8 @@ class TestAMDRenderer(unittest.TestCase):
 
   def test_z_dim_specials_set_descriptor_bits(self):
     prg = _z_dim_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    linear_regs = {u.reg.index for u in prg.src[2].src if getattr(u, "reg", None) is not None}
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    linear_regs = {u.reg.index for u in _prg_lin(prg).src if getattr(u, "reg", None) is not None}
     self.assertIn(258, linear_regs)
     self.assertIn(4, linear_regs)
     desc = _amd_desc(prg)
@@ -1494,7 +1498,7 @@ class TestAMDRenderer(unittest.TestCase):
   def test_hardware_range_smoke(self):
     out = Tensor.empty(8, dtype=dtypes.uint32, device="AMD").contiguous().realize()
     buf, prg = out._buffer().ensure_allocated(), _range_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(buf.get_buf("AMD"), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), list(range(1, 9)))
 
@@ -1503,7 +1507,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp = Tensor(list(range(16)), dtype=dtypes.uint32, device="AMD").contiguous().realize()
     out = Tensor.empty(16, dtype=dtypes.uint32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp)], _two_uint_var_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(2, 3), wait=True)
     self.assertEqual(out.tolist(), [i + 5 for i in range(16)])
 
@@ -1511,7 +1515,7 @@ class TestAMDRenderer(unittest.TestCase):
   def test_hardware_reg_buffer_smoke(self):
     out = Tensor.empty(16, dtype=dtypes.uint32, device="AMD").contiguous().realize()
     buf, prg = out._buffer().ensure_allocated(), _reg_buffer_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(buf.get_buf("AMD"), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [i + 6 for i in range(16)])
 
@@ -1521,7 +1525,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp1 = Tensor([100 + i for i in range(16)], dtype=dtypes.uint32, device="AMD").contiguous().realize()
     out = Tensor.empty(16, dtype=dtypes.uint32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp0, inp1)], _gated_load_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [100 + 2*i if i < 4 else i if i < 8 else 0 for i in range(16)])
 
@@ -1547,7 +1551,7 @@ class TestAMDRenderer(unittest.TestCase):
     mask = Tensor([True, False, True, False], dtype=dtypes.bool, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float16, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp0, inp1, mask)], _float16_where_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [1.5, -2.0, 3.5, -4.0])
 
@@ -1557,7 +1561,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp = Tensor(vals, dtype=dtypes.float16, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float16, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp)], _float16_unary_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     expected = [math.sqrt(x) + math.log2(x) + math.trunc(x + 0.75) - math.trunc(x) + 1.0 / x + math.sin(x) for x in vals]
     for got, exp in zip(out.tolist(), expected):
@@ -1569,7 +1573,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp1 = Tensor([2.0, 3.0, 4.0, 5.0], dtype=dtypes.float16, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float16, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp0, inp1)], _float16_fused_mulacc_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [3.0, 7.0, 13.0, 21.0])
 
@@ -1591,8 +1595,8 @@ class TestAMDRenderer(unittest.TestCase):
   def test_int_half_cast_routes_through_f32(self):
     # the int->f16 leg should select two converts (int->f32, f32->f16), never a raw CAST left for regalloc
     prg = _int_to_half_cast_program()
-    self.assertTrue(prg.src[4].arg.startswith(b"\x7fELF"))
-    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(prg.src[2])]
+    self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
+    inst_names = [getattr(i, "op_name", "") for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg))]
     self.assertIn("V_CVT_F32_I32_E32", inst_names)
     self.assertIn("V_CVT_F16_F32_E32", inst_names)
     self.assertIn("V_CVT_F32_F16_E32", inst_names)
@@ -1604,7 +1608,7 @@ class TestAMDRenderer(unittest.TestCase):
     div = Tensor([3, -3, 3, -3], dtype=dtypes.int32, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.int32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp, div)], _var_divmod_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [-21, 19, 21, -19])
 
@@ -1613,7 +1617,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp = Tensor([0.0, 1.0, 2.0, 3.0], dtype=dtypes.float32, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp)], _exp2_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [1.0, 2.0, 4.0, 8.0])
 
@@ -1622,7 +1626,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp = Tensor([1.0, 4.0, 16.0, 64.0], dtype=dtypes.float32, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp)], _unary_math_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     self.assertEqual(out.tolist(), [1.0, 4.0, 8.0, 14.0])
 
@@ -1631,7 +1635,7 @@ class TestAMDRenderer(unittest.TestCase):
     inp = Tensor([-2.0, 0.0, 1.0, math.pi / 2], dtype=dtypes.float32, device="AMD").contiguous().realize()
     out = Tensor.empty(4, dtype=dtypes.float32, device="AMD").contiguous().realize()
     bufs, prg = [x._buffer().ensure_allocated() for x in (out, inp)], _sin_program()
-    rt = Device["AMD"].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
+    rt = Device["AMD"].runtime(prg.arg.function_name, _prg_bin(prg).arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars, prg=prg)
     rt(*(b.get_buf("AMD") for b in bufs), global_size=prg.arg.global_size, local_size=prg.arg.local_size, vals=(), wait=True)
     for got, expected in zip(out.tolist(), [math.sin(x) for x in [-2.0, 0.0, 1.0, math.pi / 2]]):
       self.assertAlmostEqual(got, expected, places=5)

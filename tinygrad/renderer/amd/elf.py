@@ -64,8 +64,8 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       lds_size = max(lds_size, (u.src[1].arg if len(u.src) > 1 else lds_size) + u.src[0].arg)
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
     elif u.op is Ops.SPECIAL and u.arg.startswith("lidx"): lids.add(int(u.arg[-1]))
-  if len(prg.src) > 2 and prg.src[2].op is Ops.LINEAR:
-    for u in prg.src[2].src:
+  if len(prg.src) > 1 and prg.src[1].op is Ops.LINEAR:
+    for u in prg.src[1].src:
       if u.op is Ops.INS and getattr(u.arg, "name", None) == "SCRATCH_SIZE":
         private_segment_size = max(private_segment_size, u.src[0].arg)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
