@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, reg as greg
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
 # ***** X86 Ops *****
