@@ -25,7 +25,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 from tinygrad.codegen.late.expander import pm_group_for_reduce
-from tinygrad.helpers import all_same, flatten
+from tinygrad.helpers import all_same, flatten, argsort
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 
 pm_remove_vec_dtypes = PatternMatcher([
@@ -53,7 +53,7 @@ pm_no_weakints = PatternMatcher([
   (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
 ])
 
-def build_range_map(ctx, sink:UOp):
+def build_range_map(ctx:dict[int, int], sink:UOp):
   for x in sink.toposort():
     if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
       ctx[x.arg[0]] = len(ctx)
@@ -61,6 +61,25 @@ def build_range_map(ctx, sink:UOp):
 def fix_reduce(ctx, r:UOp):
   range_to_axis = {u:ctx[u.arg[0]] for u in r.ended_ranges if u.arg[0] in ctx if u.arg[1] == AxisType.UNROLL}
   return r.replace(src=tuple([u for u in r.src if u not in range_to_axis]), arg=(r.arg[0], r.arg[1]+tuple(range_to_axis.values())))
+
+def do_contract(ctx:dict[int, int], u:UOp):
+  # the context is a mapping from range number (in contract) to axis number
+  permute_tail = [ctx[rn] for rn,_ in u.arg]
+  permute_head = [i for i in range(len(u.src[0].shape)) if i not in permute_tail]
+  out = u.src[0].permute(permute_head+permute_tail)
+  return out.reshape(*out.shape[:len(permute_head)], -1)
+
+def do_unroll(ctx:dict[int, int], u:UOp):
+  # this is the opposite of contract
+  permute_tail = [ctx[rn] for rn,_ in u.arg]
+  out = u.src[0].reshape(*u.src[0].shape[:-1], *[nm for _,nm in u.arg])
+  permute_head = [i for i in range(len(out.shape)) if i not in permute_tail]
+  return out.permute(argsort(permute_head+permute_tail))
+
+expander_contract = PatternMatcher([
+  (UPat(Ops.CONTRACT, name="u"), do_contract),
+  (UPat(Ops.UNROLL, name="u"), do_unroll),
+])
 
 expander2 = PatternMatcher([
   (UPat(Ops.SINK, name="sink"), build_range_map),
@@ -186,7 +205,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # expand
   #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
-  sink = graph_rewrite(sink, expander2, ctx={}, name="expander", bottom_up=True)
+  sink = graph_rewrite(sink, expander2, ctx=(ectx:={}), name="expander", bottom_up=True)
+  sink = graph_rewrite(sink, expander_contract, ctx=ectx, name="expander contract")
   sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
 
   # add locals
