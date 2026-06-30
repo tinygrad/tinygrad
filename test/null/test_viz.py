@@ -1111,8 +1111,10 @@ class TestCLI(unittest.TestCase):
     with write_files(viz) as files, Context(NO_COLOR=1):
       flat = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end")
       aggregate = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end", "-t")
+      final = run_cli(*files, "-s", "NULL", "--interval", "interval_end", "-t")
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
+    assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
 
 if __name__ == "__main__":
   unittest.main()
