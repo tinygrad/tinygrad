@@ -175,7 +175,8 @@ pm_linearize_cleanups = PatternMatcher([
 def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
-  for u in lst:
+  for i, u in enumerate(lst):
+    if hasattr(ctx, "regalloc_i"): ctx.regalloc_i = i
     nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
     ret: tuple[UOp, list[UOp]] = pm.rewrite(nu, ctx) or (nu, [nu])
     replaced[u] = ret[0]

@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.helpers import dedup
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes
 
@@ -12,7 +12,6 @@ class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops = uops
     self.ren = ren
-    self.idx = itertools.count()
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
 
@@ -35,6 +34,7 @@ class LinearScanRegallocContext:
     self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
+    self.regalloc_i = 0
     # prologue/epilogue must attach to real emitted instructions: skip leading/trailing PSEUDO_OPS and the SINK
     # terminator (regalloc_rewrite never processes SINK), otherwise stack alloc/dealloc would be dropped.
     real_idxs = [i for i,u in enumerate(uops) if u.op not in PSEUDO_OPS and u.op is not Ops.SINK]
@@ -122,7 +122,7 @@ class LinearScanRegallocContext:
           if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i = next(ctx.idx)
+  i = ctx.regalloc_i
   if x.op in PSEUDO_OPS: return None
   nsrc = []
   for j,s in enumerate(x.src):
@@ -148,4 +148,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 pm_regalloc_rewrite = PatternMatcher([
   (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.SHRINK, Ops.LOAD, Ops.STORE} | PSEUDO_OPS, name="x"),
         regalloc_rewrite),
+  (UPat(GroupOp.All - {Ops.SINK}, name="x"), regalloc_rewrite),
 ])

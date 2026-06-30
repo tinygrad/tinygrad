@@ -12,24 +12,14 @@ from tinygrad.codegen.decomp.op import fast_idiv
 from tinygrad.uop import Ops, FastEnum, auto
 from tinygrad.uop.ops import PatternMatcher, UOp, UPat
 
-# RDNA3 starts every wave with the kernarg segment pointer in s[0:1]. With
-# ENABLE_SGPR_WORKGROUP_ID_X/Y/Z, workgroup ids follow in s[2:4]. v0-v2 are local ids x/y/z.
+# RDNA3: kernarg in s[0:1], wg ids s[2:4], local ids v0-v2. Even SGPR bases for 64-bit kernarg loads.
 KERNARG_REG = s[0:1]
 WGID = tuple(Register(f"s{i}", i) for i in range(2, 5))
 LID = tuple(Register(f"v{i}", 256+i) for i in range(3))
-# Allocate scalar temporaries on even bases so 64-bit kernarg pointer loads don't overlap.
-# The odd SGPRs are intentionally left as the high half of potential 64-bit pairs.
 SGPR = tuple(Register(f"s{i}", i) for i in range(6, 104, 2))
 VGPR = tuple(Register(f"v{i}", 256+i) for i in range(3, 254))
-# v254/v255 are reserved for synthetic store-data/address materialization and scratch spills.
-# They are per-instruction scratch temps only; nothing may expect them to stay live across linear IR uops.
-TMP_VDATA = v[254]
-TMP_VADDR = v[255]
-# s104:105 is outside the allocator pool and serves two non-overlapping purposes:
-#  - TMP_EXEC: cleanup gated stores save EXEC across exactly one store (s_and_saveexec -> store -> s_mov EXEC).
-#  - TMP_SDATA0/1: single-instruction scalar scratch for uniform VGPR values before a SALU compare.
-# These never alias in time: CMP_GE's readfirstlane+compare is a tight produce/consume at loop boundaries and
-# never lands between an IF_MASK save and its END_MASK restore (the masked region only ever contains the store).
+# v254/v255: per-instruction VGPR scratch; s104:105: EXEC save/restore or SALU compare scratch.
+TMP_VDATA, TMP_VADDR = v[254], v[255]
 TMP_EXEC = s[104:105]
 TMP_SDATA0, TMP_SDATA1 = s[104], s[105]
 
@@ -84,6 +74,8 @@ class AMDOps(FastEnum):
 
 _F32_UNARY = {AMDOps.RECIPROCAL: r3.v_rcp_f32_e32, AMDOps.EXP2: r3.v_exp_f32_e32, AMDOps.LOG2: r3.v_log_f32_e32,
               AMDOps.SQRT: r3.v_sqrt_f32_e32, AMDOps.TRUNC: r3.v_trunc_f32_e32}
+_ISEL_UNARY = {Ops.RECIPROCAL: AMDOps.RECIPROCAL, Ops.EXP2: AMDOps.EXP2, Ops.LOG2: AMDOps.LOG2, Ops.SQRT: AMDOps.SQRT,
+               Ops.TRUNC: AMDOps.TRUNC, Ops.SIN: AMDOps.SIN}
 
 def _is_float(dt:DType) -> bool: return dt.scalar() in (dtypes.float16, dtypes.float32)
 def _reg_slots(dt:DType) -> int: return max(1, (dt.itemsize + 3) // 4)
@@ -144,61 +136,53 @@ def _wait_domain_for_load(u:UOp) -> str|None:
   if u.arg in (AMDOps.KERNARG, AMDOps.LLOAD): return "lgkm"
   return None
 
-def _global_load(dt:DType):
+_SCALAR_LOAD = {
+  dtypes.bool: (r3.global_load_u8, r3.scratch_load_u8, r3.ds_load_u8),
+  dtypes.uint8: (r3.global_load_u8, r3.scratch_load_u8, r3.ds_load_u8),
+  dtypes.int8: (r3.global_load_i8, r3.scratch_load_i8, r3.ds_load_i8),
+  dtypes.uint16: (r3.global_load_u16, r3.scratch_load_u16, r3.ds_load_u16),
+  dtypes.int16: (r3.global_load_i16, r3.scratch_load_i16, r3.ds_load_i16),
+  dtypes.float16: (r3.global_load_u16, r3.scratch_load_u16, r3.ds_load_u16),
+  dtypes.uint32: (r3.global_load_b32, r3.scratch_load_b32, r3.ds_load_b32),
+  dtypes.int32: (r3.global_load_b32, r3.scratch_load_b32, r3.ds_load_b32),
+  dtypes.float32: (r3.global_load_b32, r3.scratch_load_b32, r3.ds_load_b32),
+}
+_SCALAR_STORE = {
+  dtypes.bool: (r3.global_store_b8, r3.scratch_store_b8, r3.ds_store_b8),
+  dtypes.uint8: (r3.global_store_b8, r3.scratch_store_b8, r3.ds_store_b8),
+  dtypes.int8: (r3.global_store_b8, r3.scratch_store_b8, r3.ds_store_b8),
+  dtypes.uint16: (r3.global_store_b16, r3.scratch_store_b16, r3.ds_store_b16),
+  dtypes.int16: (r3.global_store_b16, r3.scratch_store_b16, r3.ds_store_b16),
+  dtypes.float16: (r3.global_store_b16, r3.scratch_store_b16, r3.ds_store_b16),
+  dtypes.uint32: (r3.global_store_b32, r3.scratch_store_b32, r3.ds_store_b32),
+  dtypes.int32: (r3.global_store_b32, r3.scratch_store_b32, r3.ds_store_b32),
+  dtypes.float32: (r3.global_store_b32, r3.scratch_store_b32, r3.ds_store_b32),
+}
+_WIDE_LOAD = {8: (r3.global_load_b64, r3.ds_load_b64), 16: (r3.global_load_b128, r3.ds_load_b128)}
+_WIDE_STORE = {8: (r3.global_store_b64, r3.ds_store_b64), 16: (r3.global_store_b128, r3.ds_store_b128)}
+
+def _mem_load(kind:int, dt:DType):
   if dt.count > 1:
     if dt.scalar() is not dtypes.float32: return None
-    return {8: r3.global_load_b64, 16: r3.global_load_b128}.get(dt.itemsize)
-  return {
-    dtypes.bool: r3.global_load_u8, dtypes.uint8: r3.global_load_u8, dtypes.int8: r3.global_load_i8,
-    dtypes.uint16: r3.global_load_u16, dtypes.int16: r3.global_load_i16, dtypes.float16: r3.global_load_u16,
-    dtypes.uint32: r3.global_load_b32, dtypes.int32: r3.global_load_b32, dtypes.float32: r3.global_load_b32,
-  }.get(dt.scalar())
+    ops = _WIDE_LOAD.get(dt.itemsize)
+    return None if ops is None else ops[0 if kind == 0 else 1]
+  ops = _SCALAR_LOAD.get(dt.scalar())
+  return None if ops is None else ops[kind]
 
-def _global_store(dt:DType):
+def _mem_store(kind:int, dt:DType):
   if dt.count > 1:
     if dt.scalar() is not dtypes.float32: return None
-    return {8: r3.global_store_b64, 16: r3.global_store_b128}.get(dt.itemsize)
-  return {
-    dtypes.bool: r3.global_store_b8, dtypes.uint8: r3.global_store_b8, dtypes.int8: r3.global_store_b8,
-    dtypes.uint16: r3.global_store_b16, dtypes.int16: r3.global_store_b16, dtypes.float16: r3.global_store_b16,
-    dtypes.uint32: r3.global_store_b32, dtypes.int32: r3.global_store_b32, dtypes.float32: r3.global_store_b32,
-  }.get(dt.scalar())
+    ops = _WIDE_STORE.get(dt.itemsize)
+    return None if ops is None else ops[0 if kind == 0 else 1]
+  ops = _SCALAR_STORE.get(dt.scalar())
+  return None if ops is None else ops[kind]
 
-def _scratch_load(dt:DType):
-  if dt.count > 1: return None
-  return {
-    dtypes.bool: r3.scratch_load_u8, dtypes.uint8: r3.scratch_load_u8, dtypes.int8: r3.scratch_load_i8,
-    dtypes.uint16: r3.scratch_load_u16, dtypes.int16: r3.scratch_load_i16, dtypes.float16: r3.scratch_load_u16,
-    dtypes.uint32: r3.scratch_load_b32, dtypes.int32: r3.scratch_load_b32, dtypes.float32: r3.scratch_load_b32,
-  }.get(dt.scalar())
-
-def _scratch_store(dt:DType):
-  if dt.count > 1: return None
-  return {
-    dtypes.bool: r3.scratch_store_b8, dtypes.uint8: r3.scratch_store_b8, dtypes.int8: r3.scratch_store_b8,
-    dtypes.uint16: r3.scratch_store_b16, dtypes.int16: r3.scratch_store_b16, dtypes.float16: r3.scratch_store_b16,
-    dtypes.uint32: r3.scratch_store_b32, dtypes.int32: r3.scratch_store_b32, dtypes.float32: r3.scratch_store_b32,
-  }.get(dt.scalar())
-
-def _local_load(dt:DType):
-  if dt.count > 1:
-    if dt.scalar() is not dtypes.float32: return None
-    return {8: r3.ds_load_b64, 16: r3.ds_load_b128}.get(dt.itemsize)
-  return {
-    dtypes.bool: r3.ds_load_u8, dtypes.uint8: r3.ds_load_u8, dtypes.int8: r3.ds_load_i8,
-    dtypes.uint16: r3.ds_load_u16, dtypes.int16: r3.ds_load_i16, dtypes.float16: r3.ds_load_u16,
-    dtypes.uint32: r3.ds_load_b32, dtypes.int32: r3.ds_load_b32, dtypes.float32: r3.ds_load_b32,
-  }.get(dt.scalar())
-
-def _local_store(dt:DType):
-  if dt.count > 1:
-    if dt.scalar() is not dtypes.float32: return None
-    return {8: r3.ds_store_b64, 16: r3.ds_store_b128}.get(dt.itemsize)
-  return {
-    dtypes.bool: r3.ds_store_b8, dtypes.uint8: r3.ds_store_b8, dtypes.int8: r3.ds_store_b8,
-    dtypes.uint16: r3.ds_store_b16, dtypes.int16: r3.ds_store_b16, dtypes.float16: r3.ds_store_b16,
-    dtypes.uint32: r3.ds_store_b32, dtypes.int32: r3.ds_store_b32, dtypes.float32: r3.ds_store_b32,
-  }.get(dt.scalar())
+def _global_load(dt:DType): return _mem_load(0, dt)
+def _global_store(dt:DType): return _mem_store(0, dt)
+def _scratch_load(dt:DType): return _mem_load(1, dt)
+def _scratch_store(dt:DType): return _mem_store(1, dt)
+def _local_load(dt:DType): return _mem_load(2, dt)
+def _local_store(dt:DType): return _mem_store(2, dt)
 
 def _scaled_addr(dst:Reg, idx:UOp, itemsize:int) -> tuple[list, Reg]:
   src = _src(idx)
@@ -449,26 +433,21 @@ def _cmp_bool_const(x:UOp, m:UOp, c:UOp) -> UOp:
   keep = (x.op is Ops.CMPNE and c.arg is False) or (x.op is Ops.CMPEQ and c.arg is True)
   return m if keep else m.where(UOp.const(dtypes.bool, False), UOp.const(dtypes.bool, True))
 
-def _materialize_compare_flags(x:UOp) -> UOp|None:
-  src, changed = [], False
-  for src_u in x.src:
-    if src_u.op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ):
-      src.append(src_u.where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False)))
-      changed = True
-    else: src.append(src_u)
-  return x.replace(src=tuple(src)) if changed else None
+def _bool_flag(x:UOp) -> UOp:
+  return x.where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False))
 
-def _materialize_store_compare_flag(x:UOp) -> UOp|None:
-  if len(x.src) < 2 or x.src[1].op not in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ): return None
-  return x.replace(src=(x.src[0], x.src[1].where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False)), *x.src[2:]))
-
-def _materialize_where_value_flags(x:UOp) -> UOp|None:
+def _materialize_flags(x:UOp, idx:tuple[int, ...]|None=None) -> UOp|None:
   src, changed = list(x.src), False
-  for i in (1, 2):
+  for i in idx or range(len(src)):
     if src[i].op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ):
-      src[i] = src[i].where(UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False))
+      src[i] = _bool_flag(src[i])
       changed = True
   return x.replace(src=tuple(src)) if changed else None
+
+def _materialize_compare_flags(x:UOp) -> UOp|None: return _materialize_flags(x)
+def _materialize_store_compare_flag(x:UOp) -> UOp|None:
+  return _materialize_flags(x, (1,)) if len(x.src) >= 2 and x.src[1].op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ) else None
+def _materialize_where_value_flags(x:UOp) -> UOp|None: return _materialize_flags(x, (1, 2))
 
 def _materialize_bool_where(m:UOp, a:UOp, b:UOp) -> UOp|None:
   if m.op in (Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ): return None
@@ -537,16 +516,10 @@ def make_isel_matcher(sgpr_pool:tuple[Register, ...]=SGPR, vgpr_pool:tuple[Regis
     (UPat(Ops.SUB, dtype=dtypes.ints+(dtypes.float16, dtypes.float32), name="x"), lambda x: x.ins(AMDOps.SUB)),
     ((UPat(dtype=dtypes.ints+(dtypes.float16, dtypes.float32)) * UPat()).named("x"), lambda x: x.ins(AMDOps.MUL)),
     (UPat(Ops.MULACC, dtype=(dtypes.float16, dtypes.float32), name="x"), lambda x: x.ins(AMDOps.MULACC)),
-    (UPat.var("y", dtypes.float16).cast(dtypes.float32, name="x"), lambda y,x: x.ins(AMDOps.CAST, src=(y,))),
-    (UPat.var("y", dtypes.float32).cast(dtypes.float16, name="x"), lambda y,x: x.ins(AMDOps.CAST, src=(y,))),
-    (UPat.var("y", dtypes.ints).cast(dtypes.float32, name="x"), lambda y,x: x.ins(AMDOps.CAST, src=(y,))),
-    (UPat.var("y", dtypes.float32).cast(dtypes.ints, name="x"), lambda y,x: x.ins(AMDOps.CAST, src=(y,))),
-    (UPat(Ops.RECIPROCAL, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.RECIPROCAL)),
-    (UPat(Ops.EXP2, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.EXP2)),
-    (UPat(Ops.LOG2, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.LOG2)),
-    (UPat(Ops.SQRT, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.SQRT)),
-    (UPat(Ops.TRUNC, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.TRUNC)),
-    (UPat(Ops.SIN, dtype=dtypes.float32, name="x"), lambda x: x.ins(AMDOps.SIN)),
+    *((UPat.var("y", fr).cast(to, name="x"), lambda y,x,op=op: x.ins(op, src=(y,)))
+      for fr,to,op in ((dtypes.float16, dtypes.float32, AMDOps.CAST), (dtypes.float32, dtypes.float16, AMDOps.CAST),
+                       (dtypes.ints, dtypes.float32, AMDOps.CAST), (dtypes.float32, dtypes.ints, AMDOps.CAST))),
+    *((UPat(op, dtype=dtypes.float32, name="x"), lambda x,op=op,amd=amd: x.ins(amd)) for op,amd in _ISEL_UNARY.items()),
     (UPat(Ops.MAX, dtype=dtypes.ints+(dtypes.float16, dtypes.float32), name="x"), lambda x: x.ins(AMDOps.MAX)),
     ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda x: x.ins(AMDOps.SHL)),
     ((UPat(dtype=dtypes.ints) >> UPat()).named("x"), lambda x: x.ins(AMDOps.SHR)),
@@ -619,9 +592,7 @@ def _vcc_rematerialize(ctx, x:UOp):
   ctx.clobbered.remove(flag_def)
   return x, [flag_def, x]
 
-def _lower_late_index(x:UOp) -> tuple[UOp, list[UOp]]:
-  return x, []
-
+def _lower_late_index(x:UOp) -> tuple[UOp, list[UOp]]: return x, []
 def _store_addr(a:UOp) -> UOp:
   return a if a.op in (Ops.INDEX, Ops.SHRINK) else UOp(Ops.INDEX, a.dtype, (a, UOp.const(dtypes.int32, 0).rtag()))
 
