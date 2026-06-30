@@ -251,14 +251,8 @@ jobs:
       with:
         key: fuzzing-unit
         deps: testing_unit
-    - name: Fuzz Test symbolic
-      run: python test/external/fuzz_symbolic.py
-    - name: Fuzz Test symbolic (symbolic divisors)
-      run: python test/external/fuzz_symbolic_symbolic_div.py
-    - name: Fuzz Test fast idiv
-      run: python test/external/fuzz_fast_idiv.py
-    - name: Fuzz Test shape ops
-      run: python test/external/fuzz_shape_ops.py
+    - name: Fuzz Tests
+      run: parallel --tagstring '[{}]' 'python test/external/fuzz_{}.py' ::: symbolic symbolic_div fast_idiv shape_ops
 
   testopenclimage:
     name: CL IMAGE Tests
