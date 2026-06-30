@@ -111,9 +111,21 @@ def do_devectorize(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
+def devectorize_wmma(u:UOp):
+  if all(x.op == Ops.STACK for x in u.src): return None
+  src = []
+  for b in u.src:
+    if b.op != Ops.STACK:
+      src.append(UOp._stack(*[b.index(UOp.const(dtypes.weakint, i)) for i in range(b.max_numel())]))
+    else:
+      src.append(b)
+  return u.replace(src=tuple(src))
+
 devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
+  # unpack WMMA
+  (UPat(Ops.WMMA, name="u"), devectorize_wmma),
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
   # stacked INDEX is many INDEX
@@ -163,7 +175,7 @@ pm_reduce_local = PatternMatcher([
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_move_regs = PatternMatcher([
   # BITCAST?
-  (UPat(GroupOp.Elementwise|{Ops.REDUCE}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
