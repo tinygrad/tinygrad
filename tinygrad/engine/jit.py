@@ -94,16 +94,16 @@ class DepsTracker:
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
   @staticmethod
-  def _buf_key(buf:Buffer) -> int: return id(buf.base)
+  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
 
-  def access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
+  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
     wait_nodes = []
     for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      key, s, e = self._key(buf)
       wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
       if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
     for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      key, s, e = self._key(buf)
       if i in write:
         for dmap in [self.w_dependency_map, self.r_dependency_map]:
           kept = []
