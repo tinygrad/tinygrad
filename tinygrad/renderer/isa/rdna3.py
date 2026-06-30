@@ -35,7 +35,19 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       lo, hi = const(dtypes.uint32,x.arg), const(dtypes.uint32, x.arg >> 32)
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
     else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
-  if x.op is Ops.STACK: return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
+  if x.op is Ops.STACK:
+    nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
+    vregs = ctx.vreg((GP_VGPRS, nregs))
+    # NOTE: if fp16 use v_pack_b32_f16?
+    if x.dtype.itemsize == 2:
+      mvs = []
+      for i in range(nregs):
+        vr = vregs[i]
+        lo = x.src[i*2].ins(RDNA3Ops.v_mov_b16_e32, src=(x.src[i*2],))
+        hi = x.src[i*2+1].ins(RDNA3Ops.v_lshl_or_b32, src=(lo, const(dtypes.int, 16), x.src[i*2+1]))
+        mvs.append(hi)
+      return UOp.group(*mvs)
+    return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
@@ -62,7 +74,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
     n = (x.dtype.itemsize // 4) * x.src[0].arg
     defs = [ctx.vreg(GP_VGPRS)] if n == 1 else ctx.vreg((GP_VGPRS,n))
   else:
-    n = x.dtype.itemsize // 4
+    n = max(x.dtype.itemsize // 4, 1)
     defs = [ctx.vreg(GP_VGPRS)] if n == 1 else ctx.vreg((GP_VGPRS,n))
   return x.replace(tag=tuple(defs))
 
@@ -112,21 +124,33 @@ def _build_ins_table(srcs):
     if bothenc: tbl[op] = { n : { _extract_dt(code) : _extract_ins(pref, code, n) for code in codes } for n in [32, 64] }
     else: tbl[op] = { _extract_dt(code) : _extract_ins(pref, code) for code in codes }
   return tbl
-
 OP_INS = _build_ins_table(insdefs)
 
-def _build_cvt_table():
+V_FMA =   { dtypes.float16:RDNA3Ops.v_fma_f16,      dtypes.float32:RDNA3Ops.v_fma_f32,      dtypes.float64:RDNA3Ops.v_fma_f64       }
+
+def _cvt_ins(dtin, dtout):
   _valid_casts = {
       dtypes.float64    : (dtypes.int32, dtypes.float32, dtypes.uint32),
       dtypes.int32      : (dtypes.float64, dtypes.float32),
       dtypes.uint32     : (dtypes.float32, dtypes.float64),
-      dtypes.float32    : (dtypes.float64, dtypes.uint32, dtypes.int32, dtypes.float64),
+      dtypes.float32    : (dtypes.float64, dtypes.uint32, dtypes.int32, dtypes.float64, dtypes.float16),
       dtypes.float16    : (dtypes.float32,),
   }
-  return { src : { targ: getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[targ]}_{dt_to_isa[src]}_e32") for targ in targets } for src,targets in _valid_casts.items() }
+  assert dtin in _valid_casts and dtout in _valid_casts[dtin], f"cannot natively cast from {dtin} -> {dtout}"
+  return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
 
-CVT_INS = _build_cvt_table()
-V_FMA =   { dtypes.float16:RDNA3Ops.v_fma_f16,      dtypes.float32:RDNA3Ops.v_fma_f32,      dtypes.float64:RDNA3Ops.v_fma_f64       }
+# TODO: b64 -> b64
+def cvt(ctx, y:UOp, x:UOp):
+  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
+  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
+    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
+  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
+    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
+    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.gep(0),))
+    else: return y.gep(0)
+  return x.ins(_cvt_ins(y.dtype,x.dtype))
 
 def _vop3(ctx, x:UOp):
   lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
@@ -192,6 +216,10 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 
+# okay so loading 4xfp16 is a b64 load, will return 2 vgprs and indexing has to handle this
+# - maybe index cant be fully handled in regview?
+# - indexes need to be expanded into 16 bit (v_mov_b16 ?& (>> 16))
+# - quick hack is to expand the load into a move per value
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
@@ -216,11 +244,11 @@ def store(ctx, addr:UOp, x:UOp):
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
-  n = len(val.src) if val.op is Ops.STACK else 1
   if base.addrspace is AddrSpace.REG:
     assert base.dtype.itemsize == 4
     assert idx.op is Ops.CONST
     return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base.gep(idx.arg),to_vgpr(ctx,val))).rtag()) # two address op?
+  n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n*val.dtype.itemsize+3)//4
   imap = {
     1:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
@@ -228,19 +256,6 @@ def store(ctx, addr:UOp, x:UOp):
     4:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
   return _gate(UOp(Ops.INS, arg=_insspace(imap[nregs],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
-
-# TODO: b64 -> b64
-def cvt(ctx, y:UOp, x:UOp):
-  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
-    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-    lo = y.ins(CVT_INS[y.dtype][targ]) if _needcast(y.dtype, targ) else y
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
-  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
-    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
-    if _needcast(src, x.dtype): return x.ins(CVT_INS[src][x.dtype], src=(y.gep(0),))
-    else: return y.gep(0)
-  return x.ins(CVT_INS[y.dtype][x.dtype])
 
 # -- complex alu --
 def add64(ctx, x:UOp):
@@ -290,6 +305,11 @@ def cdiv(x:UOp):
   # c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
   return c.cast(x.dtype)
 
+def gethalf(x:UOp, buf:UOp, idx:UOp):
+  b32 = buf.index(UOp.const(dtypes.int, (i := idx.arg) // 2)).replace(dtype=dtypes.uint32)
+  if i % 2 != 0: b32 = b32 >> 16
+  return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
@@ -297,6 +317,9 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
+  # 16 bit indexes get expanded into extract moves/shifts
+  # this only works for const indexes (everything but load/store?)
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
 ])
 
 def prep_range(ctx, bnd:UOp, x:UOp):
@@ -419,6 +442,7 @@ def encode(ctx, x:UOp):
     args = [_immorreg(u) for u in oprs]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group is RDNA3Ops.VOP2: oprs = oprs[:2]
+    if group is RDNA3Ops.VOP3: oprs = oprs[:3]
     args = [_fuse(regs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
@@ -451,6 +475,7 @@ class RDNA3Renderer(ISARenderer):
     super().__init__(target)
 
   def is_two_address(self, x:UOp) -> bool:
+    # 2 address if first src value is reg space buffer and not load/store?
     if x.op is not Ops.INS: return False
     return x.arg.func in [RDNA3Ops.VOP1] and len(x.src) > 1
 
@@ -520,3 +545,5 @@ class RDNA3Renderer(ISARenderer):
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
