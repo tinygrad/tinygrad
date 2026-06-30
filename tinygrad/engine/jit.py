@@ -94,7 +94,7 @@ class DepsTracker:
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
   @staticmethod
-  def _key(buf:Any) -> int: return id(buf.base), buf.offset, buf.offset + buf.nbytes
+  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
 
   def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
     wait_nodes = []
