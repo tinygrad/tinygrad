@@ -1,8 +1,9 @@
 import sys
 from pathlib import Path
 
-from tinygrad.helpers import fetch
 from tinygrad import Tensor
+from tinygrad.helpers import fetch
+from tinygrad.nn import Conv2d, BatchNorm2d
 
 import cv2
 import numpy as np
@@ -47,26 +48,64 @@ def get_variant_scales(variant: str):
 
 class YOLOv26:
   def __init__(self, w: float, h: float, ch: int, num_classes:int):
+    self.backbone = Backbone(w,h,ch)
+  def __call__(self, x: Tensor):
     pass
 
 class Upclass:
   pass
 
-class Conv2d:
-  pass
-
-class BatchNorm2d:
-  pass
-
-class SiLU:
-  pass
-
 class Conv:
-  def __init__(self, ch_in, ch_out, k, s) -> None:
-    Conv2d()
-    BatchNorm2d()
-    SiLU()
-    
+  def __init__(self, ch_in:int, ch_out:int, kernel_size:int|tuple[int,...], strides:int, padding:tuple|int=0, dilation:int=1, bias:bool=True) -> None:
+    self.conv = Conv2d(ch_in, ch_out, kernel_size, strides, padding, dilation, bias)
+    self.bn = BatchNorm2d(ch_out)
+  
+  def __call__(self, x:Tensor)->Tensor:
+    x = self.bn(self.conv(x)).silu()
+
+class Bottleneck:
+  def __init__(self, c1, c2 , shortcut: bool, g=1, kernels: list = (3,3), channel_factor=0.5):
+    c_ = int(c2 * channel_factor)
+    self.cv1 = Conv(c1, c_, kernel_size=kernels[0], stride=1, padding=None)
+    self.cv2 = Conv(c_, c2, kernel_size=kernels[1], stride=1, padding=None, groups=g)
+    self.residual = c1 == c2 and shortcut
+
+  def __call__(self, x):
+    return x + self.cv2(self.cv1(x)) if self.residual else self.cv2(self.cv1(x))
+
+class C3K:
+  def __init__(self,c1:int,c2:int,n:int=1,c3k:bool=False,e:float=0.5,g:int=1,shortcut:bool=True):
+    pass
+
+class C3K2:
+  def __init__(self,c1:int,c2:int,n:int=1,c3k:bool=False,e:float=0.5,g:int=1,shortcut:bool=True):
+    """
+      Initialize C3k2 module.
+
+      Args:
+        c1 (int): Input channels.
+        c2 (int): Output channels.
+        n (int): Number of blocks.
+        c3k (bool): Whether to use C3k blocks.
+        e (float): Expansion ratio.
+        g (int): Groups for convolutions.
+        shortcut (bool): Whether to use shortcut connections.
+    """
+    self.c = int(c2 * e)
+    self.cv1 = Conv(c1, 2 * self.c, 1,)
+    self.cv2 = Conv((2 + n) * self.c, c2, 1)
+    self.c3k = [C3K(self.c, self.c, shortcut, g, kernels=[(3, 3), (3, 3)], channel_factor=1.0) for _ in range(n)]
+
+class Sequential:
+  pass
+
+class Backbone:
+  def __init__(self, w: float, h: float, ch: int):
+    self.conv = Conv(ch_in=3,ch_out=int(64*w),kernel_size=3,strides=2) ## 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
+    self.conv = Conv(ch_in=int(64*w),ch_out=int(128*w),kernel_size=3,strides=2) # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
+    self.c3k2
+  def __call__(self, x:Tensor):
+    pass
 
 if __name__=="__main__":
   print(f"sys.args: {sys.argv}")
@@ -75,7 +114,7 @@ if __name__=="__main__":
     sys.exit(1)
   img_path = sys.argv[1]
   yolo_variant = sys.argv[2] if len(sys.argv)>=3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n') # default to nano
-  print(f"Running inference for YOLO version {yolo_variant}")
+  print(f"Running inference for YOLO26 variant {yolo_variant}")
   (output_folder_path := Path('./outputs-yolov26')).mkdir(parents=True, exist_ok=True)
   image_location = np.frombuffer(fetch(img_path).read_bytes(), dtype=np.uint8)
   image = cv2.imdecode(image_location, 1)
