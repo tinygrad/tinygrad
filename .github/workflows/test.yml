@@ -252,7 +252,8 @@ jobs:
         key: fuzzing-unit
         deps: testing_unit
     - name: Fuzz Tests
-      run: parallel --tagstring '[{}]' 'python test/external/fuzz_{}.py' ::: symbolic symbolic_div fast_idiv shape_ops
+      run: |
+        parallel --tagstring '[{}]' 'python test/external/fuzz_{}.py' ::: symbolic symbolic_div fast_idiv shape_ops
 
   testopenclimage:
     name: CL IMAGE Tests
