@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools, functools
+import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
