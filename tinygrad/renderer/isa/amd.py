@@ -382,7 +382,8 @@ def _alloc_vregs(ctx:IselContext, x:UOp, sgpr_pool:tuple[Register, ...], vgpr_po
   if isinstance(x.tag, tuple): return None
   if x.op is Ops.BUFFER:
     return x.replace(src=tuple(s.rtag() for s in x.src), tag=None) if x.addrspace is AddrSpace.REG else None
-  if x.arg in (AMDOps.DEFINE, AMDOps.SCRATCH_SIZE, AMDOps.SCRATCH_ADDR, AMDOps.LDS_BASE, AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ) or x.dtype is dtypes.void:
+  if x.arg in (AMDOps.DEFINE, AMDOps.SCRATCH_SIZE, AMDOps.SCRATCH_ADDR, AMDOps.LDS_BASE,
+               AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ) or x.dtype is dtypes.void:
     return x.replace(tag=None) if x.arg in (AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ) and x.tag is not None else None
   if x.arg is AMDOps.KERNARG: return x.replace(tag=(ctx.vreg(sgpr_pool),))
   if x.op is Ops.PARAM:
@@ -603,8 +604,9 @@ post_regalloc_matcher = PatternMatcher([
 ])
 
 def _vcc_rematerialize(ctx, x:UOp):
-  flag_def = x if x.arg in (AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ) else \
-             x.src[0] if x.arg in (AMDOps.WHERE, AMDOps.IF_MASK) and x.src[0].op is Ops.INS and x.src[0].arg in (AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ) else None
+  _flags = (AMDOps.CMPLT, AMDOps.CMPNE, AMDOps.CMPEQ)
+  flag_def = x if x.arg in _flags else \
+             x.src[0] if x.arg in (AMDOps.WHERE, AMDOps.IF_MASK) and x.src[0].op is Ops.INS and x.src[0].arg in _flags else None
   if flag_def is None: return None
   # VCC is a single implicit register. Rematerialize compare flags at every consumer so loops and unrelated compares
   # cannot leave a WHERE/IF_MASK reading a stale condition from a previous instruction or previous loop iteration.
@@ -685,7 +687,9 @@ class AMDRenderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {op: (lambda: None) for op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SQRT, Ops.TRUNC, Ops.SIN, Ops.MAX, Ops.SHL, Ops.SHR, Ops.AND, Ops.OR, Ops.XOR, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ)}
+  _code_ops = (Ops.ADD, Ops.SUB, Ops.MUL, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SQRT, Ops.TRUNC, Ops.SIN, Ops.MAX,
+               Ops.SHL, Ops.SHR, Ops.AND, Ops.OR, Ops.XOR, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ)
+  code_for_op = {op: (lambda: None) for op in _code_ops}
 
   def __init__(self, target:Target):
     if not target.arch.startswith("gfx11"): raise RuntimeError(f"AMDRenderer is RDNA3/gfx11 only, got {target.arch}")
@@ -718,7 +722,8 @@ class AMDRenderer(ISARenderer):
   def _insts_for_uop(self, u:UOp):
     if u.op is not Ops.INS: return []
     match u.arg:
-      case AMDOps.LABEL | AMDOps.BRANCH | AMDOps.CBRANCH_SCC1 | AMDOps.DEFINE | AMDOps.SCRATCH_BASE | AMDOps.SCRATCH_SIZE | AMDOps.SCRATCH_ADDR | AMDOps.LDS_BASE:
+      case (AMDOps.LABEL | AMDOps.BRANCH | AMDOps.CBRANCH_SCC1 | AMDOps.DEFINE | AMDOps.SCRATCH_BASE |
+            AMDOps.SCRATCH_SIZE | AMDOps.SCRATCH_ADDR | AMDOps.LDS_BASE):
         return []
       case AMDOps.KERNARG:
         off = u.src[0].arg
@@ -738,7 +743,8 @@ class AMDRenderer(ISARenderer):
         return _parallel_vmov([(_reg_lane(u.reg, i), _src(s)) for i,s in enumerate(u.src)])
       case AMDOps.EXTRACT:
         lane = u.src[1].arg
-        if u.src[0].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports EXTRACT for float32 vectors, got {u.src[0].dtype}")
+        if u.src[0].dtype.scalar() is not dtypes.float32:
+          raise CompileError(f"AMDRenderer only supports EXTRACT for float32 vectors, got {u.src[0].dtype}")
         if not isinstance(u.src[0].reg, Register): raise CompileError(f"AMDRenderer expected vector register source for {u}")
         src = _reg_lane(u.src[0].reg, lane)
         return [] if isinstance(u.reg, Register) and u.reg.index == u.src[0].reg.index+lane else [r3.v_mov_b32_e32(_dst(u), src)]
@@ -853,7 +859,8 @@ class AMDRenderer(ISARenderer):
         pre, addr = _scaled_addr(_dst(u) if _reg_slots(u.dtype) == 1 else TMP_VADDR, u.src[1], _mem_itemsize(u.dtype))
         return pre + [global_load(_dst(u), addr, saddr=_src(u.src[0]))]
       case AMDOps.STORE:
-        if (global_store:=_global_store(u.src[2].dtype)) is None: raise CompileError(f"AMDRenderer does not support global stores for {u.src[2].dtype}")
+        if (global_store:=_global_store(u.src[2].dtype)) is None:
+          raise CompileError(f"AMDRenderer does not support global stores for {u.src[2].dtype}")
         pre, addr = _scaled_addr(TMP_VADDR, u.src[1], _mem_itemsize(u.src[2].dtype))
         dpre, data = ([], _full_src(u.src[2])) if _reg_slots(u.src[2].dtype) > 1 else _vgpr_data(TMP_VDATA, u.src[2])
         return pre + dpre + [global_store(addr=addr, data=data, saddr=_src(u.src[0]))]
@@ -877,7 +884,8 @@ class AMDRenderer(ISARenderer):
         pre, addr = _scratch_addr(u.src[0], u.src[1], u.dtype.itemsize)
         return pre + [scratch_load(addr=addr, vdst=_dst(u), offset=0, sve=1)]
       case AMDOps.SSTORE:
-        if (scratch_store:=_scratch_store(u.src[2].dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch stores for {u.src[2].dtype}")
+        if (scratch_store:=_scratch_store(u.src[2].dtype)) is None:
+          raise CompileError(f"AMDRenderer does not support scratch stores for {u.src[2].dtype}")
         pre, addr = _scratch_addr(u.src[0], u.src[1], u.src[2].dtype.itemsize)
         dpre, data = _vgpr_data(TMP_VDATA, u.src[2])
         return pre + dpre + [scratch_store(addr=addr, data=data, offset=0, sve=1), r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
@@ -889,7 +897,9 @@ class AMDRenderer(ISARenderer):
         if u.src[0].arg + (slots-1)*4 >= 4096: raise CompileError("AMDRenderer scratch fill offset exceeds 13-bit immediate range")
         if slots > 1:
           if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer does not support vector scratch fills for {u.dtype}")
-          return [r3.v_mov_b32_e32(TMP_VADDR, 0)] + [r3.scratch_load_b32(addr=TMP_VADDR, vdst=_reg_lane(u.reg, i), offset=u.src[0].arg + i*4) for i in range(slots)]
+          loads = [r3.scratch_load_b32(addr=TMP_VADDR, vdst=_reg_lane(u.reg, i), offset=u.src[0].arg + i*4)
+                   for i in range(slots)]
+          return [r3.v_mov_b32_e32(TMP_VADDR, 0)] + loads
         if (scratch_load:=_scratch_load(u.dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch fills for {u.dtype}")
         return [r3.v_mov_b32_e32(TMP_VADDR, 0), scratch_load(addr=TMP_VADDR, vdst=_dst(u), offset=u.src[0].arg)]
       case AMDOps.SPILL:
@@ -897,11 +907,13 @@ class AMDRenderer(ISARenderer):
         slots = _reg_slots(u.src[1].dtype)
         if u.src[0].arg + (slots-1)*4 >= 4096: raise CompileError("AMDRenderer scratch spill offset exceeds 13-bit immediate range")
         if slots > 1:
-          if u.src[1].dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer does not support vector scratch spills for {u.src[1].dtype}")
+          if u.src[1].dtype.scalar() is not dtypes.float32:
+            raise CompileError(f"AMDRenderer does not support vector scratch spills for {u.src[1].dtype}")
           return [r3.v_mov_b32_e32(TMP_VADDR, 0)] + \
                  [r3.scratch_store_b32(addr=TMP_VADDR, data=_reg_lane(u.src[1].reg, i), offset=u.src[0].arg + i*4) for i in range(slots)] + \
                  [r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
-        if (scratch_store:=_scratch_store(u.src[1].dtype)) is None: raise CompileError(f"AMDRenderer does not support scratch spills for {u.src[1].dtype}")
+        if (scratch_store:=_scratch_store(u.src[1].dtype)) is None:
+          raise CompileError(f"AMDRenderer does not support scratch spills for {u.src[1].dtype}")
         return [r3.v_mov_b32_e32(TMP_VADDR, 0), scratch_store(addr=TMP_VADDR, data=_src(u.src[1]), offset=u.src[0].arg),
                 r3.s_waitcnt_vmcnt(sdst=NULL, simm16=0)]
       case AMDOps.CMP_GE:

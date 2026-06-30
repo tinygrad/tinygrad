@@ -352,7 +352,8 @@ def _bitwise_program():
   out = UOp.placeholder((16,), dtypes.uint32, 0)
   inp = UOp.placeholder((16,), dtypes.uint32, 1)
   idx = UOp.special(16, "lidx0")
-  val = (((inp.index(idx).load() & UOp.const(dtypes.uint32, 0xff)) | UOp.const(dtypes.uint32, 0x10)) ^ UOp.const(dtypes.uint32, 0x3)) >> UOp.const(dtypes.uint32, 1)
+  x = inp.index(idx).load() & UOp.const(dtypes.uint32, 0xff)
+  val = ((x | UOp.const(dtypes.uint32, 0x10)) ^ UOp.const(dtypes.uint32, 0x3)) >> UOp.const(dtypes.uint32, 1)
   sink = out.index(idx).store(val).sink(idx, arg=KernelInfo(name="amd_asm_bitwise"))
   to_program_cache.clear()
   return to_program(sink, AMDRenderer(Target("AMD", arch="gfx1100")))
@@ -598,7 +599,8 @@ def _late_gated_store_linear(materialized_gate=False):
   mif = UOp(Ops.IF, dtypes.void, (gate, addr))
   st = UOp(Ops.STORE, dtypes.void, (addr, val))
   mend = UOp(Ops.ENDIF, dtypes.void, (mif,))
-  lst = line_rewrite([u for u in (out, inp, idx, val, one, gate, addr, mif, st, mend) if u is not None], renderer.pre_regalloc_matcher, PreRegAllocContext())
+  uops = [u for u in (out, inp, idx, val, one, gate, addr, mif, st, mend) if u is not None]
+  lst = line_rewrite(uops, renderer.pre_regalloc_matcher, PreRegAllocContext())
   lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
   regalloc_ctx = LinearScanRegallocContext(lst, renderer)
   lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
@@ -787,7 +789,9 @@ class TestAMDRenderer(unittest.TestCase):
         self.assertLess(max(regs, default=0), 256 + 254)
 
   def test_abi_fixed_registers_are_not_temp_allocated(self):
-    for prg in (_multi_dim_program(), _z_dim_program(), _uint_var_program(), _global_dim_program(), _spill_program(), _multi_spill_program(), _local_program(), _multi_local_program()):
+    progs = (_multi_dim_program(), _z_dim_program(), _uint_var_program(), _global_dim_program(),
+             _spill_program(), _multi_spill_program(), _local_program(), _multi_local_program())
+    for prg in progs:
       with self.subTest(name=prg.arg.name):
         _assert_abi_reg_isolation(self, prg)
 
@@ -1416,7 +1420,9 @@ class TestAMDRenderer(unittest.TestCase):
   def test_after_global_load_keeps_64bit_saddr(self):
     prg = _after_global_load_program()
     self.assertTrue(_prg_bin(prg).arg.startswith(b"\x7fELF"))
-    loads = [i for i in AMDRenderer(Target("AMD", arch="gfx1100"))._insts_from_linear(_prg_lin(prg)) if getattr(i, "op_name", "") == "GLOBAL_LOAD_B32"]
+    renderer = AMDRenderer(Target("AMD", arch="gfx1100"))
+    loads = [i for i in renderer._insts_from_linear(_prg_lin(prg))
+             if getattr(i, "op_name", "") == "GLOBAL_LOAD_B32"]
     self.assertTrue(loads)
     self.assertTrue(all(i.saddr.sz == 2 for i in loads))
 

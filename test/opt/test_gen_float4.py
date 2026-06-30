@@ -13,7 +13,8 @@ class TestFloat4(unittest.TestCase):
     return (len([uop for uop in uops if (uop.op is Ops.LOAD and uop.dtype.scalar() == dtypes.float and uop.shape == (4,)) or
                  (uop.op is Ops.INS and getattr(uop.arg, "name", "") == "LOAD" and uop.dtype.scalar() == dtypes.float and uop.dtype.count == 4)]),
             len([uop for uop in uops if (uop.op is Ops.STORE and uop.src[1].dtype.scalar() == dtypes.float and uop.shape == (4,)) or
-                 (uop.op is Ops.INS and getattr(uop.arg, "name", "") == "STORE" and uop.src[2].dtype.scalar() == dtypes.float and uop.src[2].dtype.count == 4)]))
+                 (uop.op is Ops.INS and getattr(uop.arg, "name", "") == "STORE" and uop.src[2].dtype.scalar() == dtypes.float
+                  and uop.src[2].dtype.count == 4)]))
   @staticmethod
   def count_half4(uops: list[UOp]):
     return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype.scalar() == dtypes.half and uop.shape == (4,)]),
