@@ -26,6 +26,25 @@ spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
+
+def _vop3(ctx, x:UOp):
+  lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
+  if len(lits) <= 1: return x
+  new = list(x.src)
+  for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
+  return x.replace(src=tuple(new))
+
+# TODO:  pass in original op to use GroupOp.COMMUTATIVE?
+def _vop2(ctx, x:UOp):
+  # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
+  def _isconst(u:UOp): return u.op is Ops.CONST
+  if not _isconst(x.src[1]): return x
+  rest = x.src[2:] if len(x.src) > 2 else ()
+  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
+  if not non_commutative and not _isconst(x.src[0]): 
+    return x.replace(src=(x.src[1], x.src[0]) + rest)
+  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
+
 # TODO: Handle 64 bit inputs
 def to_vgpr(ctx, x:UOp) -> UOp:
   # NOTE: handle sgpr?
@@ -34,19 +53,17 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       # NOTE: need underpromo dict, just assume uint for now
       lo, hi = const(dtypes.uint32,x.arg), const(dtypes.uint32, x.arg >> 32)
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
-    else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,))
+    else: return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
   if x.op is Ops.STACK:
     nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
     vregs = ctx.vreg((GP_VGPRS, nregs))
     # NOTE: if fp16 use v_pack_b32_f16?
     if x.dtype.itemsize == 2:
-      mvs = []
-      for i in range(nregs):
-        vr = vregs[i]
-        lo = x.src[i*2].ins(RDNA3Ops.v_mov_b16_e32, src=(x.src[i*2],))
-        hi = x.src[i*2+1].ins(RDNA3Ops.v_lshl_or_b32, src=(lo, const(dtypes.int, 16), x.src[i*2+1]))
-        mvs.append(hi)
-      return UOp.group(*mvs)
+      def _pk(n):
+        lo, hi = to_vgpr(ctx, x.src[n*2]), to_vgpr(ctx, x.src[n*2+1]) # NOTE: hack for now, literal encoding of fp16 has to be fixed
+        ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo))
+        return _vop3(ctx, ins)
+      return UOp.group(*[_pk(i) for i in range(nregs)])
     return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
@@ -152,23 +169,6 @@ def cvt(ctx, y:UOp, x:UOp):
     else: return y.gep(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
-def _vop3(ctx, x:UOp):
-  lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
-  if len(lits) <= 1: return x
-  new = list(x.src)
-  for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
-  return x.replace(src=tuple(new))
-
-# TODO:  pass in original op to use GroupOp.COMMUTATIVE?
-def _vop2(ctx, x:UOp):
-  # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
-  def _isconst(u:UOp): return u.op is Ops.CONST
-  if not _isconst(x.src[1]): return x
-  rest = x.src[2:] if len(x.src) > 2 else ()
-  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-  if not non_commutative and not _isconst(x.src[0]): 
-    return x.replace(src=(x.src[1], x.src[0]) + rest)
-  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
 # NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
 # NOTE: also maybe add this to pre_isel?
@@ -229,13 +229,14 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
     assert base.dtype.itemsize == 4
     return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.gep(idx.arg),)))
   imap = {
-    1 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
-    2 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
-    4 : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
+    2 : (RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16),
+    4 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
+    8 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
+    16 : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
   }
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * x.dtype.itemsize+3)//4
-  return _gate(x.ins(_insspace(imap[nregs],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs)))
+  return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs)))
 
 # REG Buffer can hold many registers? Index into slice based on idx??
 # - then use gep to load/store from
@@ -305,10 +306,12 @@ def cdiv(x:UOp):
   # c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
   return c.cast(x.dtype)
 
+# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
 def gethalf(x:UOp, buf:UOp, idx:UOp):
-  b32 = buf.index(UOp.const(dtypes.int, (i := idx.arg) // 2)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: b32 = b32 >> 16
-  return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+  i = idx.arg
+  b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
+  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
+  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 pre_isel_matcher = PatternMatcher([
   # cast to ptr is noop
@@ -333,6 +336,10 @@ def prep_end(ctx, x:UOp, rng:UOp):
   mask, bnd = rng.src[-1], to_vgpr(ctx, rng.src[0])
   return x.replace(src=x.src + (bnd,one,mask))
 
+def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
+  return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
+
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 isel_matcher = PatternMatcher([
   # control flow
@@ -351,7 +358,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
-  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), lambda ctx,pred,a,b,x: _vop3(ctx, x.ins(RDNA3Ops.v_cndmask_b32_e64, src=(b,a,cmp(ctx,pred))))),
+  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
   # perf: cmp shouldn't always be materialized to sgpr, only for where
   (UPat(GroupOp.Comparison|{Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
   # mem ops
@@ -540,8 +547,8 @@ class RDNA3Renderer(ISARenderer):
       return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
-    # print(prg.arg)
-    # for u in lin.src: print(u.arg)
+    print(prg.arg)
+    for u in lin.src: print(u.arg)
      
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
