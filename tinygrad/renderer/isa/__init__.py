@@ -26,7 +26,7 @@ class IselContext:
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
 @functools.cache
-def reg(u:UOp) -> Register:
+def reg(u:UOp):
   if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return reg(u.src[0])
   if isinstance(u.tag, tuple): return u.tag[0]
   return u.tag
