@@ -5,6 +5,7 @@ from tinygrad.device import CompileError
 from tinygrad.dtype import dtypes, DType, AddrSpace, PtrDType
 from tinygrad.helpers import Target
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext, Register
+from tinygrad.renderer import Renderer
 from tinygrad.renderer.amd.dsl import Reg, s, v, NULL, EXEC, VCC
 from tinygrad.runtime.autogen.amd.rdna3 import ins as r3
 from tinygrad.codegen.decomp.op import fast_idiv
@@ -233,7 +234,7 @@ def _lds_size_bytes(x:UOp) -> int:
 def _align(x:int, a:int) -> int: return x + (-x % a)
 
 def _lds_offsets(ctx:IselContext) -> dict[int, int]:
-  if not hasattr(ctx, "amd_lds_offsets"):
+  if ctx.amd_lds_offsets is None:
     offsets, slots, off = {}, set(), 0
     for b in sorted([u for u in ctx.uses if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL], key=lambda u: u.arg.slot):
       if b.arg.slot in slots: raise CompileError(f"AMDRenderer got duplicate LDS buffer slot {b.arg.slot}")
@@ -280,7 +281,7 @@ def _const_int(x:UOp) -> int|None:
   return None
 
 def _reg_promotable_buffers(ctx:PreRegAllocContext) -> set[UOp]:
-  if hasattr(ctx, "amd_reg_promotable"): return ctx.amd_reg_promotable
+  if ctx.amd_reg_promotable is not None: return ctx.amd_reg_promotable
   bases, bad, seen_store = set(), set(), set()
   for u in ctx.uops or []:
     if u.op is not Ops.INS or u.arg not in (AMDOps.SLOAD, AMDOps.SSTORE): continue
@@ -300,9 +301,9 @@ def _reg_promotable_buffers(ctx:PreRegAllocContext) -> set[UOp]:
   return ctx.amd_reg_promotable
 
 def _reg_promote_slot(ctx:PreRegAllocContext, base:UOp, idx:UOp) -> tuple[UOp, int]|None:
-  base = _reg_buffer_base(base)
-  if base is None or base not in _reg_promotable_buffers(ctx): return None
-  return None if (slot:=_const_int(idx)) is None else (base, slot)
+  buf = _reg_buffer_base(base)
+  if buf is None or buf not in _reg_promotable_buffers(ctx): return None
+  return None if (slot:=_const_int(idx)) is None else (buf, slot)
 
 def _new_promoted_reg(ctx:PreRegAllocContext, val:UOp) -> UOp:
   n = ctx.amd_reg_n
@@ -402,8 +403,9 @@ def _pow2_cmod(x:UOp, c:UOp) -> UOp|None:
   if c.arg <= 0 or c.arg & (c.arg - 1) or (x.dtype not in dtypes.uints and x.vmin < 0): return None
   return x & UOp.const(x.dtype, c.arg - 1)
 
-class _AMDFastDivRenderer:
-  def supported_dtypes(self): return {dtypes.int32, dtypes.uint32}
+class _AMDFastDivRenderer(Renderer):
+  def __init__(self): super().__init__(Target("NULL", ""))
+  def supported_dtypes(self) -> set[DType]: return {dtypes.int32, dtypes.uint32}
 
 def _const_cdiv(x:UOp, c:UOp) -> UOp|None:
   return fast_idiv(_AMDFastDivRenderer(), x, c.arg) if c.arg > 0 and x.vmin >= 0 else None
@@ -648,7 +650,9 @@ def _promote_reg_access(ctx:PreRegAllocContext, x:UOp) -> tuple[UOp, list[UOp]]|
     return acc, [st]
   if x.arg is AMDOps.SLOAD:
     if (slot:=_reg_promote_slot(ctx, x.src[0], x.src[1])) is None: return None
-    return (acc, []) if (acc:=ctx.amd_reg_values.get(slot)) is not None else None
+    loaded = ctx.amd_reg_values.get(slot)
+    if loaded is None: return None
+    return loaded, []
   return None
 
 def _lower_late_if(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
@@ -746,8 +750,8 @@ class AMDRenderer(ISARenderer):
         if u.src[0].dtype.scalar() is not dtypes.float32:
           raise CompileError(f"AMDRenderer only supports EXTRACT for float32 vectors, got {u.src[0].dtype}")
         if not isinstance(u.src[0].reg, Register): raise CompileError(f"AMDRenderer expected vector register source for {u}")
-        src = _reg_lane(u.src[0].reg, lane)
-        return [] if isinstance(u.reg, Register) and u.reg.index == u.src[0].reg.index+lane else [r3.v_mov_b32_e32(_dst(u), src)]
+        lane_src = _reg_lane(u.src[0].reg, lane)
+        return [] if isinstance(u.reg, Register) and u.reg.index == u.src[0].reg.index+lane else [r3.v_mov_b32_e32(_dst(u), lane_src)]
       case AMDOps.ADD:
         if u.dtype.scalar() is dtypes.float16: return [r3.v_add_f16_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
         if u.dtype.scalar() is dtypes.float32: return [r3.v_add_f32_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
@@ -770,25 +774,25 @@ class AMDRenderer(ISARenderer):
         if u.dtype.scalar() is dtypes.float32: return [r3.v_fma_f32(_dst(u), _src(u.src[0]), _src(u.src[1]), _src(u.src[2]))]
         raise CompileError(f"AMDRenderer only supports MULACC for float16/float32, got {u.dtype}")
       case AMDOps.CAST:
-        pre, src = _vgpr_data(TMP_VDATA, u.src[0])
+        pre, cast_src = _vgpr_data(TMP_VDATA, u.src[0])
         if u.dtype.scalar() in dtypes.ints and u.src[0].dtype.scalar() in dtypes.ints:
           if u.dtype.itemsize > 4 or u.src[0].dtype.itemsize > 4: raise CompileError(f"AMDRenderer cannot cast {u.src[0].dtype} to {u.dtype}")
           # Equal-width int casts are dropped to NOOP in pre-isel, so the narrower type always sets the result width:
           # widening zero/sign-extends from the source width, narrowing truncates to the destination width.
           narrow = u.src[0].dtype if u.src[0].dtype.itemsize <= u.dtype.itemsize else u.dtype
-          if narrow.scalar() in dtypes.uints: return pre + [r3.v_and_b32_e32(_dst(u), (1 << (narrow.itemsize * 8)) - 1, src)]
+          if narrow.scalar() in dtypes.uints: return pre + [r3.v_and_b32_e32(_dst(u), (1 << (narrow.itemsize * 8)) - 1, cast_src)]
           shift = 32 - narrow.itemsize * 8
-          return pre + [r3.v_lshlrev_b32_e64(_dst(u), shift, src), r3.v_ashrrev_i32_e64(_dst(u), shift, _dst(u))]
+          return pre + [r3.v_lshlrev_b32_e64(_dst(u), shift, cast_src), r3.v_ashrrev_i32_e64(_dst(u), shift, _dst(u))]
         if u.dtype.scalar() is dtypes.float32 and u.src[0].dtype.scalar() is dtypes.float16:
-          return pre + [r3.v_cvt_f32_f16_e32(_dst(u), src)]
+          return pre + [r3.v_cvt_f32_f16_e32(_dst(u), cast_src)]
         if u.src[0].dtype.scalar() is dtypes.float32 and u.dtype.scalar() is dtypes.float16:
-          return pre + [r3.v_cvt_f16_f32_e32(_dst(u), src)]
+          return pre + [r3.v_cvt_f16_f32_e32(_dst(u), cast_src)]
         if u.dtype.scalar() is dtypes.float32 and u.src[0].dtype.scalar() in dtypes.ints:
-          op = r3.v_cvt_f32_i32_e32 if u.src[0].dtype.scalar() in dtypes.sints else r3.v_cvt_f32_u32_e32
-          return pre + [op(_dst(u), src)]
+          cast_op = r3.v_cvt_f32_i32_e32 if u.src[0].dtype.scalar() in dtypes.sints else r3.v_cvt_f32_u32_e32
+          return pre + [cast_op(_dst(u), cast_src)]
         if u.src[0].dtype.scalar() is dtypes.float32 and u.dtype.scalar() in dtypes.ints:
-          op = r3.v_cvt_i32_f32_e32 if u.dtype.scalar() in dtypes.sints else r3.v_cvt_u32_f32_e32
-          return pre + [op(_dst(u), src)]
+          cast_op = r3.v_cvt_i32_f32_e32 if u.dtype.scalar() in dtypes.sints else r3.v_cvt_u32_f32_e32
+          return pre + [cast_op(_dst(u), cast_src)]
         raise CompileError(f"AMDRenderer cannot cast {u.src[0].dtype} to {u.dtype}")
       case AMDOps.RECIPROCAL:
         if u.dtype.scalar() is not dtypes.float32: raise CompileError(f"AMDRenderer only supports RECIPROCAL for float32, got {u.dtype}")
@@ -822,13 +826,13 @@ class AMDRenderer(ISARenderer):
       case AMDOps.MAX:
         if u.dtype.scalar() is dtypes.float16: return [r3.v_max_f16_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
         if u.dtype.scalar() is dtypes.float32: return [r3.v_max_f32_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
-        op = r3.v_max_i32_e64 if u.dtype.scalar() in dtypes.sints else r3.v_max_u32_e64
-        return [op(_dst(u), _src(u.src[0]), _src(u.src[1]))]
+        if u.dtype.scalar() in dtypes.sints: return [r3.v_max_i32_e64(_dst(u), _src(u.src[0]), _src(u.src[1]))]
+        return [r3.v_max_u32_e64(_dst(u), _src(u.src[0]), _src(u.src[1]))]
       case AMDOps.SHL:
         return [r3.v_lshlrev_b32_e64(_dst(u), _src(u.src[1]), _src(u.src[0]))]
       case AMDOps.SHR:
-        op = r3.v_ashrrev_i32_e64 if u.dtype.scalar() in dtypes.sints else r3.v_lshrrev_b32_e64
-        return [op(_dst(u), _src(u.src[1]), _src(u.src[0]))]
+        if u.dtype.scalar() in dtypes.sints: return [r3.v_ashrrev_i32_e64(_dst(u), _src(u.src[1]), _src(u.src[0]))]
+        return [r3.v_lshrrev_b32_e64(_dst(u), _src(u.src[1]), _src(u.src[0]))]
       case AMDOps.AND:
         return [r3.v_and_b32_e32(_dst(u), _src(u.src[0]), _src(u.src[1]))]
       case AMDOps.OR:
@@ -930,7 +934,8 @@ class AMDRenderer(ISARenderer):
     raise CompileError(f"AMDRenderer cannot encode {u.arg}")
 
   def _insts_from_linear(self, lin:UOp):
-    items, targets, byte, pending = [], {}, 0, {"vm": set(), "lgkm": set()}
+    pending: dict[str, set[int]] = {"vm": set(), "lgkm": set()}
+    items, targets, byte = [], {}, 0
     def emit(inst):
       nonlocal byte
       items.append(inst)

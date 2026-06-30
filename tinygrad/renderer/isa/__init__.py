@@ -18,6 +18,7 @@ class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
+    self.amd_lds_offsets: dict[int, int]|None = None
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
@@ -31,6 +32,9 @@ class PreRegAllocContext:
   uops: list[UOp]|None = None
   lock: UOp|None = None
   clobbered: set[UOp] = field(default_factory=set)
+  amd_reg_promotable: set[UOp]|None = None
+  amd_reg_values: dict[tuple[UOp, int], UOp] = field(default_factory=dict)
+  amd_reg_n: int = 0
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
