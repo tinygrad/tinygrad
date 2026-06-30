@@ -860,7 +860,6 @@ def insts_for_uop(u:UOp):
     raise CompileError(f"AMDRenderer cannot encode {u.arg}")
 
 
-
 def insts_from_linear(lin:UOp):
     pending: dict[str, set[int]] = {"vm": set(), "lgkm": set()}
     items, targets, byte = [], {}, 0

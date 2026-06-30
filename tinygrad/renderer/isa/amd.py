@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 from tinygrad.device import CompileError
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import Target
 from tinygrad.renderer.isa import ISARenderer, Register
-from tinygrad.renderer.amd.dsl import v
 from tinygrad.runtime.autogen.amd.rdna3 import ins as r3
-from tinygrad.runtime.autogen.amd.rdna3.isa_renderer import (
-  AMDOps, AMD_ATOMIC_ADD, SGPR, VGPR, LID, WGID, KERNARG_REG, TMP_VDATA, TMP_VADDR, TMP_EXEC, TMP_SDATA0, TMP_SDATA1,
-  make_isel_matcher, isel_matcher, pre_isel_matcher, pre_regalloc_matcher, post_regalloc_matcher,
-  insts_for_uop, insts_from_linear, _lower_reg_store, _parallel_vmov,
-)
+from tinygrad.runtime.autogen.amd.rdna3 import isa_renderer as _ir
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
+
+AMDOps = _ir.AMDOps
+AMD_ATOMIC_ADD = _ir.AMD_ATOMIC_ADD
+SGPR, VGPR, LID, WGID = _ir.SGPR, _ir.VGPR, _ir.LID, _ir.WGID
+KERNARG_REG = _ir.KERNARG_REG
+TMP_VDATA, TMP_VADDR, TMP_EXEC = _ir.TMP_VDATA, _ir.TMP_VADDR, _ir.TMP_EXEC
+TMP_SDATA0, TMP_SDATA1 = _ir.TMP_SDATA0, _ir.TMP_SDATA1
+make_isel_matcher = _ir.make_isel_matcher
+isel_matcher = _ir.isel_matcher
+pre_isel_matcher = _ir.pre_isel_matcher
+pre_regalloc_matcher = _ir.pre_regalloc_matcher
+post_regalloc_matcher = _ir.post_regalloc_matcher
+_lower_reg_store = _ir._lower_reg_store
+_parallel_vmov = _ir._parallel_vmov
 
 class AMDRenderer(ISARenderer):
   device = "AMD"
@@ -60,8 +69,8 @@ class AMDRenderer(ISARenderer):
     return "\n".join(ret)
 
   def render(self, uops:list[UOp]) -> str: return self.asm_str(uops, "kernel")
-  def _insts_for_uop(self, u:UOp): return insts_for_uop(u)
-  def _insts_from_linear(self, lin:UOp): return insts_from_linear(lin)
+  def _insts_for_uop(self, u:UOp): return _ir.insts_for_uop(u)
+  def _insts_from_linear(self, lin:UOp): return _ir.insts_from_linear(lin)
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
