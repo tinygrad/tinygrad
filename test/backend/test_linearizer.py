@@ -361,14 +361,13 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    local_stores = [u for u in uops if u.op is Ops.STORE and any(
-      x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL for x in get_recursive(u.src[0]))]
-    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.PARAM for x in get_recursive(u.src[0]))]
+    local_stores = [u for u in uops if u.op is Ops.STORE and u.addrspace == AddrSpace.LOCAL]
+    global_stores = [u for u in uops if u.op is Ops.STORE and u.addrspace == AddrSpace.GLOBAL]
     barrier = [u for u in uops if u.op is Ops.BARRIER]
     assert len(barrier) == 1
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.src[1].max_numel() > 1 # and store.src[2].op is not Ops.VECTORIZE
+      assert store.src[1].max_numel() > 1, f"store shape {store.src[1].shape} on {store.addrspace}"
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
