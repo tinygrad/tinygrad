@@ -4,9 +4,9 @@ from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
-from tinygrad.runtime.autogen import mesa
+from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
-import base64, ctypes, ctypes.util, struct, functools, inspect, itertools
+import base64, ctypes, struct, functools, inspect, itertools
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -222,8 +222,7 @@ class NIRRenderer(Renderer):
     self.postrender(uops)
 
     mesa.nir_validate_shader(self.b.shader, b"after render")
-    if DEBUG >= 4: mesa.nir_print_shader(self.b.shader, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')),
-                                                                                                    "__stdoutp" if OSX else "stdout"))
+    if DEBUG >= 4: mesa.nir_print_shader(self.b.shader, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(libc.dll, "__stdoutp" if OSX else "stdout"))
     mesa.nir_serialize(blob:=mesa.struct_blob(), self.b.shader, False)
     ret = base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
 

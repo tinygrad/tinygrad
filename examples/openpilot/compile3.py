@@ -50,7 +50,7 @@ def compile(onnx_file):
   read_image_count = 0
   gated_read_image_count = 0
   for call in kernel_calls:
-    _, _, _, source, _ = call.src[0].src
+    _, _, source, _ = call.src[0].src
     src = source.arg
     kernel_count += 1
     read_image_count += src.count("read_image")

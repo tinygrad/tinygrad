@@ -1842,7 +1842,7 @@ class TestFusionOp(unittest.TestCase):
     linear = a.schedule_linear()
     prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(prg.src[3].arg.splitlines()) < 250
+    assert len(prg.src[2].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

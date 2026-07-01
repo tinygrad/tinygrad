@@ -247,8 +247,8 @@ class AMDProgramData:
 _amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
 
 def amd_build_program(prg:UOp) -> UOp:
-  dev = Device[prg.src[1].arg] # TODO: rm this
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[4].arg, dev.device))) is None:
+  dev = Device[to_tuple(prg.device)[0]] # TODO: rm this
+  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, dev.device))) is None:
     image, sections, relocs = elf_loader(lib)
     rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
     for off, sym, typ, addent in relocs:
@@ -271,7 +271,7 @@ def amd_build_program(prg:UOp) -> UOp:
   return cached
 
 pm_prep_program = PatternMatcher([
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE, arg="AMD"), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
 ])
 
 class AMDAllocator(HCQAllocator['AMDDevice']):

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable, Self
 from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
-from tinygrad.helpers import argfix
+from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
@@ -18,6 +18,26 @@ class CreationMixin(DTypeMixin, MovementMixin):
     assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
     if self._uop.axis is None: return self._wrap_uop(fxn(self.shape, None)._uop.shard(self.device, None))
     return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).multi(self._uop.axis))
+
+  @classmethod
+  def empty(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Self:
+    """
+    Creates an empty tensor with the given shape.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.empty(2, 3)
+    print(t.shape)
+    ```
+    """
+    from tinygrad.uop.ops import UOp, to_max_shape
+    from tinygrad.device import canonicalize_device
+    dt = to_dtype(dtype) if dtype is not None else dtypes.default_float
+    new_shape = argfix(*shape)
+    max_shape = to_max_shape(new_shape)
+    u = UOp.new_buffer(canonicalize_device(device), prod(max_shape), dt).reshape(max_shape).shrink_to(new_shape)
+    return cls._wrap_uop(u)
 
   def empty_like(self, dtype: DTypeLike|None=None, device: str|tuple[str, ...]|None=None) -> Self:
     """
