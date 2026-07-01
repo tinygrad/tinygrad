@@ -1,6 +1,6 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
-from tinygrad import nn
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, base64
+from tinygrad import nn, Variable, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -103,6 +103,9 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
+  "qwen3-vl:2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
+  "qwen3-vl:4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf",
+  "qwen3-vl:8b":"https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-F16.gguf", # untested, not enough memory
 }
 
 # *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
@@ -149,14 +152,22 @@ class Handler(HTTPRequestHandler):
       # extract tokens, last assistant message is treated as prefill
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
         content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
+        text = []
+        if isinstance(content, str): text.append(content)
         elif isinstance(content, list):
           for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
+            # https://developers.openai.com/api/docs/guides/images-vision?format=base64-encoded
+            if c["type"] == "input_text": text.append(c["text"])
+            elif c["type"] == "input_image":
+              ids.extend([0] * (self.server.model.vis.toks_per_img + self.server.model.vis.prefix.shape[0] + self.server.model.vis.suffix.shape[0]))
+              if i == len(body["messages"]) - 1:
+                self.server.model.vis(lang=self.server.model, image=base64.b64decode(c["image_url"].split(',')[1]), start_pos=\
+                Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
+        ids += tok.role(msg["role"])
+        for t in text: ids += tok.encode(t)
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn()
       else: ids += tok.role("assistant")
@@ -198,6 +209,12 @@ def main():
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  if "qwen3-vl" in args.model:
+    from extra.models.qwen3vl import Qwen3VLVis
+    model.vis = Qwen3VLVis(size="2B", tok=tok)
+    for _ in range(2):
+      model.vis.prefill(lang=model, image=Tensor.rand(*model.vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, model.max_context).bind(42))
 
   # warmup the JIT
   if args.warmup or args.serve:
