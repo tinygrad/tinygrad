@@ -145,6 +145,7 @@ class EnumBitField(BitField):
 
 import struct
 def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+def _f16(f: float) -> int: return struct.unpack('H', struct.pack('e', f))[0]
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
@@ -267,6 +268,15 @@ def _canonical_name(name: str) -> str | None:
   if name in ('data', 'vdata', 'data0', 'vsrc'): return 'data'
   return None
 
+class InsOp(functools.partial):
+  @property
+  def opc(self): return str(self).lower()
+  @property
+  def group(self): return self.func.__name__
+  def __repr__(self): return self.args[0].name
+  def _key(self): return (self.func.__name__, *[str(a) for a in self.args])
+  def __lt__(self, other): return self._key() < other._key()
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
@@ -324,10 +334,14 @@ class Inst:
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
     # For _LIT classes, capture literal value from SrcFields that encode to 255
     literal_val = None
+    op_operands = OPERANDS.get(vals.get('op'), {})
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):
-        literal_val = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+        if isinstance(val, float):
+          # 16-bit operands (e.g. v_mov_b16) need the fp16 bit pattern in the low half of the literal
+          literal_val = _f16(val) if op_operands.get(name, (None, 32, None))[1] == 16 else _f32(val)
+        else: literal_val = val & 0xFFFFFFFF
     if literal_val is not None and 'literal' in vals:
       vals['literal'] = literal_val
     # Set all field values
