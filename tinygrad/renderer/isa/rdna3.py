@@ -23,7 +23,7 @@ execop = def_reg(dtypes.uint32, EXEC)
 lidop = def_reg(dtypes.uint32, WIIDS[0])
 vccop = def_reg(dtypes.uint32, VCC)
 
-spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
+# spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
@@ -63,40 +63,35 @@ def to_vgpr(ctx, x:UOp) -> UOp:
     # NOTE: if fp16 use v_pack_b32_f16?
     if x.dtype.itemsize == 2:
       def _pk(n):
+        # if x.dtype is dtypes.half: return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(x.src[n*2], x.src[n*2+1]))
         lo, hi = to_vgpr(ctx, x.src[n*2]), to_vgpr(ctx, x.src[n*2+1]) # NOTE: hack for now, literal encoding of fp16 has to be fixed
         # NOTE: hi needs to masked off
         lo = _vop2(ctx, lo.ins(RDNA3Ops.v_and_b32_e32, src=(lo, const(dtypes.uint32, 0xFFFF))))
-        ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo))
+        ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo)) # this dtype is wrong
         return _vop3(ctx, ins)
       return UOp.group(*[_pk(i) for i in range(nregs)])
     return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
+# NOTE: this is getting shitty, whats the heuristic for cons vs group of registers?
+# don't generally allocate to SGPRS, only works wave uniform possible future optim
+# TODO: allocate vgpr / sgpr based on op group (x.arg.func)
+# - should almost never need to manually call ctx.vreg
+# - control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  # real registers
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
-  # no register definition
   if x.dtype is dtypes.void: return None
-  # already allocated vregs
-  # NOTE: this is getting shitty, whats the heuristic for cons vs group of registers?
-  if isinstance(x.tag, tuple): assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
-  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0]._cons: return None # how can this receive an empty tuple???
-  # allocate vreg definitions
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0].is_virtual(): return None 
+  if isinstance(x.tag, tuple):
+    assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
   defs = []
-  # don't generally allocate to SGPRS, only works wave uniform possible future optim
-  # if x.op is Ops.END: defs = [ctx.vreg(GP_SGPRS)] # alloc gate mask
-  # TODO: allocatate vgpr / sgpr based on op group (x.arg.func)
-  # - should almost never need to manually call ctx.vreg
-  # - control flow allocations should also be handled here?
   if isinstance(x.tag, tuple):
     vr = ctx.vreg(x.tag)
     defs = [vr] if isinstance(vr, Register) else [*vr]
-  elif x.op is Ops.BUFFER: # reg buffer
-    n = (x.dtype.itemsize // 4) * x.src[0].arg
-    defs = [ctx.vreg(GP_VGPRS)] if n == 1 else ctx.vreg((GP_VGPRS,n))
   else:
-    n = max(x.dtype.itemsize // 4, 1)
+    if x.op is Ops.BUFFER: n = (x.dtype.itemsize // 4) * x.src[0].arg
+    else: n = max(x.dtype.itemsize // 4, 1)
     defs = [ctx.vreg(GP_VGPRS)] if n == 1 else ctx.vreg((GP_VGPRS,n))
   return x.replace(tag=tuple(defs))
 
@@ -214,8 +209,8 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 # NOTE: keep base in src to maintain graph dependencies?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), idx.arg * scale, base)
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), idx.src[1].arg * scale, base)
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
   return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
@@ -268,8 +263,8 @@ def store(ctx, addr:UOp, x:UOp):
 
 # -- complex alu --
 def add64(ctx, x:UOp):
+  if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
-  if dtypes.is_float(x.dtype): return x.ins(V_ADD[x.dtype]) # f64 add is native
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   # need to alloc 64b buf to store into
   v1,v2 = ctx.vreg((GP_VGPRS,2)) # make a standard/consistent way to do this 
@@ -279,6 +274,7 @@ def add64(ctx, x:UOp):
 
 # TODO: signed
 def mul64(ctx, x:UOp):
+  if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
   a, b = x.src
   p1 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
   p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(1), b.gep(0), p1))
@@ -327,8 +323,8 @@ def widenshort(y:UOp, x:UOp):
   if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
   return y
 
-# TODO: simplify these cast rules, maybe just make a legalize cast function?
 # TODO: properly expand/cast 64 bit consts across registers
+# TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
   # bitcast is noop?
   (UPat.var("y").bitcast().named("x"), lambda y,x: y),
@@ -340,9 +336,14 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast((dtypes.uint16,dtypes.int16)), lambda y: y), # same size int b16
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
   # cast rewrites
+  # u64/i64 -> f32 = take lo then cast
+  (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half, dtypes.short, dtypes.ushort, dtypes.int, dtypes.uint), name="x"),
+    lambda y,x: y.gep(0).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).cast(x.dtype)),
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.uint32, dtypes.int32, dtypes.float32,dtypes.float64)), widenshort),
   # (f16 -> f64/i32/u32 ) to (f16 -> f32 -> f64/i32/u32)
   (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
+  (UPat.var("y", dtype=(dtypes.half, dtypes.float)).cast((dtypes.ulong,dtypes.long), name="x"),
+    lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(x.dtype)),
   # (u32/i32 -> f16) to (-> f32 -> f16)
   (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)), 
   # (f64 -> f16/i16/u16) to (f64 -> f64 ?-> i16/u16)
@@ -368,6 +369,7 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
 
+
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
@@ -391,8 +393,9 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
+# TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
-  (UPat.var("y", dtype=dtypes.ints+dtypes.uints).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
+  (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -540,16 +543,18 @@ class RDNA3Renderer(ISARenderer):
     if x.op is not Ops.INS: return False
     return x.arg.func in [RDNA3Ops.VOP1] and len(x.src) > 1
 
-  def spill_pointer(self) -> UOp: return spill_ptr
+  # def spill_pointer(self) -> UOp: return spill_ptr
+  # def spill_pointer(self) -> UOp: return UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
   # load spilled value into lds
   def spill(self, disp:UOp, x:UOp) -> UOp: # disp is the byte offset into spill space
-    ret = isel_matcher.rewrite(self.spill_pointer().index(const(dtypes.uint32, disp//4)).store(x))
+    print(self.spill_pointer().index(disp).store(x))
+    ret = isel_matcher.rewrite(self.spill_pointer().index(disp).store(x))
     assert ret is not None
     return ret
 
   # this is going to have to handle multiple regs
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
-    val = isel_matcher.rewrite(self.spill_pointer().index(const(dtypes.uint32, disp//4)).load())
+    val = isel_matcher.rewrite(self.spill_pointer().index(disp).load())
     # assume reg is vgpr?
     return x
 

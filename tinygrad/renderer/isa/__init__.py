@@ -15,6 +15,7 @@ class Register:
   @property
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
+  def is_virtual(self) -> bool: return self.name[:2] == "vr"
   @staticmethod
   def contiguous(ctx, cons:tuple[Register,...], n:int) -> tuple[Register,...]:
     gid = next(ctx.group_n)
