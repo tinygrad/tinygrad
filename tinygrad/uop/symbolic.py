@@ -188,6 +188,12 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return unwrap(UOp.usum(*np).divides(d))<(c//d)
   return None
 
+def ge_folding(x:UOp, c:int) -> UOp|None:
+  # x >= c (matched as (x<c).ne(True)) is -x < 1-c
+  if c >= 1: return None
+  f = lt_folding(UOp.usum(*(-u for u in x.split_uop(Ops.ADD))).simplify(), 1 - c)
+  return f if f is not None and len(f.ranges) < len(x.ranges) else None
+
 def canonicalize_simplex(X:UOp) -> UOp|None:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
@@ -297,6 +303,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  ((UPat.var("x", dtypes.weakint)<UPat.cvar("c")).ne(True), lambda x,c: ge_folding(x, c.arg)),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
   ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
