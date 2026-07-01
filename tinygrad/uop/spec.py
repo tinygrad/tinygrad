@@ -7,6 +7,8 @@ from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_
 
 # ***** uop helpers *****
 
+load_store_index = UPat.any(UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted(), UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_bitcasted())
+
 def validate_index(uidx:UOp, gate:UOp|None=None):
   if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
@@ -31,6 +33,14 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
+
+def validate_bitcast_index(bidx:UOp, uidx:UOp, gate:UOp|None=None):
+  if bidx.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) or bidx.addrspace != uidx.addrspace: return False
+  if bidx.max_numel() * bidx.dtype.itemsize != uidx.max_numel() * uidx.dtype.itemsize: return False
+  return validate_index(uidx, gate)
+
+def validate_address_index(addr:UOp, uidx:UOp, gate:UOp|None=None):
+  return validate_bitcast_index(addr, uidx, gate) if addr.op is Ops.BITCAST else validate_index(uidx, gate)
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
   lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
@@ -103,11 +113,12 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  (load_store_index.load(name="load"), lambda uidx,load: validate_address_index(load.src[0], uidx)),
+  (load_store_index.load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+   lambda uidx,gate,alt,load: validate_address_index(load.src[0], uidx, gate) if alt.dtype == load.dtype else False),
+  (load_store_index.store(UPat(), name="store"), lambda uidx,store: validate_address_index(store.src[0], uidx)),
+  (load_store_index.store(UPat(), UPat.var("gate", dtype=dtypes.bool), name="store"),
+   lambda uidx,gate,store: validate_address_index(store.src[0], uidx, gate)),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),

@@ -469,6 +469,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
+  def shrink(self, arg:tuple[tuple[sint, sint]|None, ...]|sint, size:sint|None=None):
+    if size is None: return super(UOp, self).shrink(cast(tuple[tuple[sint, sint]|None, ...], arg))
+    return UOp(Ops.SHRINK, self.dtype.base, (self, sint_to_uop(cast(sint, arg), dtypes.int), sint_to_uop(size, dtypes.int)))
   def __getitem__(self, idx):
     # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
@@ -1244,6 +1247,7 @@ class UPat(OpMixin):
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
+  def or_bitcasted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.BITCAST, name=name, src=(self,)))
   def or_after(self, name:str|None=None):
     return UPat.any(self if name is None else self.named(name), UPat(Ops.AFTER, name=name, src=(self,), allow_any_len=True))
 
