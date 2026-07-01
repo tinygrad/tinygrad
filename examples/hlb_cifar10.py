@@ -145,6 +145,8 @@ hyp = {
 }
 
 def train_cifar():
+  if not getenv("DEFAULT_FLOAT", "") and dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes():
+    dtypes.default_float = dtypes.half
 
   def set_seed(seed):
     Tensor.manual_seed(seed)
