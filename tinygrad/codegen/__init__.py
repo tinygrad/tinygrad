@@ -97,8 +97,22 @@ def broadcast_binary(x:UOp):
   src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
   return x.replace(src=tuple(src_reshaped))
 
+def broadcast_and_devec_wmma(b:UOp):
+  shapes = [u.shape[:-1] for u in b.src]
+  if all_same(shapes): return None
+  shaped_aligned = _align_left(*shapes)
+  broadcasted = _broadcast_shape(*shapes)
+  src_reshaped = [u.reshape(shp+(u.shape[-1],)).expand(broadcasted+(u.shape[-1],))
+                  for u,shp in zip(b.src, shaped_aligned)]
+  src = []
+  for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
+  return UOp.vectorize(*src).reshape(b.shape)
+
 unbroadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+  (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
 def do_devectorize(b:UOp):
@@ -111,8 +125,9 @@ def do_devectorize(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
-def devectorize_wmma(u:UOp):
+def do_stack_wmma(u:UOp):
   if all(x.op == Ops.STACK for x in u.src): return None
+  assert len(u.shape) == 1
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
@@ -125,9 +140,10 @@ devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # unpack WMMA
-  (UPat(Ops.WMMA, name="u"), devectorize_wmma),
+  (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # const INDEX into STACK is src
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i"))), lambda a,i: a.src[i.arg]),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
+   lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
    lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
@@ -212,6 +228,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
+  # this is new style (TODO: this should all be removed)
+  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
+
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
@@ -235,17 +255,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
+
   # add loads and remove invalids
   #sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
   sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
 
-  # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
-
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
-  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
   # simplify indexing
