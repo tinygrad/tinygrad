@@ -318,10 +318,6 @@ class TestUOpStr(unittest.TestCase):
     vec = UOp(Ops.STACK, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
-  def test_device_arg(self):
-    device = UOp(Ops.DEVICE, arg="CL")
-    assert str(eval(str(device))) == str(device)
-
   def test_reduceop_arg(self):
     sum_uop = Tensor.empty(32, 32).sum().uop
     assert str(eval(str(sum_uop))) == str(sum_uop)
