@@ -1,3 +1,8 @@
+from collections import defaultdict
+from time import time
+from tinygrad.nn.state import load_state_dict
+from tinygrad.nn.state import safe_load
+import json
 import sys
 from itertools import chain
 from pathlib import Path
@@ -8,6 +13,8 @@ from tinygrad.nn import Conv2d, BatchNorm2d
 
 import cv2
 import numpy as np
+
+
 
 def compute_transform(image:np.ndarray,new_shape=(640,640),auto=False,scaleFill=False,scaleUp=True,stride=32):
   shape = image.shape[:2] # current shape [height, width]
@@ -320,16 +327,14 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
 
 class DetectionHead:
   def __init__(self, nc=80, filters=()):
-    self.ch = 16
     self.nc = nc  # number of classes
     self.nl = len(filters)
-    self.no = nc + self.ch * 4  #
+    self.no = nc + 4  #
     self.stride = [8, 16, 32]
     c1 = max(filters[0], self.nc)
-    c2 = max((filters[0] // 4, self.ch * 4))
-    self.dfl = DFL(self.ch)
+    c2 = max(16, filters[0] // 4)
     self.cv3 = [[Conv(x, c1, 3), Conv(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
-    self.cv2 = [[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
+    self.cv2 = [[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4, 1)] for x in filters]
 
   def __call__(self, x):
     for i in range(self.nl):
@@ -337,8 +342,8 @@ class DetectionHead:
     self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
     y = [(i.reshape(x[0].shape[0], self.no, -1)) for i in x]
     x_cat = y[0].cat(y[1], y[2], dim=2)
-    box, cls = x_cat[:, :self.ch * 4], x_cat[:, self.ch * 4:]
-    dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+    box, cls = x_cat[:, :4], x_cat[:, 4:]
+    dbox = dist2bbox(box, self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
 
@@ -346,9 +351,152 @@ class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
     self.backbone = Backbone(w,d,ch)
     self.head = Head(w,d,ch)
-    self.detection = DetectionHead(ch, filters=(int(256*w), int(512*w), int(1024*w)))
+    self.detection = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
   def __call__(self, x: Tensor)->Tensor:
     return self.detection(self.head(*self.backbone(x)))
+
+def get_weights_location(yolo_variant: str) -> Path:
+  def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
+    with open(input_file, 'rb') as f:
+      metadata_length = int.from_bytes(f.read(8), 'little')
+      metadata = json.loads(f.read(metadata_length).decode())
+      float32_values = np.fromfile(f, dtype=np.float16).astype(np.float32)
+      for v in metadata.values():
+        if v["dtype"] == "F16": v.update({"dtype": "F32", "data_offsets": [offset * 2 for offset in v["data_offsets"]]})
+      with open(output_file, 'wb') as f:
+        new_metadata_bytes = json.dumps(metadata).encode()
+        f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
+        f.write(new_metadata_bytes)
+        float32_values.tofile(f)
+
+  weights_location = Path(__file__).parents[1] / "weights" / f'yolo26{yolo_variant}.safetensors'
+  fetch(f'https://huggingface.co/Acrusinho/yolo26-safetensors/resolve/main/yolo26{yolo_variant}.safetensors', weights_location)
+  f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
+  if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
+  return f32_weights
+
+def clip_boxes(boxes, shape):
+  boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, shape[1])  # x1, x2
+  boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, shape[0])  # y1, y2
+  return boxes
+
+def scale_boxes(img1_shape, predictions:np.ndarray, img0_shape, ratio_pad=None)->np.ndarray:
+  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
+  pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
+  for pred in predictions:
+    boxes_np = pred[:4].numpy() if isinstance(pred[:4], Tensor) else pred[:4]
+    boxes_np[..., [0, 2]] -= pad[0]
+    boxes_np[..., [1, 3]] -= pad[1]
+    boxes_np[..., :4] /= gain
+    boxes_np = clip_boxes(boxes_np, img0_shape)
+    pred[:4] = boxes_np
+  return predictions
+
+def box_iou(box:np.ndarray, boxes:np.ndarray)->np.ndarray:
+  x1 = np.maximum(box[0], boxes[:, 0])
+  y1 = np.maximum(box[1], boxes[:, 1])
+  x2 = np.minimum(box[2], boxes[:, 2])
+  y2 = np.minimum(box[3], boxes[:, 3])
+  inter = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+  area1 = np.maximum(0, box[2] - box[0]) * np.maximum(0, box[3] - box[1])
+  area2 = np.maximum(0, boxes[:, 2] - boxes[:, 0]) * np.maximum(0, boxes[:, 3] - boxes[:, 1])
+  return inter / (area1 + area2 - inter + 1e-7)
+
+def nms(predictions:np.ndarray, iou_thres:float=0.45, max_det:int=300)->np.ndarray:
+  if len(predictions) == 0: return predictions
+  keep = []
+  for cls in np.unique(predictions[:, 5]).astype(np.int32):
+    dets = predictions[predictions[:, 5] == cls]
+    dets = dets[np.argsort(-dets[:, 4])]
+    while len(dets) and len(keep) < max_det:
+      keep.append(dets[0])
+      if len(dets) == 1: break
+      dets = dets[1:][box_iou(dets[0, :4], dets[1:, :4]) <= iou_thres]
+  return np.array(keep, dtype=np.float32) if keep else np.empty((0, 6), dtype=np.float32)
+
+def postprocess(predictions:np.ndarray, conf_thres:float=0.001, iou_thres:float=0.45)->np.ndarray:
+  pred = predictions[0] if predictions.ndim == 3 else predictions
+  if pred.shape[0] < pred.shape[1]: pred = pred.T
+  boxes, scores = pred[:, :4], pred[:, 4:]
+  class_ids = scores.argmax(axis=1)
+  conf = scores.max(axis=1)
+  print(f"max confidence: {conf.max():.6f}, threshold: {conf_thres}")
+  mask = conf > conf_thres
+  boxes, conf, class_ids = boxes[mask], conf[mask], class_ids[mask]
+  if len(boxes) == 0: return np.empty((0, 6), dtype=np.float32)
+  x, y, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+  detections = np.stack((x - w / 2, y - h / 2, x + w / 2, y + h / 2, conf, class_ids), axis=1).astype(np.float32)
+  return nms(detections, iou_thres=iou_thres)
+
+def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels):
+  color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
+  font = cv2.FONT_HERSHEY_SIMPLEX
+
+  def is_bright_color(color):
+    r, g, b = color
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return brightness > 127
+
+  orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
+  height, width, _ = orig_img.shape
+  box_thickness = int((height + width) / 400)
+  font_scale = (height + width) / 2500
+  object_count = defaultdict(int)
+
+  for pred in predictions:
+    x1, y1, x2, y2, conf, class_id = pred
+    if conf <= 0: continue
+    x1, y1, x2, y2, class_id = map(int, (x1, y1, x2, y2, class_id))
+    color = color_dict[class_labels[class_id]]
+    cv2.rectangle(orig_img, (x1, y1), (x2, y2), color, box_thickness)
+    label = f"{class_labels[class_id]} {conf:.2f}"
+    text_size, _ = cv2.getTextSize(label, font, font_scale, 1)
+    label_y, bg_y = (y1 - 4, y1 - text_size[1] - 4) if y1 - text_size[1] - 4 > 0 else (y1 + text_size[1], y1)
+    cv2.rectangle(orig_img, (x1, bg_y), (x1 + text_size[0], bg_y + text_size[1]), color, -1)
+    font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
+    cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
+    object_count[class_labels[class_id]] += 1
+
+  print("Objects detected:")
+  for obj, count in object_count.items():
+    print(f"- {obj}: {count}")
+
+  cv2.imwrite(output_img_path, orig_img)
+  print(f'saved detections at {output_img_path}')
+
+def remap_yolo26_state_dict(state_dict):
+  mapping = {
+    "model.0.": "backbone.layers.0.",
+    "model.1.": "backbone.layers.1.",
+    "model.2.": "backbone.layers.2.",
+    "model.3.": "backbone.layers.3.",
+    "model.4.": "backbone.layers.4.",
+    "model.5.": "backbone.layers.5.",
+    "model.6.": "backbone.layers.6.",
+    "model.7.": "backbone.layers.7.",
+    "model.8.": "backbone.layers.8.",
+    "model.9.": "backbone.layers.9.",
+    "model.10.": "backbone.layers.10.",
+    "model.13.": "head.c3_13.",
+    "model.16.": "head.c3_16.",
+    "model.17.": "head.down1.",
+    "model.19.": "head.c3_19.",
+    "model.20.": "head.down2.",
+    "model.22.": "head.c3_22.",
+    "model.23.": "detection.",
+  }
+
+  out = {}
+  for k, v in state_dict.items():
+    if k.endswith(".num_batches_tracked"): continue
+    if k.startswith("model.23.one2one_"): continue
+
+    for src, dst in mapping.items():
+      if k.startswith(src):
+        out[dst + k[len(src):]] = v
+        break
+
+  return out
 
 if __name__=="__main__":
   print(f"sys.args: {sys.argv}")
@@ -357,6 +505,7 @@ if __name__=="__main__":
     sys.exit(1)
   img_path = sys.argv[1]
   yolo_variant = sys.argv[2] if len(sys.argv)>=3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n') # default to nano
+  conf_thres = float(sys.argv[3]) if len(sys.argv)>=4 else 0.001
   print(f"args {sys.argv}")
   print(f"Running inference for YOLO26 variant {yolo_variant}")
   (output_folder_path := Path('./outputs-yolov26')).mkdir(parents=True, exist_ok=True)
@@ -369,5 +518,15 @@ if __name__=="__main__":
   preprocessed_image = preprocess(image)
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
-  print(yolo_infer(preprocessed_image))
+  state_dict = safe_load(get_weights_location(yolo_variant))
+  state_dict = remap_yolo26_state_dict(state_dict)
+  load_state_dict(yolo_infer, state_dict, strict=False)
+  st = time()
+  predictions = yolo_infer(preprocessed_image).numpy()
+  print(f'did inference in {int(round(((time() - st) * 1000)))}ms')
+  class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
+  predictions = postprocess(predictions, conf_thres=conf_thres)
+  print(f"detections after NMS: {len(predictions)}")
+  predictions = scale_boxes(preprocessed_image.shape[2:], predictions, image.shape)
+  draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels)
   sys.exit(0)
