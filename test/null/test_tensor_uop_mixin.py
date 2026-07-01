@@ -456,7 +456,6 @@ class TestTensorUOpSVD(unittest.TestCase):
   def test_svd_batched(self):   self._check(_t(2, 2, 2).float())
   def test_svd_nonfull(self):   self._check(_t(3, 2).float(), full_matrices=False)
 
-# UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
 class TestUOpEmpty(unittest.TestCase):
   def test_empty_dtype_string(self):
     self.assertEqual(UOp.empty((3, 4), dtype="float32").dtype, dtypes.float32)
@@ -475,11 +474,12 @@ class TestUOpEmpty(unittest.TestCase):
       self.assertTrue(u.has_buffer_identity())
 
   def test_empty_direct_singleton_tuple_device(self):
-    # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
-    u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
+    u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",))
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
 
 class TestTensorUOpCreation(unittest.TestCase):
+  def test_empty(self):
+    self.assertIs(_strip_unique(Tensor.empty(2, 3).uop), _strip_unique(UOp.empty(2, 3)))
   def test_full(self):
     self.assertIs(_strip_unique(Tensor.full((2, 3), 42).uop), _strip_unique(UOp.full((2, 3), 42)))
   def test_full_kwargs(self):

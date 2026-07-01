@@ -1601,6 +1601,12 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x,y: x.isclose(y), vals=[[a], [b]], forward_only=True)
         helper_test_op(None, lambda x,y: x.isclose(y, equal_nan=True), vals=[[a], [b]], forward_only=True)
 
+  def test_isclose_scalar(self):
+    # torch needs a tensor
+    helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(torch.tensor(1.0)), lambda x: x.isclose(1.0), forward_only=True)
+    helper_test_op(None, lambda x: x.isclose(torch.tensor(1.0)), lambda x: x.isclose(1.0),
+                   vals=[[1.0, 1.0 + 1e-7, 2.0, math.inf, -math.inf, math.nan]], forward_only=True)
+
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
     helper_test_op([()], lambda x: x.mean())
