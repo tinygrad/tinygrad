@@ -130,9 +130,36 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+def _ggml_nbytes(n:int, typ:int) -> int:
+  return n * _GGML_NATIVE[typ].itemsize if typ in _GGML_NATIVE else (n // _GGML_QUANT[typ][0]) * _GGML_QUANT[typ][1]
+
+def _shard_tensor(tensor:Tensor, data_start:int, t_info:tuple[str, tuple[int, ...], int, int], devices:tuple[str, ...], axis:int) -> Tensor:
+  name, dims, typ, off = t_info
+  shape = tuple(reversed(dims))
+  ndev, start = len(devices), data_start + off
+  assert shape[axis] % ndev == 0, f"{name}: axis {axis} size {shape[axis]} does not divide {ndev} devices"
+  if axis == 0:
+    row_count, row_elems = shape[0]//ndev, prod(shape[1:])
+    row_nbytes = _ggml_nbytes(row_elems, typ)
+    raws = [tensor[start+i*row_count*row_nbytes:start+(i+1)*row_count*row_nbytes].to(d) for i,d in enumerate(devices)]
+    Tensor.realize(*raws)
+    parts = [ggml_data_to_tensor(r, row_count*row_elems, typ).reshape(row_count, *shape[1:]) for r in raws]
+    return Tensor(parts[0].uop.mstack(*[p.uop for p in parts[1:]]).multi(0))
+  nelems, nbytes = _GGML_QUANT[typ] if typ in _GGML_QUANT else (1, _GGML_NATIVE[typ].itemsize)
+  assert shape[-1] % nelems == 0, f"{name}: last dim {shape[-1]} does not divide block size {nelems}"
+  nblk, per_dev = shape[-1] // nelems, shape[axis] // ndev
+  blk = tensor[start:start + (prod(shape)//nelems)*nbytes].to("CPU").realize().reshape(*shape[:-1], nblk*nbytes)
+  assert axis != len(dims)-1 or nblk % ndev == 0, f"{name}: last dim {nblk} blocks does not divide {ndev} devices"
+  cnt, shard_shape = blk.shape[axis] // ndev, (*shape[:axis], per_dev, *shape[axis+1:])
+  raws = [blk[tuple(slice(i*cnt, (i+1)*cnt) if a==axis else slice(None) for a in range(len(shape)))].contiguous().to(d) for i,d in enumerate(devices)]
+  Tensor.realize(*raws)
+  parts = [ggml_data_to_tensor(r.reshape(-1), prod(shard_shape), typ).reshape(*shard_shape) for r in raws]
+  return Tensor(parts[0].uop.mstack(*[p.uop for p in parts[1:]]).multi(axis))
+
+def _gguf_parse(tensor: Tensor, devices:tuple[str, ...]|None=None,
+                shard_policy:Callable[[str], int|str|None]|None=None) -> tuple[dict, dict[str, Tensor]]:
   # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
+  if devices is None: tensor = tensor.to(None).realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
   magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
@@ -146,7 +173,19 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  if devices is None:
+    state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+    return kv_data, state_dict
+  state_dict = {}
+  for t_info in t_infos:
+    name, dims, typ, off = t_info
+    spec = shard_policy(name) if shard_policy is not None else None
+    if isinstance(spec, int):
+      state_dict[name] = _shard_tensor(tensor, data_start, t_info, devices, spec)
+    else:
+      n = prod(dims)
+      raw = tensor[data_start + off:data_start + off + _ggml_nbytes(n, typ)].to(devices if spec == "replicate" else devices[0]).realize()
+      state_dict[name] = ggml_data_to_tensor(raw, n, typ).reshape(*reversed(dims))
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
@@ -155,7 +194,8 @@ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
   return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
 
-def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
+def gguf_load(fn: Tensor|str|pathlib.Path, devices:tuple[str, ...]|None=None,
+              shard_policy:Callable[[str], int|str|None]|None=None) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
 
@@ -170,8 +210,8 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), devices, shard_policy)
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), devices, shard_policy)[1])
   return kv, sd
