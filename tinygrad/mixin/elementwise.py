@@ -631,6 +631,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
     ```
     """
+    other = self.ufix(other)
     is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
     is_infinite_close = (self.isinf() | other.isinf()) & self.eq(other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
