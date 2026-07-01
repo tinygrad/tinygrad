@@ -1,18 +1,17 @@
-from collections import defaultdict
-from time import time
-from tinygrad.nn.state import load_state_dict
-from tinygrad.nn.state import safe_load
 import json
 import sys
-from itertools import chain
-from pathlib import Path
-
-from tinygrad import Tensor
-from tinygrad.helpers import fetch, make_tuple
-from tinygrad.nn import Conv2d, BatchNorm2d
-
 import cv2
 import numpy as np
+from time import time
+from itertools import chain
+from pathlib import Path
+from collections import defaultdict
+
+from tinygrad import Tensor
+from tinygrad.nn import Conv2d, BatchNorm2d
+from tinygrad.nn.state import load_state_dict, safe_load
+from tinygrad.helpers import fetch, make_tuple
+
 
 
 
@@ -83,7 +82,7 @@ class Upclass:
   pass
 
 class Conv:
-  def __init__(self, ch_in:int, ch_out:int, kernel_size:int|tuple[int,...], strides:int=1, padding:tuple|int|None=None, dilation:int=1, bias:bool=True, groups:int=1, act:bool=True) -> None:
+  def __init__(self, ch_in:int, ch_out:int, kernel_size:int|tuple[int,...], strides:int=1, padding:tuple|int|None=None, dilation:int=1, bias:bool=False, groups:int=1, act:bool=True) -> None:
     self.conv = Conv2d(ch_in, ch_out, kernel_size, strides, autopad(kernel_size, padding, dilation), dilation=dilation, groups=groups, bias=bias)
     self.bn = BatchNorm2d(ch_out)
     self.act = act
@@ -372,7 +371,7 @@ def get_weights_location(yolo_variant: str) -> Path:
   weights_location = Path(__file__).parents[1] / "weights" / f'yolo26{yolo_variant}.safetensors'
   fetch(f'https://huggingface.co/Acrusinho/yolo26-safetensors/resolve/main/yolo26{yolo_variant}.safetensors', weights_location)
   f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
-  if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
+  # if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
   return f32_weights
 
 def clip_boxes(boxes, shape):
@@ -464,40 +463,6 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
   cv2.imwrite(output_img_path, orig_img)
   print(f'saved detections at {output_img_path}')
 
-def remap_yolo26_state_dict(state_dict):
-  mapping = {
-    "model.0.": "backbone.layers.0.",
-    "model.1.": "backbone.layers.1.",
-    "model.2.": "backbone.layers.2.",
-    "model.3.": "backbone.layers.3.",
-    "model.4.": "backbone.layers.4.",
-    "model.5.": "backbone.layers.5.",
-    "model.6.": "backbone.layers.6.",
-    "model.7.": "backbone.layers.7.",
-    "model.8.": "backbone.layers.8.",
-    "model.9.": "backbone.layers.9.",
-    "model.10.": "backbone.layers.10.",
-    "model.13.": "head.c3_13.",
-    "model.16.": "head.c3_16.",
-    "model.17.": "head.down1.",
-    "model.19.": "head.c3_19.",
-    "model.20.": "head.down2.",
-    "model.22.": "head.c3_22.",
-    "model.23.": "detection.",
-  }
-
-  out = {}
-  for k, v in state_dict.items():
-    if k.endswith(".num_batches_tracked"): continue
-    if k.startswith("model.23.one2one_"): continue
-
-    for src, dst in mapping.items():
-      if k.startswith(src):
-        out[dst + k[len(src):]] = v
-        break
-
-  return out
-
 if __name__=="__main__":
   print(f"sys.args: {sys.argv}")
   if len(sys.argv)<2:
@@ -519,8 +484,10 @@ if __name__=="__main__":
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
-  state_dict = remap_yolo26_state_dict(state_dict)
-  load_state_dict(yolo_infer, state_dict, strict=False)
+  print(f"State dict len: {len(state_dict.keys())}")
+  x = load_state_dict(yolo_infer, state_dict)
+  print(f"loaded tensors: {len(x)}")
+  sys.exit(0)
   st = time()
   predictions = yolo_infer(preprocessed_image).numpy()
   print(f'did inference in {int(round(((time() - st) * 1000)))}ms')
