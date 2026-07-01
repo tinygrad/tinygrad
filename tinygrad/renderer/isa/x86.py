@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
 # ***** X86 Ops *****
@@ -648,7 +648,7 @@ post_regalloc_matcher = PatternMatcher([
    [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.copy(x.src[0], x.reg), nx] if x.reg != x.src[0].reg else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[0], greg(x)), nx] if greg(x) != greg(x.src[0]) else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -658,9 +658,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
               vvvv_uop:UOp|None=None, imm_uop:UOp|None=None) -> bytes:
     nonlocal reg, opc
     # get the encoding values of the different fields
-    reg = cast(int, cast(Register, reg_uop.reg).index if reg_uop is not None else reg)
-    rm = cast(Register, rm_uop.reg).index
-    idx = cast(Register, idx_uop.reg).index if idx_uop is not None and idx_uop.reg is not None else 4
+    reg = cast(int, cast(Register, greg(reg_uop)).index if reg_uop is not None else reg)
+    rm = cast(Register, greg(rm_uop)).index
+    idx = cast(Register, greg(idx_uop)).index if idx_uop is not None and greg(idx_uop) is not None else 4
     # for a memory operand the rm size is the element size from the address, otherwise it's the size of the value in the register
     rm_sz = sz_uop.arg if sz_uop is not None else rm_uop.dtype.itemsize
     reg_sz = reg_uop.dtype.itemsize if reg_uop is not None else 0
@@ -672,7 +672,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # r extends reg field, x extends index field, b extends rm or base field
     r, _x, b = reg >> 3, idx >> 3, rm >> 3
     if sel: # VEX bytes
-      vvvv = cast(Register, vvvv_uop.reg).index if vvvv_uop is not None else 0
+      vvvv = cast(Register, greg(vvvv_uop)).index if vvvv_uop is not None else 0
       l = (max(reg_sz, rm_sz) > 16) & 0b1
       if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
       else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
@@ -716,7 +716,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # IMM byte
     if imm_uop is not None:
       if imm_uop.op is Ops.CONST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.arg)
-      elif isinstance(imm_uop.reg, Register): inst += bytes([(imm_uop.reg.index & 0b1111) << 4 | 0b0000])
+      elif isinstance(greg(imm_uop), Register): inst += bytes([(greg(imm_uop).index & 0b1111) << 4 | 0b0000])
     return inst
 
   # get the encoding structure of the uop
@@ -748,7 +748,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
 encodings = {
   # moves
   X86Ops.MOVABS: lambda x:
-   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.reg.index >> 3, 0xB8 + (x.reg.index & 0b111)]) + struct.pack(x.dtype.fmt, x.src[0].arg),
+   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | greg(x).index >> 3, 0xB8 + (greg(x).index & 0b111)]) + struct.pack(x.dtype.fmt, x.src[0].arg),
   X86Ops.MOV: lambda x: encode(x, 0x8B), X86Ops.MOVi: lambda x: encode(x, 0xC7, reg=0),
   X86Ops.MOVm: lambda x: encode(x, 0x89), X86Ops.LEA: lambda x: encode(x, 0x8D),
   X86Ops.VMOVSS: lambda x: encode(x, 0x10, pp=2, sel=1), X86Ops.VMOVSSm: lambda x: encode(x, 0x11, pp=2, sel=1),
@@ -894,9 +894,9 @@ class X86Renderer(ISARenderer):
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
         return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(s.dtype.itemsize, o) if \
-                (o:=str(s.reg)) in reg_strs else o for s in src if s.reg is not None]
+                (o:=str(greg(s))) in reg_strs else o for s in src if greg(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, sz:UOp) -> list[str]:
-        return [f"[{base.reg}" + (f" + {idx.reg}*{sz.arg}" if idx.reg else "") + (f" + {disp.arg}" if disp.arg else "") + "]"]
+        return [f"[{greg(base)}" + (f" + {greg(idx)}*{sz.arg}" if greg(idx) else "") + (f" + {disp.arg}" if disp.arg else "") + "]"]
 
       if len(x.src) > 4 and x.arg in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:4]) + _format(x.src[4:])
       elif len(x.src) > 3 and x.arg in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:4]) + _format(x.src[4:])
