@@ -7,7 +7,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
+from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -73,14 +73,6 @@ class TestLinearizer(unittest.TestCase):
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]
       # assert that there is a global load after the reduce ends
       assert any(u.addrspace == AddrSpace.GLOBAL for u in load_idxs)
-
-  def _test_no_nested_ranges(self, lins, skip=None):
-    for l in lins:
-      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG])
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.END and u.src[0] in range_in_acc)]
-      for i,u in enumerate(ranges):
-        if skip and i in skip: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -408,12 +400,6 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
   return ast, bufs
-
-def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
-  assert isinstance(ast, UOp), "ast must be UOp"
-  inbufs = [x.uop.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.size, out.src[1].dtype).allocate() for out in ast.src]
-  _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
