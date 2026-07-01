@@ -49,11 +49,13 @@ def _vop2(ctx, x:UOp):
 def to_vgpr(ctx, x:UOp) -> UOp:
   # NOTE: handle sgpr?
   if x.op is Ops.CONST: # is 128 bit consts a thing??
-    if x.dtype.itemsize == 8:
-      # NOTE: need underpromo dict, just assume uint for now
-      lo, hi = const(dtypes.uint32,x.arg), const(dtypes.uint32, x.arg >> 32)
+    # NOTE: need underpromo dict, just assume uint for now
+    if x.dtype.itemsize == 8: # handle f64
+      v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
+      lo, hi = const(dtypes.uint32,v), const(dtypes.uint32, v >> 32)
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
-    else: return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
+    else:
+      return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
   if x.op is Ops.STACK:
     nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
     vregs = ctx.vreg((GP_VGPRS, nregs))
@@ -61,6 +63,8 @@ def to_vgpr(ctx, x:UOp) -> UOp:
     if x.dtype.itemsize == 2:
       def _pk(n):
         lo, hi = to_vgpr(ctx, x.src[n*2]), to_vgpr(ctx, x.src[n*2+1]) # NOTE: hack for now, literal encoding of fp16 has to be fixed
+        # NOTE: hi needs to masked off
+        lo = _vop2(ctx, lo.ins(RDNA3Ops.v_and_b32_e32, src=(lo, const(dtypes.uint32, 0xFFFF))))
         ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo))
         return _vop3(ctx, ins)
       return UOp.group(*[_pk(i) for i in range(nregs)])
@@ -151,9 +155,9 @@ def _cvt_ins(dtin, dtout):
       dtypes.int32      : (dtypes.float64, dtypes.float32),
       dtypes.uint32     : (dtypes.float32, dtypes.float64),
       dtypes.float32    : (dtypes.float64, dtypes.uint32, dtypes.int32, dtypes.float64, dtypes.float16),
-      dtypes.float16    : (dtypes.float32,),
-      dtypes.int16      : (dtypes.int32,),
-      dtypes.uint16     : (dtypes.uint32,)
+      dtypes.float16    : (dtypes.float32, dtypes.uint16, dtypes.int16),
+      dtypes.int16      : (dtypes.int32, dtypes.float16),
+      dtypes.uint16     : (dtypes.uint32, dtypes.float16)
   }
   assert dtin in _valid_casts and dtout in _valid_casts[dtin], f"cannot natively cast from {dtin} -> {dtout}"
   return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
@@ -322,21 +326,28 @@ def widenshort(y:UOp, x:UOp):
   if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
   else: return y
 
+# TODO: simplify these cast rules, maybe just make a legalize cast function?
+# TODO: properly expand/cast 64 bit consts across registers
 pre_isel_matcher = PatternMatcher([
-  # cast to ptr is noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
   # bitcast is noop?
   (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # cast to float has to be widened first
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.float32,dtypes.float64)), widenshort),
-  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
-  # uint narrow is noop
-  (UPat.var("y", dtype=dtypes.uint32).cast(dtypes.uint16), lambda y: y), 
+  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
+  # cast noops
+  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.uint32,dtypes.int32)), lambda y: y), # same size int b32
+  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16)), lambda y: y), # narrow int
+  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast((dtypes.uint16,dtypes.int16)), lambda y: y), # same size int b16
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
+
+  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)),
+  (UPat.var("y", dtype=dtypes.int16).cast(dtypes.uint32), lambda y: y.cast(dtypes.int32)),
+  (UPat.var("y", dtype=dtypes.uint16).cast(dtypes.int32), lambda y: y.cast(dtypes.uint32)),
+  (UPat.var("y", dtype=dtypes.double).cast((dtypes.half, dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.cast(dtypes.float32).cast(dtypes.half).cast(x.dtype)),
   (UPat.var("y", dtype=dtypes.float32).cast(dtypes.uint16), lambda y: y.cast(dtypes.uint32)),
   (UPat.var("y", dtype=dtypes.float32).cast(dtypes.int16), lambda y: y.cast(dtypes.int32)),
-
   # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
 ])
