@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, TinyJit
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
@@ -497,6 +497,47 @@ class TestUOpWhere(unittest.TestCase):
 
     result = Tensor(cond.uop.where(1.5, 0))
     self.assertEqual(result.tolist(), [1.5, 0, 1.5])
+
+class TestCustomKernelJit(unittest.TestCase):
+  @unittest.expectedFailure
+  def test_custom_program(self):
+    N = 32
+    def custom_program(name:str, device:str, src:str):
+      binary = Device["CPU"].compiler.compile(src)
+      def fxn(*args:UOp) -> UOp:
+        sink = UOp.sink(*(x.base for x in args), arg=KernelInfo(name=name))
+        return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                                     UOp(Ops.BINARY, arg=binary)))
+      return fxn
+
+    writer = custom_program("writer", "CPU", f"""
+    void writer(float* restrict C, float* restrict A) {{
+      for (volatile int spin=0; spin<20000000; spin++) {{ }}
+      for (int i=0; i<{N}; i++) C[i] = A[i] * 3.0f + 7.0f;
+    }}
+    """)
+    reader = custom_program("reader", "CPU:1", f"""
+    void reader(float* restrict D, float* restrict C) {{
+      for (int i=0; i<{N}; i++) D[i] = C[i];
+    }}
+    """)
+
+    @TinyJit
+    def step(A:Tensor, C:Tensor):
+      C = Tensor.custom_kernel(C, A, fxn=writer)[0]
+      D = Tensor.empty(N, device="CPU:1")
+      return Tensor.custom_kernel(D, C, fxn=reader)[0]
+
+    A = Tensor(Tensor.arange(N, dtype=dtypes.float32).tolist(), device="CPU")
+    C = Tensor.zeros(N, device="CPU").realize()
+
+    for _ in range(2):
+      C.assign(0).realize()
+      step(A, C).realize()
+
+    C.assign(0).realize()
+    tst = step(A, C).realize()
+    self.assertEqual(tst.tolist(), (Tensor.arange(N) * 3.0 + 7.0).tolist())
 
 if __name__ == '__main__':
   unittest.main()
