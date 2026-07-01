@@ -85,7 +85,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
   elif len(arg) == 1: return UOp.const(dtypes.weakint, arg[0])
-  else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
+  else: return UOp(Ops.STACK, dtypes.weakint, tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
@@ -289,16 +289,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return self.src[0].as_shape if len(self.src) >= 1 else None
 
       # wmma output shape = accumulator shape (src[2])
-      case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
+      case Ops.WMMA:
+        in0, in1, out0 = self.arg[6]
+        wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
+        return wmma_b + (prod([x for _,x in out0]),)
+      #case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
-      # REDUCE with empty axis is passthrough (lowered form)
-      case Ops.REDUCE if len(self.arg[1]) == 0:
-        # these can mismatch if there's a horizonal reduce
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -465,8 +465,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _stack(self, *srcs):
     # TODO: this should become the real stack
     return UOp(Ops.STACK, self.dtype, (self,)+srcs)
-  def vectorize(self, *srcs):
-    return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
+  def vectorize(self, *srcs): return self._stack(*srcs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
@@ -1034,7 +1033,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
-      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
