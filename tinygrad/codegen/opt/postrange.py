@@ -290,6 +290,12 @@ class Scheduler:
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
+            def with_missing_tc_axes(arg):
+              ret = list(arg)
+              for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
+                if rn not in [x[0] for x in ret]: ret.append((rn, 1))
+              return tuple(ret)
+            tc_upcast_axes = tuple(with_missing_tc_axes(v) for v in tc_upcast_axes)
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
@@ -300,14 +306,7 @@ class Scheduler:
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
               UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg, tag=1)
-            # hack to inject 1s for reduce
-            arg = list(tc_upcast_axes[2])
-            used_ranges = [x[0] for x in arg]
-            for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
-              if rn not in used_ranges:
-                arg.append((rn, 1))
-                used_ranges.append(rn)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tuple(arg), tag=1)
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2], tag=1)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
