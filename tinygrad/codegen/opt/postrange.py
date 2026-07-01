@@ -300,8 +300,14 @@ class Scheduler:
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
               UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg, tag=1)
-            # TODO: we need a 1 for the reduce axis
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=(*tc_upcast_axes[2], (tc_upcast_axes[0][-1][0], 1)), tag=1)
+            # hack to inject 1s for reduce
+            arg = list(tc_upcast_axes[2])
+            used_ranges = [x[0] for x in arg]
+            for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
+              if rn not in used_ranges:
+                arg.append((rn, 1))
+                used_ranges.append(rn)
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tuple(arg), tag=1)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
