@@ -21,6 +21,7 @@ def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), 
 kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
 execop = def_reg(dtypes.uint32, EXEC)
 lidop = def_reg(dtypes.uint32, WIIDS[0])
+vccop = def_reg(dtypes.uint32, VCC)
 
 spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
 
@@ -269,9 +270,12 @@ def store(ctx, addr:UOp, x:UOp):
 def add64(ctx, x:UOp):
   a, b = x.src
   if dtypes.is_float(x.dtype): return x.ins(V_ADD[x.dtype]) # f64 add is native
+  narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   # need to alloc 64b buf to store into
-  a1, a2 = x.ins(RDNA3Ops.v_add_co_u32, src=(a.gep(0),b.gep(0))), x.ins(RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1),b.gep(1)))
-  return a2.after(a1)
+  v1,v2 = ctx.vreg((GP_VGPRS,2)) # make a standard/consistent way to do this 
+  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(v1,))
+  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(v2,)).after(lo)
+  return UOp.group(lo, hi)
 
 # TODO: signed
 def mul64(ctx, x:UOp):
@@ -282,7 +286,8 @@ def mul64(ctx, x:UOp):
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  lo, hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0))), UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0))) 
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
   return UOp.group(lo,hi)
 
 # NOTE: booleans should be natively represented as vcc/scc
@@ -491,7 +496,8 @@ def encode(ctx, x:UOp):
     else: kw["vdst"]=_fuse(regs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.VOP3SD:
-    kw = dict(vdst=_fuse(regs(x)))
+    oprs = oprs[:3]
+    kw = dict(sdst=_immorreg(vccop), vdst=_fuse(regs(x)))
     for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
   elif group is RDNA3Ops.VOPC:
     args = [_immorreg(u) for u in oprs]
