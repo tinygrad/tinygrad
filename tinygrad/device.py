@@ -96,6 +96,10 @@ class MultiBuffer:
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
+# bounded intern cache: equal-content buffers serialize once per pickle; cap = max distinct buffers deduped per dump
+@functools.lru_cache(maxsize=4096)
+def _dedupe_payload(b:bytes) -> bytes: return b
+
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
@@ -110,7 +114,7 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        self.copyin(memoryview(initial_value))
+        self.copyin(memoryview(bytearray(initial_value)))  # bytearray: copyin needs a writable source; each restored buffer gets its own copy
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
@@ -178,8 +182,9 @@ class Buffer:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
     if self.is_allocated():
-      buf = bytearray(self.nbytes)
-      self.copyout(memoryview(buf))
+      ba = bytearray(self.nbytes)
+      self.copyout(memoryview(ba))
+      buf = _dedupe_payload(bytes(ba))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
