@@ -128,7 +128,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       subs[s] = placed
       items.append(s.after(*after_deps) if after_deps else s)
     else:
-      items.append(t.after(t.store(s), *after_deps))
+      items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
