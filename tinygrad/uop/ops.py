@@ -302,10 +302,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
-        ps = self.src[0]._shape
-        if ps is None: return None
+        ps = self.src[0].shape
         if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
-          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),) if len(ps) > 0 else ps
+          if ps == ():
+            if output_sz > input_sz: raise RuntimeError(f"shape {ps} must be an expanding bitcast {output_sz=} {input_sz=}")
+            ps = (1,)
+          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
       # MULTI marker has no shape
