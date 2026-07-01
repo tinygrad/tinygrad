@@ -1,4 +1,5 @@
 import sys
+from itertools import chain
 from pathlib import Path
 
 from tinygrad import Tensor
@@ -14,9 +15,11 @@ def compute_transform(image:np.ndarray,new_shape=(640,640),auto=False,scaleFill=
   r = min(new_shape[0] / shape[0], new_shape[1] / shape[1]) # get scale factor
   r = min(r, 1.0) if not scaleUp else r
   new_unpad = (int(round(shape[1]*r)), int(round(shape[0]*r))) # scale image
-  dw,dh = new_shape[1]-new_unpad[1], new_shape[0]-new_unpad[0]
-  dw,dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (0.0, 0.0) # if auto: add enough padding so that strides divide both dims
-  new_unpad = (new_shape[1], new_shape[0]) if scaleFill else new_unpad
+  dw,dh = new_shape[1]-new_unpad[0], new_shape[0]-new_unpad[1]
+  dw,dh = (np.mod(dw, stride), np.mod(dh, stride)) if auto else (dw, dh) # if auto: add enough padding so that strides divide both dims
+  if scaleFill:
+    dw, dh = 0.0, 0.0
+    new_unpad = (new_shape[1], new_shape[0])
   dw /= 2
   dh /= 2
   image = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR) if shape[::-1] != new_unpad else image
@@ -67,11 +70,7 @@ def autopad(k:int|tuple[int, ...], p:int|tuple[int, ...]|None=None, d:int=1):
 
 def depth_scale(n:int, d:float): return max(round(n * d), 1) if n > 1 else n
 
-class YOLOv26:
-  def __init__(self, w: float, d: float, ch: int, num_classes:int):
-    self.backbone = Backbone(w,d,ch)
-  def __call__(self, x: Tensor)->Tensor:
-    return self.backbone(x)
+
 
 class Upclass:
   pass
@@ -221,7 +220,7 @@ class C2PSA:
 
 class Backbone:
   def __init__(self, w: float, d: float, ch: int):
-    self.seq = Sequential(
+    self.layers = [
       Conv(ch_in=3,ch_out=int(64*w),kernel_size=3,strides=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
       Conv(ch_in=int(64*w),ch_out=int(128*w),kernel_size=3,strides=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
       C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
@@ -233,9 +232,123 @@ class Backbone:
       C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [1024, True]]
       SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
       C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)) # [-1, 2, C2PSA, [1024]] # 10
-    )
-  def __call__(self, x:Tensor):
-    return self.seq(x)
+    ]
+
+  def __call__(self, x: Tensor):
+    outputs = []
+    for layer in self.layers:
+      x = layer(x)
+      outputs.append(x)
+    return [outputs[4], outputs[6], outputs[10]]
+
+class Upsample:
+  def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
+    assert mode == "nearest" # only mode supported for now
+    self.mode = mode
+    self.scale_factor = scale_factor
+
+  def __call__(self, x: Tensor) -> Tensor:
+    assert len(x.shape) > 2 and len(x.shape) <= 5
+    (b, c), _lens = x.shape[:2], len(x.shape[2:])
+    tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
+    return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
+
+class Head:
+  def __init__(self, w:int, d:int, ch:int):
+    self.up1 = Upsample(scale_factor=2, mode="nearest")
+    self.c3_13 = C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3)
+
+    self.up2 = Upsample(scale_factor=2, mode="nearest")
+    self.c3_16 = C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3)
+    self.down1 = Conv( ch_in=int(256 * w), ch_out=int(256 * w), kernel_size=3, strides=2,)
+    self.c3_19 = C3K2( c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,)
+
+    self.down2 = Conv( ch_in=int(512 * w), ch_out=int(512 * w), kernel_size=3, strides=2,)
+
+    self.c3_22 = C3K2( c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3,)
+
+  def __call__(self,p3:Tensor,p4:Tensor,p5:Tensor):
+    x = self.up1(p5).cat(p4, dim=1)
+    head_p4 = self.c3_13(x)
+    x = self.up2(head_p4).cat(p3, dim=1)
+    head_p3 = self.c3_16(x)
+    x = self.down1(head_p3).cat(head_p4, dim=1)
+    head_p4_out = self.c3_19(x)
+    x = self.down2(head_p4_out).cat(p5, dim=1)
+    head_p5_out = self.c3_22(x)
+    return [head_p3, head_p4_out, head_p5_out]
+
+class DFL:
+  def __init__(self, c1=16):
+    self.conv = Conv2d(c1, 1, 1, bias=False)
+    x = Tensor.arange(c1)
+    self.conv.weight.replace(x.reshape(1, c1, 1, 1))
+    self.c1 = c1
+
+  def __call__(self, x):
+    b, c, a = x.shape # batch, channels, anchors
+    return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
+
+# utility functions for forward pass.
+def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+  lt, rb = distance.chunk(2, dim)
+  x1y1 = anchor_points - lt
+  x2y2 = anchor_points + rb
+  if xywh:
+    c_xy = (x1y1 + x2y2) / 2
+    wh = x2y2 - x1y1
+    return c_xy.cat(wh, dim=1)
+  return x1y1.cat(x2y2, dim=1)
+
+def make_anchors(feats, strides, grid_cell_offset=0.5):
+  anchor_points, stride_tensor = [], []
+  assert feats is not None
+  for i, stride in enumerate(strides):
+    _, _, h, w = feats[i].shape
+    sx = Tensor.arange(w) + grid_cell_offset
+    sy = Tensor.arange(h) + grid_cell_offset
+
+    # this is np.meshgrid but in tinygrad
+    sx = sx.reshape(1, -1).repeat([h, 1]).reshape(-1)
+    sy = sy.reshape(-1, 1).repeat([1, w]).reshape(-1)
+
+    anchor_points.append(Tensor.stack(sx, sy, dim=-1).reshape(-1, 2))
+    stride_tensor.append(Tensor.full((h * w), stride))
+  anchor_points = anchor_points[0].cat(anchor_points[1], anchor_points[2])
+  stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
+  return anchor_points, stride_tensor
+
+class DetectionHead:
+  def __init__(self, nc=80, filters=()):
+    self.ch = 16
+    self.nc = nc  # number of classes
+    self.nl = len(filters)
+    self.no = nc + self.ch * 4  #
+    self.stride = [8, 16, 32]
+    c1 = max(filters[0], self.nc)
+    c2 = max((filters[0] // 4, self.ch * 4))
+    self.dfl = DFL(self.ch)
+    self.cv3 = [[Conv(x, c1, 3), Conv(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
+    self.cv2 = [[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4 * self.ch, 1)] for x in filters]
+
+  def __call__(self, x):
+    for i in range(self.nl):
+      x[i] = (x[i].sequential(self.cv2[i]).cat(x[i].sequential(self.cv3[i]), dim=1))
+    self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
+    y = [(i.reshape(x[0].shape[0], self.no, -1)) for i in x]
+    x_cat = y[0].cat(y[1], y[2], dim=2)
+    box, cls = x_cat[:, :self.ch * 4], x_cat[:, self.ch * 4:]
+    dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
+    z = dbox.cat(cls.sigmoid(), dim=1)
+    return z
+
+class YOLOv26:
+  def __init__(self, w: float, d: float, ch: int, num_classes:int):
+    self.backbone = Backbone(w,d,ch)
+    self.head = Head(w,d,ch)
+    self.detection = DetectionHead(ch, filters=(int(256*w), int(512*w), int(1024*w)))
+  def __call__(self, x: Tensor)->Tensor:
+    return self.detection(self.head(*self.backbone(x)))
 
 if __name__=="__main__":
   print(f"sys.args: {sys.argv}")
