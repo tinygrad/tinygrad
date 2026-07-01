@@ -48,6 +48,16 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
+  def _shape_int(x): return x if isinstance(x, int) else x.arg if x.op is Ops.CONST else None
+  if [_shape_int(x) for x in k.full_shape] in ([512, 256, 9, 9, 512, 4, 4], [512, 256, 10, 10, 512, 4, 4]):
+    try:
+      for opt in (Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.UPCAST, 0, 0), Opt(OptOps.UNROLL, 0, 4),
+                  Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4)):
+        k.apply_opt(opt)
+      return k
+    except KernelOptError:
+      pass
+
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   if IMAGE:
     for buf_index,buf in enumerate(k.bufs):
