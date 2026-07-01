@@ -172,7 +172,7 @@ class Buffer:
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     self._bufs.clear()
-  def __reduce__(self):
+  def __reduce_ex__(self, protocol):
     buf = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
@@ -180,6 +180,7 @@ class Buffer:
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
+      if protocol >= 5: buf = pickle.PickleBuffer(buf)
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
