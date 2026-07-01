@@ -155,10 +155,6 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
-    - name: Symlink models and datasets
-      run: |
-        mkdir -p weights
-        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -166,13 +162,17 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
+    - name: Run 10 CIFAR training steps
+      env:
+        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || matrix.dev == 'AMD' && '200' || '3000' }}
+      run: BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || matrix.dev == 'AMD' && '230' || '3000' }}
       run: BENCHMARK_LOG=cifar_10steps_half STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training w 1 GPU
-      env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '130' || matrix.dev == 'AMD' && '200' || '3000' }}
+      # slow on metal
+      if: ${{ matrix.dev != 'METAL' }}
       run: time BENCHMARK_LOG=cifar DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training steps w 6 GPUS
       # only run on machines with multiple gpus
