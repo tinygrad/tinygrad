@@ -267,8 +267,10 @@ def store(ctx, addr:UOp, x:UOp):
 
 # -- complex alu --
 def add64(ctx, x:UOp):
+  a, b = x.src
   if dtypes.is_float(x.dtype): return x.ins(V_ADD[x.dtype]) # f64 add is native
-  a1, a2 = x.ins(RDNA3Ops.v_add_co_u32), x.ins(RDNA3Ops.v_add_co_ci_u32)
+  # need to alloc 64b buf to store into
+  a1, a2 = x.ins(RDNA3Ops.v_add_co_u32, src=(a.gep(0),b.gep(0))), x.ins(RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1),b.gep(1)))
   return a2.after(a1)
 
 # TODO: signed
@@ -287,7 +289,7 @@ def bitwise64(ctx, x:UOp, ins):
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
-  if dpreciz and x.op is Ops.ADD: return add64(x)
+  if dpreciz and x.op is Ops.ADD: return add64(ctx, x)
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
   ins = None
@@ -313,18 +315,12 @@ def cdiv(x:UOp):
   # c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
   return c.cast(x.dtype)
 
-# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
-def gethalf(x:UOp, buf:UOp, idx:UOp):
-  i = idx.arg
-  b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
-  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
-
 def widenshort(y:UOp, x:UOp):
   mid = dtypes.int32 if y.dtype is dtypes.int16 else dtypes.uint32
-  y = y.cast(mid).cast(dtypes.float32)
+  y = y.cast(mid)
+  if x.dtype is dtypes.float32: y = y.cast(dtypes.float32)
   if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
-  else: return y
+  return y
 
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 # TODO: properly expand/cast 64 bit consts across registers
@@ -333,23 +329,23 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
-  # cast to float has to be widened first
-  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.float32,dtypes.float64)), widenshort),
-  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
   # cast noops
   (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.uint32,dtypes.int32)), lambda y: y), # same size int b32
-  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16)), lambda y: y), # narrow int
+  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.replace(dtype=x.dtype)), # narrow int
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast((dtypes.uint16,dtypes.int16)), lambda y: y), # same size int b16
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
-
-  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)),
-  (UPat.var("y", dtype=dtypes.int16).cast(dtypes.uint32), lambda y: y.cast(dtypes.int32)),
-  (UPat.var("y", dtype=dtypes.uint16).cast(dtypes.int32), lambda y: y.cast(dtypes.uint32)),
+  # cast rewrites
+  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.uint32, dtypes.int32, dtypes.float32,dtypes.float64)), widenshort),
+  # (f16 -> f64/i32/u32 ) to (f16 -> f32 -> f64/i32/u32)
+  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
+  # (u32/i32 -> f16) to (-> f32 -> f16)
+  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)), 
+  # (f64 -> f16/i16/u16) to (f64 -> f64 ?-> i16/u16)
   (UPat.var("y", dtype=dtypes.double).cast((dtypes.half, dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.cast(dtypes.float32).cast(dtypes.half).cast(x.dtype)),
-  (UPat.var("y", dtype=dtypes.float32).cast(dtypes.uint16), lambda y: y.cast(dtypes.uint32)),
-  (UPat.var("y", dtype=dtypes.float32).cast(dtypes.int16), lambda y: y.cast(dtypes.int32)),
-  # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
+  # (f32 -> u16/i16) to (f32 -> u32/i32)
+  (UPat.var("y", dtype=dtypes.float32).cast((dtypes.uint16,dtypes.int16), name="x"), lambda y,x: y.cast(dtypes.uint32 if x.dtype is dtypes.uint16 else dtypes.int32)),
+  # this only works because we assume upper half is right, widen cast is noop
+  (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
 ])
 
 def prep_range(ctx, bnd:UOp, x:UOp):
@@ -367,8 +363,31 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
 
+# NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
+def castint64(ctx, y:UOp, x:UOp):
+  # if src (y) is an int just allocate reg buffer and store?
+  if y.dtype in dtypes.ints + dtypes.uints:
+    lo,hi = ctx.vreg((GP_VGPRS,2))
+    return UOp.group(
+        y.ins(RDNA3Ops.v_mov_b32_e32, tag=(lo,), src=(y,)),
+        UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(hi,), src=(const(dtypes.uint32,0),))
+    )
+  # casting between long/ulong and floats is more complicated, may belong in isel?
+  raise NotImplementedError()
+
+# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
+# NOTE: this should just be triggered in to_vgpr????
+# - not for loads
+# - what cases is this valid?
+def gethalf(x:UOp, buf:UOp, idx:UOp):
+  i = idx.arg
+  b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
+  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
+  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 isel_matcher = PatternMatcher([
+  (UPat.var("y", dtype=dtypes.ints+dtypes.uints).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -391,6 +410,8 @@ isel_matcher = PatternMatcher([
   # mem ops
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
+  # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
   # unified alu experiment
   (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
