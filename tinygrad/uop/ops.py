@@ -250,13 +250,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
         return inner_shape
 
-      case Ops.CAST:
-        # if it has a vec dtype, set the shape
-        if self.dtype.count > 1: return (self.dtype.count,)
-        # when PTX casts from ptr to non ptr, remove the shape of the buffer
-        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
-          return ()
-
       case Ops.INDEX:
         shp:list[sint] = []
         for s in self.src[1:]: shp.extend(list(s.shape))
@@ -493,7 +486,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   @property
   def _uop(self) -> UOp: return self
-  def _wrap_uop(self, u:UOp) -> UOp: return u
+  @classmethod
+  def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
@@ -735,16 +729,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
     else: assert buffers[uop] is opaque
     return uop
-  @staticmethod
-  def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
-    dtype, device = to_dtype(dtype) if dtype is not None else dtypes.default_float, canonicalize_device(device)
-    max_shape = to_max_shape(shape)
-    ret = UOp.new_buffer(device, prod(max_shape), dtype, num).reshape(max_shape).shrink_to(shape)
-    return ret.multi(axis) if isinstance(device, tuple) and axis is not None else ret
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
-    return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
+    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=self.dtype if dtype is None else dtype, device=device)
+    return ret.multi(axis) if axis is not None else ret
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(device)
@@ -753,7 +742,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
       bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
-      ret = UOp.empty(shape:=get_shape(x), bdtype, "PYTHON")
+      ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     # fake realize. if target device is PYTHON it needs bytearray to be writable
     ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))

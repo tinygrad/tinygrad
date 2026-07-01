@@ -4,7 +4,7 @@ import time, math, functools, sys, inspect, pathlib, hashlib, weakref
 from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import argfix, prod, all_int, getenv, fully_flatten, ceildiv, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
+from tinygrad.helpers import prod, all_int, getenv, fully_flatten, ceildiv, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
@@ -120,7 +120,8 @@ class Tensor(RandMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   @property
   def _uop(self) -> UOp: return self.uop
-  def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
+  @classmethod
+  def _wrap_uop(cls, u:UOp) -> Tensor: return cls(u)
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
 
@@ -402,20 +403,6 @@ class Tensor(RandMixin):
     return data[:16].contiguous()
 
   # ***** creation entrypoint *****
-
-  @staticmethod
-  def empty(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Creates an empty tensor with the given shape.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.empty(2, 3)
-    print(t.shape)
-    ```
-    """
-    return Tensor(UOp.empty(argfix(*shape), dtype, device))
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:

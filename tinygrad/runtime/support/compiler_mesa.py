@@ -1,7 +1,7 @@
 import base64, ctypes, pathlib, tempfile, hashlib
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
-from tinygrad.runtime.autogen import mesa, llvm
+from tinygrad.runtime.autogen import mesa, llvm, libc
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 
 # NB: compilers assume mesa's glsl type cache is managed externally with mesa.glsl_type_singleton_init_or_ref() and mesa.glsl_type_singleton_decref()
@@ -80,14 +80,16 @@ class NAKCompiler(Compiler):
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
 def disas_adreno(lib:bytes, gpu_id=630):
-  with tempfile.TemporaryFile('w+', buffering=1) as tf:
+  with tempfile.TemporaryFile('w+') as tf:
+    mesa_fp = ctypes.cast(fp:=libc.fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE))
     @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
     def hd(data, n, instr):
       fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
-      print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True, file=tf)
+      # print with libc so that output interleaves properly
+      libc.fputs(f"{n:04} [{fst:08x}_{snd:08x}] ".encode(), fp)
 
-    ctypes.CDLL(None).setlinebuf(fp:=ctypes.cast(ctypes.CDLL(None).fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE)))
-    mesa.ir3_isa_disasm(lib, len(lib), fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+    mesa.ir3_isa_disasm(lib, len(lib), mesa_fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+    libc.fflush(fp)
     tf.seek(0)
     print(tf.read())
 

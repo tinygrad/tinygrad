@@ -557,7 +557,7 @@ class TestFunctionTuple(unittest.TestCase):
     lib = Device["CPU"].compiler.compile(src)
     def prog(C:UOp, A:UOp) -> UOp:
       sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
                  arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
 

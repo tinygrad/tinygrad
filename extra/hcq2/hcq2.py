@@ -146,7 +146,7 @@ def unwrap_after(uop):
 
 def make_getaddr(u, device=None):
   if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM): return u
-  return UOp(Ops.GETADDR, dtypes.uint64, src=(u, UOp(Ops.DEVICE, arg=device or to_tuple(u.device)[0])))
+  return UOp(Ops.GETADDR, dtypes.uint64, src=(u,), arg=device or to_tuple(u.device)[0])
 
 def make_ins(op, *srcs):
   return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
@@ -519,17 +519,17 @@ def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
     struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, v.arg)
   return UOp(Ops.NOOP)
 
-def resolve_getaddr(buf:UOp, g:UOp) -> UOp|None:
-  if buf.op not in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT): return None
-  devs, b = to_tuple(g.src[1].arg), buf.buffer
+def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
+  if buf.op not in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT): return buf
+  devs, b = to_tuple(g.arg), buf.buffer
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
   addrs = tuple(UOp.const(dtypes.uint64, x.get_buf(d).va_addr) for x, d in zip(bufs, devs))
   return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64.vec(len(addrs)), addrs)
 
-def resolve_getaddr_slice(bv:UOp, dev:UOp) -> UOp:
+def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   itemsize = bv.src[0].dtype.itemsize if unwrap_after(bv.src[0]).op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
-  return UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0], dev)) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
+  return UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
 
 pm_resolve_patches = PatternMatcher([
   # multi
@@ -541,8 +541,8 @@ pm_resolve_patches = PatternMatcher([
     lambda shr, bv: shr.replace(src=(bv.src[0], shr.src[1] + bv.src[1].cast(shr.src[1].dtype), shr.src[2]))),
 
   # getaddr
-  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"), UPat(Ops.DEVICE, name="dev"))), resolve_getaddr_slice), # getaddr(slice(x)) -> offset+getaddr(x)
-  (UPat(Ops.GETADDR, src=(UPat(name="buf"), UPat(Ops.DEVICE)), name="g"), resolve_getaddr),
+  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"),), name="g"), resolve_getaddr_slice), # getaddr(slice(x)) -> offset+getaddr(x)
+  (UPat(Ops.GETADDR, src=(UPat(name="buf"),), name="g"), resolve_getaddr),
 
   # folders
   (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
