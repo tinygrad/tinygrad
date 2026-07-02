@@ -25,7 +25,7 @@ class _Device:
     assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     return self.__get_canonicalized_item(ix)
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def get_class(self, ix:str) -> type[Compiled]:
+  def get_class(self, ix:str):
     base = (__package__ or __name__).split('.')[0]  # tinygrad
     x = ix.split(":")[0].lower()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) if (cname.lower() == x + "device")][0]
