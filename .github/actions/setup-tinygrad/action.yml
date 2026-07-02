@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ''  # if you don't set a key, it doesn't cache
   deps:
-    description: 'Extra dependency groups (comma separated)'
+    description: 'Extra dependency groups (space separated)'
     required: false
     default: ''
   pydeps:
@@ -110,7 +110,8 @@ runs:
       shell: bash
       run: |
         uv venv .venv
-        uv pip install --python .venv -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        DEPS="${{ inputs.deps }}"
+        uv pip install --python .venv -e ".[${DEPS// /,}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == ''
       shell: bash
