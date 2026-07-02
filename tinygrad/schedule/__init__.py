@@ -62,7 +62,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for a, prev_state, write_kernels in writes.get(s.buf_uop, []):
         if a is u or prev_state is not s: continue
         for t in write_kernels:
-          if t is not k:
+          if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
 

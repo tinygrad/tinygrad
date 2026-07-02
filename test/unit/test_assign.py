@@ -863,6 +863,18 @@ class TestAssignOrdering(unittest.TestCase):
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
+  def test_war_reader_already_depends_on_write(self):
+    x = Tensor([1.0]).contiguous().realize()
+    y = Tensor([2.0]).contiguous().realize()
+    x_expr = x + 10
+    x.assign(x * 2)
+    y.assign(y + x)
+    z = y + x_expr
+    Tensor.realize(x, y, z)
+    # TODO: z should be 15: x_expr means 11 (x captured at build time), but the read is fused past the assign and
+    # sees the new bytes. once stale readers are scheduled before the overwrite, update this to 15
+    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+
   def test_multiple_slice_assigns_then_read(self):
     """Multiple non-overlapping slice assigns then read."""
     buf = Tensor.zeros(4).contiguous().realize()
