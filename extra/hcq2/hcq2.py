@@ -149,7 +149,7 @@ def make_ins(op, *srcs):
   return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
 
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
-  return UOp.placeholder((size,), dtype, next(UOp.unique_num) if unique else 0, device=devs).rtag(name or "buf")
+  return UOp.param(next(UOp.unique_num) if unique else 0, dtype.ptr(size), device=devs).rtag(name or "buf")
 
 def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   dt = dtype or val.dtype
