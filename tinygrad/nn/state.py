@@ -1,9 +1,9 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
+import json, math, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape, CHUNK_SIZE
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -81,6 +81,60 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
+
+# tinyfs
+
+def fs_store(t:Tensor) -> Tensor:
+  """
+  Store a tensor to storage.
+  """
+  # TODO: this should work locally as well
+  data = t.contiguous().flatten().bitcast(dtypes.uint8)
+
+  # pad to a multiple of 1mb
+  if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+  size = data.shape[0]
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+
+  to_device = "CPU" if isinstance(t.device, str) and t.device.startswith("DISK") else t.device
+
+  level_chunks = base_chunks
+  for _ in range(tree_depth + 1):
+    data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
+    if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+    level_chunks = math.ceil(data.shape[0] / CHUNK_SIZE)
+
+  return data[:16].contiguous()
+
+def fs_load(t:Tensor, size:int) -> Tensor:
+  """
+  Load a tensor from storage.
+
+  t should be a tensor of the hash to load
+  """
+  # TODO: this should work locally as well
+  assert t.dtype == dtypes.uint8, "hash is expected to be uint8"
+  h = t.contiguous().flatten()
+  assert h.shape[0] == 16, "expected hash"
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+  data, level_chunks = h, 0
+  for i in reversed(range(tree_depth + 1)):
+    data = data.to("tinyfs:load")
+
+    # if not last level, its still hashes
+    if i > 0 or tree_depth == 0:
+      level_chunks = max(1, math.ceil(base_chunks / (CHUNK_SIZE // 16)**(i-1)))
+      pad_amt = 16 * level_chunks
+    else: pad_amt = CHUNK_SIZE * level_chunks
+    if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
+    data = data[:pad_amt].contiguous()
+    if i != 0: data = data.to(t.device)
+
+  return data[:size]
 
 # state dict
 
