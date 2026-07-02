@@ -792,19 +792,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
     if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
-    if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
-      if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].arg
-    if out.src[1].op is Ops.RANGE: return 0
-    if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
-      if not isinstance(out.src[1].src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].src[1].arg
+    idx, has_range = out.src[1], False
+    if idx.op is Ops.RANGE: return 0
+    if idx.op is Ops.ADD and idx.src[0].op is Ops.RANGE: idx, has_range = idx.src[1], True
+    if idx.op is Ops.CONST and (has_range or resolve(numel == 1, False)):
+      if not isinstance(idx.arg, int): return None  # masked/padded regions produce InvalidType
+      return idx.arg
     return None
 
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
-    if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
