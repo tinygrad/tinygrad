@@ -405,13 +405,13 @@ class Tensor(RandMixin):
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
       Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
-    counter = Tensor._device_rng_counters[device]
+    snapshot = Tensor._device_rng_counters[device].clone()
+    # insert an AFTER so that `snapshot` precedes the STORE below
+    counter = Tensor._device_rng_counters[device] = Tensor(Tensor._device_rng_counters[device].uop.after(snapshot.uop))
     new_low = counter[0:1] + (num & 0xffffffff)
     new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
     counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    return Tensor._device_seeds[device], snapshot
 
   # ***** toposort and backward pass *****
 
