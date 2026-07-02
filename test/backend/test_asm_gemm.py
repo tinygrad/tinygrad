@@ -64,22 +64,22 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
     assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
 
-def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
+def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=1) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
 
-def verify_asm_gemm_k_sharded(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=8) -> None:
+def verify_asm_gemm_k_sharded(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=8) -> None:
   run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=1, b_shard=0, gpus=gpus)
 
-def verify_asm_gemm_n_sharded(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+def verify_asm_gemm_n_sharded(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=None, b_shard=1, gpus=gpus)
 
-def verify_asm_gemm_m_sharded(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+def verify_asm_gemm_m_sharded(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
 
-def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=None, b_shard=1, gpus=gpus)
 
-def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
 
 # 128x smaller than usual
@@ -107,7 +107,7 @@ class TestGemm(unittest.TestCase):
 # uses the smallest size for the cdna assembly gemm
 class TestAsmGEMM(unittest.TestCase):
   def setUp(self):
-    if not is_cdna4():
+    if not is_cdna4() or not has_hipcc():
       self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
