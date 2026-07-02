@@ -8,28 +8,34 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposor
 class Register:
   name: str
   index: int
-  _cons: tuple[Register, ...] = field(default_factory=tuple)
-  _gid: int|None = None
-  _count: int|None = None
-  _pos: int|None = None
-  @property
-  def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
-  def is_virtual(self) -> bool: return self.name[:2] == "vr"
-  @staticmethod
-  def contiguous(ctx, cons:tuple[Register,...], n:int) -> tuple[Register,...]:
-    gid = next(ctx.group_n)
-    stripes = tuple(tuple(cons[i*n+j] for i in range(len(cons) // n)) for j in range(n))
-    return tuple(Register(f"vr{next(ctx.reg_n)}", 0, _cons=stripes[j], _gid=gid, _count=n, _pos=j) for j in range(n))
 
-def regs(u:UOp) -> tuple[Register,...]:
-  # model view register dependencies through rewrites in here
-  if u.op in {Ops.AFTER, Ops.END}: return regs(u.src[0])
-  if u.op is Ops.GEP: return (regs(u.src[0])[u.arg[0]],) # narrow
-  if u.op is Ops.INDEX: return (regs(u.src[0])[u.src[1].arg],) # narrow
-  if u.op is Ops.GROUP: return tuple(r for s in u.src for r in regs(s)) # widen
-  return u.tag if isinstance(u.tag, tuple) else (u.tag,)
-def reg(u:UOp) -> Register: return regs(u)[0]
+# TODO: iter over subregisters
+@dataclass(frozen=True)
+class VRegister:
+  name: str
+  width: int
+  _cons: tuple[Register, ...] = field(default_factory=tuple)
+  def __repr__(self): return self.name
+  def sub(self, i:int) -> VSubRegister:
+    assert self.width > 1, "sub registers only supported for wide vregs"
+    return VSubRegister(self, i)
+
+@dataclass(frozen=True)
+class VSubRegister: # should this inherit?
+  parent: VRegister
+  pos: int
+  def __repr__(self): return f"{self.parent.name}.{self.pos}"
+
+# model view register dependencies through rewrites in here
+AbstractReg = Register|VRegister|VSubRegister
+def rdefs(u:UOp) -> tuple[AbstractReg,...]:
+  if u.op in {Ops.GEP, Ops.INDEX}: # narrow
+    idx = u.arg[0] if u.op is Ops.GEP else u.src[1].arg
+    return (rdefs(u.src[0])[idx],) 
+  # if u.op is Ops.GROUP: return tuple(r for s in u.src for r in rdefs(s)) # widen
+  return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, AbstractReg))
+def vrdefs(u:UOp) -> tuple[VRegister,...]: return tuple(r for r in rdefs(u) if isinstance(r, VRegister))
 
 class IselContext:
   def __init__(self, sink:UOp):
@@ -41,9 +47,8 @@ class IselContext:
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
-  def vreg(self, cons:tuple[tuple[Register,...],int]|tuple[Register, ...]|Register) -> tuple[Register,...]|Register:
-    if isinstance(cons, tuple) and isinstance(cons[0], tuple): return Register.contiguous(self, *cons)
-    return Register(f"vr{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
+  def vreg(self, cons:tuple[Register, ...], width:int=1) -> VRegister:
+    return VRegister(f"vr{next(self.reg_n)}", width, cons if isinstance(cons, tuple) else (cons,))
 
 @dataclass
 class PreRegAllocContext:

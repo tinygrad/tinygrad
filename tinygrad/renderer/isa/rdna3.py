@@ -3,11 +3,12 @@ from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, regs, reg
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, VSubRegister, rdefs as regs
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
 
+def reg(u:UOp): return rdefs(u)[0]
 # NOTE: wavefront size is 32, use exec_lo
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -27,6 +28,10 @@ vccop = def_reg(dtypes.uint32, VCC)
 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
+
+# NOTE: make an easy way to register/create register classes in IselContext
+# - ex register constraint tuples and then just pass a name or class enum into ctx.vreg()
+def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 
 def _vop3(ctx, x:UOp):
   lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
@@ -57,9 +62,9 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
     else:
       return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
-  if x.op is Ops.STACK:
+  if x.op is Ops.STACK: # this is the sparse regalloc case, each register has to be moved into its proper out slot
     nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
-    vregs = ctx.vreg((GP_VGPRS, nregs))
+    vregs = make_vgpr(ctx, width=nregs)
     # NOTE: if fp16 use v_pack_b32_f16?
     if x.dtype.itemsize == 2:
       def _pk(n):
@@ -70,7 +75,11 @@ def to_vgpr(ctx, x:UOp) -> UOp:
         ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo)) # this dtype is wrong
         return _vop3(ctx, ins)
       return UOp.group(*[_pk(i) for i in range(nregs)])
-    return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(ctx.vreg((GP_VGPRS,len(x.src))), x.src)]) 
+
+    # how would we want to express this in a way that each klkl
+    vreg = make_vgpr(ctx, width=len(x.src))
+    return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(i),), src=(u,)) for i, u in enumerate(x.src)]).replace(tag=(vreg,))
+    # return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(make_vgpr(ctx,width=len(x.src)), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
@@ -82,17 +91,19 @@ def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
-  if isinstance(x.tag, tuple) and isinstance(x.tag[0], Register) and x.tag[0].is_virtual(): return None 
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
   if isinstance(x.tag, tuple):
     assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
   defs = []
   if isinstance(x.tag, tuple):
-    vr = ctx.vreg(x.tag)
-    defs = [vr] if isinstance(vr, Register) else [*vr]
+    cons, width = x.tag, 1
+    if isinstance(x.tag[0], tuple):
+      cons, width = x.tag
+    defs = [ctx.vreg(x.tag, width=width)]
   else:
     if x.op is Ops.BUFFER: n = (x.dtype.itemsize // 4) * x.src[0].arg
     else: n = max(x.dtype.itemsize // 4, 1)
-    defs = [ctx.vreg(GP_VGPRS)] if n == 1 else ctx.vreg((GP_VGPRS,n))
+    defs = [make_vgpr(ctx, width=n)]
   return x.replace(tag=tuple(defs))
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
@@ -108,7 +119,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if x.addrspace is AddrSpace.ALU:
     val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=ctx.vreg((GP_SGPRS, 2)))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=ctx.vreg(GP_SGPRS, width=2))
 
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
@@ -267,7 +278,8 @@ def add64(ctx, x:UOp):
   a, b = x.src
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   # need to alloc 64b buf to store into
-  v1,v2 = ctx.vreg((GP_VGPRS,2)) # make a standard/consistent way to do this 
+  v1,v2 = make_vgpr(ctx, width=2)
+  # v1,v2 = ctx.vreg((GP_VGPRS,2)) # make a standard/consistent way to do this 
   lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(v1,))
   hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(v2,)).after(lo)
   return UOp.group(lo, hi)
@@ -374,7 +386,8 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
   if y.dtype in dtypes.ints + dtypes.uints:
-    lo,hi = ctx.vreg((GP_VGPRS,2))
+    lo,hi = make_vgpr(ctx, width=2)
+    # lo,hi = ctx.vreg((GP_VGPRS,2))
     return UOp.group(
         y.ins(RDNA3Ops.v_mov_b32_e32, tag=(lo,), src=(y,)),
         UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(hi,), src=(const(dtypes.uint32,0),))
