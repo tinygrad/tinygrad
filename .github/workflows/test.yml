@@ -694,7 +694,6 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: macos-${{ matrix.dev }}
-        deps: testing_unit
         deps: testing_unit${{ contains(matrix.dev, 'LVP') && ',mesa' || '' }}
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
