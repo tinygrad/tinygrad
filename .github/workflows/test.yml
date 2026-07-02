@@ -438,9 +438,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linux-${{ matrix.dev }}
-        deps: testing_unit
+        deps: testing_unit${{ contains(matrix.dev, 'LVP') && ',mesa' || '' }}
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
-        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
@@ -696,8 +695,8 @@ jobs:
       with:
         key: macos-${{ matrix.dev }}
         deps: testing_unit
+        deps: testing_unit${{ contains(matrix.dev, 'LVP') && ',mesa' || '' }}
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
-        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
     - name: Set env
       run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
@@ -763,8 +762,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: compile-${{ matrix.backend }}
-          deps: testing_unit
-          mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
+          deps: testing_unit,mesa
       - name: Set env
         shell: bash
         run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV

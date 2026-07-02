@@ -41,10 +41,6 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
-  mesa:
-    description: "Install mesa (true, false, cpu)"
-    required: false
-    default: 'false'
   tinydreno:
     description: "Install tinydreno"
     required: false
@@ -285,16 +281,6 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
-
-    # **** mesa ****
-    - name: Install mesa (linux)
-      if: inputs.mesa != 'false' && runner.os == 'Linux'
-      shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}.so
-    - name: Install mesa (macOS)
-      if: inputs.mesa != 'false' && runner.os == 'macOS'
-      shell: bash
-      run: brew install sirhcm/tinymesa/tinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}
 
     # *** tinydreno ***
     - name: Install tinydreno (linux)
