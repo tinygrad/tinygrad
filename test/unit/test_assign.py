@@ -885,6 +885,16 @@ class TestAssignOrdering(unittest.TestCase):
     # sees the new bytes. once stale readers are scheduled before the overwrite, update this to 15
     np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
 
+  def test_war_multi_read_then_assign(self):
+    devices = ("CPU:0", "CPU:1")
+    for realize_reader_first in (False, True):
+      buf = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize().shard(devices, 0).realize()
+      stale = buf.to("CPU")
+      buf.assign(Tensor.full(buf.shape, 10.0, device="CPU").shard(devices, 0).contiguous().realize())
+      Tensor.realize(stale, buf) if realize_reader_first else Tensor.realize(buf, stale)
+      np.testing.assert_equal(stale.numpy(), [1., 2., 3., 4.])
+      np.testing.assert_equal(buf.numpy(), [10., 10., 10., 10.])
+
   def test_multiple_slice_assigns_then_read(self):
     """Multiple non-overlapping slice assigns then read."""
     buf = Tensor.zeros(4).contiguous().realize()
