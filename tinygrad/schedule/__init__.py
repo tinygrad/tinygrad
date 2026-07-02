@@ -43,10 +43,10 @@ def create_schedule(sched_sink:UOp) -> UOp:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
         kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        # TODO: MSELECT/MSTACK reads never get WAR deps
-        reads += [(u, k, s) for s in map(_unwrap_src, kernel_deps) if s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}]
+        read_states = [st for s in kernel_deps for st in _states(s)]
+        reads += [(u, k, st) for st in read_states]
         # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
-        for st in [st for s in kernel_deps + after_deps for st in _states(s)]:
+        for st in read_states + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             for t in _split_after(st)[0]:
               children.setdefault(t, []).append(k)
