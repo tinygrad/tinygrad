@@ -237,8 +237,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # expand
   #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
-  sink = graph_rewrite(sink, expander2, ctx=(ectx:={}), name="expander", bottom_up=True)
-  sink = graph_rewrite(sink, expander_contract, ctx=ectx, name="expander contract")
+  expander_range_map: dict[int, int] = {}
+  sink = graph_rewrite(sink, expander2, ctx=expander_range_map, name="expander", bottom_up=True)
+  sink = graph_rewrite(sink, expander_contract, ctx=expander_range_map, name="expander contract")
   sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
 
   # add locals
