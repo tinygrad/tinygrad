@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, importlib, itertools, weakref
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, DEBUG, dedup, flatten, pluralize
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, DEBUG, dedup, pluralize
 from tinygrad.helpers import to_tuple, round_up, partition
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
@@ -345,20 +345,23 @@ pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdb
 # 3.1. lower loads/stores
 
 def add_loads(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
-  if (deps:=next((s for s in q.src if s.op is Ops.AFTER), None)) is None: return None
+  if not any(s.op is Ops.AFTER for s in q.src): return None
   cur_devs = q.arg[0]
 
-  waits = []
-  for lanes, dep in zip(deps.arg, deps.src[1:]):
-    devs, queue = dep.arg.aux.device, dep.arg.aux.queue
-    ctx.add(dep.tag) # mark op to update signal.
+  new_src:list[UOp] = []
+  for s in q.src:
+    if s.op is Ops.AFTER:
+      for lanes, dep in zip(s.arg, s.src[1:]):
+        devs, queue = dep.arg.aux.device, dep.arg.aux.queue
+        ctx.add(dep.tag) # mark op to update signal.
 
-    # for lanes that need this dep, wait on the dep device's signal/value; other lanes get a passing sentinel
-    lanes = set(lanes)
-    sig = make_mstack([make_signal(devs[j] if j in lanes else d, queue=queue, sentinel=j not in lanes) for j, d in enumerate(cur_devs)])
-    val = make_mstack([make_signal_value(devs[j] if j in lanes else d, queue=queue) for j, d in enumerate(cur_devs)]).index(UOp.const(dtypes.int, 0))
-    waits.append(sig.wait(val + dep.tag))
-  new_src = flatten(waits+[deps.src[0]] if s is deps else [s] for s in q.src)
+        # for lanes that need this dep, wait on the dep device's signal/value; other lanes get a passing sentinel
+        lanes = set(lanes)
+        sig = make_mstack([make_signal(devs[j] if j in lanes else d, queue=queue, sentinel=j not in lanes) for j, d in enumerate(cur_devs)])
+        val = make_mstack([make_signal_value(devs[j] if j in lanes else d, queue=queue) for j, d in enumerate(cur_devs)]).index(UOp.const(dtypes.int, 0))
+        new_src.append(sig.wait(val + dep.tag))
+      s = s.src[0]
+    new_src.append(s)
   return submit.replace(src=(q.replace(src=tuple(new_src)),))
 pm_add_inner_loads = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_loads)])
 
@@ -393,25 +396,23 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbu
 
 # *****************
 # 5.0. replace params with per-submit input address loads
-# getaddr of an untagged param (or a view of one) is an input: it loads from the inputs table, exec fills it with resolved addresses
+# getaddr of an untagged param is an input: it loads from the inputs table, exec fills it with resolved addresses
 
-def load_input(ctx, p:UOp, x:UOp|None=None) -> UOp|None:
-  if p.tag is not None: return None
-  inputs, idxs, input_uops = ctx
-  if x is not None and x not in input_uops: input_uops.append(x)
-  idx = idxs.setdefault(p.arg.slot if x is None else input_uops.index(x), len(idxs))
-  return inputs.index(UOp.const(dtypes.int, idx)).load()
+def load_input(ctx, p:UOp) -> UOp|None:
+  inputs, idxs = ctx
+  return inputs.index(UOp.const(dtypes.int, idxs.setdefault(p.arg.slot, len(idxs)))).load() if p.tag is None else None
 
 pm_input_loads = PatternMatcher([
   # address of an input param is a load from the inputs table
   (UPat(Ops.GETADDR, src=(UPat(Ops.PARAM, name="p"),)), load_input),
-  # views of inputs go into input_uops as their own entries, they resolve into correctly offset addresses
-  (UPat(Ops.GETADDR, src=(UPat((Ops.SLICE, Ops.MSELECT), src=(UPat(Ops.PARAM, name="p"),), allow_any_len=True, name="x"),)), load_input),
+  # address of a sliced input is the base load plus offset, computed in C so offsets can be symbolic
+  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, src=(UPat(Ops.PARAM, name="p"), UPat.var("off")), name="x"),)),
+   lambda ctx, p, x, off: None if (base:=load_input(ctx, p)) is None else base + (off * x.src[0].dtype.itemsize).cast(dtypes.uint64)),
 ])
 
-def replace_params(ctx:list[UOp], call:UOp) -> UOp|None:
+def replace_params(call:UOp) -> UOp|None:
   inputs = make_placeholder(call.arg.aux.device, 0, dtypes.uint64, "inputs")
-  body = graph_rewrite(call.src[0], pm_input_loads, ctx=(inputs, idxs:={}, ctx), bottom_up=True, name="load inputs")
+  body = graph_rewrite(call.src[0], pm_input_loads, ctx=(inputs, idxs:={}), bottom_up=True, name="load inputs")
   if not idxs: return None
 
   body = body.substitute({inputs:(inputs:=make_placeholder(call.arg.aux.device, len(idxs), dtypes.uint64, "inputs"))})
@@ -421,23 +422,21 @@ pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTIO
 # *****************
 # 5.1. split patches: link-time patches (values read no memory) move to call srcs, runtime ones stay in C
 
-def is_link_patch(s:UOp) -> bool:
-  return s.op is Ops.STORE and s.buf_uop.tag is not None and all(u.op not in (Ops.LOAD, Ops.INDEX) for u in s.toposort())
+def changes_per_submit(u:UOp) -> bool: return u.op in (Ops.LOAD, Ops.INDEX) or (u.op is Ops.PARAM and u.tag is None)
+def is_link_patch(s:UOp) -> bool: return s.buf_uop.tag is not None and not any(changes_per_submit(u) for u in s.backward_slice)
 
 def trim_link_patches(ctx:list[UOp], a:UOp) -> UOp|None:
   links, kept = partition(a.src[1:], is_link_patch)
-  if not links: return None
   ctx += links
-  return a.src[0].after(*kept)
+  return a.src[0].after(*kept) if links else None
 pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat(Ops.PARAM),), allow_any_len=True, name="a"), trim_link_patches)])
 
 def split_patches(call:UOp) -> UOp|None:
   body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(links:=[]), name="trim link patches")
   if not links: return None
-  patches:dict[UOp, tuple[UOp, ...]] = collections.defaultdict(tuple)
-  for s in dedup(links): patches[s.buf_uop] += (s,)
+
   srcs = {unwrap_after(x):x for x in call.src[1:]}
-  for b, ps in patches.items(): srcs[b] = srcs.get(b, b).after(*ps)
+  for b in dedup(s.buf_uop for s in links): srcs[b] = srcs.get(b, b).after(*dedup(s for s in links if s.buf_uop is b))
   return call.replace(src=(body, *srcs.values()))
 pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
@@ -563,7 +562,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
     linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
 
     # pie
-    linear = graph_rewrite(linear, pm_replace_params, ctx=input_uops, walk=True, name="replace params")
+    linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
     linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
     linear = graph_rewrite(linear, pm_parametrize_placeholders, walk=True, name="parametrize placeholders")
     linear = graph_rewrite(linear, pm_resolve_patches_0 + symbolic, bottom_up=False, name="early simplify patches")
