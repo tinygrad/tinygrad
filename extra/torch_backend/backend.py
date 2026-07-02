@@ -621,6 +621,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.argmin": Tensor.argmin,
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
+  "aten.trace": Tensor.trace,
   "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": lambda self, value: self.const_like(value.reshape(()).item()),
   "aten.flip": Tensor.flip,

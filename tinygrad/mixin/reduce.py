@@ -43,6 +43,23 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     ret = self.cast(sum_acc_dtype(self.dtype) if dtype is None else to_dtype(dtype))._reduce(Ops.ADD, axis, keepdim)
     return ret.cast(self.dtype) if dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, *dtypes.fp8s) else ret
 
+  def trace(self) -> Self:
+    """
+    Returns the sum of the elements of the main diagonal of a 2-D tensor.
+
+    Equivalent to `self.diagonal().sum()`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.trace().numpy())
+    ```
+    """
+    if self.ndim != 2: raise RuntimeError(f"expect input to be 2-D, getting {self.ndim}-D")
+    return self.diagonal().sum()
+
   def prod(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Self:
     """
     Returns the product of the elements of the tensor along the specified axis or axes.

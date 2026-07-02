@@ -2143,6 +2143,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
     self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
 
+  def test_trace(self):
+    helper_test_op([(5,5)], lambda x: x.trace())
+    helper_test_op([(3,4)], lambda x: x.trace())  # rectangular
+    helper_test_op([(4,3)], lambda x: x.trace())  # rectangular (other way)
+    self.helper_test_exception([(5,)], lambda x: x.trace(), expected=RuntimeError)  # 1-D
+    self.helper_test_exception([(2,3,4)], lambda x: x.trace(), expected=RuntimeError)  # 3-D
+
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
