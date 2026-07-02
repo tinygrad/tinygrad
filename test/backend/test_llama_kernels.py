@@ -1,10 +1,11 @@
 import unittest
-from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
+from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters, nn
 from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.rmsnorm import rmsnorm_weighted
 from test.helpers import needs_second_gpu
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -82,6 +83,37 @@ class TestQuantizeFP8(unittest.TestCase):
     Tensor.realize(fp8, new_amax)
     assert fp8.uop.shape == x.uop.shape
     assert new_amax.shape == ()
+
+def run_rmsnorm_weighted(shape:tuple[int, int, int], eps:float=1e-5) -> None:
+  Tensor.manual_seed(0)
+  x_rand = Tensor.randn(*shape).cast(dtypes.bfloat16).contiguous()
+  w_rand = Tensor.randn(shape[-1]).cast(dtypes.bfloat16).contiguous()
+  Tensor.realize(x_rand, w_rand)
+
+  x, w = Tensor(x_rand.numpy()).cast(dtypes.bfloat16), Tensor(w_rand.numpy()).cast(dtypes.bfloat16)
+  out = rmsnorm_weighted(x, w, eps)
+  loss = out.float().sum()
+  loss.backward()
+  Tensor.realize(out, x.grad, w.grad)
+
+  x_ref, w_ref = Tensor(x_rand.numpy()).cast(dtypes.bfloat16), Tensor(w_rand.numpy()).cast(dtypes.bfloat16)
+  ref_norm = nn.RMSNorm(shape[-1], eps)
+  ref_norm.weight = w_ref
+  ref = ref_norm(x_ref)
+  ref.float().sum().backward()
+  Tensor.realize(ref, x_ref.grad, w_ref.grad)
+
+  with Context(DEBUG=0):
+    assert out.allclose(ref, atol=2e-2, rtol=2e-2).item(), "forward mismatch"
+    assert x.grad.allclose(x_ref.grad, atol=2e-2, rtol=2e-2).item(), "x grad mismatch"
+    assert w.grad.allclose(w_ref.grad, atol=2e-2, rtol=2e-2).item(), "weight grad mismatch"
+
+class TestRMSNormWeighted(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_rmsnorm_weighted_1_2_2048(self): run_rmsnorm_weighted((1, 2, 2048))
+  def test_rmsnorm_weighted_2_3_4096(self): run_rmsnorm_weighted((2, 3, 4096))
 
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):
