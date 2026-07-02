@@ -177,7 +177,17 @@ class Tensor(RandMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    # pull live lazy readers of any buffer state this sink overwrites, so they schedule before the write
+    # a pulled reader can carry more pending stores, so run to a fixpoint. only reachability changes per pass
+    candidates = [t.uop for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.device is not None and t.uop.buffer_state() is None]
+    while (states:={s for u in big_sink.backward_slice if u.op is Ops.STORE and (s:=u.src[0].buffer_state()) is not None}):
+      in_scope: dict[UOp, bool] = {}
+      def visitor(n:UOp) -> bool:
+        return (st:=n.buffer_state()) is not None and st in states or n.op is not Ops.AFTER and any(in_scope.get(s) for s in n.src)
+      if not (pulled := [u for u in candidates if u not in big_sink.backward_slice and u.topovisit(visitor, in_scope)]): break
+      big_sink = UOp.sink(*big_sink.src, *pulled)
+    big_sink, becomes_map = transform_to_call(big_sink)
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 

@@ -326,6 +326,38 @@ class TestAssign(unittest.TestCase):
       self.assertEqual(y.tolist(), [11.0])
       self.assertEqual(x.tolist(), [5.0])
 
+  def test_assign_cross_schedule_stale_reader(self):
+    x = Tensor([1.0]).realize()
+    y = x + 10
+    x.assign(x*2).realize()
+    self.assertEqual(y.tolist(), [11.0])
+    self.assertEqual(x.tolist(), [2.0])
+
+  def test_assign_cross_schedule_intermediate_reader(self):
+    x = Tensor([1.0]).realize()
+    x.assign(x*2)
+    b = x + 20
+    x.assign(x+3).realize()
+    self.assertEqual(b.tolist(), [22.0])
+    self.assertEqual(x.tolist(), [5.0])
+
+  def test_assign_cross_schedule_alias_tracks_storage(self):
+    x = Tensor([1.0]).realize()
+    z = x.reshape(1)
+    x.assign(x*2).realize()
+    self.assertEqual(z.tolist(), [2.0])
+
+  def test_assign_pull_reaches_carried_stores(self):
+    x, y = Tensor([1.0]).realize(), Tensor([10.0]).realize()
+    q = y + 5
+    y.assign(y+1)
+    r = x + y
+    x.assign(x*2)
+    x.realize()
+    self.assertEqual(q.tolist(), [15.0])
+    self.assertEqual(r.tolist(), [12.0])
+    self.assertEqual(y.tolist(), [11.0])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)

@@ -814,6 +814,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
+  def buffer_state(self) -> UOp|None:
+    """The buffer state this UOp denotes: an AFTER pinning a buffer after a write, or the base BUFFER/PARAM storage.
+    None if this UOp is a computation, not storage."""
+    if self.base.op is Ops.AFTER: return self.base
+    return self.buf_uop if self.has_buffer_identity() or self.base.op in {Ops.BUFFER, Ops.PARAM} else None
+
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
     u = self.base
