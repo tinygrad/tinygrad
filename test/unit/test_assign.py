@@ -103,6 +103,16 @@ class TestAssign(unittest.TestCase):
     out = x.item()
     assert out == 1, f"expected 1, got {out}"
 
+  def test_pending_assign_chain_preserves_intermediate_reads(self):
+    x = Tensor([0.0]).contiguous().realize()
+    y0 = x + 0
+    x.assign(x + 1)
+    y1 = x + 0
+    x.assign(x + 1)
+    y2 = x + 0
+    x.assign(x + 1)
+    assert [y0.item(), y1.item(), y2.item(), x.item()] == [0.0, 1.0, 2.0, 3.0]
+
   def test_assign_add_jit(self):
     @TinyJit
     def f(x):
