@@ -38,13 +38,16 @@ pm_store_ranges = PatternMatcher([
   (UPat(Ops.STORE, name="x"), add_ranges_to_store),
 ])
 
+def push_index(idx:UOp, x:UOp) -> UOp|None:
+  if x.op is Ops.BITCAST and any(isinstance(u.dtype, PtrDType) for u in (x, x.src[0])): return None
+  return x.replace(src=tuple(s.index(*idx.src[1:]) for s in x.src))
+
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
   # early rangeify
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
-   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"), push_index),
 ])
 
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
