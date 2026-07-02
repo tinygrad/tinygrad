@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 
-TILE_M, TILE_N, TILE_K = 256, 256, 62564
+TILE_M, TILE_N, TILE_K = 256, 256, 64
 
 # ** FP8 GEMM custom kernel
 
