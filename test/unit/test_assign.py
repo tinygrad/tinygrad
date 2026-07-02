@@ -306,6 +306,16 @@ class TestAssign(unittest.TestCase):
     t.assign(t + 100)
     np.testing.assert_equal(t.numpy(), [[100, 104, 108, 112], [101, 105, 109, 113], [102, 106, 110, 114], [103, 107, 111, 115]])
 
+  def test_assign_corealize_order_independent(self):
+    for order in [lambda x,y: Tensor.realize(x, y), lambda x,y: Tensor.realize(y, x)]:
+      x = Tensor([1.0]).realize()
+      y = x + 10
+      x.assign(x*2)
+      x.assign(x+3)
+      order(x, y)
+      self.assertEqual(y.tolist(), [11.0])
+      self.assertEqual(x.tolist(), [5.0])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)
