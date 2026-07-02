@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, functools, sys, inspect, pathlib, hashlib, weakref
+import time, functools, sys, inspect, pathlib, hashlib, weakref
 from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
@@ -16,16 +16,16 @@ from tinygrad.callify import transform_to_call
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, walk:bool=False) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
     scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
-    # get all Tensors and apply the map
+    # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
     sink = UOp.sink(*[t.uop for t in scope_tensors])
-    new_sink = sink.substitute(applied_map, name=f"substitute {name}", walk=walk)
+    new_sink = sink.substitute(applied_map, name=f"substitute {name}", walk=True)
 
     # set the relevant uop to the realized UOps
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
@@ -226,7 +226,7 @@ class Tensor(RandMixin):
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
       assigned_ib = ib.after(assign)
-      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", walk=True)
+      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
@@ -348,59 +348,6 @@ class Tensor(RandMixin):
     if y.device is None: return self
     if isinstance(y.device, str): return self.to(y.device)
     return self if isinstance(self.device, tuple) and (y.device, y.uop.axis) == (self.device, self.uop.axis) else self.shard(y.device, y.uop.axis)
-
-  CHUNK_SIZE = 2**20
-  def fs_load(self, size:int) -> Tensor:
-    """
-    Load a tensor from storage.
-
-    self should be a tensor of the hash to load
-    """
-    # TODO: this should work locally as well
-    assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
-    h = self.contiguous().flatten()
-    assert h.shape[0] == 16, "expected hash"
-
-    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
-    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
-    data, level_chunks = h, 0
-    for i in reversed(range(tree_depth + 1)):
-      data = data.to("tinyfs:load")
-
-      # if not last level, its still hashes
-      if i > 0 or tree_depth == 0:
-        level_chunks = max(1, math.ceil(base_chunks / (Tensor.CHUNK_SIZE // 16)**(i-1)))
-        pad_amt = 16 * level_chunks
-      else: pad_amt = Tensor.CHUNK_SIZE * level_chunks
-      if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
-      data = data[:pad_amt].contiguous()
-      if i != 0: data = data.to(self.device)
-
-    return data[:size]
-
-  def fs_store(self) -> Tensor:
-    """
-    Store a tensor to storage.
-    """
-    # TODO: this should work locally as well
-    data = self.contiguous().flatten().bitcast(dtypes.uint8)
-
-    # pad to a multiple of 1mb
-    if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
-    size = data.shape[0]
-
-    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
-    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
-
-    to_device = "CPU" if isinstance(self.device, str) and self.device.startswith("DISK") else self.device
-
-    level_chunks = base_chunks
-    for _ in range(tree_depth + 1):
-      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
-      if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
-      level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
-
-    return data[:16].contiguous()
 
   # ***** creation entrypoint *****
 

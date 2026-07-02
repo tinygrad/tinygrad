@@ -3,7 +3,7 @@ from typing import cast, Any, Callable
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, make_getaddr, make_ins, make_cmdbuf
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_getaddr, make_ins, make_cmdbuf, make_placeholder
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -102,11 +102,12 @@ def pm4_timestamp(ctx, dst):
   return release_mem(ctx, make_getaddr(dst, ctx.devs), 0, ctx.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
                      ctx.pm4.int_sel__mec_release_mem__none)
 
-def pm4_program(ctx, prg):
+def pm4_program(ctx, call, prg):
   data, info = prg.arg
-  lib_gpu, args = prg.src
+  lib_gpu = prg.src[0]
+  args = encode_kernargs_clike(call, prg, ctx.devs)
   prog_addr = make_getaddr(lib_gpu, ctx.devs) + data.entry_point_offset
-  scratch_addr = make_getaddr(UOp.new_buffer(lib_gpu.device, data.private_segment_size, dtypes.uint8).rtag("scratch"), ctx.devs)
+  scratch_addr = make_getaddr(make_placeholder(ctx.devs, data.private_segment_size, dtypes.uint8, "scratch", unique=False), ctx.devs)
   args_addr = make_getaddr(args, ctx.devs)
 
   user_regs = []
@@ -134,9 +135,10 @@ def pm4_program(ctx, prg):
   return UOp(Ops.LINEAR, dtypes.void, tuple(ins))
 
 pm_pm4_opsel = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
+
   (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
   (UPat(Ops.BARRIER), pm4_barrier),
-  (UPat(Ops.PROGRAM, name="prg"), pm4_program),
   (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), pm4_timestamp),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
 ])
@@ -146,7 +148,7 @@ def pm4_submit(cmdbuf, devs):
 
   # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
   for d in devs: q = Device[d].compute_queue
-  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("COMPUTE:0", name))
+  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, ("COMPUTE:0", name), unique=False)
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # place the cmdbuf at the ring's write offset, wrapping the ring
@@ -156,29 +158,31 @@ def pm4_submit(cmdbuf, devs):
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(
-    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
-  bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
-  bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
+  copy_to_ring = ring.index(ring_idx, ptr=True).store(
+    cmdbuf.index(i*4, ptr=True).cast(dtypes.uint32.ptr()).load()).end(i)
+  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put)
+  bump_wptr = wptr.index(zero, ptr=True).store(next_put)
 
   # ring the doorbell once the copy and pointer bumps have landed
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put)
+  return doorbell.after(flush).index(zero, ptr=True).store(next_put)
 
 pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0]), "compute"), to_tuple(lin.arg[0])))])
+  lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
 
 # *****************
 # SDMA
 
 class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TRAP = auto(); TIMESTAMP = auto()  # noqa: E702
 
-def sdma_copy(ctx, dst, src, copy):
+def sdma_copy(ctx, call):
+  dst, src = call.src[1], call.src[2]
+  sz = src.max_numel() * src.dtype.base.itemsize
   src_addr, dst_addr = make_getaddr(src, ctx.devs), make_getaddr(dst, ctx.devs)
   return UOp(Ops.LINEAR, dtypes.void, tuple([make_ins(SDMAOps.COPY,
      ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
-     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(copy.arg - off, ctx.max_copy_size) - 1), 0,
-     *data64_le(src_addr + off), *data64_le(dst_addr + off)) for off in range(0, copy.arg, ctx.max_copy_size)]))
+     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz - off, ctx.max_copy_size) - 1), 0,
+     *data64_le(src_addr + off), *data64_le(dst_addr + off)) for off in range(0, sz, ctx.max_copy_size)]))
 
 def sdma_wait(ctx, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
@@ -196,9 +200,10 @@ def sdma_timestamp(ctx, dst):
   return make_ins(SDMAOps.TIMESTAMP, op, *data64_le(make_getaddr(dst, ctx.devs)))
 
 pm_sdma_opsel = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
+
   (UPat(Ops.BARRIER), lambda: UOp(Ops.NOOP, dtypes.void, ())),
   (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), sdma_wait),
-  (UPat(Ops.COPY, src=(UPat(name="dst"), UPat(name="src")), name="copy"), sdma_copy),
   (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), sdma_timestamp),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), sdma_store),
 ])
@@ -209,7 +214,7 @@ def sdma_submit(cmdbuf, devs):
 
   # the sdma queue's ring and its host-side ring/write/put pointers
   for d in devs: q = Device[d].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("COPY:0", name))
+  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, ("COPY:0", name), unique=False)
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
@@ -221,22 +226,33 @@ def sdma_submit(cmdbuf, devs):
 
   # zero the wrapped tail, then copy the cmdbuf into the ring
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
-  zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
+  zero_tail = ring.index(tail_off_dw + zi, ptr=True).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
-  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(
-    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
+  copy_to_ring = ring.index(start_dw + i, ptr=True).store(
+    cmdbuf.index(i*4, ptr=True).cast(dtypes.uint32.ptr()).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
-  bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put_b)
-  bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put_b)
+  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put_b)
+  bump_wptr = wptr.index(zero, ptr=True).store(next_put_b)
 
   # ring the doorbell once the writes have landed
   flush = UOp.barrier(zero_tail, copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put_b)
+  return doorbell.after(flush).index(zero, ptr=True).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0]), "copy"), to_tuple(lin.arg[0])))])
+  lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
+
+@dataclass(frozen=True)
+class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
+  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
+  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
+
+def encode_queue(q:UOp) -> UOp|None:
+  d = Device[(devs:=to_tuple(q.arg[0]))[0]]
+  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
+  opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
+  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -245,7 +261,6 @@ class AMDProgramData:
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
 _amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
-
 def amd_build_program(prg:UOp) -> UOp:
   dev = Device[to_tuple(prg.device)[0]] # TODO: rm this
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, dev.device))) is None:
@@ -258,21 +273,17 @@ def amd_build_program(prg:UOp) -> UOp:
     if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
       raise RuntimeError("Too many resources requested: group_segment_size")
     edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    cached = _amd_program_cache[key] = (AMDProgramData(
-      entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
+
+    data = AMDProgramData(entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
       rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
       rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
-      wave32=bool(desc.kernel_code_properties & 0x400),
-      private_segment_size=desc.private_segment_fixed_size,
-      kernargs_segment_size=desc.kernarg_size,
-      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0),
-      enable_dispatch_ptr=edp,
-      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER), bytes(image))
+      wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
+      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
+      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+    buf = make_placeholder(dev.device, len(image), dtypes.uint8, "program")
+    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=bytes(image)))),), arg=(data, prg.arg))
+    # cached = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, arg=bytes(image)))),), arg=data)
   return cached
-
-pm_prep_program = PatternMatcher([
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
-])
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
@@ -516,23 +527,15 @@ class PCIIface(PCIIfaceBase):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-@dataclass(frozen=True)
-class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
-  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
-  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
-
-def encode_queue(q:UOp) -> UOp|None:
-  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
-  d = Device[(devs:=to_tuple(q.arg[0]))[0]]
-  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
-  opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
-  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
-
-pm_lower = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
-])
-
 class AMDDevice(HCQ2Compiled):
+  pm_lower = PatternMatcher([
+    # prep program
+    (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
+
+    # encoding of cmdbuf
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
+  ])
+
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
 
   ifaces = [KFDIface, PCIIface]
@@ -579,7 +582,7 @@ class AMDDevice(HCQ2Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, tag="scratch", name="b"), lambda ctx, b: ctx.scratch_buffer(b.max_numel()))]) + self.pm_bufferize
+    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx.scratch_buffer(b.max_numel()))]) + self.pm_bufferize
 
     self.pmc_enabled:bool = PROFILE > 0 and PMC > 0
     if self.pmc_enabled:
@@ -627,10 +630,10 @@ class AMDDevice(HCQ2Compiled):
 
     qname = f"{'COPY' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
     self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.BUFFER, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
+      (UPat(Ops.PARAM, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
     ] + [
-      (UPat(Ops.BUFFER, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.timeline_signal(q)),
-      (UPat(Ops.BUFFER, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.timeline_value(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.timeline_signal(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue

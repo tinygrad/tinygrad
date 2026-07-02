@@ -123,9 +123,6 @@ def valid_gettuple(g:UOp, t:UOp):
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
-  # DEVICE
-  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d: is_device(d.arg)),
-
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and buf.src[0].dtype.scalar() == dtypes.weakint and is_device(buf.arg.device))

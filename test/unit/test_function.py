@@ -246,6 +246,24 @@ class TestFunction(unittest.TestCase):
     r0 = f(buf, x, v.bind(0)).numpy()
     np.testing.assert_equal(r0, [[1.,0.,0.,0.,0.,0.,0.,0.], [2.,0.,0.,0.,0.,0.,0.,0.]])
 
+  def test_single_after_store_precompile(self):
+    """precompiled AFTER(buf, STORE(view, data)) should return buf after the store."""
+    @function(precompile=True)
+    def f(buf:Tensor, x:Tensor, start_pos:int|UOp) -> Tensor:
+      slice_uop = buf[:, start_pos:start_pos+1].uop
+      assigned = Tensor(buf.uop.after(slice_uop.store(x.uop)))
+      return assigned
+
+    x = Tensor([[1.], [2.]]).realize()
+    v = UOp.variable("sp", 0, 7)
+    for sp in (0, 2):
+      with self.subTest(sp=sp):
+        buf = Tensor.zeros(2, 8).clone().realize()
+        expected = np.zeros((2, 8), dtype=np.float32)
+        expected[:, sp] = [1., 2.]
+        np.testing.assert_equal(f(buf, x, v.bind(sp)).numpy(), expected)
+        np.testing.assert_equal(buf.numpy(), expected)
+
   @unittest.expectedFailure
   def test_assign_slice(self):
     @function

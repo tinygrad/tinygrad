@@ -210,14 +210,15 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   if call.arg.aux.inputs is not None:
-    for j,dev in enumerate(call.arg.aux.devs):
-      addrs = [(b.bufs[j] if isinstance(b:=ctx.input_uops[i].buffer, MultiBuffer) else b).get_buf(dev).va_addr for i in call.arg.aux.params]
+    bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
+    for j,dev in enumerate(call.arg.aux.device):
+      addrs = [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs]
       buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
       buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
 
-  for d in call.arg.aux.devs:
+  for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
   return None
@@ -260,13 +261,13 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_compile
-    linear = hcq_compile(linear)
+    linear = hcq_compile(linear, input_uops)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def link_linear(linear:UOp) -> UOp:
@@ -275,9 +276,10 @@ def link_linear(linear:UOp) -> UOp:
     linear = hcq_link(linear)
   return linear
 
-def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU))
-  ctx = ExecContext(var_vals or {}, input_uops, update_stats, jit, wait or DEBUG>=2)
+def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
+  inputs = list(input_uops)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
+  ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:

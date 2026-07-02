@@ -226,8 +226,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
+      case Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -669,13 +668,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
-    if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
-    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
-    return self
-
-  @property
-  def multibase(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
@@ -755,7 +747,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
-    if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.STAGE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
@@ -800,19 +791,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
     if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
-    if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
-      if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].arg
-    if out.src[1].op is Ops.RANGE: return 0
-    if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
-      if not isinstance(out.src[1].src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].src[1].arg
+    idx, has_range = out.src[1], False
+    if idx.op is Ops.RANGE: return 0
+    if idx.op is Ops.ADD and idx.src[0].op is Ops.RANGE: idx, has_range = idx.src[1], True
+    if idx.op is Ops.CONST and (has_range or resolve(numel == 1, False)):
+      if not isinstance(idx.arg, int): return None  # masked/padded regions produce InvalidType
+      return idx.arg
     return None
 
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
-    if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
@@ -823,7 +812,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.MULTI, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
       buf = self.base.buffer
@@ -865,6 +854,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
+    if self.op is Ops.MULTI: return self.src[0].realized
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LOCAL/REG scratch buffers are never realized
@@ -1059,6 +1049,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BIND:
       return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].expr, addrspace)
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
+
+  @staticmethod
+  def custom_function(name:str, *src:UOp, dtype:DType=dtypes.void) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, dtype, src=src, arg=name)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
