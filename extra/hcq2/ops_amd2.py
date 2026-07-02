@@ -249,7 +249,6 @@ class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf a
   gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
 
 def encode_queue(q:UOp) -> UOp|None:
-  # TODO: fix this shit
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
   ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
   opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
