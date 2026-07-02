@@ -11,6 +11,14 @@ def _unwrap_src(s: UOp) -> UOp:
   while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
   return s
 
+# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
+def _states(s: UOp) -> list[UOp]:
+  s = _unwrap_src(s)
+  if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.BIND: return []
+  assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
+  return [s]
+
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
   deps, remaining = partition(remaining, lambda s: s.op is Ops.AFTER)
@@ -37,25 +45,12 @@ def create_schedule(sched_sink:UOp) -> UOp:
         kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
         # TODO: MSELECT/MSTACK reads never get WAR deps
         reads += [(u, k, s) for s in map(_unwrap_src, kernel_deps) if s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}]
-        for s in kernel_deps + after_deps:
-          match (s := _unwrap_src(s)).op:
-            case Ops.AFTER:
-              for t in _split_after(s)[0]:
-                children.setdefault(t, []).append(k)
-                in_degree[k] += 1
-            case Ops.MSELECT | Ops.MSTACK:
-              for ss in s.src:
-                if ss.op is Ops.MSELECT: ss = ss.src[0]
-                ss = _unwrap_src(ss)
-                if ss.op not in {Ops.BUFFER, Ops.PARAM}:
-                  assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
-                  for t in _split_after(ss)[0]:
-                    children.setdefault(t, []).append(k)
-                    in_degree[k] += 1
-            case Ops.BUFFER | Ops.PARAM | Ops.BIND:
-              pass  # BUFFER/PARAM is already realized, BIND is a bound variable (not a buffer dependency)
-            case _:
-              raise RuntimeError(f"input to kernel must be AFTER, BUFFER, PARAM, MSELECT, MSTACK, or BIND, not {s.op}")
+        # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
+        for st in [st for s in kernel_deps + after_deps for st in _states(s)]:
+          if st.op is Ops.AFTER:
+            for t in _split_after(st)[0]:
+              children.setdefault(t, []).append(k)
+              in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
