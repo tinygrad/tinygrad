@@ -126,7 +126,12 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
   return UOp.vectorize(*src).reshape(b.shape)
 
-unbroadcast = PatternMatcher([
+pm_wmma_add = PatternMatcher([
+  (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
+   lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
+])
+
+unbroadcast = pm_wmma_add+PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
@@ -202,12 +207,10 @@ def expand_horizontal_reduce(r:UOp):
   vals = [r.src[0].index(*idx) for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in sorted(axes)])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
-pm_reduce_local = PatternMatcher([
+pm_reduce_local = pm_wmma_add+PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
-  (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
-   lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
@@ -279,16 +282,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
-
-  # devectorize
-  #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast, name="*** unbroadcast")
 
   # add loads and remove invalids
   #sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
   sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
-  sink = graph_rewrite(sink, symbolic_simple+simple_devectorize, name="simple devectorize")
+
+  # devectorize
+  #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
