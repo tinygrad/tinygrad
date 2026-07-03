@@ -1,6 +1,6 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
-from tinygrad.helpers import dedup, get_contraction
+from tinygrad.helpers import dedup
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
@@ -36,24 +36,8 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
   raw_idxs = [UOp.special(s, f"{prefix}{i}") for i,s in enumerate(limited)]
-  if len(limited) < len(dims):
-    ret = []
-    if (contraction:=get_contraction(dims, limited)) is None: raise RuntimeError(f"get_contraction should not be None {dims=} {limited=}")
-    for idx, contraction_group in zip(raw_idxs, contraction):
-      for c in contraction_group[:-1]:
-        ret.append(idx % dims[c])
-        idx //= dims[c]
-      ret.append(idx)
-    return ret
-  elif (a:=len(limited)) > (b:=len(dims)):
-    if a == 2 and b == 1: return [raw_idxs[0] * limited[1] + raw_idxs[1]]
-    if a == 3 and b == 1: return [(raw_idxs[0] * limited[1] + raw_idxs[1]) * limited[2] + raw_idxs[2]]
-  if limited != dims:
-    # Convert to 1D
-    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(limited) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
-    # Get back original indices from 1D
-    return [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), (flat//dims[2])%dims[1], flat%dims[2]]
-  return raw_idxs
+  flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
+  return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
 
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
