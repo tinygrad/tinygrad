@@ -287,4 +287,5 @@ runs:
       shell: bash
       run: |
         sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/rusticl-v1/libRusticlOpenCL.so.1.0.0 -o /usr/lib/libRusticlOpenCL.so
+        mkdir -p /etc/OpenCL/vendors
         echo "/usr/lib/libRusticlOpenCL.so" | sudo tee /etc/OpenCL/vendors/rusticl.icd
