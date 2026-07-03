@@ -136,14 +136,19 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-devectorizer2 = pm_mops+PatternMatcher([
+simple_devectorize = PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
-  # unpack WMMA
-  (UPat(Ops.WMMA, name="u"), do_stack_wmma),
-  # const INDEX into STACK is src
+  # const INDEX into STACK is src (this is symbolic)
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
    lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
+  # INDEX without src is nothing
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+])
+
+devectorizer2 = pm_mops+simple_devectorize+PatternMatcher([
+  # unpack WMMA
+  (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
    lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
@@ -154,8 +159,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
-  # INDEX without src is nothing
-  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # RESHAPE+EXPAND -> STACK
   (UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(UPat.var("x"), UPat())), UPat()), name="out"),
    lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if out.shape == (out.max_numel(),) else None),
@@ -187,17 +190,20 @@ pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
+])+pm_clean_up_group_sink
+
+late_wmma_fuse = PatternMatcher([
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
-    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.WMMA, name="wmma"), UPat()), name="reshape"),), name="permute") + UPat.var("add"),
-    lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.arg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.arg)),
-])+pm_clean_up_group_sink
+   lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
+  (UPat(Ops.WMMA, name="w1").index(UPat.var("x")) + UPat(name="w2").index(UPat.var("x")),
+   lambda w1,w2,x: (w1+w2).index(x) if w1.shape == w2.shape else None),
+])
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_move_regs = PatternMatcher([
   # BITCAST?
-  (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
+  (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
@@ -265,13 +271,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
 
-  # add loads and remove invalids
-  #sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
-  sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
-
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
+  sink = graph_rewrite(sink, late_wmma_fuse, name="late wmma fuse")
+
+  # add loads and remove invalids
+  #sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
+  sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
+  sink = graph_rewrite(sink, symbolic_simple+simple_devectorize, name="simple devectorize")
 
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
