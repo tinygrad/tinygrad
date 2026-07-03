@@ -20,7 +20,7 @@ from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext,
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar, pm_store_ranges
+from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar, pm_store_ranges, mop_cleanup
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
@@ -53,18 +53,28 @@ pm_no_weakints = PatternMatcher([
   (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
 ])
 
-def build_range_map(ctx:dict[int, int], sink:UOp):
-  # UNROLLs then UPCASTs always
+def build_range_map(sink:UOp) -> dict[int, int]:
+  ctx: dict[int, int] = {}
   for x in sink.toposort():
-    if x.op is Ops.RANGE and x.arg[1] == AxisType.UNROLL:
+    if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
       ctx[x.arg[0]] = len(ctx)
-  for x in sink.toposort():
-    if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST:
-      ctx[x.arg[0]] = len(ctx)
+  return ctx
 
-def fix_reduce(ctx, r:UOp):
-  range_to_axis = {u:ctx[u.arg[0]] for u in r.ended_ranges if u.arg[0] in ctx if u.arg[1] == AxisType.UNROLL}
-  return r.replace(src=tuple([u for u in r.src if u not in range_to_axis]), arg=(r.arg[0], r.arg[1]+tuple(range_to_axis.values())))
+def expand_reduce(r:UOp):
+  range_srcs = []
+  new_axes = []
+  for u in r.src[1:]:
+    if u.op == Ops.RANGE:
+      range_srcs.append(u)
+    else:
+      for i,s in enumerate(u.shape):
+        if s > 1: new_axes.append(i)
+  if len(new_axes) == 0: return None
+  assert r.arg[1] == ()
+  # move to the front
+  permute = tuple(new_axes) + tuple(i for i in range(r.src[0].ndim) if i not in new_axes)
+  out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
+  return r.src[0].permute(permute).reduce(*range_srcs, arg=(r.arg[0], tuple(range(len(new_axes))))).reshape(out_shape)
 
 def do_contract(ctx:dict[int, int], u:UOp):
   # the context is a mapping from range number (in contract) to axis number
@@ -80,30 +90,14 @@ def do_unroll(ctx:dict[int, int], u:UOp):
   permute_head = [i for i in range(len(out.shape)) if i not in permute_tail]
   return out.permute(argsort(permute_head+permute_tail))
 
-def move_reduce_axes(r:UOp):
-  # move reduce axes to the front of the shape
-  axes = r.arg[1]
-  if len(axes) == 0 or axes == tuple(range(len(axes))): return None
-  permute = axes + tuple(i for i in range(r.src[0].ndim) if i not in axes)
-  return r.src[0].permute(permute).reduce(*r.src[1:], arg=(r.arg[0], tuple(range(len(axes)))), dtype=r.dtype)
-
-expander_contract = PatternMatcher([
-  (UPat(Ops.CONTRACT, name="u"), do_contract),
-  (UPat(Ops.UNROLL, name="u"), do_unroll),
-  # push permute below reduce
-  (UPat(Ops.WMMA, name="wmma").f(Ops.PERMUTE, name="permute").reduce(name="red", allow_any_len=True),
-   lambda wmma,permute,red: wmma.reduce(*red.src[1:], arg=(red.arg[0], tuple([permute.arg[x] for x in red.arg[1]]))).permute(permute.arg)),
-  # move reduce axes to the front
-  (UPat(Ops.REDUCE, name="r"), move_reduce_axes),
-])
-
 expander2 = PatternMatcher([
-  (UPat(Ops.SINK, name="sink"), build_range_map),
-  (UPat(Ops.REDUCE, name="r"), fix_reduce),
+  (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
-])+pm_flatten_range
+  (UPat(Ops.CONTRACT, name="u"), do_contract),
+  (UPat(Ops.UNROLL, name="u"), do_unroll),
+])+pm_flatten_range+mop_cleanup
 
 def broadcast_binary(x:UOp):
   shapes = [u._shape for u in x.src]
@@ -263,9 +257,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # expand
   #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
-  expander_range_map: dict[int, int] = {}
-  sink = graph_rewrite(sink, expander2, ctx=expander_range_map, name="expander", bottom_up=True)
-  sink = graph_rewrite(sink, expander_contract, ctx=expander_range_map, name="expander contract")
+  sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
   sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
 
   # add locals
