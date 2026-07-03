@@ -80,12 +80,21 @@ def do_unroll(ctx:dict[int, int], u:UOp):
   permute_head = [i for i in range(len(out.shape)) if i not in permute_tail]
   return out.permute(argsort(permute_head+permute_tail))
 
+def move_reduce_axes(r:UOp):
+  # move reduce axes to the front of the shape
+  axes = r.arg[1]
+  if len(axes) == 0 or axes == tuple(range(len(axes))): return None
+  permute = axes + tuple(i for i in range(r.src[0].ndim) if i not in axes)
+  return r.src[0].permute(permute).reduce(*r.src[1:], arg=(r.arg[0], tuple(range(len(axes)))), dtype=r.dtype)
+
 expander_contract = PatternMatcher([
   (UPat(Ops.CONTRACT, name="u"), do_contract),
   (UPat(Ops.UNROLL, name="u"), do_unroll),
   # push permute below reduce
   (UPat(Ops.WMMA, name="wmma").f(Ops.PERMUTE, name="permute").reduce(name="red", allow_any_len=True),
    lambda wmma,permute,red: wmma.reduce(*red.src[1:], arg=(red.arg[0], tuple([permute.arg[x] for x in red.arg[1]]))).permute(permute.arg)),
+  # move reduce axes to the front
+  (UPat(Ops.REDUCE, name="r"), move_reduce_axes),
 ])
 
 expander2 = PatternMatcher([
