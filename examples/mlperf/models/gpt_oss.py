@@ -89,17 +89,6 @@ class GPTOSS:
     if sliding: allowed = allowed & (i - j < self.sliding_window)
     return allowed.where(0.0, -1e30).cast(dtype).contiguous()
 
-  def _sdpa(self, xq:Tensor, xk:Tensor, xv:Tensor, sinks:Tensor, mask:Tensor) -> Tensor:
-    b, s, _, hd = xq.shape
-    xq = xq.reshape(b, s, self.n_kv_heads, self.n_rep, hd).permute(0, 2, 3, 1, 4)
-    xk = xk.permute(0, 2, 1, 3).unsqueeze(2)
-    xv = xv.permute(0, 2, 1, 3).unsqueeze(2)
-    scores = ((xq @ xk.transpose(-2, -1)).float() * self.sm_scale) + mask
-    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).expand(b, self.n_kv_heads, self.n_rep, s, 1).float()
-    w = scores.cat(sink, dim=-1).softmax(-1)[..., :s].cast(xv.dtype)
-    out = (w @ xv).permute(0, 3, 1, 2, 4).reshape(b, s, self.n_heads * hd)
-    return out
-
   def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wqkv_scale:Tensor,
                 wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
@@ -107,10 +96,17 @@ class GPTOSS:
     qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
     qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk = qkv[:, :, :, self.n_rep]
-    xv = qkv[:, :, :, self.n_rep + 1]
+    xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    attn = self._sdpa(xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16), sinks, mask)
+
+    xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
+    xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
+    xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
+    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
+    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).expand(bsz, self.n_kv_heads, self.n_rep, seqlen, 1).float()
+    w = scores.cat(sink, dim=-1).softmax(-1)[..., :seqlen].cast(dtypes.bfloat16)
+    attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
+
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
     return out, [x_normed, rrms, attn]
 
