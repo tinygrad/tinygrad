@@ -1025,7 +1025,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
-      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace), src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):

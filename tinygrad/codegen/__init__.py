@@ -165,7 +165,8 @@ devectorizer2 = pm_mops+PatternMatcher([
 ])
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
-  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
+  # TODO: remove this replace when placeholder isn't ptr
+  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG).replace(dtype=r.dtype)
   ctx.acc_num += 1
   topo = r.src[0].toposort()
   ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
@@ -201,7 +202,8 @@ pm_move_regs = PatternMatcher([
 ])
 
 def add_local_buffer(ctx, x:UOp):
-  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
+  # TODO: remove this replace when placeholder isn't ptr
+  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace).replace(dtype=x.dtype)
   return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]).barrier())
 
 pm_add_local_buffers = PatternMatcher([
