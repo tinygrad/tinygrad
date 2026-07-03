@@ -54,8 +54,12 @@ pm_no_weakints = PatternMatcher([
 ])
 
 def build_range_map(ctx:dict[int, int], sink:UOp):
+  # UNROLLs then UPCASTs always
   for x in sink.toposort():
-    if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
+    if x.op is Ops.RANGE and x.arg[1] == AxisType.UNROLL:
+      ctx[x.arg[0]] = len(ctx)
+  for x in sink.toposort():
+    if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST:
       ctx[x.arg[0]] = len(ctx)
 
 def fix_reduce(ctx, r:UOp):
@@ -256,8 +260,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
   #sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
-  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
-
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   #sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
@@ -268,6 +270,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
 
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
