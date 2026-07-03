@@ -90,8 +90,8 @@ expander2 = PatternMatcher([
 ])+pm_flatten_range
 
 def broadcast_binary(x:UOp):
-  shapes = [u.shape for u in x.src]
-  if all_same(shapes): return None
+  shapes = [u._shape for u in x.src]
+  if any(s is None for s in shapes) or all_same(shapes): return None
   shaped_aligned = _align_left(*shapes)
   broadcasted = _broadcast_shape(*shapes)
   src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
