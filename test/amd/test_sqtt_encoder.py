@@ -94,6 +94,16 @@ class TestSQTTEncoder(unittest.TestCase):
     times = [p._time for p in decode(blob)]
     self.assertEqual(times, sorted(times))
 
+  def test_custom_deltas(self):
+    """SQTT emit helpers preserve caller-provided packet deltas."""
+    from test.mockgpu.amd.emu import _init_sqtt_encoder
+    emit, finish, finalize = _init_sqtt_encoder()
+    emit(0, s_mov_b32(s[0], 0), None, delta=3, start_delta=2)
+    finish(0, delta=4)
+    packets = [p for p in decode(finalize()) if type(p).__name__ != "NOP"]
+    self.assertEqual([type(p) for p in packets], [LAYOUT_HEADER, WAVESTART, INST, WAVEEND])
+    self.assertEqual([p._time for p in packets], [0, 2, 5, 9])
+
   def test_no_trace_without_profile(self):
     """No SQTT trace is emitted when PROFILE=0."""
     from test.mockgpu.amd.emu import run_asm, sqtt_traces

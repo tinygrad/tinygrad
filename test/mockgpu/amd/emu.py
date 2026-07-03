@@ -158,30 +158,30 @@ def _init_sqtt_encoder():
   started: set[int] = set()
   _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
 
-  def emit(wave_id: int, inst, branch_taken: bool|None):
+  def emit(wave_id: int, inst, branch_taken: bool|None, delta: int = 1, start_delta: int = 1):
     """Emit an SQTT packet for one executed instruction."""
     w = wave_id & 0x1F
     if wave_id not in started:
-      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, wgp=0, wave=w, id7=wave_id)
+      _emit_nibbles(nibbles, WAVESTART, delta=start_delta, simd=0, wgp=0, wave=w, id7=wave_id)
       started.add(wave_id)
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
       if inst_op in _SOPP_SKIP: return
-      elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
-      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
+      elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=delta, wave=w)
+      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=InstOp.BARRIER)
       elif inst_op in _SOPP_BRANCH:
-        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+        _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
+      else: _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=InstOp.SALU)
     elif issubclass(inst_type, _VALU):
       op = _valu_op(op_name)
-      if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
-    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM_RD)
-    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
+      if op is None: _emit_nibbles(nibbles, VALUINST, delta=delta, wave=w)
+      else: _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=op)
+    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=InstOp.SMEM_RD)
+    else: _emit_nibbles(nibbles, INST, delta=delta, wave=w, op=_mem_op(inst_type, op_name))
 
-  def finish(wave_id: int):
+  def finish(wave_id: int, delta: int = 1):
     """Emit WAVEEND for a completed wave."""
-    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, wgp=0, wave=wave_id & 0x1F)
+    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=delta, simd=0, wgp=0, wave=wave_id & 0x1F)
 
   def finalize() -> bytes:
     """Pad and return the encoded SQTT blob."""
@@ -2258,14 +2258,14 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 pc = st.pc
                 if pc == ENDPGM_PC:
                   done[wi] = True
-                  if tracing: sqtt_finish(wi)
+                  if tracing: sqtt_finish(wi, delta=1)
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
-                  sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
+                  sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, delta=1)
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
             # All waves have either hit barrier or endpgm — release barrier waves for next round
