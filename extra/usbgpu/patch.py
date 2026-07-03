@@ -50,8 +50,12 @@ patched_fw = patch(file_path, file_hash, patches)
 dev = None
 for vendor, device in SUPPORTED_CONTROLLERS:
   try:
-    dev = USB3(vendor, device, 0x81, 0x83, 0x02, 0x04, use_bot=True)
-    break
+    for usbDevice, _ in USB3.list_devices(vendor, device):
+      dev = USB3(usbDevice, 0x81, 0x83, 0x02, 0x04, use_bot=True)
+      break
+
+    if dev is not None:
+      break
   except RuntimeError: pass
 if dev is None:
   raise RuntimeError('Could not open controller. You can set USBDEV environment variable to your device\'s vendor and device ID (e.g., USBDEV="174C:2464")')
