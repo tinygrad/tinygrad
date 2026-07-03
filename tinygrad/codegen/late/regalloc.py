@@ -49,29 +49,22 @@ class LinearScanRegallocContext:
       else: # spill
         raise NotImplementedError("spilling not implemented")
 
-    for v,p in self.pmap.items():
-      print(v, p)
-
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
+  nsrc, ndefs, before, after = [], [], [], []
 
-  nsrc = []
-  # what order does this happen in? src already assigned physical regs?
   for s in x.src: # handle spills?
     if s.op in {Ops.INDEX, Ops.GEP} and len((block := rdefs(s.src[0]))) >= 1:
       idx = s.src[1].arg if s.op is Ops.INDEX else s.arg[0]
       nsrc.append(s.replace(tag=(block[idx],)))
     else: nsrc.append(s)
 
-  ndefs = []
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.pmap[v])
     if isinstance(v, VSubRegister): ndefs.append(ctx.pmap[v.parent][v.pos])
 
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
-
-  before, after = [], []
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([

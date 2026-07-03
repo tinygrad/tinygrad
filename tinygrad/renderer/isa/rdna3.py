@@ -8,129 +8,8 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
 
-def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
-# NOTE: wavefront size is 32, use exec_lo
-VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
-SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
-KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) # reserved for abi
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 
-lane_ctr = itertools.count()
-def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
-
-kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
-execop = def_reg(dtypes.uint32, EXEC)
-lidop = def_reg(dtypes.uint32, WIIDS[0])
-vccop = def_reg(dtypes.uint32, VCC)
-
-# spill_ptr = UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
-
-def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
-def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
-
-# NOTE: make an easy way to register/create register classes in IselContext
-# - ex register constraint tuples and then just pass a name or class enum into ctx.vreg()
-def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
-
-def _vop3(ctx, x:UOp):
-  lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
-  if len(lits) <= 1: return x
-  new = list(x.src)
-  for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
-  return x.replace(src=tuple(new))
-
-# TODO:  pass in original op to use GroupOp.COMMUTATIVE?
-def _vop2(ctx, x:UOp):
-  # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
-  def _isconst(u:UOp): return u.op is Ops.CONST
-  if not _isconst(x.src[1]): return x
-  rest = x.src[2:] if len(x.src) > 2 else ()
-  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-  if not non_commutative and not _isconst(x.src[0]): 
-    return x.replace(src=(x.src[1], x.src[0]) + rest)
-  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
-
-# okay we need a cleaner way to perform whatver the fuck this does
-
-def stack2regs(x:UOp, vreg:VRegister):
-  return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, src=(u,), tag=(vreg.sub(i),)) for i,u in enumerate(x.src)]).replace(tag=vreg)
-
-# TODO: Handle 64 bit inputs
-
-def to_vgpr(ctx, x:UOp) -> UOp:
-  # NOTE: handle sgpr?
-  if x.op is Ops.CONST: # is 128 bit consts a thing??
-    # NOTE: need underpromo dict, just assume uint for now
-    if x.dtype.itemsize == 8: # handle f64
-      v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
-      lo, hi = const(dtypes.uint32,v), const(dtypes.uint32, v >> 32)
-      return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
-    else:
-      return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
-  if x.op is Ops.STACK: # this is the sparse regalloc case, each register has to be moved into its proper out slot
-    nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
-
-    """
-    vregs = make_vgpr(ctx, width=nregs)
-    # NOTE: if fp16 use v_pack_b32_f16?
-    if x.dtype.itemsize == 2:
-      def _pk(n):
-        # if x.dtype is dtypes.half: return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(x.src[n*2], x.src[n*2+1]))
-        lo, hi = to_vgpr(ctx, x.src[n*2]), to_vgpr(ctx, x.src[n*2+1]) # NOTE: hack for now, literal encoding of fp16 has to be fixed
-        # NOTE: hi needs to masked off
-        lo = _vop2(ctx, lo.ins(RDNA3Ops.v_and_b32_e32, src=(lo, const(dtypes.uint32, 0xFFFF))))
-        ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo)) # this dtype is wrong
-        return _vop3(ctx, ins)
-      return UOp.group(*[_pk(i) for i in range(nregs)])
-    """
-
-    # how would we want to express this in a way that each klkl
-    vreg = make_vgpr(ctx, width=len(x.src))
-    return stack2regs(x, vreg)
-    # return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(i),), src=(u,)) for i, u in enumerate(x.src)]).replace(tag=(vreg,))
-    # return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(make_vgpr(ctx,width=len(x.src)), x.src)]) 
-  return x
-def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
-
-# NOTE: this is getting shitty, whats the heuristic for cons vs group of registers?
-# don't generally allocate to SGPRS, only works wave uniform possible future optim
-# TODO: allocate vgpr / sgpr based on op group (x.arg.func)
-# - should almost never need to manually call ctx.vreg
-# - control flow allocations should also be handled here?
-def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
-  if x.dtype is dtypes.void: return None
-  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
-  if isinstance(x.tag, tuple):
-    assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
-  defs = []
-  if isinstance(x.tag, tuple):
-    cons, width = x.tag, 1
-    if isinstance(x.tag[0], tuple):
-      cons, width = x.tag
-    defs = [ctx.vreg(x.tag, width=width)]
-  else:
-    if x.op is Ops.BUFFER: n = (x.dtype.itemsize // 4) * x.src[0].arg
-    else: n = max(x.dtype.itemsize // 4, 1)
-    defs = [make_vgpr(ctx, width=n)]
-  return x.replace(tag=tuple(defs))
-
-# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
-# TODO: batch param loading? ex. s_load_b128
-def abi(ctx:IselContext, x:UOp) -> UOp|None:
-  i = ctx.func_args.index(x)
-  if x.op is Ops.SPECIAL: # maintain src edge?
-    dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
-    else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
-  offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
-  # if AddrSpace is ALU auto load into vgpr??
-  if x.addrspace is AddrSpace.ALU:
-    val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
-    return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2),))
-
+# ---- (UOp, dtype) -> Instruction tables ----
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
@@ -163,7 +42,6 @@ def _build_ins_table(srcs):
     else: tbl[op] = { _extract_dt(code) : _extract_ins(pref, code) for code in codes }
   return tbl
 OP_INS = _build_ins_table(insdefs)
-
 V_FMA =   { dtypes.float16:RDNA3Ops.v_fma_f16,      dtypes.float32:RDNA3Ops.v_fma_f32,      dtypes.float64:RDNA3Ops.v_fma_f64       }
 
 def _cvt_ins(dtin, dtout):
@@ -179,54 +57,124 @@ def _cvt_ins(dtin, dtout):
   assert dtin in _valid_casts and dtout in _valid_casts[dtin], f"cannot natively cast from {dtin} -> {dtout}"
   return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
 
-# TODO: b64 -> b64
-def cvt(ctx, y:UOp, x:UOp):
-  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
-    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
-  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
-    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
-    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.gep(0),))
-    else: return y.gep(0)
-  return x.ins(_cvt_ins(y.dtype,x.dtype))
+# ---- everything else ----
 
+def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
+def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
+def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
+def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
+def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 
-# NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
-# NOTE: also maybe add this to pre_isel?
-def cmp(ctx, x:UOp):
-  rlz = []
-  if x.op in GroupOp.Comparison:
-    for u in x.src: # convert cmp outputs and const bools to vgpr
-      if u.dtype is dtypes.bool:
-        if u.op is Ops.CONST: rlz.append(const(dtypes.uint32, 1) if u.arg else const(dtypes.uint32,0))
-        else: rlz.append(u.where(const(dtypes.uint32,1), const(dtypes.uint32,0)))
-      else: rlz.append(u)
-    x = x.replace(src=tuple(rlz))
-    dt = x.src[0].dtype.scalar()
-    # NOTE: maybe easier to just always write to new sgpr, can be optimized to use e32 later but there will be lots of VCC spills in regalloc
-    ins = OP_INS[x.op][64][dt]
+VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
+SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
+KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) 
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
+VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
+lane_ctr = itertools.count()
+
+kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
+execop = def_reg(dtypes.uint32, EXEC)
+lidop = def_reg(dtypes.uint32, WIIDS[0])
+vccop = def_reg(dtypes.uint32, VCC)
+
+# ---- register movement helpers ----
+
+def packb16(ctx, lo:UOp, hi:UOp):
+  if dtypes.is_float(lo.dtype): return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(lo,hi))
+  lo = lo & const(dtypes.uint32, 0xFFFF) # mask off upper half
+  return _vop3(ctx, UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(dtypes.int, 16), lo)))
+
+def stack2regs(ctx, x:UOp, vreg:VRegister):
+  nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
+  for i in range(nregs):
+    if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]).replace(tag=(vreg.sub(i),)))
+    else: mvs.append(x.src[i].ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[i],), tag=(vreg.sub(i),)))
+  return UOp.group(*mvs).replace(tag=vreg)
+
+# TODO: Handle 64 bit inputs
+# NOTE: handle sgpr?
+def to_vgpr(ctx, x:UOp) -> UOp:
+  if x.op is Ops.CONST:
+    # NOTE: need underpromo dict, just assume uint for now
+    if x.dtype.itemsize == 8: 
+      v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
+      lo, hi = const(dtypes.uint32,v), const(dtypes.uint32, v >> 32)
+      return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
+    return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
+  elif x.op is Ops.STACK:
+    nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
+    vreg = make_vgpr(ctx, width=nregs)
+    return stack2regs(ctx, x, vreg)
+  return x
+def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
+
+# ---- operand legalization wrappers ----
+
+def _vop3(ctx, x:UOp):
+  lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
+  if len(lits) <= 1: return x
+  new = list(x.src)
+  for i in lits[1:]: new[i]=to_vgpr(ctx, new[i])
+  return x.replace(src=tuple(new))
+
+# TODO: pass in original op to use GroupOp.COMMUTATIVE?
+def _vop2(ctx, x:UOp):
+  # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
+  def _isconst(u:UOp): return u.op is Ops.CONST
+  if not _isconst(x.src[1]): return x
+  rest = x.src[2:] if len(x.src) > 2 else ()
+  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
+  if not non_commutative and not _isconst(x.src[0]): 
+    return x.replace(src=(x.src[1], x.src[0]) + rest)
+  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
+
+# TODO: allocate vgpr / sgpr based on op group (x.arg.func)
+# - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
+def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
+  if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
+  if x.dtype is dtypes.void: return None
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
+  if isinstance(x.tag, tuple):
+    assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
+  defs = []
+  if isinstance(x.tag, tuple):
+    cons, width = x.tag, 1
+    if isinstance(x.tag[0], tuple):
+      cons, width = x.tag
+    defs = [ctx.vreg(x.tag, width=width)]
   else:
-    if x.op is Ops.AND: ins = RDNA3Ops.s_and_b32
+    if x.op is Ops.BUFFER: n = (x.dtype.itemsize // 4) * x.src[0].arg
+    else: n = max(x.dtype.itemsize // 4, 1)
+    defs = [make_vgpr(ctx, width=n)]
+  return x.replace(tag=tuple(defs))
 
-  x = x.ins(ins, tag=GP_SGPRS)
-  if x.op is Ops.AND: return x
-  return _vop3(ctx, x)
+# TODO: batch param loading? ex. s_load_b128
+# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+def abi(ctx:IselContext, x:UOp) -> UOp|None:
+  i = ctx.func_args.index(x)
+  if x.op is Ops.SPECIAL: # maintain src edge?
+    dim = int(x.arg[-1])
+    if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
+    else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
+  offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
+  # if AddrSpace is ALU auto load into vgpr
+  if x.addrspace is AddrSpace.ALU:
+    val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
+    return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2),))
 
-# NOTE: ISA spec 11.2
+
+# ----- memory access ----
+
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(ctx, const(dtypes.int, disp_scale.bit_length() - 1))
-  if idx.op is Ops.CONST:
-    return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
-  # if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, const(dtypes.int16, idx.src[1].arg * disp_scale))
+  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
   return (idx << shft, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
-# base doesn't hold a ptr for local addrspace
 # NOTE: keep base in src to maintain graph dependencies?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
@@ -236,13 +184,10 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
 
 # TODO: handle 16 bit loads?
+
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 
-# okay so loading 4xfp16 is a b64 load, will return 2 vgprs and indexing has to handle this
-# - maybe index cant be fully handled in regview?
-# - indexes need to be expanded into 16 bit (v_mov_b16 ?& (>> 16))
-# - quick hack is to expand the load into a move per value
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
@@ -260,31 +205,17 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   nregs = (n * x.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
   # the alt realize has to load them into the same vreg/subregs?
-  def _gate(o:UOp):
-    return o.replace(src=(stack2regs(alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
+  def _gate(o:UOp): return o.replace(src=(stack2regs(ctx, alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
 
-# REG Buffer can hold many registers? Index into slice based on idx??
-# - then use gep to load/store from
-
-
-# NOTE: reg buf stores have to happen pre-regalloc after buffer is already given a vreg
 def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
+  # NOTE: reg buf stores have to happen pre-regalloc after buffer is already given a vreg
+  if base.addrspace is AddrSpace.REG: return None
+
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
-  if base.addrspace is AddrSpace.REG:
-    return None
-  """
-  if base.addrspace is AddrSpace.REG:
-    assert idx.op is Ops.CONST and base.dtype.itemsize == 4
-    # two address op?
-    vreg = make_vgpr(ctx, width=1)
-    base = base.replace(tag=(vreg,))
-    return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(to_vgpr(ctx,val),), tag=(vreg.sub(idx.arg),)))
-    # return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base.gep(idx.arg),to_vgpr(ctx,val))).rtag()) 
-  """
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n*addr.dtype.itemsize+3)//4
   imap = {
@@ -295,7 +226,46 @@ def store(ctx, addr:UOp, x:UOp):
   }
   return _gate(UOp(Ops.INS, arg=_insspace(imap[n * addr.dtype.itemsize],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
 
-# -- complex alu --
+def regstore(addr:UOp, x:UOp):
+  base, idx = addr.src
+  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(rdefs(base)[0].sub(idx.arg),))
+  return nx, [nx]
+
+# ------ ALU ------
+
+def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
+  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
+  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
+    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
+  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
+    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
+    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.gep(0),))
+    else: return y.gep(0)
+  return x.ins(_cvt_ins(y.dtype,x.dtype))
+
+# NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
+# NOTE: also maybe add this to pre_isel?
+def cmp(ctx, x:UOp):
+  rlz = []
+  if x.op in GroupOp.Comparison:
+    for u in x.src: # convert cmp outputs and const bools to vgpr, NOTE: just add this to isel matching somehow?
+      if u.dtype is dtypes.bool:
+        if u.op is Ops.CONST: rlz.append(const(dtypes.uint32, 1) if u.arg else const(dtypes.uint32,0))
+        else: rlz.append(u.where(const(dtypes.uint32,1), const(dtypes.uint32,0)))
+      else: rlz.append(u)
+    x = x.replace(src=tuple(rlz))
+    dt = x.src[0].dtype.scalar()
+    # NOTE: maybe easier to just always write to new sgpr, can be optimized to use e32 later but there will be lots of VCC spills in regalloc
+    ins = OP_INS[x.op][64][dt]
+  else:
+    if x.op is Ops.AND: ins = RDNA3Ops.s_and_b32
+
+  x = x.ins(ins, tag=GP_SGPRS)
+  if x.op is Ops.AND: return x
+  return _vop3(ctx, x)
+
 def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
@@ -322,6 +292,13 @@ def bitwise64(ctx, x:UOp, ins):
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)), tag=(vreg.sub(1),))
   return UOp.group(lo,hi).replace(tag=(vreg,))
 
+# cdiv of int types needs to be converted to float then cast back after ceil op
+# NOTE: we need to cast to float version of this bitwidth..., start with just 32
+def cdiv(x:UOp):
+  a,b = [u.cast(dtypes.float32) for u in x.src]
+  c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_trunc_f32_e32, src=(a.div(b),))
+  return c.cast(x.dtype)
+
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
@@ -344,13 +321,7 @@ def alu(ctx, x:UOp):
     else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, is_unary={len(x.src)==1}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
-# cdiv of int types needs to be converted to float then cast back after ceil op
-# - we need to cast to float version of this bitwidth..., start with just 32
-def cdiv(x:UOp):
-  a,b = [u.cast(dtypes.float32) for u in x.src]
-  c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_trunc_f32_e32, src=(a.div(b),))
-  # c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_ceil_f32_e32, src=(a.div(b),))
-  return c.cast(x.dtype)
+# ---- casting utilities -----
 
 def widenshort(y:UOp, x:UOp):
   mid = dtypes.int32 if y.dtype is dtypes.int16 else dtypes.uint32
@@ -359,7 +330,74 @@ def widenshort(y:UOp, x:UOp):
   if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
   return y
 
-# TODO: properly expand/cast 64 bit consts across registers
+# NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
+def castint64(ctx, y:UOp, x:UOp):
+  # if src (y) is an int just allocate reg buffer and store?
+  if y.dtype in dtypes.ints + dtypes.uints:
+    vreg = make_vgpr(ctx, width=2)
+    lo = y.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(0),), src=(y,))
+    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(1),), src=(const(dtypes.uint32,0),))
+    return UOp.group(lo, hi).replace(tag=vreg)
+  # casting between long/ulong and floats is more complicated, may belong in isel?
+  raise NotImplementedError()
+
+# ---- control flow ----
+def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
+def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
+
+# TODO: dont use string comparisons, have a clear load/store spec? operands?
+def lower_gated(x:UOp):
+  if "load" in x.arg.opc and len(x.src) > 3: # gated load
+    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
+  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
+    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
+  return None
+
+def prep_range(ctx, bnd:UOp, x:UOp):
+  if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
+  mask = def_reg(dtypes.uint32, GP_SGPRS)
+  return x.replace(src=(bnd,mask)).replace(dtype=dtypes.uint32)
+
+def prep_end(ctx, x:UOp, rng:UOp):
+  if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
+  one = const_vgpr(ctx,dtypes.uint32,1)
+  mask, bnd = rng.src[-1], to_vgpr(ctx, rng.src[0])
+  return x.replace(src=x.src + (bnd,one,mask))
+
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
+def lower_range(ctx, x:UOp):
+  loop_label = "_".join(str(i) for i in x.arg[:-1])
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
+  ctx.loop_label[acc] = loop_label
+  lbl = label(ctx, f".LOOP_{loop_label}")
+  return acc, [acc, mask, lbl]
+
+def lower_end(ctx, x:UOp):
+  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
+  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
+  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
+
+
+# --- other stuff ---
+
+# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
+# NOTE: this should just be triggered in to_vgpr????
+def gethalf(x:UOp, buf:UOp, idx:UOp):
+  b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
+  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
+  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+
+def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
+  return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
+
+
+# ---- lowering passes ----
+
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
   # bitcast is noop?
@@ -389,42 +427,6 @@ pre_isel_matcher = PatternMatcher([
   # this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
 ])
-
-def prep_range(ctx, bnd:UOp, x:UOp):
-  if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
-  mask = def_reg(dtypes.uint32, GP_SGPRS)
-  return x.replace(src=(bnd,mask)).replace(dtype=dtypes.uint32)
-
-def prep_end(ctx, x:UOp, rng:UOp):
-  if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
-  one = const_vgpr(ctx,dtypes.uint32,1)
-  mask, bnd = rng.src[-1], to_vgpr(ctx, rng.src[0])
-  return x.replace(src=x.src + (bnd,one,mask))
-
-def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
-  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
-
-
-# NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
-def castint64(ctx, y:UOp, x:UOp):
-  # if src (y) is an int just allocate reg buffer and store?
-  if y.dtype in dtypes.ints + dtypes.uints:
-    vreg = make_vgpr(ctx, width=2)
-    lo = y.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(0),), src=(y,))
-    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(1),), src=(const(dtypes.uint32,0),))
-    return UOp.group(lo, hi).replace(tag=vreg)
-  # casting between long/ulong and floats is more complicated, may belong in isel?
-  raise NotImplementedError()
-
-# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
-# NOTE: this should just be triggered in to_vgpr????
-# - not for loads
-# - what cases is this valid?
-def gethalf(x:UOp, buf:UOp, idx:UOp):
-  b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
-  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
@@ -464,44 +466,9 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
-def regstore(addr:UOp, x:UOp):
-  base, idx = addr.src
-  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(rdefs(base)[0].sub(idx.arg),))
-  return nx, [nx]
-
 pre_regalloc_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), regstore),
 ])
-
-# --- control flow ---
-def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
-def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
-
-# TODO: dont use string comparisons, have a clear load/store spec? operands?
-def lower_gated(x:UOp):
-  if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
-  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
-    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
-  return None
-
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
-def lower_range(ctx, x:UOp):
-  loop_label = "_".join(str(i) for i in x.arg[:-1])
-  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
-  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
-  ctx.loop_label[acc] = loop_label
-  lbl = label(ctx, f".LOOP_{loop_label}")
-  return acc, [acc, mask, lbl]
-
-def lower_end(ctx, x:UOp):
-  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
-  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
-  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
-
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
@@ -511,7 +478,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), lower_gated),
 ])
 
-# NOTE: maybe just make my register viewing another rewrite??
 def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   import tinygrad.renderer.amd.dsl as dsl
@@ -524,7 +490,6 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  # print("encoding", opc, [(s.op, rdefs(s)) for s in x.src])
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM:
