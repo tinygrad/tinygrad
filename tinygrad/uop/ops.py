@@ -559,6 +559,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
+    # NOTE: we don't allow reduce on 1s axis
     axis = tuple(sorted(axis))
     reduce_axis = tuple(x for x in axis if resolve(self.shape[x] != 1))
     ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self

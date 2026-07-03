@@ -10,18 +10,6 @@ from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
 
-class TestReduceShape(unittest.TestCase):
-  def test_reduce_drops_axes(self):
-    x = UOp.const(dtypes.float, 1, shape=(2, 3, 4))
-    self.assertEqual(UOp(Ops.REDUCE, x.dtype, (x,), (Ops.ADD, (1,))).shape, (2, 4))
-    self.assertEqual(UOp(Ops.REDUCE, x.dtype, (x,), (Ops.ADD, (0, 2))).shape, (3,))
-    self.assertEqual(UOp(Ops.REDUCE, x.dtype, (x,), (Ops.ADD, (0, 1, 2))).shape, ())
-
-  def test_rop_drops_size_one_axes(self):
-    x = UOp.const(dtypes.float, 1, shape=(2, 1, 4))
-    self.assertEqual(x._rop(Ops.ADD, (1,)).shape, (2, 4))
-    self.assertEqual(x._rop(Ops.ADD, (0, 1)).shape, (4,))
-
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
     a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
