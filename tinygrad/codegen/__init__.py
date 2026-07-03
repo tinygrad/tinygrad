@@ -79,6 +79,9 @@ def do_unroll(ctx:dict[int, int], u:UOp):
 expander_contract = PatternMatcher([
   (UPat(Ops.CONTRACT, name="u"), do_contract),
   (UPat(Ops.UNROLL, name="u"), do_unroll),
+  # push permute below reduce
+  (UPat(Ops.WMMA, name="wmma").f(Ops.PERMUTE, name="permute").reduce(name="red", allow_any_len=True),
+   lambda wmma,permute,red: wmma.reduce(*red.src[1:], arg=(red.arg[0], tuple([permute.arg[x] for x in red.arg[1]]))).permute(permute.arg)),
 ])
 
 expander2 = PatternMatcher([
@@ -190,15 +193,9 @@ pm_reduce_local = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
-])+pm_clean_up_group_sink
-
-late_wmma_fuse = PatternMatcher([
-  # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-  (UPat(Ops.WMMA, name="w1").index(UPat.var("x")) + UPat(name="w2").index(UPat.var("x")),
-   lambda w1,w2,x: (w1+w2).index(x) if w1.shape == w2.shape else None),
-])
+])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_move_regs = PatternMatcher([
@@ -259,6 +256,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
   #sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
+  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
+
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   #sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
@@ -269,12 +268,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
 
   # devectorize
   #sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
-  sink = graph_rewrite(sink, late_wmma_fuse, name="late wmma fuse")
 
   # add loads and remove invalids
   #sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
