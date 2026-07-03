@@ -51,7 +51,13 @@ def _vop2(ctx, x:UOp):
     return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
+# okay we need a cleaner way to perform whatver the fuck this does
+
+def stack2regs(x:UOp, vreg:VRegister):
+  return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, src=(u,), tag=(vreg.sub(i),)) for i,u in enumerate(x.src)]).replace(tag=vreg)
+
 # TODO: Handle 64 bit inputs
+
 def to_vgpr(ctx, x:UOp) -> UOp:
   # NOTE: handle sgpr?
   if x.op is Ops.CONST: # is 128 bit consts a thing??
@@ -81,7 +87,8 @@ def to_vgpr(ctx, x:UOp) -> UOp:
 
     # how would we want to express this in a way that each klkl
     vreg = make_vgpr(ctx, width=len(x.src))
-    return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(i),), src=(u,)) for i, u in enumerate(x.src)]).replace(tag=(vreg,))
+    return stack2regs(x, vreg)
+    # return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(i),), src=(u,)) for i, u in enumerate(x.src)]).replace(tag=(vreg,))
     # return UOp.group(*[u.ins(RDNA3Ops.v_mov_b32_e32, tag=(vr,), src=(u,)) for vr, u in zip(make_vgpr(ctx,width=len(x.src)), x.src)]) 
   return x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
@@ -239,11 +246,10 @@ def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
-  def _gate(o:UOp): return o.replace(src=(to_vgpr(ctx, alt),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   if base.addrspace is AddrSpace.REG: # handle loading/storing multiple registers
-    assert idx.op is Ops.CONST
-    assert base.dtype.itemsize == 4
-    return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),)))
+    assert idx.op is Ops.CONST and base.dtype.itemsize == 4 and gate is None
+    # TODO: gated reg load
+    return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),))
   imap = {
     2 : (RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16),
     4 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
@@ -253,6 +259,9 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * x.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
+  # the alt realize has to load them into the same vreg/subregs?
+  def _gate(o:UOp):
+    return o.replace(src=(stack2regs(alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
 
 # REG Buffer can hold many registers? Index into slice based on idx??
@@ -308,9 +317,10 @@ def mul64(ctx, x:UOp):
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0))) 
-  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
-  return UOp.group(lo,hi)
+  vreg = make_vgpr(ctx, width=2)
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),)) 
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)), tag=(vreg.sub(1),))
+  return UOp.group(lo,hi).replace(tag=(vreg,))
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -400,12 +410,10 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
   if y.dtype in dtypes.ints + dtypes.uints:
-    lo,hi = make_vgpr(ctx, width=2)
-    # lo,hi = ctx.vreg((GP_VGPRS,2))
-    return UOp.group(
-        y.ins(RDNA3Ops.v_mov_b32_e32, tag=(lo,), src=(y,)),
-        UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(hi,), src=(const(dtypes.uint32,0),))
-    )
+    vreg = make_vgpr(ctx, width=2)
+    lo = y.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(0),), src=(y,))
+    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(1),), src=(const(dtypes.uint32,0),))
+    return UOp.group(lo, hi).replace(tag=vreg)
   # casting between long/ulong and floats is more complicated, may belong in isel?
   raise NotImplementedError()
 
@@ -458,7 +466,7 @@ isel_matcher = PatternMatcher([
 
 def regstore(addr:UOp, x:UOp):
   base, idx = addr.src
-  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(base.tag[0].sub(0),))
+  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(rdefs(base)[0].sub(idx.arg),))
   return nx, [nx]
 
 pre_regalloc_matcher = PatternMatcher([
@@ -472,11 +480,9 @@ def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=nam
 # TODO: dont use string comparisons, have a clear load/store spec? operands?
 def lower_gated(x:UOp):
   if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    print("lowering gated")
     save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
     return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
   if "store" in x.arg.opc and len(x.src) > 4: # gated store 
-    print("lowering gated")
     branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
     return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
   return None
@@ -518,6 +524,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
+  # print("encoding", opc, [(s.op, rdefs(s)) for s in x.src])
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM:

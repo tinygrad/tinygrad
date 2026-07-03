@@ -21,6 +21,7 @@ class LinearScanRegallocContext:
     lis = self.live_intervals
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
+      if u.op is Ops.INDEX: return _live_units(u.src[0])
       return tuple(r.parent if isinstance(r, VSubRegister) else r for r in rdefs(u) if isinstance(r, (VRegister, VSubRegister)))
     for u in reversed(self.uops):
       pt, defs, uses = prgpts[u], _live_units(u), []
@@ -48,6 +49,9 @@ class LinearScanRegallocContext:
       else: # spill
         raise NotImplementedError("spilling not implemented")
 
+    for v,p in self.pmap.items():
+      print(v, p)
+
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
@@ -55,8 +59,9 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   # what order does this happen in? src already assigned physical regs?
   for s in x.src: # handle spills?
-    if s.op is Ops.INDEX and len((block := rdefs(s.src[0]))) >= 1:
-      nsrc.append(s.replace(tag=(block[s.src[1].arg],)))
+    if s.op in {Ops.INDEX, Ops.GEP} and len((block := rdefs(s.src[0]))) >= 1:
+      idx = s.src[1].arg if s.op is Ops.INDEX else s.arg[0]
+      nsrc.append(s.replace(tag=(block[idx],)))
     else: nsrc.append(s)
 
   ndefs = []
