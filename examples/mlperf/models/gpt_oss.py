@@ -1,4 +1,4 @@
-import math, os
+import math, os, functools
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -28,11 +28,47 @@ def quantize_mx(x:Tensor) -> tuple[Tensor, Tensor]:
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
   return x_clamped.cast(FP8_DTYPE), e8
 
+def _quant_dequant_fwd(x:Tensor) -> Tensor:
+  # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
+  M, K = x.shape
+  scale_K = K // 32
+  amax = x.float().reshape(M, scale_K, 32).abs().max(axis=-1)
+  e8 = (amax.maximum(1e-38).log2().floor() + 127).clamp(0, 254).cast(dtypes.uint8)
+  qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(M, scale_K, 1).expand(M, scale_K, 32).reshape(M, K)
+  x_fp8 = (x.float() * qscale).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE).cast(dtypes.float32)
+  return (x_fp8 * _mx_block_scale(e8)).cast(dtypes.bfloat16)
+
+@functools.cache
+def _quant_dequant_fwd_fxn(x_p, device):
+  return _quant_dequant_fwd(Tensor(x_p, device=device))
+
+def _quant_dequant_bwd(grad:UOp, call:UOp) -> tuple:
+  return (Tensor(grad).cast(dtypes.bfloat16).uop,)
+
+def quant_dequant_mx(x:Tensor) -> Tensor:
+  fxn = _quant_dequant_fwd_fxn(x.as_param(0).uop, x.device)
+  return Tensor(UOp.maketuple(fxn.uop).call(x.uop, grad_fxn=_quant_dequant_bwd).gettuple(0))
+
+def _dequant_fwd(w_q:Tensor, w_scale:Tensor) -> Tensor:
+  return w_q.cast(dtypes.bfloat16) * _mx_block_scale(w_scale)
+
+@functools.cache
+def _dequant_fwd_fxn(wq_p, ws_p, device):
+  return _dequant_fwd(Tensor(wq_p, device=device), Tensor(ws_p, device=device))
+
+def _dequant_bwd(grad:UOp, call:UOp) -> tuple:
+  w_scale = Tensor(call.src[2])
+  return ((Tensor(grad).cast(dtypes.bfloat16) * _mx_block_scale(w_scale).cast(dtypes.bfloat16)).uop, None)
+
+def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
+  fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)
+  call = UOp.maketuple(fxn.uop).call(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd)
+  return Tensor(call.gettuple(0))
+
 def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
   l_shape = x.shape[:-1]
-  x_q, x_e8 = quantize_mx(x.reshape(-1, x.shape[-1]))
-  x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*l_shape, x.shape[-1])
-  w_phys = w_q.cast(dtypes.bfloat16) * _mx_block_scale(w_scale)
+  x_phys = quant_dequant_mx(x.reshape(-1, x.shape[-1])).reshape(*l_shape, x.shape[-1])
+  w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
 
 def swiglu(x:Tensor, limit:float=7.0, alpha:float=1.702) -> Tensor:
@@ -102,9 +138,11 @@ class GPTOSS:
     xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
     xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
     xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
-    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).expand(bsz, self.n_kv_heads, self.n_rep, seqlen, 1).float()
-    w = scores.cat(sink, dim=-1).softmax(-1)[..., :seqlen].cast(dtypes.bfloat16)
+    scores = ((xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask).contiguous()
+    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
+    m = scores.max(-1, keepdim=True).maximum(sink)
+    e = (scores - m).exp()
+    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16).contiguous()
     attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
@@ -122,9 +160,9 @@ class GPTOSS:
 
     out = None
     for e in range(self.n_experts):
-      gate_up = matmul_mx(inp, w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]
-      y = matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]
-      contrib = weights[..., e:e+1].cast(y.dtype) * y
+      gate_up = (matmul_mx(inp.contiguous_backward(), w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]).contiguous()
+      y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]).contiguous()
+      contrib = (weights[..., e:e+1].cast(y.dtype) * y).contiguous()
       out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 
