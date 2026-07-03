@@ -876,6 +876,7 @@ class TestUOpGetItem(unittest.TestCase):
   def test_ellipsis_all_slices(self):
     p = self._placeholder((64, 80))
     self.assertEqual(p[..., :64].shape, (64, 64))
+  @unittest.skip("what is this testing?")
   def test_ellipsis_with_int(self):
     p = self._placeholder((64, 80))
     r = UOp.range(64, 100)

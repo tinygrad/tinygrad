@@ -95,7 +95,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # **** optimizations are done, now we lower to actual code ****
 
   # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
   # devectorize
   sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding, ctx=ren, name="devectorize")
@@ -142,7 +142,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_weakints
-  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren, name="final rewrite")
+  sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
