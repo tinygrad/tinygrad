@@ -189,8 +189,8 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
 
 def expand_horizontal_reduce(r:UOp):
   axes = r.arg[1]
-  vals = [r.src[0].shrink(tuple((idx[axes.index(i)], idx[axes.index(i)]+1) if i in axes else None for i in range(r.src[0].ndim)))
-          for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in axes])]
+  assert tuple(sorted(axes)) == tuple(range(len(axes))), f"bad axes on horiz reduce {axes}"
+  vals = [r.src[0].index(*idx) for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in sorted(axes)])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = PatternMatcher([
