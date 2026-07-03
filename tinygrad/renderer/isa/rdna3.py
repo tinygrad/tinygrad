@@ -3,12 +3,12 @@ from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, VSubRegister, rdefs as regs
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, VSubRegister, rdefs
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
 
-def reg(u:UOp): return rdefs(u)[0]
+def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
 # NOTE: wavefront size is 32, use exec_lo
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -64,6 +64,8 @@ def to_vgpr(ctx, x:UOp) -> UOp:
       return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
   if x.op is Ops.STACK: # this is the sparse regalloc case, each register has to be moved into its proper out slot
     nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
+
+    """
     vregs = make_vgpr(ctx, width=nregs)
     # NOTE: if fp16 use v_pack_b32_f16?
     if x.dtype.itemsize == 2:
@@ -75,6 +77,7 @@ def to_vgpr(ctx, x:UOp) -> UOp:
         ins = UOp(Ops.INS, dtype=x.dtype, arg=RDNA3Ops.v_lshl_or_b32, tag=(vregs[n],), src=(hi, const(dtypes.int, 16), lo)) # this dtype is wrong
         return _vop3(ctx, ins)
       return UOp.group(*[_pk(i) for i in range(nregs)])
+    """
 
     # how would we want to express this in a way that each klkl
     vreg = make_vgpr(ctx, width=len(x.src))
@@ -119,7 +122,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if x.addrspace is AddrSpace.ALU:
     val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=ctx.vreg(GP_SGPRS, width=2))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2),))
 
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
@@ -240,7 +243,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   if base.addrspace is AddrSpace.REG: # handle loading/storing multiple registers
     assert idx.op is Ops.CONST
     assert base.dtype.itemsize == 4
-    return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.gep(idx.arg),)))
+    return _gate(x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),)))
   imap = {
     2 : (RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16),
     4 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
@@ -249,19 +252,30 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   }
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * x.dtype.itemsize+3)//4
-  return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=GP_VGPRS if nregs == 1 else (GP_VGPRS, nregs)))
+  vreg = make_vgpr(ctx, width=nregs)
+  return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
 
 # REG Buffer can hold many registers? Index into slice based on idx??
 # - then use gep to load/store from
+
+
+# NOTE: reg buf stores have to happen pre-regalloc after buffer is already given a vreg
 def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   if base.addrspace is AddrSpace.REG:
-    assert base.dtype.itemsize == 4
-    assert idx.op is Ops.CONST
-    return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base.gep(idx.arg),to_vgpr(ctx,val))).rtag()) # two address op?
+    return None
+  """
+  if base.addrspace is AddrSpace.REG:
+    assert idx.op is Ops.CONST and base.dtype.itemsize == 4
+    # two address op?
+    vreg = make_vgpr(ctx, width=1)
+    base = base.replace(tag=(vreg,))
+    return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(to_vgpr(ctx,val),), tag=(vreg.sub(idx.arg),)))
+    # return _gate(UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(base.gep(idx.arg),to_vgpr(ctx,val))).rtag()) 
+  """
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n*addr.dtype.itemsize+3)//4
   imap = {
@@ -400,7 +414,6 @@ def castint64(ctx, y:UOp, x:UOp):
 # - not for loads
 # - what cases is this valid?
 def gethalf(x:UOp, buf:UOp, idx:UOp):
-  i = idx.arg
   b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
   if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
@@ -443,6 +456,15 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
+def regstore(addr:UOp, x:UOp):
+  base, idx = addr.src
+  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(base.tag[0].sub(0),))
+  return nx, [nx]
+
+pre_regalloc_matcher = PatternMatcher([
+  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), regstore),
+])
+
 # --- control flow ---
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
@@ -450,10 +472,11 @@ def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=nam
 # TODO: dont use string comparisons, have a clear load/store spec? operands?
 def lower_gated(x:UOp):
   if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    # cmpout = UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(x.
+    print("lowering gated")
     save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
     return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
   if "store" in x.arg.opc and len(x.src) > 4: # gated store 
+    print("lowering gated")
     branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
     return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
   return None
@@ -473,6 +496,7 @@ def lower_end(ctx, x:UOp):
   loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return inc, [inc, gate, loop, restoreexec(x.src[-1])]
 
+
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
@@ -488,39 +512,35 @@ def encode(ctx, x:UOp):
   def _route(r:Register):
     dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  } 
     return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
-  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(regs(x))
+  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  if ctx.is_two_address(x):
-    x = x.replace(tag=regs(x.src[0]))
-    oprs = oprs[1:]
-
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM:
-    kw = dict(sdata=_fuse(regs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
+    kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(regs(oprs[1])), offset=_immorreg(oprs[2]))
-    if reg(x) is None: kw["data"]=_fuse(regs(oprs[3]))
-    else: kw["vdst"]=_fuse(regs(x))
+    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(rdefs(oprs[1])), offset=_immorreg(oprs[2]))
+    if reg(x) is None: kw["data"]=_fuse(rdefs(oprs[3]))
+    else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.DS:
     kw = dict(addr=_immorreg(oprs[0]), offset1=_immorreg(oprs[1]))
-    if reg(x) is None: kw["data0"]=_fuse(regs(oprs[3]))
-    else: kw["vdst"]=_fuse(regs(x))
+    if reg(x) is None: kw["data0"]=_fuse(rdefs(oprs[3]))
+    else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.VOP3SD:
     oprs = oprs[:3]
-    kw = dict(sdst=_immorreg(vccop), vdst=_fuse(regs(x)))
+    kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)))
     for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
   elif group is RDNA3Ops.VOPC:
     args = [_immorreg(u) for u in oprs]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group is RDNA3Ops.VOP2: oprs = oprs[:2]
     if group is RDNA3Ops.VOP3: oprs = oprs[:3]
-    args = [_fuse(regs(x))] + [_immorreg(u) for u in oprs]
+    args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   
@@ -545,6 +565,7 @@ class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
+  pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   post_regalloc_ctx = RDNA3LinearCtx()
@@ -583,13 +604,13 @@ class RDNA3Renderer(ISARenderer):
       if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
       ctp = _counter(u)
       if reg(u) is not None:
-        for r in regs(u): tosync.setdefault(r,(ctp,[]))[1].append((i,bld_cntstate[ctp]))
+        for r in rdefs(u): tosync.setdefault(r,(ctp,[]))[1].append((i,bld_cntstate[ctp]))
       bld_cntstate[ctp] += 1
 
     # NOTE: broken
     for i, u in enumerate(lin.src):
       if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[_counter(u)] += 1
-      deps = [r for s in u.src for r in regs(s) if r in tosync]
+      deps = [r for s in u.src for r in rdefs(s) if r in tosync]
       waits = {}
       for r in deps:
         tp, pts = tosync[r]

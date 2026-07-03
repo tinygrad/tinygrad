@@ -3,14 +3,12 @@ from os import wait
 from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import ISARenderer, Register, VRegister, VSubRegister, vrdefs, rdefs
+from tinygrad.renderer.isa import ISARenderer, Register, VRegister, VSubRegister, rdefs
 from tinygrad.dtype import dtypes, PtrDType
 
-PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.GEP, Ops.STACK, Ops.INDEX}
+PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GEP, Ops.STACK, Ops.INDEX}
 
 class LinearScanRegallocContext:
-  # returns the uop that defines the virtual register
-  def vdef(self, v:Register) -> UOp: return self.uops[self.live_range[v][0]]
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = uops, ren, itertools.count()
     prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
@@ -22,18 +20,19 @@ class LinearScanRegallocContext:
     # TODO: handle alignment
     lis = self.live_intervals
     range_vars: list[VRegister] = []
+    def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
+      return tuple(r.parent if isinstance(r, VSubRegister) else r for r in rdefs(u) if isinstance(r, (VRegister, VSubRegister)))
     for u in reversed(self.uops):
-      pt, defs, uses = prgpts[u], vrdefs(u), []
-      for s in dedup(u.src): uses.extend(vrdefs(s))
-      for v in defs + tuple(uses):
-        lis.setdefault(v, []).insert(0, pt)
+      pt, defs, uses = prgpts[u], _live_units(u), []
+      for s in dedup(u.src): uses.extend(_live_units(s))
+      for v in defs + tuple(uses): lis.setdefault(v, []).insert(0, pt)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
         if (n := max((lis[rv][-1] for rv in range_vars if lis[rv][0] <= lis[v][-1] < lis[rv][-1]), default=None)): lis[v].append(n)
       if u.op is Ops.RANGE: range_vars.extend(defs)
 
-    vregs = []
     # sort by width, constraint pressure and program order
-    for u in uops: vregs.extend(vrdefs(u))
+    vregs = set()
+    for u in uops: vregs.update(_live_units(u))
     vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons)))
 
     live_ranges: dict[Vregister, tuple[int,int]] = { v: (iv[0], iv[-1]) for v,iv in lis.items() }
@@ -49,37 +48,27 @@ class LinearScanRegallocContext:
       else: # spill
         raise NotImplementedError("spilling not implemented")
 
-    # debug shit
-    for k,v in lis.items():
-      print(k, v)
-
-    for v in vregs:
-      print(v, v.width, len(v._cons), self.pmap[v])
-
-    for r,ivs in physical_slots.items():
-      print(r, ivs)
-
-
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
 
   nsrc = []
-  for j,s in enumerate(x.src): # handle spills?
-    pass
+  # what order does this happen in? src already assigned physical regs?
+  for s in x.src: # handle spills?
+    if s.op is Ops.INDEX and len((block := rdefs(s.src[0]))) >= 1:
+      nsrc.append(s.replace(tag=(block[s.src[1].arg],)))
+    else: nsrc.append(s)
 
   ndefs = []
   for v in rdefs(x):
-    if isinstance(v, VRegister): ndefs.append(ctx.pmap[v][0])
+    if isinstance(v, VRegister): ndefs.extend(ctx.pmap[v])
     if isinstance(v, VSubRegister): ndefs.append(ctx.pmap[v.parent][v.pos])
 
-  nx = x.replace(tag=tuple(ndefs))
-  print(x.op, x.arg, "new defs:", ndefs)
-  # nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
+  nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
 
   before, after = [], []
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
