@@ -147,7 +147,7 @@ def do_devectorize(b:UOp):
   return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
-  if all(x.op == Ops.STACK for x in u.src): return None
+  if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
   assert len(u.shape) == 1
   src = []
   for b in u.src:
