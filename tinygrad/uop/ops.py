@@ -1584,9 +1584,6 @@ class RewriteContext:
             while test_n is not None:
               if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
               seen.add(test_n)
-              if len(test_n.src) == 0 and (self.bpm is None or test_n.op not in self.bpm.pdict):
-                new_n, test_n = test_n, None
-                break
               new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
