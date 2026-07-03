@@ -31,7 +31,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
-    cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
+    cidx = uop_given_valid(valid, ((x//4)%cw)._stack(x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
