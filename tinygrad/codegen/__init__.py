@@ -259,7 +259,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, unbroadcast, name="*** unbroadcast")
 
   # add loads and remove invalids
-  #sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
+  #sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
   sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
 
   # devectorize
