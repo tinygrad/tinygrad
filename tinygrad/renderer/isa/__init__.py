@@ -25,7 +25,6 @@ class VSubRegister: # should this inherit?
   pos: int
   def __repr__(self): return f"{self.parent.name}.{self.pos}"
 
-# model view register dependencies through rewrites in here
 AbstractReg = Register|VRegister|VSubRegister
 def rdefs(u:UOp) -> tuple[AbstractReg,...]:
   if u.op in {Ops.AFTER, Ops.END}: return rdefs(u.src[0])

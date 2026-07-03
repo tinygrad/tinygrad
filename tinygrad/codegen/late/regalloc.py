@@ -58,15 +58,16 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc, ndefs, before, after = [], [], [], []
 
   for s in x.src: # handle spills?
-    if s.op in {Ops.INDEX, Ops.GEP} and len((block := rdefs(s.src[0]))) >= 1:
+    if s.op in {Ops.INDEX, Ops.GEP}:
       idx = s.src[1].arg if s.op is Ops.INDEX else s.arg[0]
-      nsrc.append(s.replace(tag=(block[idx],)))
+      nsrc.append(s.replace(tag=(rdefs(s.src[0])[idx],)))
     else: nsrc.append(s)
 
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.pmap[v])
     if isinstance(v, VSubRegister): ndefs.append(ctx.pmap[v.parent][v.pos])
 
+  # nx = x.replace(tag=tuple(ndefs))
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
   return nx, before + [nx] + after
 

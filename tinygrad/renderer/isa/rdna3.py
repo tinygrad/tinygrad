@@ -119,6 +119,7 @@ def _vop2(ctx, x:UOp):
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
+  if x.op is Ops.GROUP and x.src[0].op is not Ops.INS: return None
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
@@ -263,9 +264,11 @@ def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)))
-  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo)).after(lo)
-  return UOp.group(lo, hi).replace(dtype=x.dtype)
+  # after causes a problem for auto allocating group reg
+  vreg = make_vgpr(ctx, width=2)
+  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),))
+  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(vreg.sub(1),)).after(lo)
+  return UOp.group(lo, hi).replace(dtype=x.dtype, tag=(vreg,))
 
 # TODO: signed
 def mul64(ctx, x:UOp):
@@ -328,9 +331,23 @@ def castint64(ctx, y:UOp, x:UOp):
     lo = y.ins(RDNA3Ops.v_mov_b32_e32, src=(y,))
     hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
     return UOp.group(lo, hi).replace(dtype=x.dtype)
-  # casting between long/ulong and floats is more complicated, may belong in isel?
+  else:
+    if y.dtype is dtypes.float64:
+      tr = y.trunc()
+      hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32))).trunc() # hi_f = trunc(x * 2^-32)
+      lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, -(2 ** 32)), tr)) # tr - hi_f * 2 ^ 32
+      return UOp.group(lo_f.cast(dtypes.uint32), hi_f.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32)).replace(dtype=x.dtype)
+
+  print(y.dtype, x.dtype)
   raise NotImplementedError()
 
+def long2double(x:UOp):
+  lo = x.gep(0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
+  hi = x.gep(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
+  hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(dtypes.int16, 32)))
+  return lo + hi
+
+# casting between long/ulong and floats is more complicated, may belong in isel?
 def const64(x:UOp):
   v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
   return UOp.group(vmov(const(dtypes.uint32,v)), vmov(const(dtypes.uint32, v >> 32))).replace(dtype=x.dtype)
@@ -379,6 +396,7 @@ def lower_end(ctx, x:UOp):
 # TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
 # NOTE: this should just be triggered in to_vgpr????
 def gethalf(x:UOp, buf:UOp, idx:UOp):
+  i = idx.arg
   b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
   if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
@@ -423,6 +441,7 @@ pre_isel_matcher = PatternMatcher([
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), stack2regs),
+  (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
   (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
@@ -508,8 +527,7 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-  print("encoding", opc, args, kw)
-  
+
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
