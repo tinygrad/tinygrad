@@ -72,9 +72,8 @@ def expand_reduce(r:UOp):
   if len(new_axes) == 0: return None
   assert r.arg[1] == ()
   # move to the front
-  permute = tuple(new_axes) + tuple(i for i in range(r.src[0].ndim) if i not in new_axes)
   out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
-  return r.src[0].permute(permute).reduce(*range_srcs, arg=(r.arg[0], tuple(range(len(new_axes))))).reshape(out_shape)
+  return r.src[0].reduce(*range_srcs, arg=(r.arg[0], tuple(new_axes))).reshape(out_shape)
 
 def do_contract(ctx:dict[int, int], u:UOp):
   # the context is a mapping from range number (in contract) to axis number
@@ -196,9 +195,9 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   return acc.after(acc_out)
 
 def expand_horizontal_reduce(r:UOp):
-  axes = r.arg[1]
-  assert tuple(sorted(axes)) == tuple(range(len(axes))), f"bad axes on horiz reduce {axes}"
-  vals = [r.src[0].index(*idx) for idx in itertools.product(*[range(r.src[0].max_shape[a]) for a in sorted(axes)])]
+  permute = [i for i in range(len(r.src[0].shape)) if i in r.arg[1]] + [i for i in range(len(r.src[0].shape)) if i not in r.arg[1]]
+  inp = r.src[0].permute(permute)
+  vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(len(r.arg[1]))])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
