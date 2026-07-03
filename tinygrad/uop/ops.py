@@ -346,7 +346,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           axis_arg = self.arg[1]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
-          return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
+          return tuple(s for i,s in enumerate(ps) if i not in axis_arg)
 
     if self.op in GroupOp.Unary.union({Ops.CAST}):
       assert len(self.src) == 1, "unary ops must have 1 src"
@@ -559,8 +559,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    return UOp(Ops.REDUCE, self.dtype, (self,), (op, axis)) if len(axis) else self
+    # NOTE: we don't allow reduce on 1s axis
+    axis = tuple(sorted(axis))
+    reduce_axis = tuple(x for x in axis if resolve(self.shape[x] != 1))
+    ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self
+    return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
   def valid(self, cond):
@@ -629,7 +632,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src_axis = self.src[0].axis
     if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
       return None # SHRINK will remove the sharding if it's on axis
-    if self.op is Ops.REDUCE: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
+    if self.op is Ops.REDUCE:
+      if src_axis is None: return None
+      if src_axis in self.arg[1]: return None
+      return src_axis - sum(1 for a in self.arg[1] if a < src_axis)
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
       arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
