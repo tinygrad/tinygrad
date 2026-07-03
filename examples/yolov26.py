@@ -61,11 +61,11 @@ class ModuleList:
   def __iter__(self):
     return iter(self.layers)
 
-class Sequential:
+class Sequential(list):
   def __init__(self, *layers):
-    self.layers = layers
+    super().__init__(layers)
   def __call__(self,x:Tensor)->Tensor:
-    for layer in self.layers:
+    for layer in self:
       x=layer(x)
     return x
 
@@ -82,14 +82,12 @@ class Upclass:
   pass
 
 class Conv:
-  def __init__(self, ch_in:int, ch_out:int, kernel_size:int|tuple[int,...], strides:int=1, padding:tuple|int|None=None, dilation:int=1, bias:bool=False, groups:int=1, act:bool=True) -> None:
-    self.conv = Conv2d(ch_in, ch_out, kernel_size, strides, autopad(kernel_size, padding, dilation), dilation=dilation, groups=groups, bias=bias)
-    self.bn = BatchNorm2d(ch_out)
-    self.act = act
+  def __init__(self, ch_in:int, ch_out:int, kernel_size:int|tuple[int,...]=1, strides:int=1, padding:tuple|int|None=None, dilation:int=1, bias:bool=False, groups:int=1, act:bool=True) -> None:
+    self.conv = Conv2d(ch_in, ch_out, kernel_size, strides, autopad(kernel_size, padding, dilation), dilation=dilation, groups=groups, bias=False)
+    self.bn = BatchNorm2d(ch_out, eps=0.001)
   
   def __call__(self, x:Tensor)->Tensor:
-    x = self.bn(self.conv(x))
-    return x.silu() if self.act else x
+    return self.bn(self.conv(x)).silu()
 
 class Bottleneck:
   def __init__(self, c1, c2 , shortcut: bool, g=1, kernels:tuple = (3,3), channel_factor=0.5):
@@ -108,9 +106,8 @@ class C3K:
     self.cv1=Conv(c1,c_,1,1)
     self.cv2=Conv(c1,c_,1,1)
     self.cv3=Conv(2*c_,c2,1,1)
-    self.m = Sequential(
-      *(Bottleneck(c_,c_,shortcut,g,kernels=(k,k),channel_factor=1.0) for _ in range(n))
-    )
+    self.m = Sequential(*(Bottleneck(c_,c_,shortcut,g,kernels=(k,k),channel_factor=1.0) for _ in range(n)))
+    
   def __call__(self,x:Tensor)->Tensor:
     return self.cv3(self.m(self.cv1(x)).cat(self.cv2(x), dim=1))
 
@@ -119,14 +116,16 @@ class C2F:
     self.c=int(c2*e)
     self.cv1=Conv(c1,2*self.c,1,1)
     self.cv2=Conv((2+n)*self.c,c2,1,1)
-    self.m=ModuleList(*(Bottleneck(self.c,self.c,shortcut,g,kernels=((3,3),(3,3)),channel_factor=1.0) for _ in range(n)))
+    self.m=Sequential(*(Bottleneck(self.c,self.c,shortcut,g,kernels=((3,3),(3,3)),channel_factor=1.0) for _ in range(n)))
   def __call__(self,x:Tensor)->Tensor:
     y=list(self.cv1(x).chunk(2,1))
     y.extend(m(y[-1]) for m in self.m)
     return self.cv2(y[0].cat(*y[1:], dim=1))
 
+
+
 class C3K2(C2F):
-  def __init__(self,c1:int,c2:int,n:int=1,c3k:bool=False,e:float=0.5,g:int=1,shortcut:bool=True,k:int|tuple=3):
+  def __init__(self,c1:int,c2:int,n:int=1,c3k:bool=False,e:float=0.5,g:int=1,shortcut:bool=True,k:int|tuple=3,attn=False):
     """
       Initialize C3k2 module.
 
@@ -141,7 +140,17 @@ class C3K2(C2F):
     """
     super().__init__(c1,c2,n,shortcut,g,e)
     k=make_tuple(k,2) if isinstance(k,int) else k
-    self.m=ModuleList(*(C3K(self.c,self.c,2,shortcut=shortcut,g=g,k=k) if c3k else Bottleneck(self.c,self.c,shortcut,g,kernels=(k,k)) for _ in range(n)))
+    self.m = Sequential(*(
+      Sequential(
+        Bottleneck(self.c, self.c, shortcut, g),
+        PSABlock(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1)),
+      )
+      if attn else
+      C3K(self.c, self.c, 2, shortcut=shortcut, g=g, k=k)
+      if c3k else
+      Bottleneck(self.c, self.c, shortcut, g, kernels=(k, k))
+      for _ in range(n)
+    ))
 
 
 class MaxPool2d:
@@ -226,26 +235,50 @@ class C2PSA:
 
 class Backbone:
   def __init__(self, w: float, d: float, ch: int):
-    self.layers = [
+    self.b1 = [
       Conv(ch_in=3,ch_out=int(64*w),kernel_size=3,strides=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
       Conv(ch_in=int(64*w),ch_out=int(128*w),kernel_size=3,strides=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
+    ]
+    self.b2 = [
       C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
       Conv(ch_in=int(256*w),ch_out=int(256*w),kernel_size=3,strides=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
+    ]
+    self.b3 = [
       C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
       Conv(ch_in=int(512*w),ch_out=int(512*w),kernel_size=3,strides=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
+    ]
+    self.b4 = [
       C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
       Conv(ch_in=int(512*w),ch_out=int(1024*w),kernel_size=3,strides=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
-      C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [1024, True]]
+    ]
+    self.b5 = [
       SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
       C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)) # [-1, 2, C2PSA, [1024]] # 10
     ]
+    # self.layers = [
+    #   Conv(ch_in=3,ch_out=int(64*w),kernel_size=3,strides=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
+    #   Conv(ch_in=int(64*w),ch_out=int(128*w),kernel_size=3,strides=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
+    #   C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
+    #   Conv(ch_in=int(256*w),ch_out=int(256*w),kernel_size=3,strides=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
+    #   C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
+    #   Conv(ch_in=int(512*w),ch_out=int(512*w),kernel_size=3,strides=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
+    #   C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
+    #   Conv(ch_in=int(512*w),ch_out=int(1024*w),kernel_size=3,strides=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
+    #   C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [1024, True]]
+    #   SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
+    #   C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)) # [-1, 2, C2PSA, [1024]] # 10
+    # ]
+  
+  def return_modules(self):
+    return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
 
   def __call__(self, x: Tensor):
-    outputs = []
-    for layer in self.layers:
-      x = layer(x)
-      outputs.append(x)
-    return [outputs[4], outputs[6], outputs[10]]
+    x1 = x.sequential(self.b1)
+    x2 = x1.sequential(self.b2)
+    x3 = x2.sequential(self.b3)
+    x4 = x3.sequential(self.b4)
+    x5 = x4.sequential(self.b5)
+    return (x2,x3,x5)
 
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
@@ -259,29 +292,29 @@ class Upsample:
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
 
-class Head:
+class Neck:
   def __init__(self, w:int, d:int, ch:int):
-    self.up1 = Upsample(scale_factor=2, mode="nearest")
-    self.c3_13 = C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3)
+    self.up = Upsample(scale_factor=2, mode="nearest")
+    self.n1 = C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3)
+    # self.n2 = Upsample(scale_factor=2, mode="nearest")
+    self.n2 = C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3)
+    self.n3 = Conv(ch_in=int(256 * w), ch_out=int(256 * w), kernel_size=3, strides=2,)
+    self.n4 = C3K2(c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,)
+    self.n5 = Conv(ch_in=int(512 * w), ch_out=int(512 * w), kernel_size=3, strides=2,)
+    self.n6 = C3K2(c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True)
 
-    self.up2 = Upsample(scale_factor=2, mode="nearest")
-    self.c3_16 = C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3)
-    self.down1 = Conv( ch_in=int(256 * w), ch_out=int(256 * w), kernel_size=3, strides=2,)
-    self.c3_19 = C3K2( c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,)
-
-    self.down2 = Conv( ch_in=int(512 * w), ch_out=int(512 * w), kernel_size=3, strides=2,)
-
-    self.c3_22 = C3K2( c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3,)
+  def return_modules(self):
+    return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
 
   def __call__(self,p3:Tensor,p4:Tensor,p5:Tensor):
-    x = self.up1(p5).cat(p4, dim=1)
-    head_p4 = self.c3_13(x)
-    x = self.up2(head_p4).cat(p3, dim=1)
-    head_p3 = self.c3_16(x)
-    x = self.down1(head_p3).cat(head_p4, dim=1)
-    head_p4_out = self.c3_19(x)
-    x = self.down2(head_p4_out).cat(p5, dim=1)
-    head_p5_out = self.c3_22(x)
+    x = self.up(p5).cat(p4, dim=1)
+    head_p4 = self.n1(x)
+    x = self.n2(head_p4).cat(p3, dim=1)
+    head_p3 = self.n3(x)
+    x = self.n4(head_p3).cat(head_p4, dim=1)
+    head_p4_out = self.n5(x)
+    x = self.n6(head_p4_out).cat(p5, dim=1)
+    head_p5_out = self.n6(x)
     return [head_p3, head_p4_out, head_p5_out]
 
 class DFL:
@@ -348,12 +381,16 @@ class DetectionHead:
 
 class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
-    self.backbone = Backbone(w,d,ch)
-    self.head = Head(w,d,ch)
-    self.detection = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
+    self.net = Backbone(w,d,ch)
+    self.fpn= Neck(w,d,ch)
+    self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
   def __call__(self, x: Tensor)->Tensor:
-    return self.detection(self.head(*self.backbone(x)))
-
+    return self.hread(self.fpn(*self.net(x)))
+  def return_all_trainable_modules(self):
+    backbone_modules = [*range(10)]
+    yolov26neck_modules = [12,15,16,18,19,21]
+    yolov26head_weights = [(22, self.head)]
+    return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov26neck_modules, self.fpn.return_modules())]
 def get_weights_location(yolo_variant: str) -> Path:
   def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
     with open(input_file, 'rb') as f:
@@ -484,10 +521,10 @@ if __name__=="__main__":
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
+  print(f"State dict len: {state_dict.keys()}")
   print(f"State dict len: {len(state_dict.keys())}")
   x = load_state_dict(yolo_infer, state_dict)
   print(f"loaded tensors: {len(x)}")
-  sys.exit(0)
   st = time()
   predictions = yolo_infer(preprocessed_image).numpy()
   print(f'did inference in {int(round(((time() - st) * 1000)))}ms')
