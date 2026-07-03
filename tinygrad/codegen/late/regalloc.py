@@ -21,7 +21,7 @@ class LinearScanRegallocContext:
     lis = self.live_intervals
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
-      if u.op is Ops.INDEX: return _live_units(u.src[0])
+      if u.op in {Ops.INDEX, Ops.GEP}: return _live_units(u.src[0])
       return tuple(r.parent if isinstance(r, VSubRegister) else r for r in rdefs(u) if isinstance(r, (VRegister, VSubRegister)))
     for u in reversed(self.uops):
       pt, defs, uses = prgpts[u], _live_units(u), []
@@ -47,6 +47,9 @@ class LinearScanRegallocContext:
         self.pmap[v] = block
         for r in block: physical_slots.setdefault(r, []).append(live_ranges[v])
       else: # spill
+        # spilling requires a few things:
+        # - pass offset into spill space of spilled register to load/store in rewrite
+        # - identify...
         raise NotImplementedError("spilling not implemented")
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):

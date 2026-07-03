@@ -22,7 +22,6 @@ insdefs = [
   (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
   (Ops.EXP2, "v_exp", ["f16_e32", "f32_e32"], False),
   (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.SIN, "v_sin", ["f16_e32", "f32_e32"], False),
   (Ops.MAX, "v_max", ["f16_e32", "f32_e32", "u16", "i16", "u32_e32", "i32_e32"], False),
   (Ops.TRUNC, "v_trunc", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "i32"], True),
@@ -64,6 +63,7 @@ def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
+def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -84,28 +84,16 @@ def packb16(ctx, lo:UOp, hi:UOp):
   lo = lo & const(dtypes.uint32, 0xFFFF) # mask off upper half
   return _vop3(ctx, UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(dtypes.int, 16), lo)))
 
-def stack2regs(ctx, x:UOp, vreg:VRegister):
+def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
   for i in range(nregs):
-    if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]).replace(tag=(vreg.sub(i),)))
-    else: mvs.append(x.src[i].ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[i],), tag=(vreg.sub(i),)))
-  return UOp.group(*mvs).replace(tag=vreg)
+    if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
+    else: mvs.append(vmov(x.src[i]))
+  nx = UOp.group(*mvs).replace(dtype=x.src[0].dtype)
+  if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
+  return nx
 
-# TODO: Handle 64 bit inputs
-# NOTE: handle sgpr?
-def to_vgpr(ctx, x:UOp) -> UOp:
-  if x.op is Ops.CONST:
-    # NOTE: need underpromo dict, just assume uint for now
-    if x.dtype.itemsize == 8: 
-      v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
-      lo, hi = const(dtypes.uint32,v), const(dtypes.uint32, v >> 32)
-      return to_vgpr(ctx, UOp(Ops.STACK, src=(lo,hi)))
-    return x.ins(RDNA3Ops.v_mov_b32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_mov_b16_e32, src=(x,))
-  elif x.op is Ops.STACK:
-    nregs = ((len(x.src) * x.dtype.itemsize)+3)//4
-    vreg = make_vgpr(ctx, width=nregs)
-    return stack2regs(ctx, x, vreg)
-  return x
+def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if x.op is Ops.CONST else x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
 # ---- operand legalization wrappers ----
@@ -134,8 +122,13 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
-  if isinstance(x.tag, tuple):
-    assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
+  if isinstance(x.tag, tuple): assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
+
+  if x.op is Ops.GROUP:
+    sgpr = x.src[0].arg.func.__name__[0] == 'S'
+    vreg = ctx.vreg(GP_SGPRS if sgpr else GP_VGPRS, width=len(x.src))
+    return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
+
   defs = []
   if isinstance(x.tag, tuple):
     cons, width = x.tag, 1
@@ -270,12 +263,9 @@ def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  # need to alloc 64b buf to store into
-  v1,v2 = make_vgpr(ctx, width=2)
-  # v1,v2 = ctx.vreg((GP_VGPRS,2)) # make a standard/consistent way to do this 
-  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(v1,))
-  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(v2,)).after(lo)
-  return UOp.group(lo, hi)
+  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)))
+  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo)).after(lo)
+  return UOp.group(lo, hi).replace(dtype=x.dtype)
 
 # TODO: signed
 def mul64(ctx, x:UOp):
@@ -287,14 +277,15 @@ def mul64(ctx, x:UOp):
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  vreg = make_vgpr(ctx, width=2)
-  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),)) 
-  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)), tag=(vreg.sub(1),))
-  return UOp.group(lo,hi).replace(tag=(vreg,))
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)))
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+  return UOp.group(lo,hi).replace(dtype=x.dtype)
 
 # cdiv of int types needs to be converted to float then cast back after ceil op
 # NOTE: we need to cast to float version of this bitwidth..., start with just 32
+# https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Utils/IntegerDivision.cpp
 def cdiv(x:UOp):
+  raise NotImplementedError()
   a,b = [u.cast(dtypes.float32) for u in x.src]
   c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_trunc_f32_e32, src=(a.div(b),))
   return c.cast(x.dtype)
@@ -334,12 +325,15 @@ def widenshort(y:UOp, x:UOp):
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
   if y.dtype in dtypes.ints + dtypes.uints:
-    vreg = make_vgpr(ctx, width=2)
-    lo = y.ins(RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(0),), src=(y,))
-    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, tag=(vreg.sub(1),), src=(const(dtypes.uint32,0),))
-    return UOp.group(lo, hi).replace(tag=vreg)
+    lo = y.ins(RDNA3Ops.v_mov_b32_e32, src=(y,))
+    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+    return UOp.group(lo, hi).replace(dtype=x.dtype)
   # casting between long/ulong and floats is more complicated, may belong in isel?
   raise NotImplementedError()
+
+def const64(x:UOp):
+  v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
+  return UOp.group(vmov(const(dtypes.uint32,v)), vmov(const(dtypes.uint32, v >> 32))).replace(dtype=x.dtype)
 
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
@@ -381,9 +375,7 @@ def lower_end(ctx, x:UOp):
   loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return inc, [inc, gate, loop, restoreexec(x.src[-1])]
 
-
 # --- other stuff ---
-
 # TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
 # NOTE: this should just be triggered in to_vgpr????
 def gethalf(x:UOp, buf:UOp, idx:UOp):
@@ -395,12 +387,10 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
 
-
 # ---- lowering passes ----
-
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
-  # bitcast is noop?
+  # bitcast is noop? 
   (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
@@ -426,11 +416,13 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=dtypes.float32).cast((dtypes.uint16,dtypes.int16), name="x"), lambda y,x: y.cast(dtypes.uint32 if x.dtype is dtypes.uint16 else dtypes.int32)),
   # this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
+  (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
 ])
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
@@ -463,7 +455,7 @@ isel_matcher = PatternMatcher([
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.GROUP, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
 pre_regalloc_matcher = PatternMatcher([
@@ -515,6 +507,8 @@ def encode(ctx, x:UOp):
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
+
+  print("encoding", opc, args, kw)
   
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
@@ -539,7 +533,7 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.SIN, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
@@ -579,7 +573,7 @@ class RDNA3Renderer(ISARenderer):
         for r in rdefs(u): tosync.setdefault(r,(ctp,[]))[1].append((i,bld_cntstate[ctp]))
       bld_cntstate[ctp] += 1
 
-    # NOTE: broken
+    # NOTE: broken, needs to be CFG based (control flow aware, ex. insert wait before loop restart)
     for i, u in enumerate(lin.src):
       if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[_counter(u)] += 1
       deps = [r for s in u.src for r in rdefs(s) if r in tosync]
