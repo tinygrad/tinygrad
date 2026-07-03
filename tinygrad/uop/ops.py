@@ -293,7 +293,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         in0, in1, out0 = self.arg[6]
         wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
         return wmma_b + (prod([x for _,x in out0]),)
-      #case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
+      case Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
