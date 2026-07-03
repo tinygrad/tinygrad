@@ -111,6 +111,7 @@ docs = [
   "black",
   "numpy",
 ]
+mesa = ["tinymesa==25.2.7.2"]
 
 
 [tool.mutmut]

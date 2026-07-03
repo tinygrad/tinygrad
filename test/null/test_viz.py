@@ -215,6 +215,23 @@ class TestViz(unittest.TestCase):
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
 
+  def test_walk_rewrite(self):
+    from tinygrad.uop.ops import _substitute
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      graph_rewrite(a + 4, TrackedPatternMatcher(_substitute.patterns), {a:a+1}, walk=True)
+    list(viz.get_details(0, 0))
+
+  def test_enter_calls_rewrite(self):
+    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
+    with save_viz() as viz:
+      inner = UOp.const(dtypes.int, 3)
+      func = UOp(Ops.FUNCTION, src=(UOp(Ops.SINK, src=(inner,)),))
+      call = UOp(Ops.CALL, src=(func,))
+      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+    details = list(viz.get_details(0, 0))
+    self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
+
   def test_const_node_visibility(self):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
@@ -485,7 +502,7 @@ class TestVizIntegration(unittest.TestCase):
     binary = Device["CPU"].renderer.compiler.compile(src)
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
                                    UOp(Ops.BINARY, arg=binary)))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
     with save_viz() as viz:
@@ -809,7 +826,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with save_viz() as viz:
       with Context(DEV=f"NULL::{self.arch}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
@@ -1094,8 +1111,10 @@ class TestCLI(unittest.TestCase):
     with write_files(viz) as files, Context(NO_COLOR=1):
       flat = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end")
       aggregate = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end", "-t")
+      final = run_cli(*files, "-s", "NULL", "--interval", "interval_end", "-t")
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
+    assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
 
 if __name__ == "__main__":
   unittest.main()

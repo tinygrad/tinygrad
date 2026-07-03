@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ''  # if you don't set a key, it doesn't cache
   deps:
-    description: 'Extra dependency groups (comma separated)'
+    description: 'Extra dependency groups (space separated)'
     required: false
     default: ''
   pydeps:
@@ -39,10 +39,6 @@ inputs:
     default: 'false'
   llvm:
     description: "Install LLVM?"
-    required: false
-    default: 'false'
-  mesa:
-    description: "Install mesa (true, false, cpu)"
     required: false
     default: 'false'
   tinydreno:
@@ -114,7 +110,8 @@ runs:
       shell: bash
       run: |
         uv venv .venv
-        uv pip install --python .venv -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        DEPS="${{ inputs.deps }}"
+        uv pip install --python .venv -e ".[${DEPS// /,}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == ''
       shell: bash
@@ -285,16 +282,6 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
-
-    # **** mesa ****
-    - name: Install mesa (linux)
-      if: inputs.mesa != 'false' && runner.os == 'Linux'
-      shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}.so
-    - name: Install mesa (macOS)
-      if: inputs.mesa != 'false' && runner.os == 'macOS'
-      shell: bash
-      run: brew install sirhcm/tinymesa/tinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}
 
     # *** tinydreno ***
     - name: Install tinydreno (linux)

@@ -63,7 +63,7 @@ class TestCStyleFailures(unittest.TestCase):
     for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
     linear = ret.schedule_linear()
     assert len(linear.src) == 1
-    src = to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[3].arg
+    src = to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[2].arg
     self.assertEqual("("*5 not in src, should_strip_paren)
 
   def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)

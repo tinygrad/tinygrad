@@ -35,19 +35,17 @@ class TestGraphRewriteConst(unittest.TestCase):
     self.assertEqual(ret.arg, 4)
 
   def test_add_const(self):
-    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
-    v2 = UOp.const(dtypes.int.vec(3), (5,6,7))
+    v1 = UOp.const(dtypes.int, (0,1,2))
+    v2 = UOp.const(dtypes.int, (5,6,7))
     ret = graph_rewrite(v1+v2, sym)
     self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(const_values(ret), (5,7,9))
 
   def test_add_const_lose_v(self):
-    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
-    v2 = UOp.const(dtypes.int.vec(3), (2,1,0))
+    v1 = UOp.const(dtypes.int, (0,1,2))
+    v2 = UOp.const(dtypes.int, (2,1,0))
     ret = graph_rewrite(v1+v2, sym)
     self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(const_values(ret), (2,2,2))
 
 def xfail_broken_const_wraparound(fn):
