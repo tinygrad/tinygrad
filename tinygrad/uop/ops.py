@@ -64,6 +64,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  if all_same(shapes): return shapes[0]
   shaped_aligned_left = _align_left(*shapes)
   ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
   if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
@@ -129,9 +130,13 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    if self.nm in x.__dict__: return x.__dict__[self.nm]
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    if (nm:=self.nm) in x.__dict__: return x.__dict__[nm]
+    stack = [x]
+    while stack:
+      if nm in (n:=stack[-1]).__dict__: stack.pop()
+      elif todo:=[s for s in n.src if nm not in s.__dict__]: stack.extend(todo)
+      else: n.__dict__[nm] = self.fxn(stack.pop())
+    return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
@@ -1353,7 +1358,7 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None):
-    if len(pats:=self.pdict.get(uop.op, [])):
+    if pats:=self.pdict.get(uop.op):
       if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
         if not early_reject.issubset(ler): continue
@@ -1560,10 +1565,12 @@ class RewriteContext:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
+    replace, ctx, stack_limit = self.replace, self.ctx, REWRITE_STACK_LIMIT.value
+    pm_rewrite = self.pm.rewrite if self.pm is not None else None
     while stack:
-      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
-      if n in self.replace: continue  # skip any nodes we have seen
+      if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if self.bpm is not None:
@@ -1577,14 +1584,14 @@ class RewriteContext:
               new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = unwrap(test_n)
+            replace[n] = unwrap(test_n)
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[new_n.src[0]] = new_n.src[0]
+        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1592,7 +1599,7 @@ class RewriteContext:
       elif stage == 1:
         tmp = []
         for x in new_n.src:
-          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+          if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))
             break
@@ -1601,8 +1608,8 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
-              self.replace[n] = new_n
+            if pm_rewrite is None or (new_src_n:=pm_rewrite(new_n, ctx)) is None:
+              replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
@@ -1613,14 +1620,14 @@ class RewriteContext:
           stack.append((new_src_n, 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
-        if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
+        if (replaced_new_n:=replace.get(new_n, SENTINEL)) is SENTINEL:
           # not ready: register in waitlist instead of spinning
           waitlist.setdefault(new_n, []).append((n, 2, new_n))
         else:
           # otherwise we are done
-          self.replace[n] = replaced_new_n
+          replace[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
-    return self.replace[root]
+    return replace[root]
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
