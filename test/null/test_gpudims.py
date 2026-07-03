@@ -94,6 +94,17 @@ class TestGroupedDims(unittest.TestCase):
     assert idxs[2].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[2].op}"
     assert idxs[3].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[3].op}"
 
+  def test_grouped_dims_high_rank(self):
+    # 4D collapsed onto 2 axes
+    self._check_grouped_dims("gidx", (4,4,4,4), (16,16), False, [16,16])
+    # 4D untouched
+    self._check_grouped_dims("gidx", (2,3,4,5), None, False, [2,3,4,5])
+    idxs = get_grouped_dims("gidx", (2,3,4,5), None, False)
+    assert all(u.op is Ops.SPECIAL for u in idxs), f"expected all-SPECIAL when untouched, got {[u.op for u in idxs]}"
+    # 5D and 6D collapsed onto 3 axes
+    self._check_grouped_dims("gidx", (2,2,2,2,2), (4,4,4), False, [4,4,2])
+    self._check_grouped_dims("gidx", (2,2,2,2,2,2), (8,8,8), False, [8,4,2])
+
   def test_global_prod_max(self):
     g, l = UOp.range(256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
     sink = UOp.param(0, dtypes.float.ptr()).index(g + l).store(UOp.const(dtypes.float, 1.0)).end(g, l).sink(arg=KernelInfo())
