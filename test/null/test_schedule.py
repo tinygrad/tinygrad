@@ -861,10 +861,6 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.rand(32)
     check_schedule(x, 1, [Tensor._device_rng_counters[x.device]])
 
-  def test_rand_recompute_arange(self):
-    x = Tensor.rand(32)
-    check_schedule(x, 1, [Tensor._device_rng_counters[x.device]])
-
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2

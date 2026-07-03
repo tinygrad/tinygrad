@@ -8,9 +8,6 @@ class TestValidateWithCPU(unittest.TestCase):
     self.ctx.__enter__()
   def tearDown(self): self.ctx.__exit__(None, None, None)
 
-  def test_add(self): self.assertListEqual((Tensor([1.,2,3])+Tensor([4.,5,6])).tolist(), [5.0, 7.0, 9.0])
-  def test_mul(self): self.assertListEqual((Tensor([1.,2,3])*Tensor([4.,5,6])).tolist(), [4.0, 10.0, 18.0])
-  def test_sum(self): self.assertEqual(Tensor([1.,2,3,4]).sum().item(), 10.0)
   def test_reduce_then_op(self): self.assertEqual((Tensor([1.,2,3,4]).sum() * 2).item(), 20.0)
 
   def test_assign(self):

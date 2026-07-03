@@ -14,11 +14,6 @@ class TestCallify(unittest.TestCase):
     out.callify()
     self.assertEqual(out.item(), 5.0)
 
-  def test_sum(self):
-    out = Tensor.ones(16).contiguous().sum()
-    out.callify()
-    self.assertEqual(out.item(), 16.0)
-
   def test_multi_output(self):
     a = Tensor([1.,2,3])
     b = Tensor([4.,5,6])

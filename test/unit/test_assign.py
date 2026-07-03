@@ -399,25 +399,6 @@ class TestAssign(unittest.TestCase):
     a.assign(rhs+b)  # self-assign with reshape view is fine
     np.testing.assert_allclose(a.numpy(), new_a)
 
-  @unittest.skip("multi output not supported anymore")
-  def test_simple_assignment_multioutput(self):
-    a = Tensor.arange(32*32).reshape(32, 32).clone().realize()
-    b = Tensor.full((32, ), 1.).contiguous().realize()
-    c = Tensor.full((32, ), 2.).contiguous().realize()
-    d = Tensor.full((32, ), 3.).contiguous().realize()
-
-    r = a.sum(axis=1)
-    b.assign(r + b)
-    c.assign(r + c)
-    d.assign(r + d)
-
-    GlobalCounters.reset()
-    Tensor.realize(b, c, d)
-    self.assertEqual(GlobalCounters.kernel_count, 1)
-    np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
-    np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
-    np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
-
   # NOTE: if the assign target is read/write in a single kernel, it should be contiguous
 
   def test_permuted_assignment_correct(self):
@@ -435,35 +416,6 @@ class TestAssign(unittest.TestCase):
     b.assign(r + b.permute(1, 0))
     b.realize()
     np.testing.assert_equal(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32), dtype=np.int32).transpose(1, 0))
-
-  @unittest.skip("multi output not supported anymore")
-  def test_permuted_reduceop_multioutput_dual_use(self):
-    a = Tensor.arange(32*32*32).reshape(32, 32, 32).clone().realize()
-    b = Tensor.full((32, 32), 1.).contiguous().realize()
-    c = Tensor.full((32, 32), 2.).contiguous().realize()
-
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      r = a.sum(axis=1)
-      b_perm = b.permute(1, 0)
-      b.assign(r + b)
-      c.assign(r + b_perm)
-      Tensor.realize(b, c)
-
-  @unittest.skip("multi output not supported anymore")
-  def test_permuted_reduceop_multioutput_dual_use_possible(self):
-    a = Tensor.arange(32*32*32).reshape(32, 32, 32).clone().realize()
-    b = Tensor.arange(32 * 32).reshape(32, 32).clone().realize()
-    c = Tensor.arange(32 * 32).reshape(32, 32).clone().realize()
-
-    GlobalCounters.reset()
-    r = a.sum(axis=1)
-    b_perm = b.permute(1, 0)
-    b.assign(r + b)
-    c.assign(r + b_perm.contiguous())
-    Tensor.realize(b, c)
-    self.assertEqual(GlobalCounters.kernel_count, 2)
-    np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
-    np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
 
   def test_permuted_assignment_masked_view_possible(self):
     a = Tensor.ones(4, 4).contiguous().realize()

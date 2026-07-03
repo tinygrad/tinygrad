@@ -432,17 +432,6 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises((AssertionError, ValueError)):
       t0.reshape((26*15,7)).contiguous().schedule_linear()
 
-  # it doesn't work like this anymore
-  # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
-  @unittest.skip("this test is broken")
-  def test_mlb_assign_change_axis(self):
-    t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
-    t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-    with self.assertRaises(RuntimeError):
-      # don't allow assigns that change axes
-      t_none.assign(t_zero)
-      t_none.schedule_linear()
-
   def test_init_rand_with_multiple_devices_fail(self):
     # init rand with multi device is not allowed
     with self.assertRaises(ValueError):
