@@ -1531,18 +1531,12 @@ class RewriteContext:
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
     return ret
 
-  def can_skip_leaf(self, x:UOp) -> bool:
-    return len(x.src) == 0 and (self.pm is None or x.op not in self.pm.pdict) and (self.bpm is None or x.op not in self.bpm.pdict)
-
   def walk_rewrite(self, root:UOp) -> UOp:
     """MLIR-style Walk Pattern Rewrite Driver: single-pass, no re-traversal into rewritten subtrees."""
     stack: list[tuple[UOp, bool]] = [(root, False)]
     while stack:
       n, processed = stack.pop()
       if n in self.replace: continue
-      if self.can_skip_leaf(n):
-        self.replace[n] = n
-        continue
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
         if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
@@ -1570,10 +1564,6 @@ class RewriteContext:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0 and self.can_skip_leaf(n):
-        self.replace[n] = n
-        if n in waitlist: stack.extend(waitlist.pop(n))
-        continue
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if self.bpm is not None:
