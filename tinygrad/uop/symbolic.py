@@ -4,11 +4,10 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
+from tinygrad.uop.divandmod import div_and_mod_symbolic
 
 # TODO: symbolic shouldn't be importing from codegen
-from tinygrad.codegen.decomp.op import threefry2x32
 from tinygrad.codegen.decomp.transcendental import xpow
-from tinygrad.codegen.decomp.divandmod import div_and_mod_symbolic
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
@@ -130,9 +129,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
    lambda x: x.vconst_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
-  (UPat(Ops.THREEFRY, src=(UPat.cvar("x"), UPat.cvar("key")), name="a"),
-   lambda a, x, key: a.const_like(threefry2x32(x, key).simplify().arg)),
   (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),

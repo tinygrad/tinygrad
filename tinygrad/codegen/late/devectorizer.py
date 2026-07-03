@@ -39,7 +39,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
   if not isinstance(buf.dtype, ImageDType): return None
-  start_idx = UOp.vectorize(idx_x, idx_y)
+  start_idx = idx_x._stack(idx_y)
   idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf.dtype.shape[0], buf.dtype.shape[1])
 
