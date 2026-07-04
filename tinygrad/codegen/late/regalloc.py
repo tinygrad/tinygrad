@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, VSubRegister, rdefs
 from tinygrad.dtype import dtypes, PtrDType
 
-PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GEP, Ops.STACK, Ops.INDEX}
+PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK, Ops.INDEX}
 
 class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
@@ -20,7 +20,7 @@ class LinearScanRegallocContext:
     lis = self.live_intervals
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
-      if u.op in {Ops.INDEX, Ops.GEP}: return _live_units(u.src[0])
+      if u.op is Ops.INDEX: return _live_units(u.src[0])
       return tuple(r.parent if isinstance(r, VSubRegister) else r for r in rdefs(u) if isinstance(r, (VRegister, VSubRegister)))
     for u in reversed(self.uops):
       pt, defs, uses = prgpts[u], _live_units(u), []
@@ -57,9 +57,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc, ndefs, before, after = [], [], [], []
 
   for s in x.src: # handle spills?
-    if s.op in {Ops.INDEX, Ops.GEP}:
-      idx = s.src[1].arg if s.op is Ops.INDEX else s.arg[0]
-      nsrc.append(s.replace(tag=(rdefs(s.src[0])[idx],)))
+    if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
 
   for v in rdefs(x):

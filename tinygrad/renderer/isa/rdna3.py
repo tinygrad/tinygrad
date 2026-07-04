@@ -229,7 +229,6 @@ def regstore(addr:UOp, x:UOp):
   return nx, [nx]
 
 # ------ ALU ------
-
 def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
   def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
   if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
@@ -238,8 +237,8 @@ def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
     return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
   elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
     src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
-    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.gep(0),))
-    else: return y.gep(0)
+    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
+    else: return y.index(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
 # NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
@@ -268,8 +267,8 @@ def add64(ctx, x:UOp):
   a, b = x.src
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   vreg = make_vgpr(ctx, width=2) # NOTE: after causes a problem for auto allocating group reg
-  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),))
-  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
+  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_add_co_u32, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
+  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
 # TODO: signed
@@ -277,14 +276,14 @@ def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
   a, b = x.src
   mad = RDNA3Ops.v_mad_u64_u32 if dtypes.is_unsigned(x.dtype) else RDNA3Ops.v_mad_i64_i32
-  p1 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(0), b.gep(0), const(x.dtype,0)))
-  p2 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(1), b.gep(0), p1))
-  return UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(0), b.gep(1), p2))
+  p1 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(0), b.index(0), const(x.dtype,0)))
+  p2 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(1), b.index(0), p1))
+  return UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(0), b.index(1), p2))
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)))
-  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(0), b.index(0)))
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
   return multireg(lo, hi, dtype=x.dtype)
 
 # Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
@@ -353,8 +352,8 @@ def castint64(ctx, y:UOp, x:UOp):
   raise NotImplementedError()
 
 def long2double(x:UOp):
-  lo = x.gep(0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
-  hi = x.gep(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
+  lo = x.index(0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
+  hi = x.index(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(dtypes.int16, 32)))
   return lo + hi
 
@@ -437,7 +436,7 @@ pre_isel_matcher = PatternMatcher([
   # cast rewrites
   # u64/i64 -> f32 = take lo then cast
   (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half, dtypes.short, dtypes.ushort, dtypes.int, dtypes.uint), name="x"),
-    lambda y,x: y.gep(0).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).cast(x.dtype)),
+    lambda y,x: y.index(0).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).cast(x.dtype)),
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.uint32, dtypes.int32, dtypes.float32,dtypes.float64)), widenshort),
   # (f16 -> f64/i32/u32 ) to (f16 -> f32 -> f64/i32/u32)
   (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
