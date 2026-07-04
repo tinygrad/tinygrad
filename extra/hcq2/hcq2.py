@@ -192,10 +192,10 @@ class HCQInfo:
 # *****************
 # 0.1. prep: replace buffers with params
 
-def replace_buffer(ctx:list[UOp], b:UOp) -> UOp:
-  if b not in ctx: ctx.append(b)
-  return b.param_like(ctx.index(b))
-pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
+def replace_call_buffers(ctx:list[UOp], call:UOp) -> UOp|None:
+  ctx += [s for s in dedup(call.src[1:]) if s not in ctx and s.op not in (Ops.PARAM, Ops.BIND)]
+  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(ctx.index(s)) for s in call.src[1:]))
+pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
 
 # *****************
 # 1.1. prep: staging copies
@@ -235,18 +235,16 @@ pm_tag_hcq_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), tag_hcq_calls)]
 # C programs reserve and bump timeline values, then patch command buffers with the concrete wait/signal values.
 
 class HCQDepsTracker(DepsTracker):
-  def _key(self, u:UOp) -> tuple[Any, int, int]:
-    if u.op is Ops.MSELECT and u.src[0].op is Ops.MSTACK: return self._key(u.src[0].src[u.arg])
-    if u.op is Ops.MSELECT: return ((r:=self._key(u.src[0]))[0], u.arg), r[1], r[2]
-    if u.op is Ops.SLICE: return (r:=self._key(u.src[0]))[0], r[1]+(o:=u.src[1].arg*u.dtype.itemsize), r[1]+o+u.arg*u.dtype.itemsize
-    return (u.arg.slot, u.arg.name), 0, u.max_numel() * u.dtype.base.itemsize
+  @staticmethod
+  def _key(buf:Any) -> tuple[Any, int, int]:
+    return (buf.arg.slot, 0, buf.max_numel() * buf.dtype.base.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
 
 def make_deps(u:UOp, dep_lanes:list[tuple[UOp, int, int]], nlanes:int) -> UOp:
   deps:dict[UOp, list[int|None]] = collections.defaultdict(lambda: [None]*nlanes)
   for dep, dlane, lane in dep_lanes: deps[dep][lane] = dlane
   return u.after(*deps, arg=tuple(tuple(v) for v in deps.values()))
 
-def sched_sync(ctx:HCQDepsTracker, call:UOp) -> UOp|None:
+def sched_sync(ctx:DepsTracker, call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo): return None
 
   refs = get_call_arg_uops(call)
@@ -255,7 +253,7 @@ def sched_sync(ctx:HCQDepsTracker, call:UOp) -> UOp|None:
 
   dep_lanes:list[tuple[UOp, int, int]] = []
   for lane, d in enumerate(devices):
-    lane_refs = [b.mselect(lane) for b in refs] if len(devices) > 1 else refs
+    lane_refs = [b if b.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs]
     for dep, dlane in ctx.access_resources(lane_refs, outs, (call, lane)): dep_lanes.append((dep, dlane, lane))
 
   if devices[0].split(":")[0] in {"AMD", "QCOM"} or queue.startswith("COPY"):
@@ -531,9 +529,11 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
 
   if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
     # schedule
+    linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
     linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
     linear = graph_rewrite(linear, pm_tag_hcq_calls, ctx=(enumerator:=itertools.count(0)), walk=True, name="tag hcq calls")
-    linear = graph_rewrite(linear, pm_sched_sync, ctx=(deps_ctx:=HCQDepsTracker()), walk=True, name="schedule sync")
+    linear = graph_rewrite(linear, pm_sched_sync, ctx=HCQDepsTracker(), walk=True, name="schedule sync")
+    linear = linear.substitute({s: p for p, s in back_map.items()}, walk=True)
     linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
     linear = graph_rewrite(linear, pm_add_finalizer, ctx=enumerator, walk=True, name="add finalizer")
     linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
