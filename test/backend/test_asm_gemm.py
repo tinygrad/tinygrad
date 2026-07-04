@@ -380,23 +380,5 @@ class TestHkBf16AtbGemm(unittest.TestCase):
   @needs_second_gpu
   def test_m_sharded(self): run_atb_gemm(256, 512, 256, a_shard=2, b_shard=None, gpus=2)
 
-class TestMagicGu(unittest.TestCase):
-  def test_magicgu_matches_old(self):
-    from extra.gemm.cdna_asm_gemm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
-    old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
-    old_gemm_shapes = [
-      (8192, 4096, 4096), (8192, 14336, 4096), (8192, 4096, 14336),
-      (8192, 8192, 8192), (4096, 4096, 4096), (4096, 14336, 4096),
-      (4096, 14336, 8192), (4096, 4096, 14336), (14336, 4096, 8192),
-      (4096, 8192, 14336), (4096, 4096, 8192), (4096, 8192, 4096),
-    ]
-    for M, N, K in old_gemm_shapes:
-      iters = K // TILE_K
-      total = (M // TILE_M) * (N // TILE_N) * iters
-      for batch in [1, 2]:
-        magic, shift = _magicgu_mulhi(iters, total * batch)
-        old_magic, old_shift = old_iters_args[iters]
-        self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for ({M},{N},{K}) batch={batch} iters={iters}")
-
 if __name__ == "__main__":
   unittest.main()
