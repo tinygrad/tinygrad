@@ -83,7 +83,7 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
-  # lower SHAPED_WMMA to WMMA with CONTRACT/UNROLL
+  # lower SHAPED_WMMA to WMMA
   (UPat(Ops.SHAPED_WMMA, name="x"), lower_shaped_wmma),
 ])
 

@@ -261,8 +261,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return self.src[0].shape
         else:
           return (len(self.src),) + self.src[0].shape
-      # TODO: contract and unroll should be deleted
-      case Ops.CONST | Ops.CONTRACT | Ops.UNROLL:
+      case Ops.CONST:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # some ops init the shape
@@ -385,9 +384,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
-    if self.op is Ops.CONTRACT:
-      contract_rng_ids = {rng_id for rng_id, _ in self.arg}
-      return tuple(r for r in self.src[0].ranges if r.op is Ops.RANGE and r.arg[0] in contract_rng_ids)
     return ()
 
   # determine what ranges this is in
@@ -525,7 +521,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
-    return UOp(Ops.CONTRACT, dtype=self.dtype.vec(prod([x.vmax+1 for x in rngs])), src=(self,), arg=tuple((x.arg[0], x.vmax+1) for x in rngs))
+    return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
+                           for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs):
     all_srcs = (self, *src)
     # broadcast shaped operands to a common shape (None and () are falsy, so only real shapes participate)
@@ -979,7 +976,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
-    if self.op in {Ops.UNROLL, Ops.STACK}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
+    if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.INDEX and not isinstance(self.src[0].dtype, PtrDType): return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified

@@ -140,7 +140,7 @@ def param_to_multi(p:UOp):
   if p.axis is None: return None
   return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
 
-# NOTE: this is the same pattern as Ops.UNROLL
+# NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
