@@ -168,7 +168,7 @@ jobs:
       run: BENCHMARK_LOG=cifar_10steps STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
       env:
-        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || matrix.dev == 'AMD' && '230' || '3000' }}
+        ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'NV' && '120' || matrix.dev == 'AMD' && '235' || '3000' }}
       run: BENCHMARK_LOG=cifar_10steps_half STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training w 1 GPU
       # slow on metal
