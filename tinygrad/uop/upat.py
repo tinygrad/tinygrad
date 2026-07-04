@@ -33,7 +33,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
-      and_clause += [_get_clause(s, base.gep(i), depth) for i,s in enumerate(self.src[0])]
+      and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.NOOP, arg=f"ituop{depth}")
@@ -41,7 +41,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       and_clause.append(UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
-      fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.gep(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
+      fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
   return UOp(Ops.AND, src=tuple(and_clause))

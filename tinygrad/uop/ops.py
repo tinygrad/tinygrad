@@ -466,7 +466,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def vectorize(self, *srcs): return self._stack(*srcs)
   def index(self, *srcs:UOp|int|None, ptr=False, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in srcs if x is not None]
-    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple(new_srcs), **kwargs)
+    if not ptr and len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK:
+      return self.src[new_srcs[0].arg]
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base.scalar()), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
@@ -511,14 +513,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def bitcast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
     return self if self.dtype == dtype else UOp(Ops.BITCAST, dtype, (self,))
-  def gep(self, i:tuple[int, ...]|int):
-    if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
-    if isinstance(i, int):
-      # NOTE: these are just shortcuts to not have to create and fold later
-      if self.op is Ops.STACK: return self.src[i]
-      if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
-      return UOp(Ops.INDEX, self.dtype.scalar(), (self, UOp.const(dtypes.int, i)))
-    return UOp(Ops.STACK, self.dtype.scalar().vec(len(i)), tuple(self.gep(x) for x in i))
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())

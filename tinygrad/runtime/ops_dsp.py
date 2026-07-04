@@ -13,7 +13,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat
 
 dsp_pm = PatternMatcher([
   (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
-   lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(x.gep(tuple(range(i, i+32))) for i in range(0, 128, 32)),
+   lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(UOp.vectorize(*[x.index(j) for j in range(i, i+32)]) for i in range(0, 128, 32)),
      arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
 ])
 

@@ -38,7 +38,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # if no candidates, we don't rewrite
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
-  h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
+  h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
   buf = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4)))
   shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.arg is not True:
