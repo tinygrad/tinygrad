@@ -825,6 +825,26 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((x//10)*10 + x%10, 0, 119, "(a*10+(a+b//5)//2*10+(b+a*5)%10)")
     self.helper_test_variable((x//10)*2 + (x//5)%2, 0, 23, "(a*3+b//5)")
 
+  def test_div_mod_recombine_merged_quotient(self):
+    # recombine finds the quotient base//div even when stored merged as base0//(d0*div), including with an offset
+    x = Variable("x", 0, 199)
+    self.helper_test_variable(((x//3)%4)*2 + ((x//12)%5)*8, 0, 38, "x//3%20*2")  # nested-merged quotient
+    self.helper_test_variable(((x//3 + 1)%4) + ((x+3)//12)*4, 1, 67, "x//3+1")   # offset-merged quotient
+
+  def test_div_mod_recombine_negative_div(self):
+    # partial recombine only needs d>0, div can be negative: (x%div) + ((x//div)%d)*div -> x%(div*d)
+    x = Variable("x", 0, 199)
+    self.helper_test_variable(x%(-3) + ((x//(-3))%5)*(-3), -14, 0, "x%-15")
+
+  def test_div_mod_recombine_shifted_quotient(self):
+    # when vmin<0 blocks const reduction on the mod side, the quotient is stored const-shifted: (x-50)//3 -> (x+1)//3 - 17.
+    # recombine only needs a quotient of some b congruent to base mod div, so the shift folds into the result
+    x = Variable("x", 0, 100)
+    y = Variable("y", 0, 99)
+    self.helper_test_variable((x-50)%3 + ((x-50)//3)*3, -50, 50, "(x+-50)")                # shifted literal quotient
+    self.helper_test_variable((x-50)%3 + (((x-50)//3)%5)*3, 0, 14, "((x+-50)%15)")         # shift inside the partial's mod
+    self.helper_test_variable(((y-50)//5)%4 + ((y-50)//20)*4, -10, 9, "(y//5+-10)")        # merged and shifted
+
   def test_div_mod_recombine_in_additive_sum(self):
     x = Variable("x", 0, 31)
     y = Variable("y", 0, 5)
