@@ -38,7 +38,7 @@ class Ops(FastEnum):
   SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
-  GEP = auto(); STACK = auto()
+  STACK = auto()
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()

@@ -33,7 +33,7 @@ def hand_spec_tc_cores():
   acc_load = UOp.vectorize(acc.after(gk)[0], acc.after(gk)[1])
   out = UOp(Ops.WMMA, dtypes.float.vec(2), (a_tc, b_tc, acc_load), arg=wmma_arg)
 
-  end_loop = UOp.group(*[acc[i].store(out.gep(i)) for i in range(2)]).end(gk)
+  end_loop = UOp.group(*[acc[i].store(out.index(i)) for i in range(2)]).end(gk)
 
   sink = UOp.group(*[mat_idx(c.after(end_loop), gx, gy, warp, i).store(acc[i]) for i in range(2)])
   return sink.sink(arg=KernelInfo(name="custom_metal_matmul", opts_to_apply=())).simplify()

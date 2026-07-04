@@ -23,10 +23,10 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
 
   # TODO: validate these
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
-  # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
+  # VECTORIZE can't be properly modeled in z3 since it doesn't support vectors
   # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
   for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
-    if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.STACK} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
@@ -189,9 +189,6 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # no more of these in programs
-  (UPat(Ops.GEP), lambda: False),
-
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
@@ -231,11 +228,8 @@ spec_full = PatternMatcher([
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # expander: unroll/contract/gep/cat
+  # expander: unroll/contract
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
-
-  # GEP multi is supported here
-  (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
