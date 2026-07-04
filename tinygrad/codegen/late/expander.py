@@ -142,7 +142,8 @@ def fix_group_for_reduce(x:UOp):
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # do the final reduce (if/barrier are added in gpudims step)
-  return buf.reduce(*reduce_loop, arg=x.arg)
+  # NOTE: we remove all horizontal reduces here, they remain in the first reduce
+  return buf.reduce(*reduce_loop, arg=(x.arg[0], ()))
 
 pm_pre_expander = PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
