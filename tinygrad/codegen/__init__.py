@@ -16,7 +16,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
-from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext, pm_render, merge_reduce_ends
+from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext, merge_reduce_ends
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
@@ -24,11 +24,14 @@ from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar, pm_store_ran
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
-from tinygrad.codegen.late.expander import pm_group_for_reduce
-from tinygrad.helpers import all_same, flatten, argsort
+from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
+from tinygrad.schedule.rangeify import BufferizeOpts
 
 pm_remove_vec_dtypes = PatternMatcher([
+  # CONST must be stacked CONST
+  (UPat(Ops.CONST, name='c'),
+   lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   # rewrite PARAM to non pointer
   (UPat((Ops.PARAM, Ops.BUFFER), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
@@ -181,6 +184,27 @@ devectorizer2 = pm_mops+PatternMatcher([
    lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
 ])
 
+def fix_group_for_reduce(x:UOp):
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
+  if len(reduce_gfr) == 0: return None
+
+  # NOTE: if there's other locals here, we need them in the buffer too
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+
+  # do only the non grouped reduces early
+  ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
+  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
+
+  # do the final reduce (if/barrier are added in gpudims step)
+  # NOTE: we remove all horizontal reduces here, they remain in the first reduce
+  return buf.reduce(*reduce_loop, arg=(x.arg[0], ()))
+
+pm_group_for_reduce = PatternMatcher([
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+])
+
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   # TODO: remove this is_ptr when placeholder isn't ptr
   acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG, is_ptr=False)
@@ -248,7 +272,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_render, name="pm_render stack")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # ** expander (expand_rewrite) **

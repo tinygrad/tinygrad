@@ -66,20 +66,13 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   if size % (ALIGN * 4) != 0: return [] if (base.itemsize * size) % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
   return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
-pm_render = PatternMatcher([
-  # for rendering, we use explicit VECTORIZE
-  (UPat(Ops.CONST, name='c'),
-   lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
-  (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
-])
-
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
 
 @dataclass
 class ReduceContext:
   acc_num: int = 0
 
-def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
+def merge_reduce_ends(sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
   # ENDs at different nesting depths get cloned RANGEs so each RANGE maps to one END
   range_to_ends: dict[tuple[UOp, ...], list[UOp]] = {}
