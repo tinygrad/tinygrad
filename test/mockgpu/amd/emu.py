@@ -2253,6 +2253,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
 
+  pipe_resource = {"salu": 1, "valu": 1, "branch": 1, "barrier": 1, "control": 1,
+                   "lds": 1, "smem": 1, "vmem": 1, "export": 1, "unknown": 1}
+
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
@@ -2278,6 +2281,26 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           last_issued_cycle: dict[int, int] = {}
           traced_waves: set[int] = set()
           last_sqtt_emit_cycle = 0
+
+          def _emit_sqtt_inst(wi: int, inst, branch_taken: bool|None, issue_cycle: int):
+            nonlocal last_sqtt_emit_cycle
+            if wi not in traced_waves:
+              start_delta = max(0, issue_cycle - last_sqtt_emit_cycle)
+              inst_cycle = max(issue_cycle + 1, last_sqtt_emit_cycle + start_delta)
+              sqtt_emit(wi, inst, branch_taken, delta=inst_cycle - (last_sqtt_emit_cycle + start_delta), start_delta=start_delta)
+              traced_waves.add(wi)
+              last_sqtt_emit_cycle = inst_cycle
+            else:
+              inst_cycle = max(issue_cycle + 1, last_sqtt_emit_cycle)
+              sqtt_emit(wi, inst, branch_taken, delta=inst_cycle - last_sqtt_emit_cycle)
+              last_sqtt_emit_cycle = inst_cycle
+
+          def _emit_sqtt_finish(wi: int, issue_cycle: int):
+            nonlocal last_sqtt_emit_cycle
+            end_cycle = max(issue_cycle + 1, last_sqtt_emit_cycle)
+            sqtt_finish(wi, delta=end_cycle - last_sqtt_emit_cycle)
+            last_sqtt_emit_cycle = end_cycle
+
           while len(done_waves) < total_waves:
             cycle += 1
 
@@ -2299,41 +2322,39 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 raise RuntimeError("scheduler has no runnable waves before all waves completed")
               continue
 
-            wi, (st, c_bufs) = ready_waves.pop(0)
-            pc = st.pc
-            if pc == ENDPGM_PC:
-              done_waves.add(wi)
+            pipe_slots, next_ready_waves = pipe_resource.copy(), []
+            for wi, (st, c_bufs) in ready_waves:
+              pc = st.pc
+              if pc == ENDPGM_PC:
+                done_waves.add(wi)
+                if tracing: _emit_sqtt_finish(wi, cycle)
+                continue
+
+              fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
+              pipe = _classify_pipe(inst)
+              if pipe_slots.get(pipe, 0) <= 0:
+                next_ready_waves.append((wi, (st, c_bufs)))
+                continue
+              pipe_slots[pipe] -= 1
+
+              total_inst += 1
+              wave_inst_count[wi] += 1
+              if wave_inst_count[wi] > 1_000_000: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
+              if total_inst > 10_000_000: raise RuntimeError("exceeded 10M total scheduling instructions")
+
+              if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+              fxn(*[c_bufs[g] for g in globals_list])
+              last_issued_cycle[wi] = cycle
               if tracing:
-                sqtt_cycle = cycle + 1
-                sqtt_finish(wi, delta=sqtt_cycle - last_sqtt_emit_cycle)
-                last_sqtt_emit_cycle = sqtt_cycle
-              continue
+                inst_op = inst.op.value if hasattr(inst, 'op') else 0
+                branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None
+                _emit_sqtt_inst(wi, inst, branch_taken, cycle)
 
-            total_inst += 1
-            wave_inst_count[wi] += 1
-            if wave_inst_count[wi] > 1_000_000: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
-            if total_inst > 10_000_000: raise RuntimeError("exceeded 10M total scheduling instructions")
-
-            fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
-            if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
-            fxn(*[c_bufs[g] for g in globals_list])
-            last_issued_cycle[wi] = cycle
-            if tracing:
-              inst_op = inst.op.value if hasattr(inst, 'op') else 0
-              branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None
-              if wi not in traced_waves:
-                sqtt_emit(wi, inst, branch_taken, delta=1, start_delta=cycle - last_sqtt_emit_cycle)
-                traced_waves.add(wi)
-                last_sqtt_emit_cycle = cycle + 1
+              if is_barrier:
+                barrier_wait.append((wi, (st, c_bufs)))
               else:
-                sqtt_cycle = cycle + 1
-                sqtt_emit(wi, inst, branch_taken, delta=sqtt_cycle - last_sqtt_emit_cycle)
-                last_sqtt_emit_cycle = sqtt_cycle
-
-            if is_barrier:
-              barrier_wait.append((wi, (st, c_bufs)))
-            else:
-              ready_waves.append((wi, (st, c_bufs)))
+                next_ready_waves.append((wi, (st, c_bufs)))
+            ready_waves = next_ready_waves
           tracing = False  # only trace the first workgroup
 
           # Reset LDS for next workgroup

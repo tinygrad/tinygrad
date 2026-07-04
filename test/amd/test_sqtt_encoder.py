@@ -86,6 +86,14 @@ class TestSQTTEncoder(unittest.TestCase):
     self.assertEqual(sum(1 for p in packets if isinstance(p, WAVESTART)), 2)
     self.assertEqual(sum(1 for p in packets if isinstance(p, WAVEEND)), 2)
 
+  def test_different_pipes_can_issue_same_cycle(self):
+    """Two ready waves may issue different pipe classes in one scheduler cycle."""
+    blob = _run_kernel([s_mov_b32(s[0], 0), v_mov_b32_e32(v[0], 1), s_endpgm()], lx=64)
+    packets = [p for p in decode(blob) if type(p).__name__ != "NOP"]
+    wave0_valu = next(p for p in packets if isinstance(p, VALUINST) and p.wave == 0)
+    wave1_salu = next(p for p in packets if isinstance(p, INST) and p.wave == 1 and p.op == InstOp.SALU)
+    self.assertEqual(wave0_valu._time, wave1_salu._time)
+
   def test_branch_taken_and_not_taken(self):
     """A loop with s_cbranch_scc1 emits JUMP when taken, JUMP_NO on final iteration."""
     # s[0] = 2; loop: s[0] -= 1; cmp s[0] != 0 (SCC=1 if true); cbranch_scc1 loop; endpgm
