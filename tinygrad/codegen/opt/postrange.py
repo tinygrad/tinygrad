@@ -290,6 +290,12 @@ class Scheduler:
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
+            def with_missing_tc_axes(arg):
+              ret = list(arg)
+              for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
+                if rn not in [x[0] for x in ret]: ret.append((rn, 1))
+              return tuple(ret)
+            tc_upcast_axes = tuple(with_missing_tc_axes(v) for v in tc_upcast_axes)
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
