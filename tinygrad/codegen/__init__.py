@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
@@ -16,7 +16,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
-from tinygrad.codegen.late.devectorizer import indexing_simplify, ReduceContext, merge_reduce_ends
+from tinygrad.codegen.late.devectorizer import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
@@ -204,6 +204,30 @@ pm_group_for_reduce = PatternMatcher([
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
+
+@dataclass
+class ReduceContext:
+  acc_num: int = 0
+
+def merge_reduce_ends(sink:UOp):
+  # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
+  # ENDs at different nesting depths get cloned RANGEs so each RANGE maps to one END
+  range_to_ends: dict[tuple[UOp, ...], list[UOp]] = {}
+  for u in sink.backward_slice:
+    if u.op is Ops.END and u.tag == "mergeable": range_to_ends.setdefault(u.src[1:], []).append(u)
+  subs: dict[UOp, UOp] = {}
+  next_axis = max((u.arg[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
+  for r, ends in range_to_ends.items():
+    if len(ends) <= 1: continue
+    by_ctx: dict[frozenset[UOp], list[UOp]] = {}
+    for e in ends: by_ctx.setdefault(frozenset(e.ranges), []).append(e)
+    for i, group in enumerate(by_ctx.values()):
+      tr = r if i == 0 else tuple(rr.replace(arg=(next_axis + j, *rr.arg[1:])) for j, rr in enumerate(r))
+      if i > 0: next_axis += len(r)
+      mapped = [e.substitute(dict(zip(r, tr))) if i > 0 else e for e in group]
+      merged = mapped[0] if len(mapped) == 1 else UOp.group(*(e.src[0] for e in mapped)).end(*tr)
+      for e in group: subs[e] = merged
+  return sink.substitute(subs) if subs else None
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   # TODO: remove this is_ptr when placeholder isn't ptr
