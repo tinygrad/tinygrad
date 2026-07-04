@@ -113,22 +113,6 @@ expander = PatternMatcher([
 
 # ****
 
-def fix_reduce_unroll(x:UOp):
-  reduce_range, reduce_expand = partition(x.src[1:], lambda y: y.op is Ops.RANGE)
-  if len(reduce_expand) == 0: return None
-  reduce_expand = [x for x in reduce_expand if x.op is not Ops.CONST]
-  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand}"
-  ret = x.src[0]
-  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
-    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)
-  # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
-  return x.replace(src=(ret,)+tuple(reduce_range))
-
-def fix_store_unroll(x:UOp):
-  store_expand, store_range = partition(x.src[2:], lambda y: y.op is Ops.UNROLL)
-  if len(store_expand) == 0: return None
-  return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
-
 def fix_group_for_reduce(x:UOp):
   reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
   if len(reduce_gfr) == 0: return None
@@ -144,16 +128,6 @@ def fix_group_for_reduce(x:UOp):
   # do the final reduce (if/barrier are added in gpudims step)
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
   return buf.reduce(*reduce_loop, arg=(x.arg[0], ()))
-
-pm_pre_expander = PatternMatcher([
-  # rewrite UPCAST/UNROLL range to something to be expanded
-  (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
-    if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
-  # fix REDUCEs with UNROLLs
-  (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
-  (UPat(Ops.STORE, name="x"), fix_store_unroll),
-])
 
 pm_group_for_reduce = PatternMatcher([
   # fix group for reduce

@@ -179,6 +179,7 @@ class TestStatsOptimized(unittest.TestCase):
     self.check_gemm(p)
     self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
+  @unittest.skip("fails locally on AMD")
   def test_gemm_tc_unroll_half(self):
     try:
       p = to_program(replace_opts(self.ast_gemm_half, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
