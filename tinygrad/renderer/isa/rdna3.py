@@ -287,14 +287,22 @@ def bitwise64(ctx, x:UOp, ins):
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
   return multireg(lo, hi, dtype=x.dtype)
 
-# cdiv of int types needs to be converted to float then cast back after ceil op
-# NOTE: we need to cast to float version of this bitwidth..., start with just 32
-# https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Utils/IntegerDivision.cpp
+# Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
 def cdiv(x:UOp):
   if x.dtype.itemsize != 4:
     raise NotImplementedError(f"cdiv expansion not implemented for dtype: {x.dtype}")
-  c = x.src[0].float() / x.src[1].float()
-  return c.ins(RDNA3Ops.v_ceil_f32).cast(x.dtype)
+  a,b = x.src
+  z = b.cast(dtypes.float32).reciprocal()
+  z = z * const(dtypes.float32, 0x4F7FFFFE)
+  z = z.cast(dtypes.uint32)
+  # Unsigned integer Newton-Raphson round
+  def umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
+  z += umulh(z, -b * z)
+  q = umulh(a, z)
+  # r = a - q * b
+  # TODO: add refinement incs
+  return q
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -420,8 +428,9 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
 # ---- lowering passes ----
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
-  # bitcast is noop? 
-  (UPat.var("y").bitcast().named("x"), lambda y,x: y),
+  # what cases does this fail?
+  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)),
+  # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # cast noops
@@ -595,8 +604,8 @@ class RDNA3Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return False
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    # nuops = lin.src
-    nuops = insertwaitcnts(lin.src)
+    nuops = lin.src
+    # nuops = insertwaitcnts(lin.src)
 
     # labels + encode
     pc = 0
