@@ -122,13 +122,6 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
-# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
-  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [0 if isinstance(acc, int) and acc == 1 else acc_old.index(acc)+1 for acc in acc_new]
-  except ValueError: return None
-  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
-
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
@@ -276,7 +269,7 @@ SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
-DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 1)
+DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
 
 @dataclass(frozen=True)
 class Metadata:

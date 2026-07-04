@@ -387,6 +387,8 @@ dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
+  # materialize the structural width of a STACK into a vec dtype
+  (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
   # cast of void is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # extracting the 0th float element is a noop as it just moves the 0th element from one xmm register to another
