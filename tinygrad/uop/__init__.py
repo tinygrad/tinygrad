@@ -102,9 +102,6 @@ class Ops(FastEnum):
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
 
-  # expander ops
-  UNROLL = auto(); CONTRACT = auto()
-
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.CDIV, Ops.MAX, Ops.CMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
