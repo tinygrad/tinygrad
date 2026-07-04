@@ -76,27 +76,30 @@ def expand_reduce(r:UOp):
   out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
   return r.src[0].reduce(*range_srcs, arg=(r.arg[0], tuple(new_axes))).reshape(out_shape)
 
-def do_contract(ctx:dict[int, int], u:UOp):
-  # the context is a mapping from range number (in contract) to axis number
-  permute_tail = [ctx[rn] for rn,_ in u.arg]
-  permute_head = [i for i in range(len(u.src[0].shape)) if i not in permute_tail]
-  out = u.src[0].permute(permute_head+permute_tail)
+def contract_axis(ctx:dict[int, int], u:UOp, arg):
+  permute_tail = [ctx[rn] for rn,_ in arg]
+  permute_head = [i for i in range(len(u.shape)) if i not in permute_tail]
+  out = u.permute(permute_head+permute_tail)
   return out.reshape(*out.shape[:len(permute_head)], -1)
 
-def do_unroll(ctx:dict[int, int], u:UOp):
-  # this is the opposite of contract
-  permute_tail = [ctx[rn] for rn,_ in u.arg]
-  out = u.src[0].reshape(*u.src[0].shape[:-1], *[nm for _,nm in u.arg])
+def unroll_axis(ctx:dict[int, int], u:UOp, arg):
+  permute_tail = [ctx[rn] for rn,_ in arg]
+  out = u.reshape(*u.shape[:-1], *[nm for _,nm in arg])
   permute_head = [i for i in range(len(out.shape)) if i not in permute_tail]
   return out.permute(argsort(permute_head+permute_tail))
+
+def expand_wmma(ctx:dict[int, int], u:UOp):
+  if u.tag != 1: return None
+  in0, in1, out0 = u.arg[6]
+  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]), tag=None)
+  return unroll_axis(ctx, wmma, out0)
 
 expander2 = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
-  (UPat(Ops.CONTRACT, name="u"), do_contract),
-  (UPat(Ops.UNROLL, name="u"), do_unroll),
+  (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
 def broadcast_binary(x:UOp):
