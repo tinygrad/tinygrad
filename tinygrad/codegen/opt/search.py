@@ -59,13 +59,23 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
-  ret = None
+  ret, old_render = None, None
   try:
     st = time.perf_counter()
-    prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    sched = x[1].copy()
+    uops_max = getenv("BEAM_UOPS_MAX", 3000)
+    if uops_max > 0:
+      old_render = sched.ren.render
+      def render(uops):
+        if len(uops) >= uops_max:
+          if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
+          raise RuntimeError("too many uops")
+        return old_render(uops)
+      sched.ren.render = render
+    prg = to_program(sched.get_optimized_ast(name_override="test"), sched.ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
-    if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
+    if len(uops) >= uops_max > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     ret = (prg, et)
@@ -74,6 +84,7 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
   finally:
+    if old_render is not None: sched.ren.render = old_render
     if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
