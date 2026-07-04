@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tinygrad.helpers import Context
 from tinygrad.renderer.amd.sqtt import decode
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+import tinygrad.runtime.ops_amd  # noqa: F401, registers SQTT ContextVars before Context(...)
 
 def _assemble(instructions: list) -> bytes:
   return b"".join(inst.to_bytes() for inst in instructions)
