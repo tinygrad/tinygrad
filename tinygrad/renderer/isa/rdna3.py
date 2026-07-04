@@ -289,20 +289,16 @@ def bitwise64(ctx, x:UOp, ins):
 
 # Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
-def cdiv(x:UOp):
+# TODO: add remainder refinements?
+def cdiv(ctx, x:UOp):
   if x.dtype.itemsize != 4:
     raise NotImplementedError(f"cdiv expansion not implemented for dtype: {x.dtype}")
+  def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
   a,b = x.src
   z = b.cast(dtypes.float32).reciprocal()
-  z = z * const(dtypes.float32, 0x4F7FFFFE)
-  z = z.cast(dtypes.uint32)
-  # Unsigned integer Newton-Raphson round
-  def umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
-  z += umulh(z, -b * z)
-  q = umulh(a, z)
-  # r = a - q * b
-  # TODO: add refinement incs
-  return q
+  z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
+  z += _umulh(z, -b * z) # Unsigned integer Newton-Raphson round
+  return _umulh(a, z)
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -633,4 +629,4 @@ class RDNA3Renderer(ISARenderer):
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.int8s+dtypes.fp8s+(dtypes.bfloat16,)}
