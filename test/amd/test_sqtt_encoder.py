@@ -123,5 +123,31 @@ class TestSQTTEncoder(unittest.TestCase):
       run_asm(ctypes.addressof(buf), len(code), 1, 1, 1, 1, 1, 1, 0)
     self.assertEqual(len(sqtt_traces), 0)
 
+class TestPipeClassification(unittest.TestCase):
+
+  def test_scalar_instructions_use_salu_pipe(self):
+    from test.mockgpu.amd.emu import _classify_pipe
+    self.assertEqual(_classify_pipe(s_mov_b32(s[0], 42)), "salu")
+    self.assertEqual(_classify_pipe(s_add_u32(s[1], s[0], 1)), "salu")
+    self.assertEqual(_classify_pipe(s_cmp_lg_u32(s[0], 0)), "salu")
+
+  def test_sopp_control_pipes(self):
+    from test.mockgpu.amd.emu import _classify_pipe
+    self.assertEqual(_classify_pipe(s_cbranch_scc1(simm16=-1)), "branch")
+    self.assertEqual(_classify_pipe(s_barrier()), "barrier")
+    self.assertEqual(_classify_pipe(s_nop(simm16=0)), "control")
+
+  def test_vector_instructions_use_valu_pipe(self):
+    from test.mockgpu.amd.emu import _classify_pipe
+    self.assertEqual(_classify_pipe(v_mov_b32_e32(v[0], 1)), "valu")
+    self.assertEqual(_classify_pipe(v_add_f32_e32(v[1], v[0], v[0])), "valu")
+    self.assertEqual(_classify_pipe(v_add_nc_u32_e32(v[1], v[0], v[0])), "valu")
+
+  def test_memory_instruction_pipes(self):
+    from test.mockgpu.amd.emu import _classify_pipe
+    self.assertEqual(_classify_pipe(s_load_b32(s[2], s[0:1], 0, soffset=NULL)), "smem")
+    self.assertEqual(_classify_pipe(ds_load_b32(v[1], v[0])), "lds")
+    self.assertEqual(_classify_pipe(global_load_b32(v[1], v[0], saddr=s[0:1])), "vmem")
+
 if __name__ == "__main__":
   unittest.main()

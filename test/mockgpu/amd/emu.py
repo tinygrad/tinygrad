@@ -2096,6 +2096,28 @@ if hasattr(ir4.SOP1Op, 'S_BARRIER_SIGNAL'): _BARRIER_SOP1_OPS.add(ir4.SOP1Op.S_B
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
 
+def _classify_pipe(inst) -> str:
+  """Return the coarse execution pipe an instruction needs for scheduler modeling."""
+  if isinstance(inst, (ir3.SOP1, ir3.SOP2, ir3.SOPC, ir3.SOPK, ir4.SOP1, ir4.SOP2, ir4.SOPC, ir4.SOPK,
+                      irc.SOP1, irc.SOP2, irc.SOPC, irc.SOPK)):
+    return "salu"
+  if isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)):
+    if inst.op in _BARRIER_OPS: return "barrier"
+    if inst.op.value in _BRANCH_OPS: return "branch"
+    return "control"
+  if isinstance(inst, (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOP3SD, ir3.VOPC, ir3.VOPD, ir3.VOP1_SDST, ir3.VOP3_SDST,
+                      ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOP3SD, ir4.VOPC, ir4.VOPD, ir4.VOP1_SDST, ir4.VOP3_SDST,
+                      irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOP3PX2, irc.VOP3SD, irc.VOPC, irc.VOP3_SDST)):
+    return "valu"
+  if isinstance(inst, (ir3.DS, ir3.LDSDIR, ir4.DS, ir4.VDSDIR, irc.DS)): return "lds"
+  if isinstance(inst, (ir3.SMEM, ir4.SMEM, irc.SMEM)): return "smem"
+  if isinstance(inst, (ir3.FLAT, ir3.GLOBAL, ir3.SCRATCH, ir3.MUBUF, ir3.MTBUF, ir3.MIMG,
+                      ir4.VFLAT, ir4.VGLOBAL, ir4.VSCRATCH, ir4.VBUFFER, ir4.VIMAGE, ir4.VSAMPLE,
+                      irc.FLAT, irc.GLOBAL, irc.SCRATCH, irc.MUBUF, irc.MTBUF)):
+    return "vmem"
+  if isinstance(inst, (ir3.EXP, ir4.VEXPORT)): return "export"
+  return "unknown"
+
 def _decode_at(pc: int, arch: str):
   """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
