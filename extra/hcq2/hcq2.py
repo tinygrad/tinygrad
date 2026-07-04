@@ -212,13 +212,14 @@ pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UP
 # *****************
 # 2.1. tag hcq calls
 
-def tag_hcq_calls(ctx:itertools.count, call:UOp):
-  if (hcq_devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is None: return None
+def tag_hcq_call(ctx:itertools.count, call:UOp) -> UOp:
+  if (hcq_devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is None: return call
 
   queue = "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0"
   info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), to_tuple(hcq_devs), queue)
   return call.replace(arg=replace(call.arg, aux=info)).rtag(next(ctx))
-pm_tag_hcq_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), tag_hcq_calls)])
+pm_tag_hcq_calls = PatternMatcher([(UPat(Ops.LINEAR, name="linear"),
+  lambda ctx, linear: linear.replace(src=tuple(tag_hcq_call(ctx, s) for s in linear.src)))])
 
 # *****************
 # 2.2. deps tracking
