@@ -1,5 +1,4 @@
 import itertools
-from os import wait
 from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
@@ -34,7 +33,7 @@ class LinearScanRegallocContext:
     # sort by width, constraint pressure and program order
     vregs = set()
     for u in uops: vregs.update(_live_units(u))
-    vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons)))
+    vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons), lis[v][0], lis[v][-1]))
 
     live_ranges: dict[Vregister, tuple[int,int]] = { v: (iv[0], iv[-1]) for v,iv in lis.items() }
     physical_slots: dict[Register, list[tuple[int, int], ...]] = {} 

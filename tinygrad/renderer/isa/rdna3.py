@@ -61,9 +61,9 @@ def _cvt_ins(dtin, dtout):
 def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
-def is_vgpr(x:UOp) -> bool: return x.tag is not None and x.tag != True and x.tag != GP_SGPRS and x.tag[0].cons[0].name[0] == "v"
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
+def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -89,7 +89,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   for i in range(nregs):
     if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
     else: mvs.append(vmov(x.src[i]))
-  nx = UOp.group(*mvs).replace(dtype=x.src[0].dtype)
+  nx = multireg(*mvs, dtype=x.src[0].dtype)
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
@@ -266,7 +266,7 @@ def add64(ctx, x:UOp):
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   # after causes a problem for auto allocating group reg
   vreg = make_vgpr(ctx, width=2)
-  lo = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),))
+  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),))
   hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(vreg.sub(1),)).after(lo)
   return UOp.group(lo, hi).replace(dtype=x.dtype, tag=(vreg,))
 
@@ -288,10 +288,10 @@ def bitwise64(ctx, x:UOp, ins):
 # NOTE: we need to cast to float version of this bitwidth..., start with just 32
 # https://github.com/llvm-mirror/llvm/blob/master/lib/Transforms/Utils/IntegerDivision.cpp
 def cdiv(x:UOp):
-  raise NotImplementedError()
-  a,b = [u.cast(dtypes.float32) for u in x.src]
-  c = UOp(Ops.INS, dtypes.float32, arg=RDNA3Ops.v_trunc_f32_e32, src=(a.div(b),))
-  return c.cast(x.dtype)
+  if x.dtype.itemsize != 4:
+    raise NotImplementedError(f"cdiv expansion not implemented for dtype: {x.dtype}")
+  c = x.src[0].float() / x.src[1].float()
+  return c.ins(RDNA3Ops.v_ceil_f32).cast(x.dtype)
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -327,16 +327,21 @@ def widenshort(y:UOp, x:UOp):
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
-  if y.dtype in dtypes.ints + dtypes.uints:
+  hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+  if y.dtype in (dtypes.int, dtypes.short, dtypes.uint, dtypes.ushort):
     lo = y.ins(RDNA3Ops.v_mov_b32_e32, src=(y,))
-    hi = UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
-    return UOp.group(lo, hi).replace(dtype=x.dtype)
+    hi = UOp(Ops.INS, hi_dt, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+    return multireg(lo, hi, dtype=x.dtype)
+  elif y.dtype is dtypes.float64:
+    # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
+    tr = y.trunc()
+    hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32))).trunc() # hi_f = trunc(x * 2^-32)
+    lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, -(2 ** 32)), tr)) # tr - hi_f * 2 ^ 32
+    return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=x.dtype)
   else:
-    if y.dtype is dtypes.float64:
-      tr = y.trunc()
-      hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32))).trunc() # hi_f = trunc(x * 2^-32)
-      lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, -(2 ** 32)), tr)) # tr - hi_f * 2 ^ 32
-      return UOp.group(lo_f.cast(dtypes.uint32), hi_f.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32)).replace(dtype=x.dtype)
+    lo = y.float().cast(dtypes.uint32)
+    hi = vmov(const(hi_dt, 0))
+    return multireg(lo, hi, dtype=x.dtype)
 
   print(y.dtype, x.dtype)
   raise NotImplementedError()
@@ -355,16 +360,19 @@ def const64(x:UOp):
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
+memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }
 
-# TODO: dont use string comparisons, have a clear load/store spec? operands?
 def lower_gated(x:UOp):
-  if "load" in x.arg.opc and len(x.src) > 3: # gated load
-    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
-  if "store" in x.arg.opc and len(x.src) > 4: # gated store 
+  if x.arg.func not in memgroups: return None
+  store = x.dtype is dtypes.void
+
+  if store and len(x.src) > 4:
     branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
     return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
-  return None
+
+  if not store and len(x.src) > 3:
+    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
 
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
@@ -533,13 +541,38 @@ def encode(ctx, x:UOp):
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
 from enum import Enum, auto
-class CounterType(Enum):
-  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
+class CntType(Enum):
+  DS_CNT = RDNA3Ops.s_waitcnt_lgkmcnt
+  LOAD_CNT = RDNA3Ops.s_waitcnt_vmcnt
+  STORE_CNT = RDNA3Ops.s_waitcnt_vscnt
 
-def _counter(x:UOp):
-  if x.arg.func in [RDNA3Ops.DS, RDNA3Ops.SMEM]: return CounterType.DS_CNT
-  elif reg(x) is None: return CounterType.STORE_CNT
-  else: return CounterType.LOAD_CNT
+def ctp(x:UOp) -> CntType|None:
+  if x.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }: return CntType.STORE_CNT if x.dtype is dtypes.void else CntType.LOAD_CNT
+  if x.arg.func in { RDNA3Ops.SMEM }: return CntType.DS_CNT
+  return None
+  
+def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
+  total: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
+  outstnd: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
+  ddeps: dict[Register, tuple[CntType, int]] = {}
+  nuops = []
+
+  for u in uops: 
+    oprs = u.src
+    if (tp := ctp(u)):
+      if u.dtype is dtypes.void: oprs = oprs[:-1]
+      rs = rdefs(u.src[-1]) if u.dtype is dtypes.void else rdefs(u) 
+      for r in rs: ddeps[r] = (tp,outstnd[tp])
+      outstnd[tp] += 1
+      total[tp] += 1
+
+    tosync: dict[CntType, int] = {}
+    for tp,n in [ddeps[r] for s in oprs for r in rdefs(s) if r in ddeps]:
+      tosync[tp] = min(tosync.setdefault(tp, float('inf')), outstnd[tp] - n - 1)
+    for tp,cnt in tosync.items():
+      nuops.append(UOp(Ops.INS, arg=tp.value, src=(const(dtypes.int16, cnt),)))
+    nuops.append(u)
+  return nuops
 
 @dataclass
 class RDNA3LinearCtx:
@@ -556,53 +589,10 @@ class RDNA3Renderer(ISARenderer):
   def __init__(self, target:Target):
     super().__init__(target)
 
-  def is_two_address(self, x:UOp) -> bool:
-    # 2 address if first src value is reg space buffer and not load/store?
-    if x.op is not Ops.INS: return False
-    return x.arg.func in [RDNA3Ops.VOP1] and len(x.src) > 1
-
-  # def spill_pointer(self) -> UOp: return spill_ptr
-  # def spill_pointer(self) -> UOp: return UOp.placeholder((1,), dtypes.uint32, next(lane_ctr), AddrSpace.LOCAL)
-  # load spilled value into lds
-  def spill(self, disp:UOp, x:UOp) -> UOp: # disp is the byte offset into spill space
-    print(self.spill_pointer().index(disp).store(x))
-    ret = isel_matcher.rewrite(self.spill_pointer().index(disp).store(x))
-    assert ret is not None
-    return ret
-
-  # this is going to have to handle multiple regs
-  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
-    val = isel_matcher.rewrite(self.spill_pointer().index(disp).load())
-    # assume reg is vgpr?
-    return x
+  def is_two_address(self, x:UOp) -> bool: return False
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    # insert waitcnts
-    bld_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
-    fill_cntstate: dict[CounterType, int] = {CounterType.DS_CNT:0, CounterType.LOAD_CNT:0, CounterType.STORE_CNT:0}
-    # maps op that consumes sync dependent register to cnt requirement + pc from which this cnt is required
-    tosync: dict[Register, tuple[CounterType, list[tuple[int, int]]]] = {}
-    nuops = []
-    waitins = { CounterType.DS_CNT:RDNA3Ops.s_waitcnt_lgkmcnt, CounterType.LOAD_CNT:RDNA3Ops.s_waitcnt_vmcnt, CounterType.STORE_CNT:RDNA3Ops.s_waitcnt_vscnt }
-    for i, u in enumerate(lin.src):
-      if u.arg.func not in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: continue
-      ctp = _counter(u)
-      if reg(u) is not None:
-        for r in rdefs(u): tosync.setdefault(r,(ctp,[]))[1].append((i,bld_cntstate[ctp]))
-      bld_cntstate[ctp] += 1
-
-    # NOTE: broken, needs to be CFG based (control flow aware, ex. insert wait before loop restart)
-    for i, u in enumerate(lin.src):
-      if u.arg.func in [RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS]: fill_cntstate[_counter(u)] += 1
-      deps = [r for s in u.src for r in rdefs(s) if r in tosync]
-      waits = {}
-      for r in deps:
-        tp, pts = tosync[r]
-        cnt = next((n for j,n in reversed(pts) if i > j), None)
-        if (cnt is not None) and fill_cntstate[tp] > cnt:
-          fill_cntstate[tp] = waits[tp] = min(waits.setdefault(tp, float('inf')), cnt)
-      nuops.extend([UOp(Ops.INS, arg=waitins[tp], src=(const(dtypes.uint16,n),)) for tp,n in waits.items()])
-      nuops.append(u)
+    nuops = insertwaitcnts(lin.src)
 
     # labels + encode
     pc = 0
