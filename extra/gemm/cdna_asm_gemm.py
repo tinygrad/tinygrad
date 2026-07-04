@@ -238,27 +238,28 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     # one None per input: (out, a, b, x_scale[, w_scale][, grad_amax][, w_post_scale])
     ret = (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
     return ret
-  hk_bf16 = len(inputs) == 4 and inputs[1].dtype == dtypes.bfloat16
-  if hk_bf16:
-    out, a, b_t, b = inputs
-    assert all_same([gradient.device, a.device, b_t.device, b.device, out.device])
   else:
-    assert len(inputs) == 3, f"regular gemm must have exactly 3 sources, got: {len(inputs)}"
-    out, a, b = inputs
-    assert all_same([gradient.device, a.device, b.device, out.device])
-  a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
-  g_t = g_t[:a.shape[0]]
-  if hk_bf16 and g_t.dtype != b_t.dtype: g_t = g_t.cast(b_t.dtype)
-  if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
-  else: grad_a = (g_t @ b_t.T).uop
-  if hk_bf16:
-    grad_b = hk_bf16_atb_gemm(a_t, g_t).uop
-  else:
-    a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
-    if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
-    else: grad_b = (a_t_flat @ g_t_flat).uop
-  # hk_bf16 uses b.T, writes gradients only for a and b
-  return (None, grad_a, None, grad_b) if hk_bf16 else (None, grad_a, grad_b)
+    hk_bf16 = len(inputs) == 4 and inputs[1].dtype == dtypes.bfloat16
+    if hk_bf16:
+      out, a, b_t, b = inputs
+      assert all_same([gradient.device, a.device, b_t.device, b.device, out.device])
+    else:
+      assert len(inputs) == 3, f"regular gemm must have exactly 3 sources, got: {len(inputs)}"
+      out, a, b = inputs
+      assert all_same([gradient.device, a.device, b.device, out.device])
+    a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
+    g_t = g_t[:a.shape[0]]
+    if hk_bf16 and g_t.dtype != b_t.dtype: g_t = g_t.cast(b_t.dtype)
+    if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
+    else: grad_a = (g_t @ b_t.T).uop
+    if hk_bf16:
+      grad_b = hk_bf16_atb_gemm(a_t, g_t).uop
+    else:
+      a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
+      if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
+      else: grad_b = (a_t_flat @ g_t_flat).uop
+    # hk_bf16 uses b.T, writes gradients only for a and b
+    return (None, grad_a, None, grad_b) if hk_bf16 else (None, grad_a, grad_b)
 
 # ** mxfp8 gemm backward
 
