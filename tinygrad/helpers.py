@@ -122,13 +122,6 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
-# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
-  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [0 if isinstance(acc, int) and acc == 1 else acc_old.index(acc)+1 for acc in acc_new]
-  except ValueError: return None
-  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
-
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
@@ -239,6 +232,7 @@ class _DEV(ContextVar):
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
+CHUNK_SIZE = 2**20  # TinyFS content-addressed store: blob chunk + hash-tree node granularity
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0)

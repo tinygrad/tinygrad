@@ -9,7 +9,8 @@ class DTypeMixin:
   def dtype(self) -> DType: raise NotImplementedError
   @property
   def _uop(self) -> 'UOp': raise NotImplementedError
-  def _wrap_uop(self, u:'UOp') -> Self: raise NotImplementedError
+  @classmethod
+  def _wrap_uop(cls, u:'UOp') -> Self: raise NotImplementedError
 
   def cast(self, dtype:DTypeLike) -> Self:
     """

@@ -84,7 +84,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
+  elif len(arg) == 1: return UOp.const(dtypes.weakint, arg[0])
   else: return UOp(Ops.STACK, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
@@ -226,8 +226,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
+      case Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -249,13 +248,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if self.src[0].op is Ops.FUNCTION:
           return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
         return inner_shape
-
-      case Ops.CAST:
-        # if it has a vec dtype, set the shape
-        if self.dtype.count > 1: return (self.dtype.count,)
-        # when PTX casts from ptr to non ptr, remove the shape of the buffer
-        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
-          return ()
 
       case Ops.INDEX:
         shp:list[sint] = []
@@ -354,7 +346,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           axis_arg = self.arg[1]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
-          return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
+          return tuple(s for i,s in enumerate(ps) if i not in axis_arg)
 
     if self.op in GroupOp.Unary.union({Ops.CAST}):
       assert len(self.src) == 1, "unary ops must have 1 src"
@@ -440,12 +432,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return float(self._eval(dtypes.floats, float))
-  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
-                           bottom_up=True, walk=walk, name=name)
+                           bottom_up=True, walk=walk, enter_calls=enter_calls, name=name)
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
   def __index__(self): return self.__int__()
 
@@ -475,8 +467,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.STACK, self.dtype, (self,)+srcs)
   def vectorize(self, *srcs):
     return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
-  def index(self, *srcs:UOp|None, ptr=False, **kwargs):
-    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
+  def index(self, *srcs:UOp|int|None, ptr=False, **kwargs):
+    new_srcs: list[UOp] = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in srcs if x is not None]
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
@@ -493,7 +486,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   @property
   def _uop(self) -> UOp: return self
-  def _wrap_uop(self, u:UOp) -> UOp: return u
+  @classmethod
+  def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
@@ -566,8 +560,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    return UOp(Ops.REDUCE, self.dtype, (self,), (op, axis)) if len(axis) else self
+    # NOTE: we don't allow reduce on 1s axis
+    axis = tuple(sorted(axis))
+    reduce_axis = tuple(x for x in axis if resolve(self.shape[x] != 1))
+    ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self
+    return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
   def valid(self, cond):
@@ -636,7 +633,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src_axis = self.src[0].axis
     if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
       return None # SHRINK will remove the sharding if it's on axis
-    if self.op is Ops.REDUCE: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
+    if self.op is Ops.REDUCE:
+      if src_axis is None: return None
+      if src_axis in self.arg[1]: return None
+      return src_axis - sum(1 for a in self.arg[1] if a < src_axis)
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
       arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
@@ -675,13 +675,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if self.op in GroupOp.Movement: return self.src[0].base
-    if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
-    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
-    return self
-
-  @property
-  def multibase(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
@@ -735,16 +728,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
     else: assert buffers[uop] is opaque
     return uop
-  @staticmethod
-  def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
-    dtype, device = to_dtype(dtype) if dtype is not None else dtypes.default_float, canonicalize_device(device)
-    max_shape = to_max_shape(shape)
-    ret = UOp.new_buffer(device, prod(max_shape), dtype, num).reshape(max_shape).shrink_to(shape)
-    return ret.multi(axis) if isinstance(device, tuple) and axis is not None else ret
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
-    return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
+    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=self.dtype if dtype is None else dtype, device=device)
+    return ret.multi(axis) if axis is not None else ret
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(device)
@@ -753,7 +741,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
       bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
-      ret = UOp.empty(shape:=get_shape(x), bdtype, "PYTHON")
+      ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     # fake realize. if target device is PYTHON it needs bytearray to be writable
     ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
@@ -767,7 +755,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
-    if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.STAGE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
@@ -811,19 +798,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     numel = self.numel()
     out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
-    if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
-      if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].arg
-    if out.src[1].op is Ops.RANGE: return 0
-    if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
-      if not isinstance(out.src[1].src[1].arg, int): return None  # masked/padded regions produce InvalidType
-      return out.src[1].src[1].arg
+    if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
+    idx, has_range = out.src[1], False
+    if idx.op is Ops.RANGE: return 0
+    if idx.op is Ops.ADD and idx.src[0].op is Ops.RANGE: idx, has_range = idx.src[1], True
+    if idx.op is Ops.CONST and (has_range or resolve(numel == 1, False)):
+      if not isinstance(idx.arg, int): return None  # masked/padded regions produce InvalidType
+      return idx.arg
     return None
 
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
-    if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
@@ -834,7 +820,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.MULTI, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
       buf = self.base.buffer
@@ -876,6 +862,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
+    if self.op is Ops.MULTI: return self.src[0].realized
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LOCAL/REG scratch buffers are never realized
@@ -1070,6 +1057,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BIND:
       return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].expr, addrspace)
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
+
+  @staticmethod
+  def custom_function(name:str, *src:UOp, dtype:DType=dtypes.void) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, dtype, src=src, arg=name)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
@@ -1395,6 +1385,8 @@ class TrackedGraphRewrite:
   name:str                                      # name of the rewrite
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
+  walk:bool
+  enter_calls:bool
 
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
@@ -1451,7 +1443,8 @@ def profile_matches(fxn:Callable):
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
       dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
-      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False),
+                                                               kwargs.get("walk", False), kwargs.get("enter_calls", False)))
       active_rewrites.append(ctx)
       with cpu_profile(name, "TINY"):
         ret = fxn(*args, **kwargs)
@@ -1644,7 +1637,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
-def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+def select_dtype(u): return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))), lambda u,x,y:
@@ -1654,7 +1647,7 @@ pm_lower_index_dtype = PatternMatcher([
     cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt)).cast(dtypes.weakint)),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.weakint)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.weakint)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.weakint), name="v"),
-    lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt.scalar()) for s in v.src)).cast(dtypes.weakint)),
+    lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.weakint)),
   # special can only be int32
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.weakint),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
@@ -119,8 +119,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort()):
-    # always exclude DEVICE/CONST
-    if u.op in {Ops.DEVICE, Ops.CONST} and u is not x: excluded.add(u)
+    # always exclude CONST
+    if u.op is Ops.CONST and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
@@ -149,7 +149,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op in {Ops.CALL, Ops.FUNCTION}:
         label += f"\n{u.src[0].key.hex()[:8]}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
-        if len(u.toposort()) < 30: label += f"\n{u.render()}"
+        label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
@@ -182,9 +182,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None)
   next_sink = _reconstruct(data, ctx.sink, depth=depth)
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
-  for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches, disable=not ctx.matches):
+  for u0_num,u1_num,upat_loc,dur in ctx.matches:
     replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
-    try: new_sink = next_sink.substitute(replaces)
+    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -619,16 +619,16 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, viz_data.trace.rewrites[i][data])) is None: return {"src":"No linear found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[2].src)))}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
   if fmt == "code":
     if (sink:=get_sink_at(("do_render",), viz_data, viz_data.trace.rewrites[i][data], depth=1)) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[3].arg, "lang":"cpp"}
+    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
     renderer, idx = data
     if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, viz_data.trace.rewrites[i][idx], depth=1)) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-    lib:bytes = sink.src[4].arg
+    lib:bytes = sink.src[3].arg
     if renderer.target.arch.startswith("gfx"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))

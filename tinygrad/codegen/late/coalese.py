@@ -31,7 +31,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
-    cidx = uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw)))
+    cidx = uop_given_valid(valid, ((x//4)%cw)._stack(x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
@@ -62,9 +62,9 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalesing
-    if u.op in {Ops.LOAD, Ops.STORE} and not isinstance(u.src[0].src[0].dtype, ImageDType):
+    if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
-      if u.src[0].op is not Ops.INDEX: continue
+      assert u.src[0].op is Ops.INDEX, f"memory coalesing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u

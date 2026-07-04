@@ -8,7 +8,7 @@ from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_claus
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
-                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
+                      Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
@@ -56,10 +56,11 @@ class IndexingContext:
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.STAGE, Ops.INDEX}: return None
   new_srcs = []
-  for s in x.src:
+  for i, s in enumerate(x.src):
     new_src = s
+    # shape args of movement ops are at src[1:] and should not be indexed
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
-      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
+      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
@@ -161,8 +162,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
-    if x.op is Ops.DEVICE: continue
-
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
 
@@ -253,7 +252,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and len(x.arg[1]):
-      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
+      out_i, in_rngs = 0, []
+      for i,s in enumerate(x.src[0].shape):
+        if i in x.arg[1]: in_rngs.append(rctx.new_range(s, axistype=AxisType.REDUCE))
+        else:
+          in_rngs.append(out_rngs[out_i])
+          out_i += 1
+      rngs = tuple(in_rngs)
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)

@@ -15,7 +15,7 @@ dev = Device["AMD"]
 a = Tensor([1.0]).realize()
 b = a + 1
 linear = compile_linear(b.schedule_linear())
-lib = bytearray(linear.src[-1].src[0].src[4].arg)
+lib = bytearray(linear.src[-1].src[0].src[3].arg)
 
 # Find s_endpgm (0xBFB00000) and replace with V_MOVRELD_B32 (op=66) which has no pcode
 # VOP1 encoding: bits[31:25]=0x7E, op=bits[16:9], so op=66 -> 66<<9 = 0x8400

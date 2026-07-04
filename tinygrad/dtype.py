@@ -50,6 +50,7 @@ class DTypeMetaClass(type):
     return ret
 
 class AddrSpace(IntEnum):
+  def __str__(self): return repr(self)
   def __repr__(self): return f"{self.__class__.__name__}.{self.name}"
   GLOBAL = auto(); LOCAL = auto(); REG = auto(); ALU = auto()  # noqa: E702
 

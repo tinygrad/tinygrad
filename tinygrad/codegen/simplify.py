@@ -39,7 +39,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   return u
 
 def mark_gated(ctx, idx):
-  if idx.src[1].op is Ops.WHERE:
+  if len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
     x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
     # get all ranges r with guards "r < c" for some const c
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
@@ -98,17 +98,14 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and dtypes.is_int(y.dtype) and y.vmin > 0 else None),
-  # fold the range
-  # bound from below
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.var("val")).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
-  # bound from two sides
-  (((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0).reduce(UPat.var("r"),
-    arg=Ops.ADD), lambda r,lower,upper,val:
-      (upper.minimum(r.src[0])-lower.maximum(0)).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
-  # bound from above
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.var("val"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
+  # sum over r in [0,N) of [lower<=r<upper]*val -> clamp(min(upper,N) - max(lower,0), 0, N) * val
+  (UPat.any(
+    (UPat(Ops.RANGE, name="r") < UPat.var("upper")).where(UPat.var("val"), 0),
+    (UPat(Ops.RANGE, name="r") < UPat.var("lower")).where(0, UPat.var("val")),
+    ((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0),
+  ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
+    ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
+     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
   # REDUCE on ADD
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),

@@ -430,7 +430,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]

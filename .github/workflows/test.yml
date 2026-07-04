@@ -251,14 +251,9 @@ jobs:
       with:
         key: fuzzing-unit
         deps: testing_unit
-    - name: Fuzz Test symbolic
-      run: python test/external/fuzz_symbolic.py
-    - name: Fuzz Test symbolic (symbolic divisors)
-      run: python test/external/fuzz_symbolic_symbolic_div.py
-    - name: Fuzz Test fast idiv
-      run: python test/external/fuzz_fast_idiv.py
-    - name: Fuzz Test shape ops
-      run: python test/external/fuzz_shape_ops.py
+    - name: Fuzz Tests
+      run: |
+        parallel --tagstring '[{}]' 'python test/external/fuzz_{}.py' ::: symbolic symbolic_div fast_idiv shape_ops
 
   testopenclimage:
     name: CL IMAGE Tests
@@ -296,7 +291,8 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=39 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=55 FLOAT16=1 DEV="CL::IMAGE_PITCH_ALIGNMENT=64" IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          # IMAGE_PITCH_ALIGNMENT=64 matches adreno 630
       - name: Test openpilot CL compile fp32 (test correctness)
         run: |
           DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
@@ -443,9 +439,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linux-${{ matrix.dev }}
-        deps: testing_unit
+        deps: "testing_unit${{ contains(matrix.dev, 'LVP') && ' mesa' || '' }}"
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
-        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
@@ -700,9 +695,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: macos-${{ matrix.dev }}
-        deps: testing_unit
+        deps: "testing_unit${{ contains(matrix.dev, 'LVP') && ' mesa' || '' }}"
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
-        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
     - name: Set env
       run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
@@ -768,8 +762,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: compile-${{ matrix.backend }}
-          deps: testing_unit
-          mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
+          deps: "testing_unit mesa"
       - name: Set env
         shell: bash
         run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV

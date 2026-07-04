@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import capturing, Estimates, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -94,16 +94,16 @@ class DepsTracker:
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
   @staticmethod
-  def _buf_key(buf:Buffer) -> int: return id(buf.base)
+  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
 
-  def access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
+  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
     wait_nodes = []
     for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      key, s, e = self._key(buf)
       wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
       if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
     for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      key, s, e = self._key(buf)
       if i in write:
         for dmap in [self.w_dependency_map, self.r_dependency_map]:
           kept = []
@@ -191,11 +191,14 @@ ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
-  linear: UOp
+  _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
-  def __reduce__(self): return self.__class__, (self.ret, self.linear, self.expected_names, self.expected_input_info)
+  @functools.cached_property
+  def linear(self) -> UOp: return link_linear(self._linear)
+
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
