@@ -63,6 +63,7 @@ def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), 
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
+# NOTE: call this buildvector like LLVM?
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
@@ -148,7 +149,9 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL: # maintain src edge?
     dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
+    if x.arg[0] == 'g':
+      # return vmov(def_reg(dtypes.uint32, WGIDS[dim]))
+      return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
     else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   # if AddrSpace is ALU auto load into vgpr
@@ -264,25 +267,25 @@ def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  # after causes a problem for auto allocating group reg
-  vreg = make_vgpr(ctx, width=2)
+  vreg = make_vgpr(ctx, width=2) # NOTE: after causes a problem for auto allocating group reg
   lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_add_co_u32, src=(a.gep(0), b.gep(0)), tag=(vreg.sub(0),))
-  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), lo), tag=(vreg.sub(1),)).after(lo)
-  return UOp.group(lo, hi).replace(dtype=x.dtype, tag=(vreg,))
+  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.gep(1), b.gep(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
+  return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
 # TODO: signed
 def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
   a, b = x.src
-  p1 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(0), const(dtypes.uint64,0)))
-  p2 = UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(1), b.gep(0), p1))
-  return UOp(Ops.INS, arg=RDNA3Ops.v_mad_u64_u32, dtype=dtypes.uint64, src=(a.gep(0), b.gep(1), p2))
+  mad = RDNA3Ops.v_mad_u64_u32 if dtypes.is_unsigned(x.dtype) else RDNA3Ops.v_mad_i64_i32
+  p1 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(0), b.gep(0), const(x.dtype,0)))
+  p2 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(1), b.gep(0), p1))
+  return UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.gep(0), b.gep(1), p2))
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
   lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(0), b.gep(0)))
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.gep(1), b.gep(1)))
-  return UOp.group(lo,hi).replace(dtype=x.dtype)
+  return multireg(lo, hi, dtype=x.dtype)
 
 # cdiv of int types needs to be converted to float then cast back after ceil op
 # NOTE: we need to cast to float version of this bitwidth..., start with just 32
@@ -300,7 +303,6 @@ def alu(ctx, x:UOp):
   if dpreciz and x.op is Ops.ADD: return add64(ctx, x)
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
-  ins = None
   def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else _vop2(ctx, x.ins(ins))
   if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32)
   elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32)
@@ -310,9 +312,8 @@ def alu(ctx, x:UOp):
   if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b64)))
   elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b64)))
 
-  if ins is None:
-    if x.op in OP_INS: ins = OP_INS[x.op][x.dtype]
-    else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, is_unary={len(x.src)==1}")
+  if x.op in OP_INS and x.dtype in OP_INS[x.op]: ins = OP_INS[x.op][x.dtype]
+  else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
@@ -335,10 +336,11 @@ def castint64(ctx, y:UOp, x:UOp):
   elif y.dtype is dtypes.float64:
     # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
     tr = y.trunc()
-    hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32))).trunc() # hi_f = trunc(x * 2^-32)
-    lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, -(2 ** 32)), tr)) # tr - hi_f * 2 ^ 32
+    hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
+    hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
+    lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, 0xc1f0000000000000), tr)) # tr - hi_f * 2 ^ 32
     return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=x.dtype)
-  else:
+  else: # NOTE: wrong? look at LLVM like f64 cast
     lo = y.float().cast(dtypes.uint32)
     hi = vmov(const(hi_dt, 0))
     return multireg(lo, hi, dtype=x.dtype)
@@ -355,7 +357,9 @@ def long2double(x:UOp):
 # casting between long/ulong and floats is more complicated, may belong in isel?
 def const64(x:UOp):
   v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
-  return UOp.group(vmov(const(dtypes.uint32,v)), vmov(const(dtypes.uint32, v >> 32))).replace(dtype=x.dtype)
+  hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+  return multireg(vmov(const(dtypes.uint32,v)), vmov(const(hi_dt, v >> 32)), dtype=x.dtype)
+  # return UOp.group(vmov(const(dtypes.uint32,v)), vmov(const(dtypes.uint32, v >> 32))).replace(dtype=x.dtype)
 
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
@@ -535,7 +539,6 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
@@ -592,6 +595,7 @@ class RDNA3Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return False
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
+    # nuops = lin.src
     nuops = insertwaitcnts(lin.src)
 
     # labels + encode
