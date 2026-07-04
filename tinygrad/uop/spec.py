@@ -228,7 +228,7 @@ spec_full = PatternMatcher([
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # expander: unroll/contract/gep/cat
+  # expander: unroll/contract
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
 
   # all loads/stores

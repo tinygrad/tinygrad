@@ -18,7 +18,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
       testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
-      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
+      if testidx.index(0).vmax < 0 or testidx.index(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
 
@@ -45,7 +45,7 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  idx_y, idx_x = idx.gep(1), idx.gep(0)
+  idx_y, idx_x = idx.index(1), idx.index(0)
   return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), ptr=True) if new_valid is not None else buf.index(idx_y, idx_x, ptr=True)
 
 indexing_simplify = PatternMatcher([

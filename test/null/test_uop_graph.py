@@ -21,17 +21,10 @@ def const_values(u:UOp):
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
-    v2 = v1.gep(1)
+    v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
     self.assertEqual(ret.arg, 1)
-
-  def test_gep_const_single(self):
-    v1 = UOp.const(dtypes.int.vec(3), 4)
-    v2 = v1.gep(1)
-    ret = graph_rewrite(v2, sym)
-    self.assertEqual(ret.dtype, dtypes.int)
-    self.assertEqual(ret.arg, 4)
 
   def test_add_const(self):
     v1 = UOp.const(dtypes.int, (0,1,2))
@@ -261,7 +254,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
-    x = vec.gep(0)
+    x = vec.index(0)
     alu = UOp(Ops.SQRT, dtypes.float, (x, ))
     out = UOp(Ops.STORE, dtypes.void, (d0, idx, alu))
     uops = to_uops_list([out])
@@ -284,27 +277,27 @@ class TestUOpGraph(unittest.TestCase):
 
     # possible
     val = d1.index(idx).load(dtype=dtypes.float.vec(4))
-    xyzw = tuple(val.gep(i) for i in range(4))
+    xyzw = tuple(val.index(i) for i in range(4))
     self.assertIs(_test_vec(xyzw).op, Ops.LOAD)
 
     # unaligned
     val = d1.index(idx).load(dtype=dtypes.float.vec(4))
-    wzyx = tuple(val.gep(i) for i in reversed(range(4)))
+    wzyx = tuple(val.index(i) for i in reversed(range(4)))
     self.assertIs(_test_vec(wzyx).op, Ops.STACK)
 
     # different_size
     val = d1.index(idx).load(dtype=dtypes.float.vec(2))
-    xy = tuple(val.gep(i) for i in range(2))
+    xy = tuple(val.index(i) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, Ops.STACK)
     val = d1.index(idx).load(dtype=dtypes.float.vec(4))
-    xy = tuple(val.gep(i) for i in range(2))
+    xy = tuple(val.index(i) for i in range(2))
     self.assertIs(_test_vec(xy, count=2).op, Ops.STACK)
 
     # different vals
     val1 = d1.index(idx).load(dtype=dtypes.float.vec(2))
     val2 = d2.index(idx).load(dtype=dtypes.float.vec(2))
-    xy1 = tuple(val1.gep(i) for i in range(2))
-    xy2 = tuple(val2.gep(i) for i in range(2))
+    xy1 = tuple(val1.index(i) for i in range(2))
+    xy2 = tuple(val2.index(i) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, Ops.STACK)
 
   def test_gep_vec_const_fold(self):
@@ -312,7 +305,7 @@ class TestUOpGraph(unittest.TestCase):
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(Ops.STACK, dtypes.float.vec(vec_size), tuple(consts))
       with Context(SPEC=0):
-        uops = to_uops_list([vec.gep(i) for i in range(vec_size)])
+        uops = to_uops_list([vec.index(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):
           self.assertEqual(uop, const)
 
