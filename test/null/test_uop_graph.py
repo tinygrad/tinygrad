@@ -261,7 +261,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
-    x = UOp(Ops.GEP, dtypes.float, (vec, ), arg=0)
+    x = vec.gep(0)
     alu = UOp(Ops.SQRT, dtypes.float, (x, ))
     out = UOp(Ops.STORE, dtypes.void, (d0, idx, alu))
     uops = to_uops_list([out])
@@ -312,7 +312,7 @@ class TestUOpGraph(unittest.TestCase):
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(Ops.STACK, dtypes.float.vec(vec_size), tuple(consts))
       with Context(SPEC=0):
-        uops = to_uops_list([UOp(Ops.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
+        uops = to_uops_list([vec.gep(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):
           self.assertEqual(uop, const)
 
