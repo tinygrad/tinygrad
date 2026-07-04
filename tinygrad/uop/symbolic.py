@@ -7,7 +7,6 @@ from tinygrad.helpers import partition, all_same, prod, flatten, get_single_elem
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 
 # TODO: symbolic shouldn't be importing from codegen
-from tinygrad.codegen.decomp.op import threefry2x32
 from tinygrad.codegen.decomp.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -37,27 +36,34 @@ def fold_const_alu(a:UOp) -> UOp|None:
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
+def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
+  # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
+  # moves consts freely: the quotient may be merged ((x//c + a)//div -> (x + a*c)//(c*div) for div>0) and shifted ((y + k*D)//D == y//D + k)
+  (q, s), (num, a) = q.pop_const(), base.pop_const()
+  if q.op is not Ops.FLOORDIV or q.src[1].op is not Ops.CONST: return None
+  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].arg == (c:=num.src[1].arg)*div: num, a, D = num.src[0], a*c, c*div
+  elif q.src[1].arg == div: D = div
+  else: return None
+  (x, xa), (p, pa) = num.pop_const(), q.src[0].pop_const()
+  if p is not x or (t:=xa + a - pa) % D: return None
+  return base - k*div if (k:=t//D - s) else base
+
 def fold_add_divmod_recombine(x:UOp) -> UOp|None:
+  # a scaled mod (base%div)*mul recombines with a partner q*(div*mul) carrying the quotient of a b == base (mod div):
+  #   q == b//div     -> b*mul              (full recombine)
+  #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
   for i,u in enumerate(terms):
-    if u.op is Ops.FLOORMOD and u.src[1].op is Ops.CONST: base, div, mul = u.src[0], u.src[1].arg, 1
-    elif u.op is Ops.MUL and u.src[1].op is Ops.CONST and (m:=u.src[0]).op is Ops.FLOORMOD and m.src[1].op is Ops.CONST:
-      base, div, mul = m.src[0], m.src[1].arg, u.src[1].arg
-    else: continue
+    mod, mul = u.pop_const(Ops.MUL)
+    if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
+    base, div = mod.src[0], mod.src[1].arg
     for j,v in enumerate(terms):
-      if i == j: continue
-      if v.op is not Ops.MUL or v.src[1].op is not Ops.CONST or v.src[1].arg != div*mul: continue
-      q, exact = v.src[0], False
-      # (base%div)*mul + (base//div)*(div*mul) -> base*mul
-      if q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
-      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul if div>0
-      if not exact and div > 0 and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
-        exact = q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
-      if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
-      # ((base//div)%d)*(div*mul) + (base%div)*mul -> (base%(div*d))*mul
-      if div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
-        if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
-          return ((base % (div*d))*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
+      q, scale = v.pop_const(Ops.MUL)
+      if i == j or scale != div*mul: continue
+      rest = [t for k,t in enumerate(terms) if k not in (i,j)]
+      if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
+      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
+        return ((b % (div*d))*mul).usum(*rest)
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -130,9 +136,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   # ** constant folding **
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
-  (UPat(Ops.THREEFRY, src=(UPat.cvar("x"), UPat.cvar("key")), name="a"),
-   lambda a, x, key: a.const_like(threefry2x32(x, key).simplify().arg)),
   (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
