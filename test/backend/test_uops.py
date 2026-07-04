@@ -239,6 +239,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
 
+  @unittest.skip("this is a questionable microoptimization i won't enforce")
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
     # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)

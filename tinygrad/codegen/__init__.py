@@ -152,7 +152,7 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-simple_devectorize = PatternMatcher([
+devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # const INDEX into STACK is src (this is symbolic)
@@ -160,9 +160,6 @@ simple_devectorize = PatternMatcher([
    lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
   # INDEX without src is nothing
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
-])
-
-devectorizer2 = pm_mops+simple_devectorize+PatternMatcher([
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
