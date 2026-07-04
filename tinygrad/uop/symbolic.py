@@ -33,61 +33,72 @@ def fold_const_alu(a:UOp) -> UOp|None:
   vals = [const_arg(s) for s in a.src]
   return None if any(v is None for v in vals) else a.const_like(exec_alu(a.op, a.dtype, vals, False))
 
-invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
-invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
+def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
+  # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
+  # moves consts freely: the quotient may be merged ((x//c + a)//div -> (x + a*c)//(c*div) for div>0) and shifted ((y + k*D)//D == y//D + k)
+  (q, s), (num, a) = q.pop_const(), base.pop_const()
+  if q.op is not Ops.FLOORDIV or q.src[1].op is not Ops.CONST: return None
+  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].arg == (c:=num.src[1].arg)*div: num, a, D = num.src[0], a*c, c*div
+  elif q.src[1].arg == div: D = div
+  else: return None
+  (x, xa), (p, pa) = num.pop_const(), q.src[0].pop_const()
+  if p is not x or (t:=xa + a - pa) % D: return None
+  return base - k*div if (k:=t//D - s) else base
 
 def fold_add_divmod_recombine(x:UOp) -> UOp|None:
+  # a scaled mod (base%div)*mul recombines with a partner q*(div*mul) carrying the quotient of a b == base (mod div):
+  #   q == b//div     -> b*mul              (full recombine)
+  #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
   for i,u in enumerate(terms):
-    if u.op is Ops.FLOORMOD and u.src[1].op is Ops.CONST: base, div, mul = u.src[0], u.src[1].arg, 1
-    elif u.op is Ops.MUL and u.src[1].op is Ops.CONST and (m:=u.src[0]).op is Ops.FLOORMOD and m.src[1].op is Ops.CONST:
-      base, div, mul = m.src[0], m.src[1].arg, u.src[1].arg
-    else: continue
+    mod, mul = u.pop_const(Ops.MUL)
+    if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
+    base, div = mod.src[0], mod.src[1].arg
     for j,v in enumerate(terms):
-      if i == j: continue
-      if v.op is not Ops.MUL or v.src[1].op is not Ops.CONST or v.src[1].arg != div*mul: continue
-      q, exact = v.src[0], False
-      # (base%div)*mul + (base//div)*(div*mul) -> base*mul
-      if q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
-      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul if div>0
-      if not exact and div > 0 and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
-        exact = q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
-      if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
-      # ((base//div)%d)*(div*mul) + (base%div)*mul -> (base%(div*d))*mul
-      if div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
-        if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
-          return ((base % (div*d))*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
+      q, scale = v.pop_const(Ops.MUL)
+      if i == j or scale != div*mul: continue
+      rest = [t for k,t in enumerate(terms) if k not in (i,j)]
+      if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
+      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
+        return ((b % (div*d))*mul).usum(*rest)
   return None
 
+# an invalid index is cond.where(idx, Invalid) in weakint. the consumer reads cond back off the WHERE with UOp.get_valid,
+# so casts and comparisons of a gated index can drop the gate: when the index is invalid the result is never used
+invalid_idx_gate = UPat().where(UPat.var("x"), UPat(Ops.CONST, dtypes.weakint, arg=Invalid))
+pm_index_invalid = PatternMatcher([
+  (invalid_idx_gate.cast(name="cast"), lambda x,cast: x.cast(cast.dtype)),
+  (UPat(GroupOp.Comparison, src=(invalid_idx_gate, UPat.var("y")), name="alu"), lambda x,y,alu: x.alu(alu.op,y)),
+  (UPat(GroupOp.Comparison, src=(UPat.var("y"), invalid_idx_gate), name="alu"), lambda x,y,alu: y.alu(alu.op,x)),
+])
+
+# everywhere else Invalid poisons the value: ops move inside the gate so the Invalid reaches the LOAD/STORE and folds there.
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
-propagate_invalid = PatternMatcher([
-  # propagate invalid, push it past children
-  (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if i.dtype is dtypes.weakint else None),
-  (UPat(GroupOp.Unary, src=(invalid_gate,), name="alu"), lambda cond,x,alu,i: cond.where(x.alu(alu.op), i)),
-  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
-  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
-  # TODO: when can this happen? and is it always safe to just drop invalid?
-  (UPat(GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i:
-     x.alu(alu.op,y) if i.dtype is dtypes.weakint else cond.where(x.alu(alu.op,y), i.cast(dtypes.bool))),
-  (UPat(GroupOp.Comparison, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i:
-     y.alu(alu.op,x) if i.dtype is dtypes.weakint else cond.where(y.alu(alu.op,x), i.cast(dtypes.bool))),
-  # alu with invalid -> invalid
-  (UPat(GroupOp.Unary, src=(invalid_pat,)), lambda i: i),
+invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
+invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
+pm_data_invalid = PatternMatcher([
+  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,), name="op"), lambda i,op: i.cast(op.dtype)),
+  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_gate,), name="op"), lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i.cast(op.dtype))),
+  # binary ops move inside the gate, with Invalid cast to the result dtype (bool for comparisons)
+  (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
+  (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
-  # lift Invalid out  # TODO: this `a is cond` is asymmetric to preserve the pattern
+  # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
+  # when a is cond, ~a|cond is True and would drop the Invalid gate (losing the valid), so keep cond as the gate
   (UPat.var("a").where(invalid_gate, UPat.var("c")), lambda cond,i,x,a,c:
    (cond if a is cond else (a.logical_not()|cond)).where(a.where(x,c), i) if c.arg != Invalid else None),
   (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if b.arg != Invalid else None),
-  (UPat(Ops.BITCAST, src=(invalid_pat,), name="bc"), lambda bc,i: i.cast(bc.dtype)),
-  (UPat(Ops.BITCAST, src=(invalid_gate,), name="bc"), lambda bc,cond,x,i: cond.where(x.bitcast(bc.dtype), i.bitcast(bc.dtype))),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
     lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
+propagate_invalid = pm_index_invalid + pm_data_invalid
+
+# TODO: this does nothing now
 pm_remove_invalid = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid, name="i"), lambda i: i.const_like(0) if i.dtype.scalar() is not dtypes.weakint else None),
 ])
