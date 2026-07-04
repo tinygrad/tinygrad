@@ -16,28 +16,24 @@ def tag_uop(ctx:AllocCtx, x:UOp):
   ctx.uop_list.append(x)
   return x.replace(tag=(len(ctx.uop_list)-1,))
 
+def disk_like(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
+
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  to_disk = isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
-  if to_disk: ctx.buffer_map[u] = u.empty_like()
+  if disk_like(u) and u.tag is None:
+    ctx.buffer_map[u] = u.empty_like()
+    return u.rtag(())
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0].device, str) and any(u.src[0].device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
+  from_creation = isinstance(u.src[0].device, str) and u.src[0].device.startswith(("NPY", "DISK", "PYTHON", "TINYFS"))
   if from_creation: return tag_uop(ctx, u)
 
-def apply_after(ctx:AllocCtx, u:UOp):
-  base = u.src[0]
-  while base.op is Ops.AFTER: base = base.src[0]
-  ctx.buffer_map[u] = base
-
-# CONTIGUOUS and AFTER+STORE + parents are the only nodes that get updated
+# CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), name="x"), tag_uop),
-  (UPat(Ops.AFTER, name="u"), apply_after),
-  (UPat(Ops.CONTIGUOUS, name="x"), tag_uop),
+  (UPat((Ops.CONTIGUOUS, Ops.AFTER), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
@@ -47,13 +43,13 @@ def replace_contig_with_store_after(u:UOp):
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
-  if isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS")): return u.rtag(None)
+  if disk_like(u): return u.rtag(None)
   buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
@@ -70,7 +66,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(SLICE) when movement ops collapse to a contiguous range."""
   buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE}: return None
+  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE}: return None
 
   # no symbolic shape
@@ -78,14 +74,11 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   # check if view is supported
   from tinygrad.device import Device
-  if isinstance(c.device, str):
-    if not hasattr(Device[c.device].allocator, "_offset"): return None
-  elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
+  devs = (c.device,) if isinstance(c.device, str) else c.device
+  if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
-  x = src
-  while x.op in GroupOp.Movement: x = x.src[0]
   # NOTE: this contiguous is removed because this SLICE/RESHAPE has_buffer_identity
-  if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+  if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
     return view.contiguous(tag=c.tag)
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
@@ -205,9 +198,9 @@ pm_replace_buf = PatternMatcher([
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
-  # here we build buffer map
-  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.AFTER}
-  ctx = AllocCtx(bases=set([x.multibase for x in big_sink.src if x.base.op not in dont_realize and x.base.addrspace is not AddrSpace.ALU]))
+  # same predicate as Tensor.realize
+  ctx = AllocCtx(bases={base for x in big_sink.src if (base:=x.base).device is not None and not base.has_buffer_identity()
+                        and base.op is not Ops.AFTER and base.addrspace is not AddrSpace.ALU})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
@@ -216,8 +209,9 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
 
-  # here we construct the final buffer_map. this is everything that will go into the tensor map
+  # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
   ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
