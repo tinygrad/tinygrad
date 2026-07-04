@@ -36,34 +36,42 @@ def fold_const_alu(a:UOp) -> UOp|None:
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
-def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
-  # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
+def _quotient_base(q:UOp, base:UOp, div:int, congruent=True) -> UOp|None:
+  # the B with q == B//div and B == base - t for a const t (t%div == 0 when congruent, so B%div == base%div), or None. canonicalization
   # moves consts freely: the quotient may be merged ((x//c + a)//div -> (x + a*c)//(c*div) for div>0) and shifted ((y + k*D)//D == y//D + k)
   (q, s), (num, a) = q.pop_const(), base.pop_const()
   if q.op is not Ops.FLOORDIV or q.src[1].op is not Ops.CONST: return None
-  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].arg == (c:=num.src[1].arg)*div: num, a, D = num.src[0], a*c, c*div
-  elif q.src[1].arg == div: D = div
+  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].arg == (c:=num.src[1].arg)*div: num, a = num.src[0], a*c
+  elif q.src[1].arg == div: c = 1
+  elif div > 0 and 1 < (g:=q.src[1].arg) < div and div % g == 0:
+    # the quotient may also be split asymmetrically: q == E//g where E is the simplified base//f (f = div//g), so q == base//div.
+    # E == base//f exactly when 0 <= base - E*f < f (built distributed and simplified so the interval tightens)
+    f = div//g
+    r = UOp.usum(base, *[t*-f for t in q.src[0].split_uop(Ops.ADD)]).simplify()
+    return base + s*div if 0 <= r.vmin and r.vmax < f else None
   else: return None
   (x, xa), (p, pa) = num.pop_const(), q.src[0].pop_const()
-  if p is not x or (t:=xa + a - pa) % D: return None
-  return base - k*div if (k:=t//D - s) else base
+  if p is not x or (t:=xa + a - pa) % c or (congruent and t//c % div): return None
+  return base - d if (d:=t//c - s*div) else base
 
 def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   # a scaled mod (base%div)*mul recombines with a partner q*(div*mul) carrying the quotient of a b == base (mod div):
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
+  # inversely, any term base*mul with a partner q*(-div*mul) folds to (b%div)*mul (base-b is a const multiple of div, merges into the sum)
   terms = list(x.split_uop(Ops.ADD))
-  for i,u in enumerate(terms):
-    mod, mul = u.pop_const(Ops.MUL)
-    if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
-    base, div = mod.src[0], mod.src[1].arg
-    for j,v in enumerate(terms):
-      q, scale = v.pop_const(Ops.MUL)
-      if i == j or scale != div*mul: continue
-      rest = [t for k,t in enumerate(terms) if k not in (i,j)]
-      if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
-      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
-        return ((b % (div*d))*mul).usum(*rest)
+  pops = [t.pop_const(Ops.MUL) for t in terms]
+  for j,(q,scale) in enumerate(pops):
+    if q.op not in (Ops.FLOORDIV, Ops.FLOORMOD, Ops.ADD): continue  # a quotient partner: FLOORDIV, its partial's FLOORMOD, or const-shifted
+    for i,(base,mul) in enumerate(pops):
+      if i == j: continue
+      if base.op is Ops.FLOORMOD and base.src[1].op is Ops.CONST and scale == (div:=base.src[1].arg)*mul:
+        rest = [t for k,t in enumerate(terms) if k not in (i,j)]
+        if (b:=_quotient_base(q, base.src[0], div)) is not None: return (b*mul).usum(*rest)
+        if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and \
+            (b:=_quotient_base(q.src[0], base.src[0], div)) is not None: return ((b % (div*d))*mul).usum(*rest)
+      if mul and scale % mul == 0 and abs(div:=int(-scale//mul)) > 1 and (b:=_quotient_base(q, base, div, congruent=False)) is not None:
+        return ((base - b + b % div)*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -193,6 +201,12 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
     return unwrap(UOp.usum(*np).divides(d))<(c//d)
   return None
 
+def where_combine(alu:UOp, c:UOp, t:UOp, f:UOp, tt:UOp, ff:UOp, y:UOp|None=None) -> UOp|None:
+  # cond.where(t,f) <op> cond.where(tt,ff) -> cond.where(t<op>tt, f<op>ff), only if the simplified result is strictly smaller
+  ret = c.where(t.alu(alu.op, tt).simplify(), f.alu(alu.op, ff).simplify())
+  if y is not None: ret = y + ret
+  return ret if len(ret.toposort()) < len(alu.toposort()) else None
+
 def canonicalize_simplex(X:UOp) -> UOp|None:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
@@ -265,12 +279,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
    lambda cond, t, f: cond.where(f,t) if f.arg is not Invalid else None),
-  # alu of two where with same conds can combine, only do if true branch or false branch is const
+  # alu of two where with same conds can combine, only do if the simplified result is strictly smaller
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
-   lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+   where_combine),
   # if its a plus we add the associative variation too
-  ((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff")), \
-   lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+  (((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff"))).named("alu"), \
+   where_combine),
   # ALU/variable min==max -> CONST
   (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.BIND, Ops.SPECIAL}, name="x"),
    lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
@@ -292,9 +306,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
    lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
-  # x//d<c -> x<c*d for d>0
+  # x//d<c -> x<c*d for d>0, and x//d<c -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
-   lambda x,d,c: x<(c.arg*d.arg) if d.arg > 0 else None),
+   lambda x,d,c: (x<c.arg*d.arg) if d.arg > 0 else (x>c.arg*d.arg) if d.arg < 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
@@ -431,24 +445,19 @@ pm_move_where_on_load = PatternMatcher([
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  # in cond.where(x, i), simplify x given cond is true and i given cond is false
   if x.dtype.scalar() is not dtypes.weakint: return None
-  # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
-  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
-
-# TODO: this is O(number of WHERE * number of node)
-# def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-#   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-#   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
-#   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-#   if not t_subs and not f_subs: return None
-#   new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
-#   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
+  # skip consts, and skip branches with DIV/MOD when IMAGE mode is enabled -> image index e.g. openpilot
+  def skip(u:UOp) -> bool:
+    return u.op is Ops.CONST or (IMAGE.value > 0 and u.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD))
+  nx = x if skip(x) else uop_given_valid(cond, x, try_simplex=False)
+  ni = i if skip(i) else uop_given_valid(cond.logical_not(), i, try_simplex=False)
+  return None if nx is x and ni is i else cond.where(nx, ni)
 
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
-  (invalid_gate, gated_given_valid),
+  (UPat.var("cond").where(UPat.var("x"), UPat.var("i")), gated_given_valid),
 ])
 
 # this is symbolic 2.0
@@ -466,8 +475,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # ** where **
-  # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
-  # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
   # ** pow **

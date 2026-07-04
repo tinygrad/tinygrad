@@ -964,6 +964,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if s1_vmin*s1_vmax>0:
           return min(vals:=(cdiv(s0_vmin, s1_vmin), cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin), cdiv(s0_vmax, s1_vmax))), max(vals)
+      if self.op in {Ops.FLOORDIV, Ops.FLOORMOD} and not all_int((s0_vmin, s0_vmax, s1_vmin, s1_vmax)):
+        # a Variable bound can be a UOp: 0 <= x <= s0_vmax < y proves x//y == 0 and x%y == x
+        if isinstance(s0_vmin, int) and s0_vmin >= 0 and resolve(self.src[1] - self.src[1].ufix(s0_vmax) > 0, False):
+          return (0, 0) if self.op is Ops.FLOORDIV else (s0_vmin, s0_vmax)
+        return self.dtype.min, self.dtype.max
       if self.op is Ops.FLOORDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
         if s0_vmin > s0_vmax: return 0, 0  # numerator range is empty (e.g. RANGE with end=0)

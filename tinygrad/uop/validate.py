@@ -1,3 +1,4 @@
+from collections import deque
 from typing import Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu
 from tinygrad.dtype import dtypes, Invalid
@@ -21,14 +22,17 @@ z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
   Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
-def create_bounded(name:str, vmin:int, vmax:int, z3ctx:z3.Context) -> tuple[z3.ArithRef, z3.BoolRef]:
+def create_bounded(name:str, vmin, vmax, z3ctx:z3.Context) -> tuple[z3.ArithRef, z3.BoolRef]:
   return (s:=z3.Int(name, ctx=z3ctx)), (vmin <= s)&(s <= vmax)
+def z3_param(x:UOp, ctx) -> tuple[z3.ArithRef, z3.BoolRef]:
+  vmin, vmax = [ctx[1].get(b, b) for b in x._min_max]  # a PARAM bound can be a UOp, use its rendered z3 expression
+  return create_bounded(x.arg.name, vmin, vmax, ctx[0])
 
 z3_renderer = PatternMatcher([
   (UPat.var("cond").where(UPat.var("x"), UPat.const(dtypes.weakint, Invalid)), lambda x,cond,ctx: (ctx[1][x], ctx[1][cond])),
   # variables
   (UPat(Ops.SPECIAL, name="x"), lambda x,ctx: create_bounded(x.arg, 0, ctx[1][x.src[0]]-1, ctx[0])),
-  (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0])),
+  (UPat(Ops.PARAM, name="x"), z3_param),
   (UPat(Ops.RANGE, name="x"), lambda x,ctx: create_bounded(x.render(simplify=False), 0, ctx[1][x.src[0]]-1, ctx[0])),
   # loads are variables bounded by the min/max of the dtype. non-pointer INDEX is also a LOAD
   (UPat((Ops.LOAD, Ops.INDEX), dtypes.ints+(dtypes.weakint,), name="x"), lambda x,ctx:
@@ -52,12 +56,18 @@ z3_renderer = PatternMatcher([
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   # gate on upstream AFTER/BUFFER as a replacement for PtrDType, but keep INDEX as an unknown LOAD
-  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.BUFFER} and \
-                                      (x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
+  def gate(x:UOp) -> bool:
+    return x.op not in {Ops.AFTER, Ops.BUFFER} and (x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)
+  pending = deque(list(UOp.sink(*uops).toposort(gate=gate))[:-1])
   z3map: dict[UOp, z3.ExprRef] = {}
-  for u in lst:
+  while pending:
+    u = pending.popleft()
     # NOTE: we skip STACK here, it can't actually be accessed
-    if u.op is Ops.STACK: continue
+    if u in z3map or u.op is Ops.STACK: continue
+    # a PARAM bound can be a UOp: render the bound's subgraph before the PARAM whose constraint uses it
+    if u.op is Ops.PARAM and (bs:=[b for b in u._min_max if isinstance(b, UOp) and b not in z3map]):
+      pending.extendleft(reversed([n for b in bs for n in b.toposort(gate=gate)]+[u]))
+      continue
     z3_rewritten: tuple[z3.ExprRef, z3.BoolRef|None]|None = z3_renderer.rewrite(u, ctx=(solver.ctx, z3map))
     if z3_rewritten is None: raise NotImplementedError(f"{u.op} is not supported by z3")
     new_u, constraint = z3_rewritten

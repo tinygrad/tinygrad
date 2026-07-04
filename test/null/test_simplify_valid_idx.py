@@ -409,7 +409,7 @@ class TestImageSimplification(unittest.TestCase):
     alu1 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)//768
     valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
     load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
-    self.check(load, None, "((((idx1*24)+r3)+(r5*3))+-3)", "(((idx2*2)+r4)+-1)")
+    self.check(load, None, "((((idx1*24)+(r5*3))+r3)+-3)", "(((idx2*2)+r4)+-1)")
 
   def test_simplify7(self):
     # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
