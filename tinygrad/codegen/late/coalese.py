@@ -2,26 +2,10 @@ from typing import Any
 import itertools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
-from tinygrad.helpers import getenv, IMAGE, all_same
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.helpers import getenv, IMAGE
 from tinygrad.renderer import Renderer
-from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.codegen.late.devectorizer import image_valid_dims, _drop_valid_stmts, uop_given_valid
-
-def do_devectorize(b:UOp):
-  if b.shape == (): return None
-  # broadcasting needs to be already unpacked
-  if not all_same([x.shape for x in b.src]): return None
-  src = []
-  for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp._stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
-
-devectorizer2 = PatternMatcher([
-  # unpack broadcasting
-  (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
-])
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   shapes, ren = ctx
@@ -53,7 +37,7 @@ pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").load(dtype=dtypes.half), lambda x: x.load().cast(dtypes.half)),
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
   (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
-])+devectorizer2+symbolic_simple
+])
 
 def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
