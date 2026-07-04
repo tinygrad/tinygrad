@@ -168,11 +168,11 @@ class TestStatsOptimized(unittest.TestCase):
     cls.ast_gemm_half = (Tensor.empty(N, N, dtype=dtypes.half) @ Tensor.empty(N, N, dtype=dtypes.half)).schedule_linear().src[-1].src[0]
     cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule_linear().src[-1].src[0]
 
-  def check_gemm(self, p:UOp, extra_flops=0):
+  def check_gemm(self, p:UOp, extra_flops=0, half=False):
     est = p.src[0].arg.estimates
     print(p.arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
-    self.assertEqual(est.mem, 3*N*N*4) # 3 NxN mats with floats
+    self.assertEqual(est.mem, 3*N*N*(2 if half else 4)) # 3 NxN mats with floats
 
   def test_gemm(self):
     p = to_program(replace_opts(self.ast_gemm, []), renderer=Device[Device.DEFAULT].renderer)
@@ -186,7 +186,7 @@ class TestStatsOptimized(unittest.TestCase):
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
     print(p.src[2].arg)
-    self.check_gemm(p)
+    self.check_gemm(p, half=True)
 
   def test_gemm_tc_unroll(self):
     try:
