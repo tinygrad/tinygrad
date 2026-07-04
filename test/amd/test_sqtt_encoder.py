@@ -94,6 +94,13 @@ class TestSQTTEncoder(unittest.TestCase):
     wave1_salu = next(p for p in packets if isinstance(p, INST) and p.wave == 1 and p.op == InstOp.SALU)
     self.assertEqual(wave0_valu._time, wave1_salu._time)
 
+  def test_same_pipe_waves_issue_on_different_cycles(self):
+    """Two ready waves competing for one SALU slot issue on separate scheduler cycles."""
+    blob = _run_kernel([s_mov_b32(s[0], 0), s_endpgm()], lx=64)
+    salu_pkts = [p for p in decode(blob) if isinstance(p, INST) and p.op == InstOp.SALU]
+    self.assertEqual(len(salu_pkts), 2)
+    self.assertLess(salu_pkts[0]._time, salu_pkts[1]._time)
+
   def test_branch_taken_and_not_taken(self):
     """A loop with s_cbranch_scc1 emits JUMP when taken, JUMP_NO on final iteration."""
     # s[0] = 2; loop: s[0] -= 1; cmp s[0] != 0 (SCC=1 if true); cbranch_scc1 loop; endpgm

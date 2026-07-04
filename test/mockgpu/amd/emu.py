@@ -2255,6 +2255,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   pipe_resource = {"salu": 1, "valu": 1, "branch": 1, "barrier": 1, "control": 1,
                    "lds": 1, "smem": 1, "vmem": 1, "export": 1, "unknown": 1}
+  pipe_issue_delay = {"salu": 1, "valu": 1, "branch": 1, "barrier": 1, "control": 1,
+                      "lds": 1, "smem": 1, "vmem": 1, "export": 1, "unknown": 1}
 
   with _MXCSRContext():
     for gidz in range(gz):
@@ -2304,12 +2306,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           while len(done_waves) < total_waves:
             cycle += 1
 
-            # Decrement wait delays and promote waves that are ready to issue again.
+            # Promote waves whose scheduler-ready cycle has arrived.
             next_wait_queue = []
-            for wi, wave, delay in wait_queue:
-              delay -= 1
-              if delay <= 0: ready_waves.append((wi, wave))
-              else: next_wait_queue.append((wi, wave, delay))
+            for wi, wave, ready_cycle in wait_queue:
+              if ready_cycle <= cycle: ready_waves.append((wi, wave))
+              else: next_wait_queue.append((wi, wave, ready_cycle))
             wait_queue = next_wait_queue
 
             # Release barrier waves once every non-finished wave in this workgroup has reached the barrier.
@@ -2353,7 +2354,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               if is_barrier:
                 barrier_wait.append((wi, (st, c_bufs)))
               else:
-                next_ready_waves.append((wi, (st, c_bufs)))
+                wait_queue.append((wi, (st, c_bufs), cycle + pipe_issue_delay.get(pipe, pipe_issue_delay["unknown"])))
             ready_waves = next_ready_waves
           tracing = False  # only trace the first workgroup
 
