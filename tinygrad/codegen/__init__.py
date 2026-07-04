@@ -36,8 +36,6 @@ pm_remove_vec_dtypes = PatternMatcher([
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
-  # rewrite GEP to INDEX
-  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg if len(x.arg) > 1 else x.arg[0]),), arg=None)),
 ])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -250,7 +248,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_render, name="pm_render gep/stack")
+  sink = graph_rewrite(sink, pm_render, name="pm_render stack")
   sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # ** expander (expand_rewrite) **

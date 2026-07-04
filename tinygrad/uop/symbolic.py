@@ -2,8 +2,8 @@
 import math, struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import PyConst, ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
+from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
+from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 
 # TODO: symbolic shouldn't be importing from codegen
@@ -182,7 +182,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  # STACK on INDEX CONST (TODO: remove all the GEP crap)
+  # STACK on INDEX CONST
   (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].arg for x in stk.src] else None),
   # INDEX on STACK
@@ -209,40 +209,6 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
   return UOp.usum(*ret) if changed else None
-
-def gep_through_wmma(gep:UOp, wmma:UOp) -> UOp|None:
-  out_sz = prod(x[1] for x in wmma.arg[6][-1])
-  wmma_idxs = gep.arg[::out_sz]
-  for i in range(out_sz):
-    if tuple(x-i for x in gep.arg[i::out_sz]) != wmma_idxs: return None
-  tsrcs = []
-  for s,sz in zip(wmma.src, wmma.arg[6]):
-    src_args = []
-    ssz = prod(x[1] for x in sz)
-    for w in wmma_idxs: src_args += list(range((w//out_sz)*ssz, (w//out_sz)*ssz + ssz))
-    tsrcs.append(s.gep(tuple(src_args)))
-  return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
-
-gep_pushing = PatternMatcher([
-  # GEP/VECTORIZE, GEP/GEP, GEP/CONST
-  (UPat(Ops.GEP, name='g2').f(Ops.GEP, name='g1'),
-   lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(len(g1.arg))))),
-  (UPat(Ops.STACK, name='vec').f(Ops.GEP, name='gep'),
-   lambda gep, vec: UOp(Ops.STACK, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
-  (UPat.cvar("c").f(Ops.GEP, name="gep"), lambda gep, c: gep.const_like(c.arg)),
-  # GEP on void is skipped
-  (UPat(Ops.GEP, src=(UPat(dtype=dtypes.void, name="x"),)), lambda x: x),
-  # GEP in order is removed
-  (UPat(Ops.GEP, name="g"), lambda g: g.src[0] if not isinstance(g.dtype, PtrDType) and g.arg == tuple(range(g.src[0].max_numel())) else None),
-  # push all GEPs through ALUs for index (TODO: remove this)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu').f(Ops.GEP, dtype=dtypes.weakint, name='gep'),
-   lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
-     if not isinstance(gep.dtype, PtrDType) and not isinstance(alu.dtype, PtrDType) else None),
-  # VECTORIZE on same GEP
-  (UPat(Ops.STACK, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
-  # push some GEPs through WMMAs
-  (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
-])
 
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
@@ -326,7 +292,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
                         else y.src for y in x.src[1:]]))))),
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
-])+div_and_mod_symbolic+gep_pushing
+])+div_and_mod_symbolic
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 

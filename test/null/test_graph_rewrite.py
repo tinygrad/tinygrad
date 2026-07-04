@@ -183,33 +183,27 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
     base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(base_vector.gep(2)).arg, 3.0)
+    self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
     base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(list(apply_rewrite_values(base_vector.gep((2, 3)))), [3.0, 4.0])
+    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
 
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
     const_stack = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(const_stack.gep(2)).arg, 3.0)
+    self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
     const_stack = UOp.const(dtypes.float32.vec(4), (7.0, 8.0, 9.0, 10.0))
-    self.assertEqual(list(apply_rewrite_values(const_stack.gep((1, 3)))), [8.0, 10.0])
-
-  def test_gep_gep_simplification(self):
-    # Nested GEP simplification on a vector dtype
-    base_vector = UOp.const(dtypes.float32.vec(4), (10.0, 20.0, 30.0, 40.0))
-    gep_inner = base_vector.gep(1)  # Extract 2nd element (20.0)
-    self.assertEqual(apply_rewrite(gep_inner.gep(0)).arg, 20.0)
+    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
 
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
     base_vector = UOp.const(dtypes.float32.vec(4), (5.0, 10.0, 15.0, 20.0))
-    vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=(base_vector.gep(0), base_vector.gep(1), base_vector.gep(2), base_vector.gep(3)))
+    vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
 
