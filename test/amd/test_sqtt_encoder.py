@@ -30,6 +30,15 @@ class TestSQTTEncoder(unittest.TestCase):
     self.assertEqual(len(inst_pkts), 1)
     self.assertEqual(inst_pkts[0].op, InstOp.SALU)
 
+  def test_simple_salu_trace_sequence(self):
+    """Two scalar moves emit a deterministic single-wave SQTT packet sequence."""
+    blob = _run_kernel([s_mov_b32(s[0], 42), s_mov_b32(s[1], s[0]), s_endpgm()])
+    packets = [p for p in decode(blob) if type(p).__name__ != "NOP"]
+    self.assertEqual([type(p) for p in packets], [LAYOUT_HEADER, WAVESTART, INST, INST, WAVEEND])
+    self.assertEqual([p._time for p in packets], [0, 1, 2, 3, 4])
+    self.assertEqual([p.op for p in packets if isinstance(p, INST)], [InstOp.SALU, InstOp.SALU])
+    self.assertEqual([p.wave for p in packets if isinstance(p, (WAVESTART, INST, WAVEEND))], [0, 0, 0, 0])
+
   def test_valu_emits_valuinst(self):
     """Regular VALU ops emit VALUINST packets."""
     blob = _run_kernel([v_mov_b32_e32(v[0], 0), v_add_f32_e32(v[1], v[0], v[0]), s_endpgm()])

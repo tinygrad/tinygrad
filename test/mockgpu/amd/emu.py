@@ -2236,7 +2236,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       for gidy in range(gy):
         for gidx in range(gx):
           # Initialize all wavefronts for this workgroup
-          waves: list[tuple[WaveState, list]] = []
+          ready_waves: list[tuple[int,tuple[WaveState, list]]] = []
           for wave_start in range(0, total_threads, wave_size):
             st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data,
                             wave_size)
@@ -2244,32 +2244,72 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                       ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
                       ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0),
                       ctypes.c_uint64(st.accvgpr_buf._buf.va_addr)]
-            waves.append((st, c_bufs))
+            ready_waves.append((wave_start,(st, c_bufs)))
+
+          wait_queue: list[int, tuple[tuple[WaveState, list], int]] = []
+          barrier_wait: list[tuple[int, tuple[WaveState, list]]] = []
+          done_wave: list[tuple[WaveState, list]] = []
 
           # Execute wavefronts with barrier synchronization
           # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
-          done = [False] * len(waves)
+          done = [False] * len(ready_waves)
           for total_inst in range(10_000_000):
-            if all(done): break
-            for wi, (st, c_bufs) in enumerate(waves):
-              if done[wi]: continue
-              # Run this wave until barrier or endpgm
-              for _ in range(1_000_000):
-                pc = st.pc
-                if pc == ENDPGM_PC:
-                  done[wi] = True
-                  if tracing: sqtt_finish(wi, delta=1)
-                  break
+            ## task loop
+            cycle = 1
+            while True:
+              ## no more work to do so breaking.
+              if len(ready_waves) == 0 and len(barrier_wait) == 0 and len(wait_queue) == 0:
+                break
+              cycle = cycle + 1
+              ## decrement wait delays push to ready_wave when it's ready
+              for idx, (wid, wave, delay) in enumerate(wait_queue):
+                delay = delay - 1
+                if delay == 0:
+                  ready_waves.append((wid, wave))
+                  continue
+                wait_queue[idx] = (wid, wave, delay)
+              ## we have reached all the barrier so promote all the wave to ready_wave
+              if len(barrier_wait) != 0 and len(ready_waves) == 0:
+                ready_waves = barrier_wait
+                barrier_wait = []
+              ## pick from ready waves
+              (wi, (st, c_bufs)) = ready_waves.pop(0)
+              pc = st.pc
+              if pc == ENDPGM_PC:
+                done_wave.append((st, c_bufs))
+                if tracing: sqtt_finish(wi, delta=1)
+              else:
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
                   sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, delta=1)
-                if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
-              else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
-            # All waves have either hit barrier or endpgm — release barrier waves for next round
-          else: raise RuntimeError("exceeded 10M total scheduling rounds")
+                if is_barrier:
+                  barrier_wait.append((wid, (st, c_bufs)))
+                else:
+                  ready_waves.insert(0, (wid,(st, c_bufs)))
+
+          #   if all(done): break
+          #   for wi, (st, c_bufs) in enumerate(ready_waves):
+          #     if done[wi]: continue
+          #     # Run this wave until barrier or endpgm
+          #     for _ in range(1_000_000):
+          #       pc = st.pc
+          #       if pc == ENDPGM_PC:
+          #         done[wi] = True
+          #         if tracing: sqtt_finish(wi, delta=1)
+          #         break
+          #       fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
+          #       if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+          #       fxn(*[c_bufs[g] for g in globals_list])
+          #       if tracing:
+          #         inst_op = inst.op.value if hasattr(inst, 'op') else 0
+          #         sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, delta=1)
+          #       if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
+          #     else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
+          #   # All waves have either hit barrier or endpgm — release barrier waves for next round
+          # else: raise RuntimeError("exceeded 10M total scheduling rounds")
           tracing = False  # only trace the first workgroup
 
           # Reset LDS for next workgroup
