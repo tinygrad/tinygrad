@@ -32,6 +32,58 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
+# ** FP8 AtB GEMM custom kernel
+
+@functools.cache
+def custom_hk_fp8_atb_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=5) -> UOp:
+  # C = A.T @ B, A and B are physically [K, M] and [K, N].
+  n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0) + (1 if scale_mode & 4 else 0)
+  scales = args[:n_scales]
+  K, M = A.shape[0]*A.shape[1], A.shape[2]
+  K2, N = B.shape[0]*B.shape[1], B.shape[2]
+  assert K == K2, f"{A.shape} {B.shape}"
+  block_m, block_n, block_k, num_warps = 256, 256, 128, 8
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid fp8 atb tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
+  sink = UOp.sink(*sink_inputs,
+                  arg=KernelInfo(f"hk_fp8_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_fp8_atb.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)))
+
+def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_scale:Tensor|None=None) -> Tensor:
+  assert a.dtype == b.dtype == FP8_DTYPE, f"expected fp8, got {a.dtype} {b.dtype}"
+  assert a.ndim == b.ndim == 3 and a.shape[:2] == b.shape[:2], f"{a.shape} {b.shape}"
+  batch, rows, M = a.shape
+  N = b.shape[2]
+  assert M % TILE_M == 0 and N % TILE_N == 0 and (batch * rows) % 128 == 0, \
+    f"fp8 atb shape {a.shape} {b.shape} must produce (M,N,K) multiples of ({TILE_M},{TILE_N},128)"
+  is_multi = isinstance(a.device, tuple)
+  reduce_out = False
+  if is_multi:
+    ndev = len(a.device)
+    if a.uop.axis in (0, 1) or b.uop.axis in (0, 1): inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
+    elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=dtypes.bfloat16, device=a.device), 2
+    elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=dtypes.bfloat16, device=a.device), 1
+    else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
+    out = Tensor(inv.uop.multi(out_axis), device=a.device)
+    dname = a.device[0]
+  else:
+    out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device)
+    dname = a.device
+  dname = dname.split(":")[0]
+  scales = tuple(s for s in (x_scale, g_scale) if s is not None)
+  scale_mode = (1 if x_scale is not None else 0) | (4 if g_scale is not None else 0)
+  out = Tensor.custom_kernel(out, a, b, *scales, fxn=functools.partial(custom_hk_fp8_atb_gemm, dname=dname, scale_mode=scale_mode))[0]
+  if reduce_out: out = out.sum(0)
+  return out.squeeze(0) if out.ndim == 3 else out
+
 # ** MXFP8 GEMM custom kernel
 
 @functools.cache
@@ -230,8 +282,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     if s_g_t is not None: g_scale = g_scale * s_g_t
     grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=g_scale)
     # wgrad: no w_scale
-    g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
-    grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale)
+    grad_b = hk_fp8_atb_gemm(g_fp8, a_t, x_scale=s_x_t, g_scale=g_scale)
     # wgrad: rescale if not scalar
     if w_post_t is not None:
       grad_b = grad_b / w_post_t.reshape(*w_post_t.shape, *([1]*(grad_b.ndim - w_post_t.ndim)))
