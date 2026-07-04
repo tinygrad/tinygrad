@@ -2253,6 +2253,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           total_waves = len(ready_waves)
 
           cycle, total_inst = 0, 0
+          last_issued_cycle: dict[int, int] = {}
+          traced_waves: set[int] = set()
+          last_sqtt_emit_cycle = 0
           while len(done_waves) < total_waves:
             cycle += 1
 
@@ -2278,7 +2281,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             pc = st.pc
             if pc == ENDPGM_PC:
               done_waves.add(wi)
-              if tracing: sqtt_finish(wi, delta=1)
+              if tracing:
+                sqtt_cycle = cycle + 1
+                sqtt_finish(wi, delta=sqtt_cycle - last_sqtt_emit_cycle)
+                last_sqtt_emit_cycle = sqtt_cycle
               continue
 
             total_inst += 1
@@ -2289,9 +2295,19 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
             if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
             fxn(*[c_bufs[g] for g in globals_list])
+            last_issued_cycle[wi] = cycle
             if tracing:
               inst_op = inst.op.value if hasattr(inst, 'op') else 0
-              sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None, delta=1)
+              branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None
+              if wi not in traced_waves:
+                sqtt_emit(wi, inst, branch_taken, delta=1, start_delta=cycle - last_sqtt_emit_cycle)
+                traced_waves.add(wi)
+                last_sqtt_emit_cycle = cycle + 1
+              else:
+                sqtt_cycle = cycle + 1
+                sqtt_emit(wi, inst, branch_taken, delta=sqtt_cycle - last_sqtt_emit_cycle)
+                last_sqtt_emit_cycle = sqtt_cycle
+
             if is_barrier:
               barrier_wait.append((wi, (st, c_bufs)))
             else:
