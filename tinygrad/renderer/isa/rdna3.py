@@ -241,26 +241,15 @@ def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
     else: return y.index(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
-# NOTE: maybe add this functionality to to_vgpr? (bool const + cmp output handling, realize as vgpr per lane result)
-# NOTE: also maybe add this to pre_isel?
 def cmp(ctx, x:UOp):
-  rlz = []
-  if x.op in GroupOp.Comparison:
-    for u in x.src: # convert cmp outputs and const bools to vgpr, NOTE: just add this to isel matching somehow?
-      if u.dtype is dtypes.bool:
-        if u.op is Ops.CONST: rlz.append(const(dtypes.uint32, 1) if u.arg else const(dtypes.uint32,0))
-        else: rlz.append(u.where(const(dtypes.uint32,1), const(dtypes.uint32,0)))
-      else: rlz.append(u)
-    x = x.replace(src=tuple(rlz))
-    dt = x.src[0].dtype.scalar()
-    # NOTE: maybe easier to just always write to new sgpr, can be optimized to use e32 later but there will be lots of VCC spills in regalloc
-    ins = OP_INS[x.op][64][dt]
-  else:
-    if x.op is Ops.AND: ins = RDNA3Ops.s_and_b32
-
+  _mask_cmp = { Ops.CMPNE : RDNA3Ops.s_xor_b32, Ops.AND : RDNA3Ops.s_and_b32, Ops.CMPLT :  RDNA3Ops.s_and_not1_b32, Ops.CMPEQ : RDNA3Ops.s_nor_b32 }
+  scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
+  if scmp:
+    ins = _mask_cmp[x.op]
+    if x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
+  else: ins = OP_INS[x.op][64][x.src[0].dtype.scalar()]
   x = x.ins(ins, tag=GP_SGPRS)
-  if x.op is Ops.AND: return x
-  return _vop3(ctx, x)
+  return x if scmp else _vop3(ctx, x)
 
 def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
@@ -420,9 +409,19 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
 
+
 # ---- lowering passes ----
+extra_matcher = PatternMatcher([
+  (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
+  # prevent 64 bit immediate from being realized into 2 regs for shift
+  (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x:
+    x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
+])
+
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
+  # realize bool const as sgpr mask
+  (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   # what cases does this fail?
   (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)),
   # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
@@ -485,7 +484,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
   # unified alu experiment
   (UPat(Ops.CDIV, name="x"), cdiv),
-  (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
@@ -516,6 +514,8 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+
+  # print("encoding", opc, [rdefs(s) for s in oprs])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -589,6 +589,7 @@ class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
+  extra_matcher = extra_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}

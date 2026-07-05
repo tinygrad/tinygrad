@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools, functools
+import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
@@ -25,16 +25,14 @@ class VSubRegister: # should this inherit?
   pos: int
   def __repr__(self): return f"{self.parent.name}.{self.pos}"
 
-AbstractReg = Register|VRegister|VSubRegister
-def rdefs(u:UOp) -> tuple[AbstractReg,...]:
+def rdefs(u:UOp) -> tuple[VRegister|Register|VSubRegister,...]:
   if u.op in {Ops.AFTER, Ops.END}: return rdefs(u.src[0])
-  return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, AbstractReg))
+  return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister,VSubRegister)))
 
 class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
-    self.reg_n, self.group_n = itertools.count(), itertools.count()
-    self.lds_size = 0
+    self.reg_n = itertools.count()
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
