@@ -1228,7 +1228,8 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     srcs = {'S0': src0, 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': _c(0, dtypes.int),
             'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)}
     _, assigns = parse_pcode(get_pcode(inst.op), srcs)
-    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0')]
+    # f16 ops also emit a redundant D0[31:16]=0; skip it since _val_to_u32 already zero-extends the f16 result
+    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0') and '[' not in dest]
     return UOp.sink(*stores, *ctx.inc_pc())
 
   # Regular VOP3 - read operands dynamically
