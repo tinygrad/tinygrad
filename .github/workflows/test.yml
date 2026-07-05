@@ -558,7 +558,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/backend/test_transcendental.py test/backend/test_uops.py test/backend/test_symbolic_ops.py test/backend/test_const_folding.py test/backend/test_tensor_variable.py test/backend/test_stunning.py test/backend/test_subbuffer.py test/backend/test_to_numpy.py test/backend/test_schedule.py test/backend/test_tensor.py test/backend/test_custom_kernel.py test/backend/test_edgecases.py test/backend/test_opt_gemm.py test/backend/test_pickle.py test/backend/test_rangeify.py test/backend/test_softmax_fusion.py test/backend/test_symbolic_jit.py test/backend/test_profiler.py test/device/test_hcq.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math

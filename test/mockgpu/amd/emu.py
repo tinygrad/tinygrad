@@ -1228,8 +1228,16 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     srcs = {'S0': src0, 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': _c(0, dtypes.int),
             'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)}
     _, assigns = parse_pcode(get_pcode(inst.op), srcs)
-    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0')]
-    return UOp.sink(*stores, *ctx.inc_pc())
+    # f16 ops write D0.f16 (low 16 bits) plus D0[31:16]=0 (high 16 bits); combine partial writes into one SGPR store
+    result = _c(0)
+    for dest, val in assigns:
+      if not dest.startswith('D0'): continue
+      if (sm := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
+        hi_bit, lo_bit = int(sm.group(1)), int(sm.group(2))
+        result = _set_bits(result, _val_to_bits(val), hi_bit - lo_bit + 1, lo_bit)
+      elif re.match(r'D0\.(f16|u16|i16)', dest): result = _set_bits(result, _val_to_bits(val), 16, 0)
+      else: result = _val_to_u32(val)
+    return UOp.sink(ctx.wsgpr_dyn(vdst_reg, result.cast(dtypes.uint32)), *ctx.inc_pc())
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
