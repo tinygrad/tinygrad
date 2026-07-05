@@ -68,7 +68,7 @@ def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
-KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],) 
+KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
 lane_ctr = itertools.count()
@@ -90,7 +90,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   for i in range(nregs):
     if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
     else: mvs.append(vmov(x.src[i]))
-  nx = multireg(*mvs, dtype=x.src[0].dtype)
+  nx = multireg(*mvs, dtype=x.dtype)
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
@@ -113,7 +113,7 @@ def _vop2(ctx, x:UOp):
   if not _isconst(x.src[1]): return x
   rest = x.src[2:] if len(x.src) > 2 else ()
   non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-  if not non_commutative and not _isconst(x.src[0]): 
+  if not non_commutative and not _isconst(x.src[0]):
     return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
@@ -173,7 +173,7 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
-def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs) 
+def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
@@ -260,14 +260,19 @@ def add64(ctx, x:UOp):
   hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
-# TODO: signed
+# a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo)
+#           =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
   a, b = x.src
-  mad = RDNA3Ops.v_mad_u64_u32 if dtypes.is_unsigned(x.dtype) else RDNA3Ops.v_mad_i64_i32
-  p1 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(0), b.index(0), const(x.dtype,0)))
-  p2 = UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(1), b.index(0), p1))
-  return UOp(Ops.INS, arg=mad, dtype=x.dtype, src=(a.index(0), b.index(1), p2))
+  sign = not dtypes.is_unsigned(x.dtype)
+  def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_i64_u32 if sign else RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
+  def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(dtypes.int,32),x))
+  shup = const(dtypes.int, 32)
+  p1 = _up(_mad(a.index(1), b.index(0)))
+  p2 = _up(_mad(a.index(0), b.index(1)))
+  p3 = add64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)))
+  return _mad(a.index(0), b.index(0), p3)
 
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
@@ -409,7 +414,6 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
 
-
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -442,7 +446,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=(dtypes.half, dtypes.float)).cast((dtypes.ulong,dtypes.long), name="x"),
     lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(x.dtype)),
   # (u32/i32 -> f16) to (-> f32 -> f16)
-  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)), 
+  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)),
   # (f64 -> f16/i16/u16) to (f64 -> f64 ?-> i16/u16)
   (UPat.var("y", dtype=dtypes.double).cast((dtypes.half, dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.cast(dtypes.float32).cast(dtypes.half).cast(x.dtype)),
   # (f32 -> u16/i16) to (f32 -> u32/i32)
@@ -481,7 +485,7 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
   # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf), 
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf),
   # unified alu experiment
   (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
@@ -507,7 +511,7 @@ def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   import tinygrad.renderer.amd.dsl as dsl
   def _route(r:Register):
-    dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  } 
+    dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
     return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
   def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
@@ -515,7 +519,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  # print("encoding", opc, [rdefs(s) for s in oprs])
+  print("encoding", opc, [rdefs(s) for s in oprs])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -557,18 +561,18 @@ def ctp(x:UOp) -> CntType|None:
   if x.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }: return CntType.STORE_CNT if x.dtype is dtypes.void else CntType.LOAD_CNT
   if x.arg.func in { RDNA3Ops.SMEM }: return CntType.DS_CNT
   return None
-  
+
 def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
   total: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
   outstnd: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
   ddeps: dict[Register, tuple[CntType, int]] = {}
   nuops = []
 
-  for u in uops: 
+  for u in uops:
     oprs = u.src
     if (tp := ctp(u)):
       if u.dtype is dtypes.void: oprs = oprs[:-1]
-      rs = rdefs(u.src[-1]) if u.dtype is dtypes.void else rdefs(u) 
+      rs = rdefs(u.src[-1]) if u.dtype is dtypes.void else rdefs(u)
       for r in rs: ddeps[r] = (tp,outstnd[tp])
       outstnd[tp] += 1
       total[tp] += 1
@@ -625,7 +629,7 @@ class RDNA3Renderer(ISARenderer):
 
     print(prg.arg)
     for u in lin.src: print(u.arg)
-     
+
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 

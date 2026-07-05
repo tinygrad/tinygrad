@@ -36,7 +36,7 @@ class LinearScanRegallocContext:
     vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons), lis[v][0], lis[v][-1]))
 
     live_ranges: dict[Vregister, tuple[int,int]] = { v: (iv[0], iv[-1]) for v,iv in lis.items() }
-    physical_slots: dict[Register, list[tuple[int, int], ...]] = {} 
+    physical_slots: dict[Register, list[tuple[int, int], ...]] = {}
     for v in vregs:
       v_start, v_end = live_ranges[v]
       def _isfree(pregs:list[Register]):
