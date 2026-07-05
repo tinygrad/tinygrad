@@ -416,7 +416,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
       return graph_rewrite(self, symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
-  def sintify(self) -> sint: return self.arg if self.op is Ops.CONST else self
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = (simple_self:=self.simplify())._min_max
@@ -667,19 +666,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
-  # like gep, but might return an integer
-  def sgep(self, i:int) -> sint:
-    match self.op:
-      case Ops.CONST: return self.arg
-      case Ops.STACK: return self.src[i].sintify()
-      case _: raise RuntimeError(f"no sgep on {self.op}")
-
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.CONST: return (self.arg,)*self.dtype.count # NOTE: this will break
     if self.op is not Ops.STACK: return (ssimplify(self),)
-    return tuple(ssimplify(self.sgep(i)) for i in range(len(self.src)))
+    return tuple(s.arg if s.op is Ops.CONST else ssimplify(s) for s in self.src)
 
   @functools.cached_property
   def marg(self):
