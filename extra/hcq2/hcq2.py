@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
-import struct, functools, time, collections, importlib, itertools, weakref
-from dataclasses import replace, dataclass, field
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, DEBUG, dedup, pluralize
+import struct, functools, time, collections, itertools
+from dataclasses import replace, dataclass
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
-from tinygrad.uop.symbolic import symbolic_simple, symbolic
-from tinygrad.dtype import dtypes, AddrSpace, truncate
+from tinygrad.uop.symbolic import symbolic
+from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
@@ -323,7 +323,7 @@ def add_finalizer(ctx:itertools.count, linear:UOp) -> UOp:
 pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finalizer)])
 
 # *****************
-# 2.4. global sync
+# 2.5. global sync
 
 def add_global_sync(ctx:set[tuple[str, ...]], submit:UOp, q:UOp) -> UOp|None:
   if (devs:=q.arg[0]) in ctx: return None
@@ -365,7 +365,7 @@ def add_stores(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
 pm_add_inner_stores = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_stores)])
 
 # *****************
-# 2.1. hcq lowering: programs
+# 4.1. hcq lowering: programs
 
 def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
@@ -374,7 +374,7 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   return buf.after(*[make_patch(buf, i * 4, w) for i, w in enumerate(words)])
 
 # *****************
-# 2.2. hcq lowering: ops to ir
+# 4.2. hcq lowering: ops to ir
 
 def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
   if (pm:=Device.get_class(lin.arg[0][0]).pm_lower) is None: return None
@@ -463,6 +463,44 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
 pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
 
 # *****************
+# 8. callify hcq programs
+
+pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
+  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
+
+hcq_compile_cache:dict[bytes, UOp] = {}
+
+@track_rewrites(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
+
+  if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
+    # schedule
+    linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
+    linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
+    linear = graph_rewrite(linear, pm_tag_hcq_calls, ctx=(enumerator:=itertools.count(0)), walk=True, name="tag hcq calls")
+    linear = graph_rewrite(linear, pm_sched_sync, ctx=HCQDepsTracker(), walk=True, name="schedule sync")
+    linear = linear.substitute({s: p for p, s in back_map.items()}, walk=True)
+    linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
+    linear = graph_rewrite(linear, pm_add_finalizer, ctx=enumerator, walk=True, name="add finalizer")
+    linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
+
+    # lowering to hcq ir
+    linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
+    linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
+    linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
+
+    # pie
+    linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="early simplify patches", enter_calls=True)
+    linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
+    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
+
+    # and compile it
+    final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+
+  return final_linear
+
+# *****************
 # 6. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
@@ -507,44 +545,6 @@ pm_resolve_patches = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf"), UPat.cvar("off"), UPat(Ops.CONST)))
     .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
 ])
-
-# *****************
-# 8. callify hcq programs
-
-pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
-  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
-
-hcq_compile_cache:dict[bytes, tuple[UOp, tuple[UOp, ...]]] = {}
-
-@track_rewrites(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
-  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
-
-  if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
-    # schedule
-    linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
-    linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
-    linear = graph_rewrite(linear, pm_tag_hcq_calls, ctx=(enumerator:=itertools.count(0)), walk=True, name="tag hcq calls")
-    linear = graph_rewrite(linear, pm_sched_sync, ctx=HCQDepsTracker(), walk=True, name="schedule sync")
-    linear = linear.substitute({s: p for p, s in back_map.items()}, walk=True)
-    linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
-    linear = graph_rewrite(linear, pm_add_finalizer, ctx=enumerator, walk=True, name="add finalizer")
-    linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
-
-    # lowering to hcq ir
-    linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
-    linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
-    linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
-
-    # pie
-    linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="early simplify patches", enter_calls=True)
-    linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
-    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
-
-    # and compile it
-    final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
-
-  return final_linear
 
 @track_rewrites(lambda _,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp) -> UOp:
