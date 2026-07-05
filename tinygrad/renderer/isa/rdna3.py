@@ -193,17 +193,18 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
     # TODO: gated reg load
     return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),))
   imap = {
+    1 : (RDNA3Ops.global_load_u8,RDNA3Ops.ds_load_u8),
     2 : (RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16),
     4 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
     8 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
     16 : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
   }
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
-  nregs = (n * x.dtype.itemsize+3)//4
+  nregs = (n * base.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
   # the alt realize has to load them into the same vreg/subregs?
   def _gate(o:UOp): return o.replace(src=(stack2regs(ctx, alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
-  return _gate(x.ins(_insspace(imap[n * x.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
+  return _gate(x.ins(_insspace(imap[n * base.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
 
 def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
@@ -216,6 +217,7 @@ def store(ctx, addr:UOp, x:UOp):
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n*addr.dtype.itemsize+3)//4
   imap = {
+    1:(RDNA3Ops.global_store_b8,RDNA3Ops.ds_store_b8),
     2:(RDNA3Ops.global_store_b16,RDNA3Ops.ds_store_b16),
     4:(RDNA3Ops.global_store_b32,RDNA3Ops.ds_store_b32),
     8:(RDNA3Ops.global_store_b64,RDNA3Ops.ds_store_b64),
@@ -419,14 +421,20 @@ extra_matcher = PatternMatcher([
   # prevent 64 bit immediate from being realized into 2 regs for shift
   (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x:
     x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
+
 ])
 
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
+  # TODO: handle gated bool load/store
+  # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
+  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
+  (UPat(Ops.LOAD, dtype=dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
+  # (UPat(Ops.LOAD, allow_any_len=True, name="x"), lambda x: x.bitwise_and(const(dtypes.uint8, 1))),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   # what cases does this fail?
-  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)),
+  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG
   # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
