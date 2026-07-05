@@ -244,7 +244,7 @@ def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
 def cmp(ctx, x:UOp):
-  _mask_cmp = { Ops.CMPNE : RDNA3Ops.s_xor_b32, Ops.AND : RDNA3Ops.s_and_b32, Ops.CMPLT :  RDNA3Ops.s_and_not1_b32, Ops.CMPEQ : RDNA3Ops.s_nor_b32 }
+  _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
   scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
   if scmp:
     ins = _mask_cmp[x.op]
@@ -413,7 +413,7 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
 
 def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(ctx, x.ins(ins, src=(b,a,cmp(ctx,pred))))
+  return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
@@ -487,7 +487,7 @@ isel_matcher = PatternMatcher([
   # note: *_e64 cmp and cndmask encoding allows for storage/usage of VCC as SGPR
   (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
   # perf: cmp shouldn't always be materialized to sgpr, only for where
-  (UPat(GroupOp.Comparison|{Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
+  (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
   # mem ops
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
