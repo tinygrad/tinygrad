@@ -120,7 +120,7 @@ def _vop2(ctx, x:UOp):
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  if x.op is Ops.GROUP and x.src[0].op is not Ops.INS: return None
+  if x.op is Ops.GROUP and (len(x.src) == 0 or x.src[0].op is not Ops.INS): return None
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
@@ -260,13 +260,12 @@ def add64(ctx, x:UOp):
   hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
-# a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo)
-#           =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
+# a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
   a, b = x.src
   sign = not dtypes.is_unsigned(x.dtype)
-  def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_i64_u32 if sign else RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
+  def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_i64_i32 if sign else RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
   def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(dtypes.int,32),x))
   shup = const(dtypes.int, 32)
   p1 = _up(_mad(a.index(1), b.index(0)))
@@ -287,7 +286,7 @@ def cdiv(ctx, x:UOp):
   if x.dtype.itemsize != 4:
     raise NotImplementedError(f"cdiv expansion not implemented for dtype: {x.dtype}")
   def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
-  a,b = x.src
+  a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) # note: hack
   z = b.cast(dtypes.float32).reciprocal()
   z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
   z += _umulh(z, -b * z) # Unsigned integer Newton-Raphson round
