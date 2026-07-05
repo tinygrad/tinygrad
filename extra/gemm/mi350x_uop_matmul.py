@@ -180,7 +180,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # store the acc into gmem
   cp_i, cp_j = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 10004), UOp.range(BLOCK_N//TC_N, 10005)
   c_load = lambda i: C[gx, cp_i*TC_M*WARPGROUP_SIZE + warpgroup*TC_M + (warp//16)*4+i, gy, cp_j*TC_N + warp%16]
-  store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].gep(i)) for i in range(4)])
+  store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].index(i)) for i in range(4)])
   store = store.end(cp_i, cp_j)
 
   return store.sink(arg=KernelInfo(name="custom_gemm", opts_to_apply=())).simplify()
@@ -197,7 +197,7 @@ wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float,
 out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
 
 # store back the acc
-acc = acc.after(UOp.group(*[acc[i].store(out.gep(i)) for i in range(4)]).end(K_loop))
+acc = acc.after(UOp.group(*[acc[i].store(out.index(i)) for i in range(4)]).end(K_loop))
 
 # store the acc into gmem
 store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(acc[i]) for i in range(4)])

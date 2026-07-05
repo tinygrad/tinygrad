@@ -100,7 +100,7 @@ class VLIWRenderer(Renderer):
       assert u.dtype.count in (1,8), "dtype count must be 1 or 8"
 
       # dumb register allocator
-      if u.op not in {Ops.STORE, Ops.SINK, Ops.GEP}:
+      if u.op not in {Ops.STORE, Ops.SINK, Ops.INDEX}:
         r[u] = reg
         reg += u.dtype.count
 
@@ -110,9 +110,9 @@ class VLIWRenderer(Renderer):
           inst.append({"flow": [("halt",)]})
         case Ops.CONST:
           inst.append({"load": [("const", r[u], u.arg)]})
-        case Ops.GEP:
-          # a GEP is just an alias to a special register in the vector
-          r[u] = r[u.src[0]] + u.arg[0]
+        case Ops.INDEX:
+          # an INDEX is just an alias to a special register in the vector
+          r[u] = r[u.src[0]] + u.src[1].arg
         case Ops.STACK:
           if all(s == u.src[0] for s in u.src):
             # if all sources are the same, we can broadcast
