@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import GlobalCounters, DEV
+from tinygrad.helpers import GlobalCounters
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
@@ -90,7 +90,6 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
-  @unittest.skipIf(DEV.arch=="INTEL", "intel gets 524288 != 524352")
   def test_bigger_matmul_half(self): self.test_simple_matmul_half(64)
 
   def test_batched_matmul_half(self, N=16):
@@ -166,18 +165,29 @@ class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+    cls.ast_gemm_half = (Tensor.empty(N, N, dtype=dtypes.half) @ Tensor.empty(N, N, dtype=dtypes.half)).schedule_linear().src[-1].src[0]
     cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule_linear().src[-1].src[0]
 
-  def check_gemm(self, p:UOp, extra_flops=0):
+  def check_gemm(self, p:UOp, extra_flops=0, half=False):
     est = p.src[0].arg.estimates
     print(p.arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
-    self.assertEqual(est.mem, 3*N*N*4) # 3 NxN mats with floats
+    self.assertEqual(est.mem, 3*N*N*(2 if half else 4)) # 3 NxN mats with floats
 
   def test_gemm(self):
     p = to_program(replace_opts(self.ast_gemm, []), renderer=Device[Device.DEFAULT].renderer)
     self.check_gemm(p)
     self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4 + 4*N*N)
+
+  @unittest.skip("fails locally on AMD")
+  def test_gemm_tc_unroll_half(self):
+    try:
+      p = to_program(replace_opts(self.ast_gemm_half, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
+                      renderer=Device[Device.DEFAULT].renderer)
+    except KernelOptError:
+      raise unittest.SkipTest("no tensor cores")
+    print(p.src[2].arg)
+    self.check_gemm(p, half=True)
 
   def test_gemm_tc_unroll(self):
     try:
@@ -185,7 +195,7 @@ class TestStatsOptimized(unittest.TestCase):
                       renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
-    print(p.src[3].arg)
+    print(p.src[2].arg)
     self.check_gemm(p)
 
   # this is a good lesson about why UPCASTing is a good idea

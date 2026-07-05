@@ -36,7 +36,6 @@ renderer = PatternMatcher([
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda ctx,x,u: f"UNROLL({ctx[x.src[0]]}, {u.arg})"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
@@ -82,7 +81,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
-  (UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
+  (UPat(Ops.COPY, src=(UPat(name="x"),), name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, {x.dtype}, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {r.arg[1]})" if len(r.arg[1]) else None),
   # NOTE: range has srcs sometimes after control flow
@@ -133,7 +132,7 @@ def pyrender(ast:UOp) -> str:
   lst = list(ast.toposort())
 
   cmap = consumer_map_from_toposort(lst)
-  not_rendered = {Ops.CONST, Ops.DEVICE}
+  not_rendered = {Ops.CONST}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
                      Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.FUNCTION, Ops.WHERE, Ops.END}
 

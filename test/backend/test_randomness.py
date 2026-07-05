@@ -77,7 +77,7 @@ class TestRandomness(unittest.TestCase):
       ast = call.src[0]
       if ast.op is Ops.SINK:
         prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
-        for u in tuple(prg.src[2].src):
+        for u in tuple(prg.src[1].src):
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):

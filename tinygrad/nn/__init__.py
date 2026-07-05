@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -40,7 +40,7 @@ class BatchNorm:
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
-    if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -52,7 +52,7 @@ class BatchNorm:
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
@@ -335,13 +335,14 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     embed_size = grad_weight.shape[-1]
     BLOCK_J = min(256, embed_size)
-    assert embed_size % BLOCK_J == 0, f"embed_size {embed_size} must be divisible by {BLOCK_J}"
-
-    n_j_blocks = embed_size // BLOCK_J
+    n_j_blocks = (embed_size + BLOCK_J - 1) // BLOCK_J
     i = UOp.range(grad_emb_flat.shape[0], 0)         # batch_size * sequence_length -> GLOBAL
     j_inner = UOp.range(BLOCK_J, 2, AxisType.LOOP if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
     j_outer = UOp.range(n_j_blocks, 1)
     j = j_outer * BLOCK_J + j_inner
+    # mask padded embed
+    j_ok = j < embed_size
+    j_idx = j.clip(0, embed_size-1)
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
@@ -349,16 +350,16 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
-      in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size))
-      grad_val = in_range.where(grad_emb_flat[i, j].cast(dtypes.float), 0.0)
+      in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size)) & j_ok
+      grad_val = in_range.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     else:
       local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
-      grad_val = grad_emb_flat[i, j].cast(dtypes.float)
+      grad_val = j_ok.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(local_token_id, j, ptr=True), grad_val), arg = atomic_arg)
+    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(local_token_id, j_idx, ptr=True), grad_val), arg = atomic_arg)
     return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]

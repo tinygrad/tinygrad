@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 import itertools
-from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
+from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM, TRAINING
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype, to_dtype
 
@@ -42,9 +42,9 @@ class Optimizer:
     """
     Returns the tensors that need to be realized to perform a single optimization step.
     """
-    if not Tensor.training: raise RuntimeError(
-            f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
-                - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
+    if not TRAINING: raise RuntimeError(
+            f"""TRAINING={TRAINING.value}, TRAINING must be enabled to use the optimizer.
+                - help: Consider using Context(TRAINING=1) before calling Optimizer.step().""")
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
       # NOTE: contiguous is for speed

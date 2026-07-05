@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
@@ -32,7 +32,7 @@ def lower_shaped_wmma(ctx, x):
   wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
   wmma = UOp(Ops.WMMA, dtype_out.vec(x.src[2].shape[-1]), tuple(s[u].contract(u) for s, u in upcasts), arg=wmma_arg)
   tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG)
-  return tmp.after(UOp.group(*[tmp[e].store(wmma.gep(e)) for e in range(x.src[2].shape[-1])]))
+  return tmp.after(UOp.group(*[tmp[e].store(wmma.index(e)) for e in range(x.src[2].shape[-1])]))
 
 pm_store_ranges = PatternMatcher([
   (UPat(Ops.STORE, name="x"), add_ranges_to_store),
@@ -83,7 +83,7 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
-  # lower SHAPED_WMMA to WMMA with CONTRACT/UNROLL
+  # lower SHAPED_WMMA to WMMA
   (UPat(Ops.SHAPED_WMMA, name="x"), lower_shaped_wmma),
 ])
 
@@ -125,6 +125,12 @@ def split_reduceop(reduce:UOp, x:UOp):
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
+  # remove noop RESHAPEs
+  (UPat(Ops.RESHAPE, src=(UPat(name="x2"), UPat()), name="x"), lambda x,x2: x2 if x2._shape is not None and x2.shape == x.shape else None),
+  # merge PERMUTEs
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.PERMUTE, name="x2"),), name="x"), lambda x,x2: x2.replace(arg=tuple(x2.arg[i] for i in x.arg))),
+  # remove noop PERMUTEs
+  (UPat(Ops.PERMUTE, name="x"), lambda x: x.src[0] if list(x.arg) == list(range(len(x.arg))) else None),
 ])
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
@@ -177,14 +183,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** copy rules **
 
   # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
+   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
   # copying mselect to same device is just mselect (no NOOP kernel)
-  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"), UPat()), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
 
   # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
 
   # ** store rules **
 
@@ -335,7 +341,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  (UPat(Ops.COPY, src=(UPat.cvar("x"),), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST
@@ -479,10 +485,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.AFTER, name="x"), remove_noop_afters),
 ])
 
-pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
-  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
-])
-
 # *****************
 # 5. split into kernels
 
@@ -495,7 +497,8 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape), buf.addrspace), arg=ParamArg(ctx.dg, addrspace=buf.addrspace)).reshape(buf.max_shape)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape), buf.addrspace),
+            arg=ParamArg(ctx.dg, addrspace=buf.addrspace, device=buf.device)).reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
@@ -614,18 +617,5 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
-  # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
-  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
-  kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
-  assign_rep: dict[UOp, UOp] = {}
-  for u in afters:
-    for s in u.src[1].src:
-      # TODO: this is probably broken for MSELECT/MSTACK
-      if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
-      if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in kernel_assign[u.buf_uop].backward_slice):
-        raise RuntimeError(f"cycle detected in assign graph, buffers {s} and {u.buf_uop} have circular dependency")
-      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
-  if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   return tsink

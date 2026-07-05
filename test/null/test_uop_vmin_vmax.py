@@ -319,7 +319,7 @@ class TestVminVmaxVConst(unittest.TestCase):
     d1 = UOp.param(1, dtypes.int.ptr())
     idx = UOp.const(dtypes.int, 0)
     val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx).cast(dtypes.int.vec(2).ptr()),))
-    uop = (val // 32).gep(0)
+    uop = (val // 32).index(0)
     self.assertEqual(uop.vmin, -67108864)
     self.assertEqual(uop.vmax, 67108863)
 

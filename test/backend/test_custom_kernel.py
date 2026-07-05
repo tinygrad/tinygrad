@@ -51,7 +51,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   i = UOp.range(dest.shape[0], 0)
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
-  store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
+  store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
@@ -430,7 +430,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]

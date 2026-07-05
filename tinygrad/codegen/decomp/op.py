@@ -36,7 +36,7 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and next_dtype in ren.supported_dtypes():
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and next_dtype in ren.supported_dtypes():
     if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None

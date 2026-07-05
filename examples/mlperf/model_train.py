@@ -158,6 +158,7 @@ def train_resnet():
   # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   def normalize(x): return (x.permute([0, 3, 1, 2]) - input_mean).cast(dtypes.default_float)
   @TinyJit
+  @Context(TRAINING=1)
   def train_step(X, Y):
     optimizer_group.zero_grad()
     X = normalize(X)
@@ -171,6 +172,7 @@ def train_resnet():
     return loss.realize(), top_1.realize()
 
   @TinyJit
+  @Context(TRAINING=0)
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
@@ -193,7 +195,6 @@ def train_resnet():
     # ** train loop **
     if MLLOGGER and RUNMLPERF:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=e+1, metadata=dict(epoch_num=e+1))
-    Tensor.training = True
     BEAM.value = TRAIN_BEAM
 
     if INITMLPERF:
@@ -272,7 +273,6 @@ def train_resnet():
       eval_loss = 0.0
       eval_top_1 = 0
       eval_num_samples = 0
-      Tensor.training = False
       BEAM.value = EVAL_BEAM
 
       if INITMLPERF:
@@ -919,6 +919,7 @@ def train_rnnt():
   pass
 
 @TinyJit
+@Context(TRAINING=0)
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor,
                    masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
   for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
@@ -1106,6 +1107,7 @@ def train_bert():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*GBS, metadata={"epoch_num": i*GBS})
 
   @TinyJit
+  @Context(TRAINING=1)
   def train_step_bert(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                       masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
@@ -1133,7 +1135,6 @@ def train_bert():
 
   while train_data is not None and i < train_steps and not achieved:
     if getenv("TRAIN", 1):
-      Tensor.training = True
       BEAM.value = TRAIN_BEAM
       st = time.perf_counter()
       GlobalCounters.reset()
@@ -1186,7 +1187,6 @@ def train_bert():
       eval_lm_accs = []
       eval_clsf_accs = []
       eval_times = []
-      Tensor.training = False
       BEAM.value = EVAL_BEAM
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):

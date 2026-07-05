@@ -100,7 +100,7 @@ class VLIWRenderer(Renderer):
       assert u.dtype.count in (1,8), "dtype count must be 1 or 8"
 
       # dumb register allocator
-      if u.op not in {Ops.STORE, Ops.SINK, Ops.GEP}:
+      if u.op not in {Ops.STORE, Ops.SINK, Ops.INDEX}:
         r[u] = reg
         reg += u.dtype.count
 
@@ -110,9 +110,9 @@ class VLIWRenderer(Renderer):
           inst.append({"flow": [("halt",)]})
         case Ops.CONST:
           inst.append({"load": [("const", r[u], u.arg)]})
-        case Ops.GEP:
-          # a GEP is just an alias to a special register in the vector
-          r[u] = r[u.src[0]] + u.arg[0]
+        case Ops.INDEX:
+          # an INDEX is just an alias to a special register in the vector
+          r[u] = r[u.src[0]] + u.src[1].arg
         case Ops.STACK:
           if all(s == u.src[0] for s in u.src):
             # if all sources are the same, we can broadcast
@@ -182,7 +182,7 @@ if __name__ == "__main__":
   # *** run on Machine and compare ***
 
   # NOTE: the scratch size needs to be reduced to 1536 when you have a register allocator
-  src = eval(prg.src[3].arg)
+  src = eval(prg.src[2].arg)
   max_regs = max(t[1] for instr in src for v in instr.values() for t in v if len(t) > 1) + 8
   print(f"{max_regs:5d} regs used" + ("" if max_regs <= 1536 else "       <-- WARNING: TOO MANY REGISTERS, MUST BE <= 1536"))
   machine = problem.Machine(mem, src, problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=max_regs)

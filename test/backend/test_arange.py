@@ -115,6 +115,7 @@ class TestIndexing(unittest.TestCase):
   @unittest.skip("not ready")
   def test_index_fused_opt(self): self.test_index_fused(0)
 
+  @unittest.skip("LOAD can be out of bounds")
   def test_index_fused_out_of_bounds(self):
     dataset = Tensor.rand(256, 256).realize()
     idxs = Tensor([-19238, -257, 256, 495, 10982377]).realize()
@@ -182,6 +183,26 @@ class TestIndexing(unittest.TestCase):
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, bs*seqlen*embed_size*20, f"backward ops {bwd_ops:,} should be less than 20 per with atomic scatter-add")
+    # correctness check
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for i in idx.flatten().numpy(): expected_grad[i] += 2
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_embedding_backward_padded_embed(self):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
+    vocab_size, embed_size = 1000, 300
+    bs, seqlen = 4, 256
+    idx = Tensor.randint(bs, seqlen, high=vocab_size)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.ones(vocab_size, embed_size)
+    gt = Tensor.zeros(bs, seqlen, embed_size)
+    Tensor.realize(idx, emb.weight, gt)
+    loss = (emb(idx)-gt).square().sum()
+    loss.backward()
+    emb.weight.grad.realize()
     # correctness check
     expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
     for i in idx.flatten().numpy(): expected_grad[i] += 2

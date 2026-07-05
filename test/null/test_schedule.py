@@ -266,7 +266,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(big_enough).realize()
     with Context(SPLIT_REDUCEOP=1):
       out = (x - x.max(keepdim=True)).max()
-      check_schedule(out, 4)
+      check_schedule(out, 3)
 
   def test_example_matmul_contig(self):
     x = Tensor.eye(64).clone().realize()
@@ -355,8 +355,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty((1, 16)).realize()
     out0 = a.sum() + 2
     out1 = a.sum() + b
-    # check_schedule([out0, out1], 2)
-    check_schedule([out0, out1], 3)
+    check_schedule([out0, out1], 2)
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     q = Tensor.empty(32,8,16,8).realize()
@@ -546,8 +545,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(3, 4, 5).abs().realize()
     b = Tensor.empty(3, 4, 5).abs().realize()
     out = (a.log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum()+b).abs().log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
-    # check_schedule(out, 1)
-    check_schedule(out, 2)
+    check_schedule(out, 1)
 
   def test_shrink_pad_safe(self):
     a = Tensor.ones((3, )).contiguous().realize()
@@ -1842,7 +1840,7 @@ class TestFusionOp(unittest.TestCase):
     linear = a.schedule_linear()
     prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(prg.src[3].arg.splitlines()) < 250
+    assert len(prg.src[2].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

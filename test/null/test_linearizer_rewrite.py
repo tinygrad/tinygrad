@@ -15,7 +15,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       opts_to_apply.append(Opt(OptOps.UNROLL, 0, 4))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
       prg = to_program(ast, Device["CPU"].renderer)
-      print(prg.src[3].arg)
+      print(prg.src[2].arg)
 
   def test_arange(self):
     out = Tensor.arange(32).clone("NULL")
@@ -25,7 +25,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       opts_to_apply.append(Opt(OptOps.UPCAST, 0, 4))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
       prg = to_program(ast, Device["CPU"].renderer)
-      print(prg.src[3].arg)
+      print(prg.src[2].arg)
 
   def test_kernel_info(self):
     out = Tensor.arange(4).clone("NULL")

@@ -564,11 +564,10 @@ def eval_flux():
 
 if __name__ == "__main__":
   # inference only
-  Tensor.training = False
-
   models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
-  for m in models:
-    nm = f"eval_{m}"
-    if nm in globals():
-      print(f"eval {m}")
-      globals()[nm]()
+  with Context(TRAINING=0):
+    for m in models:
+      nm = f"eval_{m}"
+      if nm in globals():
+        print(f"eval {m}")
+        globals()[nm]()

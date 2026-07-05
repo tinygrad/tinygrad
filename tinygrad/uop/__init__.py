@@ -38,7 +38,7 @@ class Ops(FastEnum):
   SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
-  GEP = auto(); STACK = auto()
+  STACK = auto()
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()
@@ -89,12 +89,6 @@ class Ops(FastEnum):
 
   # ** 6 -- ops that don't exist in programs **
 
-  # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto()
-
-  # local unique
-  LUNIQUE = auto()
-
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
@@ -107,9 +101,6 @@ class Ops(FastEnum):
 
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
-
-  # expander ops
-  UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}

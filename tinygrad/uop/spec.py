@@ -3,7 +3,7 @@ from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
-from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB, all_same
+from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same
 
 # ***** uop helpers *****
 
@@ -23,10 +23,10 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
 
   # TODO: validate these
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
-  # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
+  # VECTORIZE can't be properly modeled in z3 since it doesn't support vectors
   # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
   for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
-    if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.STACK} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
@@ -83,8 +83,7 @@ spec_shared = PatternMatcher([
    isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
-  # TODO: remove UNROLL here, it's for SPEC=2
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL, Ops.INS))), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS))), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
@@ -118,11 +117,11 @@ spec_shared = PatternMatcher([
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
 
+def valid_gettuple(g:UOp, t:UOp):
+  return isinstance(g.arg, int) and 0 <= g.arg < len(t.src) and g.dtype == t.src[g.arg].dtype
+
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
-  # DEVICE
-  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d: is_device(d.arg)),
-
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and buf.src[0].dtype.scalar() == dtypes.weakint and is_device(buf.arg.device))
@@ -135,12 +134,13 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
   # CALL
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
 
   # FUNCTION + TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
   (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.FUNCTION, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
   # inputs to movement ops
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
@@ -156,7 +156,7 @@ spec_tensor = PatternMatcher([
    and isinstance(x.arg[1], tuple) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
   # COPY. TODO: this should not have allow_any_len, but something is adding ranges
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"),), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype and is_device(copy.arg)),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, tuple) and
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
@@ -172,25 +172,19 @@ spec_tensor = PatternMatcher([
   # TODO: this should not be here. STAGE is transformed to BUFFER later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, LINEAR?, SOURCE?, BINARY?)
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
   (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK),)), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
 
-  # UNROLL/CONTRACT is used here for WMMA
-  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # no more of these in programs
-  (UPat(Ops.GEP), lambda: False),
-
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
@@ -222,7 +216,7 @@ spec_full = PatternMatcher([
                         UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
 
-  (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
@@ -230,24 +224,11 @@ spec_full = PatternMatcher([
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # expander: unroll/contract/gep/ptrcat/cat
-  (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
-
-  # GEP multi is supported here
-  (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
-
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
-
-  # TODO: PTRCAT and VCAT need to be deleted
-
-  # PTRCAT is like VECTORIZE, but it functions on ptrs
-  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
-  # VCAT is like VECTORIZE, but the srcs can be vectors
-  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
 ])+spec_tensor+spec_program
 
 # **** pyrender (move this) ****
