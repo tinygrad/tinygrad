@@ -85,9 +85,9 @@ class TestWGSLFailures(unittest.TestCase):
 
   # WGSL has a specific select(alt, val, gate) ternary operator instead of gate?val:alt
   def test_gated_load(self):
-    a = UOp.param(0, dtypes.float32.ptr(1))
-    b = UOp.param(1, dtypes.float32.ptr(1))
-    c = UOp.param(2, dtypes.float32.ptr(1))
+    a = UOp.param(0, dtypes.float32.ptr(4))
+    b = UOp.param(1, dtypes.float32.ptr(4))
+    c = UOp.param(2, dtypes.float32.ptr(4))
     lidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), "lidx0")
     gate = lidx0.ne(0)
     alt = c.index(lidx0, ptr=True).load()
