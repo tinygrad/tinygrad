@@ -2004,8 +2004,14 @@ def train_flux():
           return
 
       avg_loss = (eval_loss / eval_samples).float().to("CPU").item()
+
+      tqdm.write(f"eval/avg_loss: {avg_loss:.4f}")
+
+      if WANDB:
+        wandb.log({"eval/avg_loss": avg_loss})
+
       if avg_loss <= target_eval_loss:
-        tqdm.write(f"target eval loss reached: {avg_loss:.6f} (target: {target_eval_loss:.6f})")
+        tqdm.write("target eval loss reached")
         break
 
 if __name__ == "__main__":
