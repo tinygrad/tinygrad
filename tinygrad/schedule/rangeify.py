@@ -494,12 +494,10 @@ class LocalAddBufferContext:
   vars:dict = field(default_factory=dict)
   range:int = 0
   opts:tuple|None = None
-  debufed:set = field(default_factory=set)
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   param = UOp(Ops.PARAM, buf.dtype, (UOp.const(dtypes.int, prod(buf.max_shape)),),
-              arg=ParamArg(ctx.dg, addrspace=buf.addrspace, device=buf.device))
-  ctx.debufed.add(param)
+              arg=ParamArg(ctx.dg, addrspace=buf.addrspace, device=buf.device), tag="debufed")
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
@@ -537,7 +535,7 @@ to_define_global = PatternMatcher([
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
-   None if buf in ctx.debufed or isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
+   None if buf.tag == "debufed" or isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
