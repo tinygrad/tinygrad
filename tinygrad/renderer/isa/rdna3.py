@@ -192,9 +192,10 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
     assert idx.op is Ops.CONST and base.dtype.itemsize == 4 and gate is None
     # TODO: gated reg load
     return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),))
+  # NOTE: handle signed
   imap = {
-    1 : (RDNA3Ops.global_load_u8,RDNA3Ops.ds_load_u8),
-    2 : (RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16),
+    1 : [(RDNA3Ops.global_load_u8,RDNA3Ops.ds_load_u8), (RDNA3Ops.global_load_i8,RDNA3Ops.ds_load_i8)],
+    2 : [(RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16), (RDNA3Ops.global_load_i16,RDNA3Ops.ds_load_i16)],
     4 : (RDNA3Ops.global_load_b32,RDNA3Ops.ds_load_b32),
     8 : (RDNA3Ops.global_load_b64,RDNA3Ops.ds_load_b64),
     16 : (RDNA3Ops.global_load_b128,RDNA3Ops.ds_load_b128),
@@ -204,7 +205,9 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   vreg = make_vgpr(ctx, width=nregs)
   # the alt realize has to load them into the same vreg/subregs?
   def _gate(o:UOp): return o.replace(src=(stack2regs(ctx, alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
-  return _gate(x.ins(_insspace(imap[n * base.dtype.itemsize],base), src=fold_address(ctx, addr), tag=(vreg,)))
+  nbytes = n * base.dtype.itemsize
+  tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not dtypes.is_unsigned(x.dtype)]
+  return _gate(x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,)))
 
 def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
@@ -333,6 +336,14 @@ def widenshort(y:UOp, x:UOp):
   if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
   return y
 
+# NOTE: make this a pm?
+def intcast(y:UOp, x:UOp):
+  if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
+  if x.dtype.itemsize > y.dtype.itemsize: return y.bitcast(x.dtype) # replace?
+  if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
+    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+    return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
+
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
@@ -428,11 +439,6 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   #ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
-# mask off top?
-def narrowint(y:UOp, x:UOp):
-  if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
-  return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
-
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 extra_matcher = PatternMatcher([
@@ -441,51 +447,46 @@ extra_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
 
+pm_float_to_int = PatternMatcher([
+  (UPat.var("y", dtypes.half).cast(dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32)),
+  (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", dtypes.double).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
+])
+
+pm_int_to_float = PatternMatcher([
+  (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
+  (UPat.var("y", dtypes.int8s).cast((dtypes.half,dtypes.float), name="x"), lambda y,x: y.cast(dtypes.uint16 if dtypes.is_unsigned(y.dtype) else dtypes.int16).cast(x.dtype)),
+  (UPat.var("y", dtypes.int16s).cast(dtypes.float), lambda y: y.cast(dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).float()),
+])
+
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
   (UPat(Ops.LOAD, dtype=dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
-  # (UPat(Ops.LOAD, allow_any_len=True, name="x"), lambda x: x.bitwise_and(const(dtypes.uint8, 1))),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
+  (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
-  (UPat.var("y").bitcast(), lambda y: y),
-  # (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP)),
-  # (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG
-  # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
-  # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
-  (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
-  # cast noops
-  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.uint32,dtypes.int32)), lambda y: y), # same size int b32
-  # (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.replace(dtype=x.dtype)), # narrow int
-  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16), name="x"), narrowint),
-  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast((dtypes.uint16,dtypes.int16)), lambda y: y), # same size int b16
+  # casting rewrites
+  (UPat.var("y", dtype=dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
-  # cast rewrites
-  # u64/i64 -> f32 = take lo then cast
-  (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half, dtypes.short, dtypes.ushort, dtypes.int, dtypes.uint), name="x"),
+  # f64 <-> f16 goes through f32
+  (UPat.var("y", dtypes.half).cast(dtypes.double), lambda y: y.float().cast(dtypes.double)),
+  (UPat.var("y", dtypes.double).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
+  # narrowing long goes through b32
+  (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast(name="x", dtype=(dtypes.uint32, dtypes.int32, dtypes.float32,dtypes.float64)), widenshort),
-  # (f16 -> f64/i32/u32 ) to (f16 -> f32 -> f64/i32/u32)
-  (UPat.var("y", dtype=dtypes.half).cast(name="x", dtype=(dtypes.double, dtypes.int32, dtypes.uint32)), lambda y,x: y.float().cast(x.dtype)),
-  (UPat.var("y", dtype=(dtypes.half, dtypes.float)).cast((dtypes.ulong,dtypes.long), name="x"),
-    lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(x.dtype)),
-  # (u32/i32 -> f16) to (-> f32 -> f16)
-  (UPat.var("y", dtype=(dtypes.uint32, dtypes.int32)).cast(dtypes.half), lambda y: y.cast(dtypes.float32).cast(dtypes.half)),
-  # (f64 -> f16/i16/u16) to (f64 -> f64 ?-> i16/u16)
-  (UPat.var("y", dtype=dtypes.double).cast((dtypes.half, dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.cast(dtypes.float32).cast(dtypes.half).cast(x.dtype)),
-  # (f32 -> u16/i16) to (f32 -> u32/i32)
-  (UPat.var("y", dtype=dtypes.float32).cast((dtypes.uint16,dtypes.int16), name="x"), lambda y,x: y.cast(dtypes.uint32 if x.dtype is dtypes.uint16 else dtypes.int32)),
   # this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
   # expand 64 bit where, 2 cndmasks
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
     multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
-])
+]) + pm_float_to_int + pm_int_to_float
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
@@ -525,6 +526,7 @@ isel_matcher = PatternMatcher([
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
+  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG?
   (UPat((Ops.INS, Ops.GROUP, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
@@ -665,4 +667,4 @@ class RDNA3Renderer(ISARenderer):
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.int8s+dtypes.fp8s}
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
