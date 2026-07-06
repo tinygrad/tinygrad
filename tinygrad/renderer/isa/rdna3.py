@@ -442,7 +442,11 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
 
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
+from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 extra_matcher = PatternMatcher([
+  # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
+  (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
+  (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
   (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
