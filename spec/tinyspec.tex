@@ -83,7 +83,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- collapse axes to size $1$}
+\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- remove axes}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
@@ -258,7 +258,7 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
 \op{Param} & from arg & from $\mathrm{src}[0]$ & from arg & from src or dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
-\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & collapse axes to $1$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
+\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
 \op{Cast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & clamped to dtype \\
 \op{Bitcast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{Copy} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ & from arg & $\mathrm{src}[0]$ \\
