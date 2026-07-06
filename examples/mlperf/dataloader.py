@@ -778,7 +778,7 @@ def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
   return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
 
-# flux.1
+# flux
 
 class FluxDataset:
   def __init__(self, dataset, empty_enc_dir:str|None=None, seed:int|None=None, cfg_prob:float=0.1, is_infinite:bool=True):

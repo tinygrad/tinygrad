@@ -366,7 +366,7 @@ class BoxCoder(object):
     pred_boxes = Tensor.stack(x, y, w, h).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
     return pred_boxes
 
-# flux.1
+# flux
 
 def generate_labels(mean:Tensor, logvar:Tensor, ae_shift_factor:float=0.1159, ae_scale_factor:float=0.3611) -> Tensor:
   std = (0.5 * logvar).exp()
