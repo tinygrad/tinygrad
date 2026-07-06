@@ -863,6 +863,59 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
+  def associative_scan(self, fn, axis=0):
+    """
+    Implements parallel prefix scan (associative scan) using a tree reduction.
+
+    Applies an associative binary function `fn` to compute the inclusive prefix scan
+    along the specified axis. Similar to `jax.lax.associative_scan`.
+
+    `fn` must be associative: `fn(fn(a, b), c) == fn(a, fn(b, c))`.
+    The implementation uses the Hillis-Steele parallel scan algorithm that runs in
+    O(log n) parallel steps, each applying `fn` element-wise to two halves of the tensor.
+
+    If performance matters, prefer using the specific methods (``cumsum``, ``cumprod``, etc.)
+    which use optimized implementations for common operations.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a * b).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    n = self.shape[axis]
+    if self.ndim == 0 or n <= 1: return self
+
+    result = self
+    offset = 1
+    while offset < n:
+      # Hillis-Steele step: combine elements offset apart
+      # upstream = result[:n-offset], downstream = result[offset:]
+      # combined[i] = fn(upstream[i], downstream[i]) = fn(result[i], result[i+offset])
+      left = result.shrink(tuple(
+        (0, s if d != axis else n - offset)
+        for d, s in enumerate(result.shape)
+      ))
+      right = result.shrink(tuple(
+        (0 if d != axis else offset, s if d != axis else n)
+        for d, s in enumerate(result.shape)
+      ))
+      combined = fn(left, right)
+
+      # Keep first 'offset' elements unchanged along axis
+      unchanged = result.shrink(tuple(
+        (0, s if d != axis else offset)
+        for d, s in enumerate(result.shape)
+      ))
+      result = unchanged.cat(combined, dim=axis)
+      offset <<= 1
+
+    return result
+
   def argmax(self, axis=None, keepdim=False) -> Self:
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
