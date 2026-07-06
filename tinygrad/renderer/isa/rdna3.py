@@ -294,6 +294,9 @@ def cdiv(ctx, x:UOp):
     # Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
     # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
     # TODO: add remainder refinements?
+    is_signed = not dtypes.is_unsigned(x.dtype)
+    # TODO implement signed
+    # NOTE: use ashr, look at llvm output for mod test
     def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
     a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) # note: hack
     z = b.cast(dtypes.float32).reciprocal() # initial estimate
@@ -426,11 +429,12 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
 # ---- lowering passes ----
+from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
   (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
-])
+]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
 
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
 pre_isel_matcher = PatternMatcher([
@@ -442,6 +446,7 @@ pre_isel_matcher = PatternMatcher([
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   # what cases does this fail?
+  (UPat().cast().named("x").bitcast(), lambda x: x),
   (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG
   # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
@@ -651,4 +656,4 @@ class RDNA3Renderer(ISARenderer):
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.int8s+dtypes.fp8s+(dtypes.bfloat16,)}
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.int8s+dtypes.fp8s}
