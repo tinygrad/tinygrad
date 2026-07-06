@@ -339,7 +339,9 @@ def widenshort(y:UOp, x:UOp):
 # NOTE: make this a pm?
 def intcast(y:UOp, x:UOp):
   if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
-  if x.dtype.itemsize > y.dtype.itemsize: return y.bitcast(x.dtype) # replace?
+  if x.dtype.itemsize > y.dtype.itemsize:
+    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+    return (y & const(y.dtype, 0xFFFFFFFF)).bitcast(x.dtype)
   if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
     if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
@@ -463,7 +465,8 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
-  # (UPat(name="x").bitcast(), lambda x: x),
+  # (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG?
+  # (UPat().bitcast().cast().named("x"), lambda x: x.replace(src=x.src[0].src)),
   # --- casting rewrites ---
   # float -> int
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
@@ -493,6 +496,7 @@ pre_isel_matcher = PatternMatcher([
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
+  (UPat(name="x").bitcast(), lambda x: x),
   # NOTE: prolly belong in pre-isel?
   (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.STACK, name="x"), stack2regs),
@@ -529,7 +533,6 @@ isel_matcher = PatternMatcher([
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # allocate virtual registers
-  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG?
   (UPat((Ops.INS, Ops.GROUP, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
