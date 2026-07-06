@@ -10,7 +10,7 @@ import itertools
 
 
 # ---- (UOp, dtype) -> Instruction tables ----
-dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", }
+dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64" }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
@@ -24,9 +24,9 @@ insdefs = [
   (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.MAX, "v_max", ["f16_e32", "f32_e32", "u16", "i16", "u32_e32", "i32_e32"], False),
   (Ops.TRUNC, "v_trunc", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "i32"], True),
-  (Ops.CMPNE, "v_cmp", ["neq_f16", "neq_f32", "neq_f64", "ne_u32", "ne_i32", "ne_i16", "ne_u16"], True),
-  (Ops.CMPEQ, "v_cmp_eq", ["f16", "f32", "f64", "u16", "u32", "i16", "i32"], True)
+  (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "u64", "i32", "i64"], True),
+  (Ops.CMPNE, "v_cmp", ["neq_f16", "neq_f32", "neq_f64", "ne_u32", "ne_u64", "ne_i32", "ne_i64", "ne_i16", "ne_u16"], True),
+  (Ops.CMPEQ, "v_cmp_eq", ["f16", "f32", "f64", "u16", "u32", "u64", "i16", "i32", "i64"], True)
 ]
 
 def _build_ins_table(srcs):
@@ -253,6 +253,8 @@ def cmp(ctx, x:UOp):
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(ctx, x)
 
+# TODO: sub64
+
 def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
@@ -265,10 +267,10 @@ def add64(ctx, x:UOp):
 # a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
-  a, b = x.src
-  sign = not dtypes.is_unsigned(x.dtype)
   def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_i64_i32 if sign else RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
   def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(dtypes.int,32),x))
+  a, b = x.src
+  sign = not dtypes.is_unsigned(x.dtype)
   shup = const(dtypes.int, 32)
   p1 = _up(_mad(a.index(1), b.index(0)))
   p2 = _up(_mad(a.index(0), b.index(1)))
@@ -281,18 +283,23 @@ def bitwise64(ctx, x:UOp, ins):
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
   return multireg(lo, hi, dtype=x.dtype)
 
-# Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
-# TODO: add remainder refinements?
 def cdiv(ctx, x:UOp):
-  if x.dtype.itemsize != 4:
-    raise NotImplementedError(f"cdiv expansion not implemented for dtype: {x.dtype}")
-  def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
-  a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) # note: hack
-  z = b.cast(dtypes.float32).reciprocal()
-  z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
-  z += _umulh(z, -b * z) # Unsigned integer Newton-Raphson round
-  return _umulh(a, z)
+  # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
+  if x.dtype.itemsize == 8:
+    n,d = x.src
+    d = UOp(Ops.RECIPROCAL, dtypes.float64, src=(d.cast(dtypes.float64),)) # d.cast(dtypes.float64).reciprocal()
+    return UOp(Ops.MUL, dtypes.float64, src=(n.cast(dtypes.float64),d)).cast(dtypes.ulong)
+    # return (n.cast(dtypes.float64) * d).cast(dtypes.ulong)
+  else:
+    # Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
+    # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
+    # TODO: add remainder refinements?
+    def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
+    a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) # note: hack
+    z = b.cast(dtypes.float32).reciprocal() # initial estimate
+    z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32) # convert back from float
+    z += _umulh(z, -b * z) # Unsigned integer Newton-Raphson round
+    return _umulh(a, z)
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -333,7 +340,8 @@ def castint64(ctx, y:UOp, x:UOp):
     return multireg(lo, hi, dtype=x.dtype)
   elif y.dtype is dtypes.float64:
     # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
-    tr = y.trunc()
+    # NOTE: alu not allowed for group, cant .trunc()
+    tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
     hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
     hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
     lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, 0xc1f0000000000000), tr)) # tr - hi_f * 2 ^ 32
@@ -342,15 +350,15 @@ def castint64(ctx, y:UOp, x:UOp):
     lo = y.float().cast(dtypes.uint32)
     hi = vmov(const(hi_dt, 0))
     return multireg(lo, hi, dtype=x.dtype)
-
-  print(y.dtype, x.dtype)
   raise NotImplementedError()
 
+# TODO: currently only 53 bit precision (f64 mantissa), could do better
 def long2double(x:UOp):
   lo = x.index(0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
   hi = x.index(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(dtypes.int16, 32)))
-  return lo + hi
+  return UOp(Ops.ADD, dtype=dtypes.float64, src=(lo,hi))
+  # return lo + hi
 
 # casting between long/ulong and floats is more complicated, may belong in isel?
 def const64(x:UOp):
@@ -411,17 +419,17 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
+# NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
 def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
-  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
+  ins = RDNA3Ops.v_cndmask_b32_e64
+  #ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
-  (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x:
-    x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
-
+  (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ])
 
 # TODO: simplify these cast rules, maybe just make a legalize cast function?
@@ -461,11 +469,16 @@ pre_isel_matcher = PatternMatcher([
   # this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
+  # expand 64 bit where, 2 cndmasks
+  (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
+    multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
 ])
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
+  # NOTE: prolly belong in pre-isel?
+  (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
   (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
@@ -494,7 +507,7 @@ isel_matcher = PatternMatcher([
   # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf),
   # unified alu experiment
-  (UPat(Ops.CDIV, name="x"), cdiv),
+  # (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
@@ -525,8 +538,6 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
-
-  print("encoding", opc, [rdefs(s) for s in oprs])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
