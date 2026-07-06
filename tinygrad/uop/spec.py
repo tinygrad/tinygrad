@@ -47,13 +47,15 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
-  (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
+  # no vec dtypes allowed
+  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.vcount > 1 else None),
+
+  # NOTE: for testing, we let sinks be anything
+  (UPat(Ops.SINK, dtypes.void), lambda: True),
 
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
 
-  # CONST must not be vector dtype
-  (UPat(Ops.CONST, name="x"), lambda x: False if x.dtype.vcount > 1 else None),
   # CONST is everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
 

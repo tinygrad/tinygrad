@@ -203,7 +203,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
     base_vector = UOp.const(dtypes.float32, (5.0, 10.0, 15.0, 20.0))
-    vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=tuple(base_vector.index(i) for i in range(4)))
+    vectorized_uop = UOp(Ops.STACK, dtypes.float32, src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
 

@@ -500,11 +500,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
-    return UOp(Ops.STACK, self.dtype.vec(count), (self,)*count)
+    return UOp(Ops.STACK, self.dtype, (self,)*count)
   def cast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
-    # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
-    if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
     if self.dtype == dtype: return self
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DTypeLike):
@@ -531,7 +529,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       out_shape = _broadcast_shape(*shapes)
       all_srcs = tuple(x._broadcast_to(out_shape) if x._shape else x for x in all_srcs)
     out_dtype = all_srcs[-1].dtype
-    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool
     return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):

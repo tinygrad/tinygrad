@@ -315,7 +315,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(a))) == str(a)
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.STACK, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    vec = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
   def test_reduceop_arg(self):
@@ -344,22 +344,22 @@ class TestUopsObject(unittest.TestCase):
 
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_empty(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=())
     self.assertEqual(u.render(simplify=False), "{}")
   def test_render_vectorize_empty_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(simplify=False), "{0,0,0}")
   def test_render_vectorize_different(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(simplify=False), "{0,1,2}")
   def test_render_vectorize_same_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(), "{0,0,0}")
   def test_render_vectorize_different_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "{0,1,2}")
 
 if __name__ == '__main__':

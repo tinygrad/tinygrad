@@ -303,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
-      vec = UOp(Ops.STACK, dtypes.float.vec(vec_size), tuple(consts))
+      vec = UOp(Ops.STACK, dtypes.float, tuple(consts))
       with Context(SPEC=0):
         uops = to_uops_list([vec.index(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):
