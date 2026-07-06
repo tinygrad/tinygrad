@@ -494,15 +494,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(x, UOp): return x
     # float self keeps its dtype for any scalar, int self only for int/Invalid scalars
     if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.const_like(x)
-    return self.const_like(x, dtypes.from_py(x).vec(self.dtype.vcount))
+    return self.const_like(x, dtypes.from_py(x))
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
-    return UOp(Ops.STACK, self.dtype.vec(count), (self,)*count)
+    return UOp(Ops.STACK, self.dtype, (self,)*count)
   def cast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
-    # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
-    if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
     if self.dtype == dtype: return self
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DTypeLike):
@@ -529,14 +527,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       out_shape = _broadcast_shape(*shapes)
       all_srcs = tuple(x._broadcast_to(out_shape) if x._shape else x for x in all_srcs)
     out_dtype = all_srcs[-1].dtype
-    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool
     return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
+    assert dtype.vcount == 1, f"const dtype must be scalar, got {dtype}"
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
-      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=()) for c in b]
+      stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
       ret = UOp.vectorize(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
@@ -553,9 +552,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
-  def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
+  def invalid(): return UOp.const(dtypes.weakint, Invalid)
   def valid(self, cond):
-    return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
+    return cond.where(self.cast(dtypes.weakint), UOp.invalid())
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     if self.op is Ops.STACK: return UOp.vectorize(*(x.get_idx() for x in self.src))

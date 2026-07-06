@@ -20,7 +20,7 @@ def const_values(u:UOp):
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
-    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v1 = UOp.const(dtypes.int, (0,1,2))
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
@@ -303,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
-      vec = UOp(Ops.STACK, dtypes.float.vec(vec_size), tuple(consts))
+      vec = UOp(Ops.STACK, dtypes.float, tuple(consts))
       with Context(SPEC=0):
         uops = to_uops_list([vec.index(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):

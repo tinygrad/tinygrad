@@ -19,7 +19,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp(Ops.LOAD, dtypes.float.vec(4), (
+  return UOp(Ops.LOAD, dtypes.float, (
     UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
   ))
 
