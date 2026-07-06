@@ -428,6 +428,11 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   #ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
+# mask off top?
+def narrowint(y:UOp, x:UOp):
+  if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+  return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
+
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 extra_matcher = PatternMatcher([
@@ -447,13 +452,16 @@ pre_isel_matcher = PatternMatcher([
   (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
-  (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG
+  (UPat.var("y").bitcast(), lambda y: y),
+  # (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP)),
+  # (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG
   # (UPat.var("y").bitcast().named("x"), lambda y,x: y),
   # NOTE: casting comparison output to float should be treated as a where pred ? 0.0 : 1.0
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # cast noops
   (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.uint32,dtypes.int32)), lambda y: y), # same size int b32
-  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.replace(dtype=x.dtype)), # narrow int
+  # (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int16, dtypes.uint16), name="x"), lambda y,x: y.replace(dtype=x.dtype)), # narrow int
+  (UPat.var("y", dtype=(dtypes.uint32,dtypes.int32)).cast((dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16), name="x"), narrowint),
   (UPat.var("y", dtype=(dtypes.int16,dtypes.uint16)).cast((dtypes.uint16,dtypes.int16)), lambda y: y), # same size int b16
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
   # cast rewrites
@@ -570,6 +578,7 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
+  # print("encoding", opc, args, kw)
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
