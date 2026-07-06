@@ -1,7 +1,8 @@
-from tinygrad.runtime.autogen.amd.cdna import enum
 import json
 import sys
 import cv2
+import math
+import copy
 import numpy as np
 from time import time
 from itertools import chain
@@ -166,17 +167,17 @@ class MaxPool2d:
 class SPPF:
   def __init__(self, c1:int, c2:int, k:int=5, n:int=3, shortcut:bool=True):
     c_ = c1 // 2
-    self.cv1 = Conv(c1, c_, 1, 1)
+    self.cv1 = Conv(c1, c_, 1, 1, act=False)
     self.cv2 = Conv(c_ * (n + 1), c2, 1, 1)
     self.m = MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
     self.n = n
-    self.residual = shortcut and c1 == c2
+    self.add = shortcut and c1 == c2
 
   def __call__(self, x:Tensor)->Tensor:
     y = [self.cv1(x)]
-    y.extend(self.m(y[-1]) for _ in range(self.n))
+    y.extend(self.m(y[-1]) for _ in range(getattr(self, "n", 3)))
     y = self.cv2(y[0].cat(*y[1:], dim=1))
-    return x + y if self.residual else y
+    return x + y if self.add else y
 
 class Attention:
   def __init__(self, dim:int, num_heads:int=8, attn_ratio:float=0.5):
@@ -373,39 +374,92 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
   stride_tensor = stride_tensor[0].cat(stride_tensor[1], stride_tensor[2]).unsqueeze(1)
   return anchor_points, stride_tensor
 
+class DwConv(Conv):
+  def __init__(self, c1, c2, k=1, s=1, d=1, act=True):
+    super().__init__(c1,c2,k,s,g=math.gcd(c1,c2), d=d, act=act)
+
+class DFL():
+  def __init__(self, c1:int=16):
+    self.conv = Conv2d(c1, 1, 1, bias=False)
+    x = Tensor.arange(c1, dtype='float')
+    self.conv.weight.replace(x.reshape(1,c1,1,1))
+    self.c1 = c1
+  
+  def __call__(self, x: Tensor) -> Tensor:
+    b, _ ,a = x.shape
+    return self.conv(x.view(b, 4, self.c1, a).transpose(2,1).softmax(1)).view(b, 4, a)
+
+class Identity:
+  def __call__(self, x): return x
+
 class DetectionHead:
-  def __init__(self, nc=80, filters=()):
+  def __init__(self, nc=80, reg_max:int=16, end2end=False, ch=()):
     self.nc = nc  # number of classes
-    self.nl = len(filters)
-    self.no = nc + 4  #
-    self.stride = [8, 16, 32]
-    c1 = max(filters[0], self.nc)
-    c2 = max(16, filters[0] // 4)
+    self.nl = len(ch)
+    self.reg_max = reg_max
+    self.no = nc + self.reg_max * 4  #
+    c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100)) # channels
+    self.cv2 = [
+      [Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4*self.reg_max, 1)] for x in ch
+    ]
     self.cv3 = [
       [
-        [Conv(x, c1, 3), Conv(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]]
-    self.cv2 = [[[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4, 1)] for x in filters]]
+        Sequential(DwConv(x,x,3), Conv(x,c3,1)),
+        Sequential(DwConv(c3,c3,3), Conv(c3,c3,1)),
+        Conv2d(c3, self.nc, 1)
+      ]
+      for x in ch
+    ]
+    self.dfl = DFL(self.reg_max) if self.reg_max > 1 else Identity()
+    if end2end:
+      self.one2one_cv2 = copy.deepcopy(self.cv2)
+      self.one2one_cv3 = copy.deepcopy(self.cv3)
 
-  def __call__(self, x):
+  @property
+  def one2one(self):
+    return dict(box_head=self.one2one_cv2, cls_head=self.one2one)
+  
+  @property
+  def end2end(self):
+    return getattr(self, "_end2end", True) and hasattr(self, "one2one")
+  
+  def forward_head(self, x:list[Tensor], box_head = None, cls_head = None):
+    if box_head is None or cls_head is None:
+      return dict()
+    bs = x[0].shape[0]
+    boxes = []
     for i in range(self.nl):
-      box = x[i]
-      cls = x[i]
-      for layer in self.cv2[i]: box = layer(box)
-      for layer in self.cv3[i]: cls = layer(cls)
-      x[i] = box.cat(cls, dim=1)
-    self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
-    y = [(i.reshape(x[0].shape[0], self.no, -1)) for i in x]
-    x_cat = y[0].cat(y[1], y[2], dim=2)
-    box, cls = x_cat[:, :4], x_cat[:, 4:]
-    dbox = dist2bbox(box, self.anchors.unsqueeze(0), xywh=True, dim=1) * self.strides
-    z = dbox.cat(cls.sigmoid(), dim=1)
-    return z
+      boxes.append(box_head[i](x[i]).reshape(bs, 4 * self.reg_max, -1))
+    boxes = boxes[0].cat(*boxes[1:], dim=2)
+    scores = []
+    for i in range(self.nl):
+      scores.append(cls_head[i](x[i]).reshape(bs, self.nc, -1))
+    return dict(boxes=boxes, scores=scores, feats=x)
+  
+  def __call__(self, x:list[Tensor]):
+    preds = self.forward_head(x, **self.one2one)
+    if self.end2end:
+      x_detach = [xi.detach() for xi in x]
+      one2one = self.forward_head(x_detach, **self.one2one)
+      preds = {"one2many": preds, "one2one": one2one}
+      return preds
 
 class Concat:
   def __init__(self, dim:int=1):
     self.dim = dim
   def __call__(self, x:Tensor):
     return x[0].cat(*x[1:], dim=self.dim)
+
+class Sequential(list):
+  __slots__ = ()
+
+  def __init__(self, *layers):
+    super().__init__(layers)
+
+  def __call__(self, x):
+    for layer in self:
+      x = layer(x)
+    return x
 
 class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
@@ -436,7 +490,7 @@ class YOLOv26:
       Conv(c1=int(512 * w), c2=int(512 * w), k=3, s=2),
       Concat(),
       C3K2(c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True),
-      DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
+      DetectionHead(num_classes, reg_max=1, end2end=True, ch=(int(256*w), int(512*w), int(1024*w)))
     ]
 
   def __call__(self, x: Tensor)->Tensor:
@@ -588,9 +642,9 @@ if __name__=="__main__":
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
-  with open("state_dict", "w+") as file:
-    for key in state_dict.keys():
-      file.write(f"{key}\n")
+  # with open("state_dict", "w+") as file:
+  #   for key in sorted(state_dict.keys()):
+  #     file.write(f"{key}\n")
   print(f"State dict: {state_dict.keys()}")
   print(f"State dict len: {len(state_dict.keys())}")
   x = load_state_dict(yolo_infer, state_dict)
