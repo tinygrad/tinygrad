@@ -20,7 +20,7 @@ def const_values(u:UOp):
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
-    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v1 = UOp.const(dtypes.int, (0,1,2))
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)

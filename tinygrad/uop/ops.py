@@ -483,10 +483,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
+    dt = dtype or self.dtype.base
+    if not isinstance(b, tuple) and dt.vcount > 1: b = (b,)*dt.vcount
+    return UOp.const(dt.scalar(), b, shape=self._shape)
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
     # for use after movement ops have been removed
-    ret = UOp.const(dtype or self.dtype.base, b)
+    ret = UOp.const((dtype or self.dtype.base).scalar(), b)
     if self.shape == (): return ret
     if len(self.shape) == 1: return UOp(Ops.STACK, ret.dtype, (ret,)*self.max_numel())
     raise RuntimeError(f"vconst_like only works on 0 or 1D shapes, not {self.shape}")
@@ -494,7 +496,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(x, UOp): return x
     # float self keeps its dtype for any scalar, int self only for int/Invalid scalars
     if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.const_like(x)
-    return self.const_like(x, dtypes.from_py(x).vec(self.dtype.vcount))
+    return self.const_like((x,)*self.dtype.vcount if self.dtype.vcount > 1 else x, dtypes.from_py(x))
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
@@ -534,9 +536,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
+    assert dtype.vcount == 1, f"const dtype must be scalar, got {dtype}"
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
-      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=()) for c in b]
+      stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
       ret = UOp.vectorize(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
@@ -553,7 +556,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
-  def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
+  def invalid(count=1):
+    if count == 1: return UOp(Ops.CONST, dtypes.weakint, src=(), arg=Invalid)
+    return UOp.vectorize(*[UOp(Ops.CONST, dtypes.weakint, src=(), arg=Invalid) for _ in range(count)])
   def valid(self, cond):
     return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:

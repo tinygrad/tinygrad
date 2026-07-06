@@ -129,8 +129,8 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
       UOp(Ops.STACK, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
-      UOp.const(dtypes.int.vec(4), (0, 256, 512, 768))))
-    rhs = UOp.const(dtypes.int.vec(4), 2)
+      UOp.const(dtypes.int, (0, 256, 512, 768))))
+    rhs = UOp.const(dtypes.int, (2,)*4)
     unopt = lhs<rhs
     opt = apply_rewrite(unopt)
     print(unopt)
@@ -182,27 +182,27 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
 class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
-    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
     self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
-    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
     self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
 
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
-    const_stack = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    const_stack = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
     self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
-    const_stack = UOp.const(dtypes.float32.vec(4), (7.0, 8.0, 9.0, 10.0))
+    const_stack = UOp.const(dtypes.float32, (7.0, 8.0, 9.0, 10.0))
     self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
 
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
-    base_vector = UOp.const(dtypes.float32.vec(4), (5.0, 10.0, 15.0, 20.0))
+    base_vector = UOp.const(dtypes.float32, (5.0, 10.0, 15.0, 20.0))
     vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 

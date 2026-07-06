@@ -160,7 +160,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertNotEqual(i.vmin, i.vmax)
 
   def test_vmin_vmax_invalid_vconst(self):
-    x = UOp.const(dtypes.weakint.vec(4), (0, 4, Invalid, Invalid))
+    x = UOp.const(dtypes.weakint, (0, 4, Invalid, Invalid))
     self.assertLess(x.vmin, 0)
     self.assertGreater(x.vmax, 4)
 
@@ -280,37 +280,37 @@ class TestVminVmaxDivMod(unittest.TestCase):
 class TestVminVmaxVConst(unittest.TestCase):
   def test_vmin_vmax_vconst_single_element(self):
     # vmin and vmax for a single-element vector constant
-    uop = UOp.const(dtypes.int32.vec(1), (42,))
+    uop = UOp.const(dtypes.int32, (42,))
     self.assertEqual(uop.vmin, 42)
     self.assertEqual(uop.vmax, 42)
 
   def test_vmin_vmax_vconst_multiple_elements(self):
     # vmin and vmax for a multi-element vector constant
-    uop = UOp.const(dtypes.int32.vec(4), (10, 20, -5, 7))
+    uop = UOp.const(dtypes.int32, (10, 20, -5, 7))
     self.assertEqual(uop.vmin, -5)
     self.assertEqual(uop.vmax, 20)
 
   def test_vmin_vmax_vconst_all_equal(self):
     # vmin and vmax for a vector where all elements are equal
-    uop = UOp.const(dtypes.int32.vec(3), (7, 7, 7))
+    uop = UOp.const(dtypes.int32, (7, 7, 7))
     self.assertEqual(uop.vmin, 7)
     self.assertEqual(uop.vmax, 7)
 
   def test_vmin_vmax_vconst_with_negative_values(self):
     # vmin and vmax for a vector constant containing negative values
-    uop = UOp.const(dtypes.int32.vec(4), (-10, -20, -5, -15))
+    uop = UOp.const(dtypes.int32, (-10, -20, -5, -15))
     self.assertEqual(uop.vmin, -20)
     self.assertEqual(uop.vmax, -5)
 
   def test_vmin_vmax_vconst_with_floats(self):
     # vmin and vmax for a vector constant of float values
-    uop = UOp.const(dtypes.float32.vec(3), (1.5, -3.2, 0.0))
+    uop = UOp.const(dtypes.float32, (1.5, -3.2, 0.0))
     self.assertEqual(uop.vmin, -3.2)
     self.assertEqual(uop.vmax, 1.5)
 
   def test_vmin_vmax_vconst_with_bools(self):
     # vmin and vmax for a vector constant of bool values
-    uop = UOp.const(dtypes.bool.vec(3), (True, False, False))
+    uop = UOp.const(dtypes.bool, (True, False, False))
     self.assertIs(uop.vmin, False)
     self.assertIs(uop.vmax, True)
 

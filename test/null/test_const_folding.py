@@ -127,7 +127,7 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src
+      srcs = full_rewrite(UOp.const(dtypes.int32, (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src
     self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
     self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
 

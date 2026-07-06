@@ -79,7 +79,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # this is the big accumulator
   acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float.vec(4), 0, AddrSpace.REG)
   assert acc.size*WARP_SIZE*WARPGROUP_SIZE*4 == BLOCK_M*BLOCK_N
-  acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float.vec(4), 0.0), end=init_l)
+  acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float, (0.0,)*4), end=init_l)
 
   # create locals (note A is permuted, and the stride is changed to avoid bank conflicts)
   def make_locals(slot) -> tuple[UOp, UOp]:

@@ -1289,9 +1289,9 @@ class TestInvalidIndex(unittest.TestCase):
     self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
 
   def test_alu_invalid_vconst(self):
-    c1 = UOp.const(dtypes.weakint.vec(4), (1, 1, Invalid, Invalid))
-    c2 = UOp.const(dtypes.weakint.vec(4), (1, Invalid, 1, 1))
-    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.weakint.vec(4), (2, Invalid, Invalid, Invalid)))
+    c1 = UOp.const(dtypes.weakint, (1, 1, Invalid, Invalid))
+    c2 = UOp.const(dtypes.weakint, (1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.weakint, (2, Invalid, Invalid, Invalid)))
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""

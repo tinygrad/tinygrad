@@ -29,9 +29,6 @@ from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 pm_remove_vec_dtypes = PatternMatcher([
-  # CONST must be stacked CONST
-  (UPat(Ops.CONST, name='c'),
-   lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   # rewrite PARAM to non pointer
   (UPat((Ops.PARAM, Ops.BUFFER), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
