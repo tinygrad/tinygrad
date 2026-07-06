@@ -3,7 +3,7 @@ from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element, srender
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -101,7 +101,10 @@ def fix_store_hazard(target:UOp, src:UOp):
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
-  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
+  # threshold uses declared upper bounds for symbolic shapes since BIND vmin/vmax ignore the bound value
+  # the split decision is binding independent so a jitted schedule stays valid for every step
+  if not SPLIT_REDUCEOP or not all_int(reduce.shape) or \
+    prod(int(s.vmax) if isinstance(s, UOp) else s for s in x.shape)//prod(reduce.shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
   #   ~2**10 should be enough if GROUP is used
@@ -112,6 +115,23 @@ def split_reduceop(reduce:UOp, x:UOp):
   indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.weakint, 0) for i,s in enumerate(x.shape)])
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
   is_expanded = [i not in range_nums for i in range(len(x.shape))]
+
+  if not all_int(x.shape):
+    # a symbolic axis has no divisors so split into a FIXED count of partials instead padding the axis to a
+    # multiple of the count. the pad must hold the reduce identity since a zero pad is only that for ADD. the partial
+    # buffer (*reduce.shape, count) is static and the fixed count keeps the accumulation tree the same at every length
+    if not (split_candidates:=[i for i in reduce.arg[1] if isinstance(x.shape[i], UOp) and not is_expanded[i]]): return None
+    dim_to_split = split_candidates[0]
+    if (divisor:=min(256, 2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape))) < 8: return None
+    num_chunks = (x.shape[dim_to_split] + (divisor-1)) // divisor
+    pads = tuple((0, num_chunks*divisor - x.shape[dim_to_split]) if i == dim_to_split else (0, 0) for i in range(len(x.shape)))
+    padded = x.pad(pads)
+    if reduce.arg[0] is not Ops.ADD:
+      padded = x.const_like(1).cast(dtypes.bool).pad(pads).where(padded, padded.const_like(identity_element(reduce.arg[0], x.dtype)))
+    splitted_shape = x.shape[:dim_to_split]+(num_chunks, divisor)+x.shape[dim_to_split+1:]
+    splitted = padded.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split+1]+[dim_to_split+1]))
+    if DEBUG >= 3: print(f"split {divisor}: {tuple(srender(s) for s in x.shape)} -> {tuple(srender(s) for s in splitted.shape)} -> {reduce.shape}")
+    return splitted._rop(*reduce.arg).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
