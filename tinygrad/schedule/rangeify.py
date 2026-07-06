@@ -31,7 +31,7 @@ def lower_shaped_wmma(ctx, x):
   name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
   wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
   wmma = UOp(Ops.WMMA, dtype_out, tuple(s[u].contract(u) for s, u in upcasts), arg=wmma_arg)
-  tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG, is_ptr=False)
+  tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG)
   return tmp.after(UOp.group(*[tmp[e].store(wmma.index(e)) for e in range(x.src[2].shape[-1])]))
 
 pm_store_ranges = PatternMatcher([
@@ -444,7 +444,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   if allow_locals:
     # handle locals
-    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL, is_ptr=False)
+    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
     do_store = buf.broadcast(x.src[1].dtype.count).index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
