@@ -1737,8 +1737,9 @@ def train_gptoss():
 
   from extra.gemm.cdna_asm_gemm import _mx_block_scale
   model_state = get_state_dict(model)
-  fp8_inv_scales = [model_state[sname] for sname in model._fp8_inv_scale.values()]
-  for wname, sname in model._fp8_inv_scale.items():
+  fp8_scale_names = {n: f"{n}_scale" for n, t in model_state.items() if t.dtype == FP8_DTYPE}
+  fp8_inv_scales = [model_state[sname] for sname in fp8_scale_names.values()]
+  for wname, sname in fp8_scale_names.items():
     w, scale = model_state[wname], model_state[sname]
     w._inv_scale = scale
     if optim.master_params:
