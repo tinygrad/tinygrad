@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -27,16 +27,6 @@ from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_imag
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
-
-pm_remove_vec_dtypes = PatternMatcher([
-  # rewrite PARAM to non pointer
-  (UPat((Ops.PARAM, Ops.BUFFER), name="buf"), lambda buf:
-   buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
-    if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
-  # remove pointer dtypes from non-PARAM/BUFFER ops
-  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER}, name="x"),
-   lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, PtrDType) else None),
-])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
@@ -297,9 +287,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
-
-  # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
