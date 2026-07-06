@@ -1,3 +1,4 @@
+from tinygrad.runtime.autogen.amd.cdna import enum
 import json
 import sys
 import cv2
@@ -380,8 +381,10 @@ class DetectionHead:
     self.stride = [8, 16, 32]
     c1 = max(filters[0], self.nc)
     c2 = max(16, filters[0] // 4)
-    self.cv3 = [[Conv(x, c1, 3), Conv(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]
-    self.cv2 = [[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4, 1)] for x in filters]
+    self.cv3 = [
+      [
+        [Conv(x, c1, 3), Conv(c1, c1, 3), Conv2d(c1, self.nc, 1)] for x in filters]]
+    self.cv2 = [[[Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4, 1)] for x in filters]]
 
   def __call__(self, x):
     for i in range(self.nl):
@@ -398,18 +401,62 @@ class DetectionHead:
     z = dbox.cat(cls.sigmoid(), dim=1)
     return z
 
+class Concat:
+  def __init__(self, dim:int=1):
+    self.dim = dim
+  def __call__(self, x:Tensor):
+    return x[0].cat(*x[1:], dim=self.dim)
+
 class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
-    self.net = Backbone(w,d,ch)
-    self.fpn= Neck(w,d,ch)
-    self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
+    # self.net = Backbone(w,d,ch)
+    # self.fpn= Neck(w,d,ch)
+    # self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
+    self.model = [
+      Conv(c1=3, c2=int(64*w), k=3, s=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
+      Conv(c1=int(64*w), c2=int(128*w), k=3, s=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
+      C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
+      Conv(c1=int(256*w), c2=int(256*w), k=3, s=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
+      C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
+      Conv(c1=int(512*w), c2=int(512*w), k=3, s=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
+      C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
+      Conv(c1=int(512*w), c2=int(1024*w), k=3, s=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
+      C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
+      SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
+      C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)), # [-1, 2, C2PSA, [1024]] # 10
+      Upsample(scale_factor=2, mode="nearest"),
+      Concat(),
+      C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3),
+      Upsample(scale_factor=2, mode="nearest"),
+      Concat(),
+      C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3),
+      Conv(c1=int(256 * w), c2=int(256 * w), k=3, s=2),
+      Concat(),
+      C3K2(c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,),
+      Conv(c1=int(512 * w), c2=int(512 * w), k=3, s=2),
+      Concat(),
+      C3K2(c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True),
+      DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
+    ]
+
   def __call__(self, x: Tensor)->Tensor:
-    return self.head(self.fpn(*self.net(x)))
-  def return_all_trainable_modules(self):
-    backbone_modules = [*range(10)]
-    yolov26neck_modules = [12,15,16,18,19,21]
-    yolov26head_weights = [(22, self.head)]
-    return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov26neck_modules, self.fpn.return_modules()), *yolov26head_weights]
+    outputs = []
+    for i, layer in enumerate(self.model):
+      if i == 12:
+        x = layer([outputs[-1], outputs[6]])
+      elif i == 15:
+        x = layer([outputs[-1], outputs[4]])
+      elif i == 18:
+        x = layer([outputs[-1], outputs[13]])
+      elif i == 21:
+        x = layer([outputs[-1], outputs[10]])
+      elif i == 23:
+        x = layer([outputs[16], outputs[19]], outputs[22])
+      else:
+        x = layer(x)
+      
+      outputs.append(x)
+    return x
 
 def get_weights_location(yolo_variant: str) -> Path:
   def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
@@ -541,6 +588,9 @@ if __name__=="__main__":
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
+  with open("state_dict", "w+") as file:
+    for key in state_dict.keys():
+      file.write(f"{key}\n")
   print(f"State dict: {state_dict.keys()}")
   print(f"State dict len: {len(state_dict.keys())}")
   x = load_state_dict(yolo_infer, state_dict)
