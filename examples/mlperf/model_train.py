@@ -1994,14 +1994,18 @@ def train_flux():
 
     # eval loop
     if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
+      eval_loss, eval_samples = Tensor.zeros((), device=GPUS), 0
       for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
-        eval_loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
+        loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
+        eval_loss += loss
+        eval_samples += sample["mean"].shape[0]
 
-        if BENCHMARK and j + 1 == min(BENCHMARK, val_total):
+        if BENCHMARK and (j + 1) == min(BENCHMARK, val_total):
           return
 
-      if eval_loss <= target_eval_loss:
-        tqdm.write(f"target eval loss reached: {eval_loss:.6f} (target: {target_eval_loss:.6f})")
+      avg_loss = (eval_loss / eval_samples).float().to("CPU").item()
+      if avg_loss <= target_eval_loss:
+        tqdm.write(f"target eval loss reached: {avg_loss:.6f} (target: {target_eval_loss:.6f})")
         break
 
 if __name__ == "__main__":
