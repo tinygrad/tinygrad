@@ -552,11 +552,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE, self.dtype, (self,), (op, reduce_axis)) if len(reduce_axis) else self
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
-  def invalid(count=1):
-    if count == 1: return UOp(Ops.CONST, dtypes.weakint, src=(), arg=Invalid)
-    return UOp.vectorize(*[UOp(Ops.CONST, dtypes.weakint, src=(), arg=Invalid) for _ in range(count)])
+  def invalid(): return UOp.const(dtypes.weakint, Invalid)
   def valid(self, cond):
-    return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
+    return cond.where(self.cast(dtypes.weakint), UOp.invalid())
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     if self.op is Ops.STACK: return UOp.vectorize(*(x.get_idx() for x in self.src))
