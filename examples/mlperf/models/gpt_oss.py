@@ -138,11 +138,11 @@ class GPTOSS:
     xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
     xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
     xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    scores = ((xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask).contiguous()
+    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
     sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
     m = scores.max(-1, keepdim=True).maximum(sink)
     e = (scores - m).exp()
-    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16).contiguous()
+    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
     attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
@@ -160,9 +160,9 @@ class GPTOSS:
 
     out = None
     for e in range(self.n_experts):
-      gate_up = (matmul_mx(inp.contiguous_backward(), w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]).contiguous()
+      gate_up = matmul_mx(inp, w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]
       y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]).contiguous()
-      contrib = (weights[..., e:e+1].cast(y.dtype) * y).contiguous()
+      contrib = weights[..., e:e+1].cast(y.dtype) * y
       out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 
