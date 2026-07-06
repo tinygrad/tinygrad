@@ -483,9 +483,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    dt = dtype or self.dtype.base
-    if not isinstance(b, tuple) and dt.vcount > 1: b = (b,)*dt.vcount
-    return UOp.const(dt.scalar(), b, shape=self._shape)
+    return UOp.const((dtype or self.dtype.base).scalar(), b, shape=self._shape)
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
     # for use after movement ops have been removed
     ret = UOp.const((dtype or self.dtype.base).scalar(), b)
@@ -496,7 +494,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(x, UOp): return x
     # float self keeps its dtype for any scalar, int self only for int/Invalid scalars
     if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.const_like(x)
-    return self.const_like((x,)*self.dtype.vcount if self.dtype.vcount > 1 else x, dtypes.from_py(x))
+    return self.const_like(x, dtypes.from_py(x))
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
