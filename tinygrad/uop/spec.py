@@ -52,6 +52,8 @@ spec_shared = PatternMatcher([
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
 
+  # CONST must not be vector dtype
+  (UPat(Ops.CONST, name="x"), lambda x: False if x.dtype.vcount > 1 else None),
   # CONST is everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
 
