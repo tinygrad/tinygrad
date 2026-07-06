@@ -465,8 +465,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return self.src[new_srcs[0].arg]
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base.scalar()), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
-    # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
-    if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
+    # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
+    # non-ptr placeholders (addrspace set, no device) use buffer indexing; device buffers (has device) use tensor indexing
+    if not isinstance(self.dtype, PtrDType) and (self.addrspace in (None, AddrSpace.ALU) or self.device is not None):
+      return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
@@ -999,20 +1001,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, is_ptr=True):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     if addrspace is AddrSpace.GLOBAL:
-      # TODO: this should have a shape
-      ret = UOp(Ops.PARAM, dtype.ptr(prod(shape), addrspace) if is_ptr else dtype, arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
-      ret = UOp(Ops.BUFFER, dtype.ptr(prod(shape), addrspace) if is_ptr else dtype,
-                src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
     return ret
-  def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL, is_ptr=True):
+  def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.max_shard_shape, self.dtype, slot, addrspace, is_ptr=is_ptr)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot, addrspace)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
