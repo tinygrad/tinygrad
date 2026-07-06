@@ -344,11 +344,12 @@ def intcast(y:UOp, x:UOp):
     if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
 
+# TODO: move this into pattern matcher
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def castint64(ctx, y:UOp, x:UOp):
   # if src (y) is an int just allocate reg buffer and store?
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  if y.dtype in (dtypes.int, dtypes.short, dtypes.uint, dtypes.ushort):
+  if y.dtype in dtypes.ints:
     lo = y.ins(RDNA3Ops.v_mov_b32_e32, src=(y,))
     hi = UOp(Ops.INS, hi_dt, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
     return multireg(lo, hi, dtype=x.dtype)
@@ -447,20 +448,7 @@ extra_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
 
-pm_float_to_int = PatternMatcher([
-  (UPat.var("y", dtypes.half).cast(dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32)),
-  (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", dtypes.double).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
-])
-
-pm_int_to_float = PatternMatcher([
-  (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
-  (UPat.var("y", dtypes.int8s).cast((dtypes.half,dtypes.float), name="x"), lambda y,x: y.cast(dtypes.uint16 if dtypes.is_unsigned(y.dtype) else dtypes.int16).cast(x.dtype)),
-  (UPat.var("y", dtypes.int16s).cast(dtypes.float), lambda y: y.cast(dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).float()),
-])
-
-# TODO: simplify these cast rules, maybe just make a legalize cast function?
+def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
@@ -471,22 +459,32 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
-  # casting rewrites
+  # (UPat(name="x").bitcast(), lambda x: x),
+  # --- casting rewrites ---
+  # float -> int
+  (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32))),
+  (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
   (UPat.var("y", dtype=dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
-  # f64 <-> f16 goes through f32
-  (UPat.var("y", dtypes.half).cast(dtypes.double), lambda y: y.float().cast(dtypes.double)),
-  (UPat.var("y", dtypes.double).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
+  # int -> float
+  (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
+  (UPat.var("y", dtypes.int8s).cast((dtypes.half, dtypes.float, dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(x.dtype)),
+  (UPat.var("y", dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  # other
+  (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
   # narrowing long goes through b32
   (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
-    lambda y,x: y.index(0).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32).cast(x.dtype)),
-  # this only works because we assume upper half is right, widen cast is noop
+    lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  # NOTE: this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
   # expand 64 bit where, 2 cndmasks
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
     multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
-]) + pm_float_to_int + pm_int_to_float
+])
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
@@ -508,6 +506,7 @@ isel_matcher = PatternMatcher([
   # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
+  # TODO: v_add3 for u32
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
