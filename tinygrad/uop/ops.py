@@ -604,7 +604,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
     return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in self.device], initial=0)))
 
-  @recursive_property
+  @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None

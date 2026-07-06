@@ -906,7 +906,6 @@ if __name__ == "__main__":
     for _ in tqdm(batch_load_flux(bs, val, BASEDIR, EMPTYENCDIR, seed=seed, cfg_prob=cfg_prob, is_infinite=False), total=total_num_samples):
       pass
 
-
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
     globals()[load_fn_name](getenv("VAL", 1))
