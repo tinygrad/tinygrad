@@ -1932,8 +1932,8 @@ def train_flux():
     )
 
   # wandb
-  wandb = getenv("WANDB")
-  if wandb:
+  WANDB = getenv("WANDB")
+  if WANDB:
     import wandb
     wandb.init(config=config, project="MLPerf-flux.1")
 
@@ -1960,6 +1960,7 @@ def train_flux():
     optim_time = et - gt
     dev_time = (gt - mst) + optim_time
     step_time = et - st
+    gbs_time = gt - st
 
     if BENCHMARK: step_times.append(step_time)
 
@@ -1968,8 +1969,21 @@ def train_flux():
     mem_gb = GlobalCounters.mem_used / 1e9
     gflops = GlobalCounters.global_ops / 1e9 / dev_time
     tqdm.write(
-        f"{i:5} {step_time:.3f} s step, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+        f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
         f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
+
+    if WANDB:
+      wandb.log({
+        "train/loss": loss,
+        "train/lr": lr,
+        "train/step_time": step_time,
+        "train/gbs_time": gbs_time,
+        "train/optim_time": optim_time,
+        "train/dev_time": dev_time,
+        "train/data_time": data_time,
+        "train/mem": mem_gb,
+        "train/GFLOPS": gflops
+      })
 
     if i == BENCHMARK:
       median_step_time = sorted(step_times)[BENCHMARK // 2]
@@ -1982,7 +1996,6 @@ def train_flux():
     if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
       for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
         eval_loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
-        tqdm.write(f"eval loss: {eval_loss.float().item():.6f}")
 
         if BENCHMARK and j + 1 == min(BENCHMARK, val_total):
           return
