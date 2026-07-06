@@ -1674,7 +1674,6 @@ def train_gptoss():
   DATA_SEED          = config["DATA_SEED"]              = getenv("DATA_SEED", SEED)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
-  SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   MAX_STEPS          = config["MAX_STEPS"]              = getenv("MAX_STEPS", 1_200_000)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else MAX_STEPS * GBS)
   EVAL_SAMPLES       = config["EVAL_SAMPLES"]           = getenv("EVAL_SAMPLES", 1024)
@@ -1758,7 +1757,7 @@ def train_gptoss():
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
+    logits:Tensor = model(tokens[:, :-1], save=True)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
@@ -1801,13 +1800,13 @@ def train_gptoss():
       return fake_data(BS, SAMPLES)
     else:
       from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
+      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=True)
 
   if getenv("FAKEDATA", 0):
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=True)
 
   def get_eval_iter():
     if eval_dataset is None:
