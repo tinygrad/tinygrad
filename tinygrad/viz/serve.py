@@ -54,7 +54,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.CALL: "#00B7C8", Ops.FUNCTION: "#C07788", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
                Ops.LINEAR: "#7DF4FF",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
-               Ops.STAGE: "#AC640D", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
+               Ops.STAGE: "#AC640D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
 addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
@@ -185,7 +185,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None)
     if err: break
     replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls)
-    except RuntimeError as e: new_sink, err = UOp(Ops.NOOP, arg=str(e)), True
+    except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr), "_sink":new_sink}
