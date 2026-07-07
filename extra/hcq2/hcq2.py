@@ -389,7 +389,7 @@ def _is_link_patch(p:UOp, buf:UOp, jit=False) -> bool:
   return not has_loads and not param_is_input if True else (p.buf_uop.tag in {"program"})
 
 def trim_link_patches(ctx:tuple[bool, list[UOp]], a:UOp) -> UOp|None:
-  links, kept = partition(a.src[1:], _is_link_patch, buf=a.src[0], jit=ctx[0])
+  links, kept = partition(a.src[1:], lambda p: _is_link_patch(p, a.src[0], jit=ctx[0]))
 
   # keep all patches from the link-time patches' subtrees in the C code
   afters = [u for u in UOp.sink(*links).toposort() if u.op is Ops.AFTER]
