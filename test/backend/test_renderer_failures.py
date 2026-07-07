@@ -87,7 +87,7 @@ class TestWGSLFailures(unittest.TestCase):
 class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
   def test_gated_store_with_if(self):
-    a = UOp.param(0, dtypes.int, (-1,))
+    a = UOp.param(0, dtypes.int, (4,))
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))

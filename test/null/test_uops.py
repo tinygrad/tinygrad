@@ -290,8 +290,8 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
   def test_replace(self):
-    x = UOp.param(0, dtypes.int, (-1,))
-    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, (-1,)).arg).arg.slot, 1)
+    x = UOp.param(0, dtypes.int, (1,))
+    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, (1,)).arg).arg.slot, 1)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
   def test_const_zero_neg_zero_different(self):

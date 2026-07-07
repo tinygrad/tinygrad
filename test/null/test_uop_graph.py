@@ -250,7 +250,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
-    d0 = UOp.param(0, dtypes.float, (-1,))
+    d0 = UOp.param(0, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
     ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
@@ -262,9 +262,9 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_gep_vec_fold(self):
-    d0 = UOp.param(0, dtypes.float, (-1,))
-    d1 = UOp.param(1, dtypes.float, (-1,))
-    d2 = UOp.param(2, dtypes.float, (-1,))
+    d0 = UOp.param(0, dtypes.float, (1,))
+    d1 = UOp.param(1, dtypes.float, (1,))
+    d2 = UOp.param(2, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(Ops.STACK, dtypes.float.vec(count), geps)
@@ -554,7 +554,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
-    glbl0 = UOp.param(0, dtypes.int, (-1,))
+    glbl0 = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])

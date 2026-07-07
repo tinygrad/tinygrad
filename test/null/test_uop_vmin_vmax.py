@@ -316,7 +316,7 @@ class TestVminVmaxVConst(unittest.TestCase):
 
   def test_vmin_vmax_vector_with_gep(self):
     # vmin and vmax for a vector constant of bool values
-    d1 = UOp.param(1, dtypes.int, (-1,))
+    d1 = UOp.param(1, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     val = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
     uop = (val // 32)
