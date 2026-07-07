@@ -66,17 +66,17 @@ def alu_multi(root:UOp):
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
-  op, axis = root.arg
-  if multi.axis is not None and multi.axis in axis:
-    local = multi.src[0]._rop(op, axis)
+  op, num_axes = root.arg
+  if multi.axis is not None and multi.axis < num_axes:
+    local = multi.src[0]._rop(op, tuple(range(num_axes)))
     # allreduce in pre-cast dtype when sum_acc_dtype promoted from bf16/half
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype.scalar() in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  new_axis = multi.axis - sum(1 for a in axis if a < multi.axis) if multi.axis is not None else None
-  return multi.src[0]._rop(op, axis).multi(axis=new_axis)
+  new_axis = multi.axis - num_axes if multi.axis is not None else None
+  return multi.src[0]._rop(op, tuple(range(num_axes))).multi(axis=new_axis)
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")

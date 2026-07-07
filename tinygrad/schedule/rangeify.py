@@ -90,14 +90,15 @@ def split_reduceop(reduce:UOp, x:UOp):
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
   is_expanded = [i not in range_nums for i in range(len(x.shape))]
 
-  if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+  if not (split_candidates:=[(i,d) for i in range(reduce.arg[1])
+                             for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted._rop(*reduce.arg).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
