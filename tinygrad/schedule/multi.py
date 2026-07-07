@@ -84,9 +84,8 @@ def reshape_multi(root:UOp, multi:UOp):
   return multi.src[0].reshape(new_shape).multi(new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
-  if multi.axis is None: new_shape = root.marg
-  else: new_shape = tuple(multi.src[0].shape[multi.axis] if a == multi.axis else s for a,s in enumerate(root.marg))
-  return multi.src[0].expand(new_shape).multi(multi.axis)
+  new_axis = None if multi.axis is None else multi.axis + len(root.marg)
+  return multi.src[0]._mop(Ops.EXPAND, arg=root.marg).multi(new_axis)
 
 def pad_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]), f"padding not supported for {root.marg=}"

@@ -252,8 +252,8 @@ class TestViz(unittest.TestCase):
     self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
   def test_const_reshape_expand_folded(self):
-    # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
-    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
+    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->EXPAND chain
     a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
@@ -262,7 +262,6 @@ class TestViz(unittest.TestCase):
     excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
     self.assertIn("CONST", excluded_nodes)
     self.assertIn("STACK", excluded_nodes)
-    self.assertIn("RESHAPE", excluded_nodes)
     self.assertIn("EXPAND", excluded_nodes)
     self.assertIn("CONST1 1", graph[id(alu)]["label"])
 
