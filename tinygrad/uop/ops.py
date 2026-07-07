@@ -322,9 +322,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
-          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
-            raise ValueError(f"bad expand: {ps} -> {self.marg}")
-          return self.marg
+          return tuple(self.marg) + ps
         case Ops.PERMUTE:
           if sorted(self.marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.marg} of len {len(ps)}")
           return tuple(ps[i] for i in self.marg)
@@ -548,7 +546,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp.vectorize(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
+    return ret._mop(Ops.EXPAND, arg=shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -637,6 +635,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if self.shape[new_axis] % len(self.device) != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
       return new_axis
     if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
+    if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:
@@ -688,7 +687,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg) -> UOp:
     # early NOOP
-    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
+    if op is Ops.EXPAND and len(arg) == 0: return self
+    if op in {Ops.SHRINK, Ops.PAD} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
       return self
     match op:

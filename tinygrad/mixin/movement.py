@@ -123,9 +123,16 @@ class MovementMixin:
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    reshaped = self.reshape(shape)
-    ret = reshaped._mop(Ops.EXPAND, arg=new_shape)
-    return reshaped if ret.shape == reshaped.shape else ret
+    # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
+    n_left = len(new_shape) - len(self.shape)
+    expand_at = tuple(i for i, s in enumerate(self.shape) if resolve(s == 1, default=False) and resolve(new_shape[n_left+i] != 1))
+    kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
+    squeezed = self.reshape(tuple(self.shape[i] for i in kept))
+    expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
+    # expanded shape = [left] + [expand_at dims] + [kept dims], permute to new_shape
+    perm = tuple(range(n_left)) + tuple(
+      n_left + (expand_at.index(i) if i in expand_at else len(expand_at) + kept.index(i)) for i in range(len(self.shape)))
+    return expanded.permute(perm)
 
   def expand(self, shape, *args) -> Self:
     """

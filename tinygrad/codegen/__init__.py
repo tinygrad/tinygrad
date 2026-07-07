@@ -172,9 +172,9 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
-  # RESHAPE+EXPAND -> STACK
-  (UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(UPat.var("x"), UPat())), UPat()), name="out"),
-   lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if out.shape == (out.max_numel(),) else None),
+  # EXPAND on scalar -> STACK
+  (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
+   lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
   # INDEX on INDEX is INDEX
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
    lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
