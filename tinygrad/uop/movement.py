@@ -16,5 +16,5 @@ mop_cleanup = PatternMatcher([
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].arg for x in stk.src] else None),
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
-   lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
+   lambda a,i,idx: a.src[i.arg] if len(idx.src) <= 2 else a.src[i.arg].index(*idx.src[2:])),
 ])
