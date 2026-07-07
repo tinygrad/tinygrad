@@ -162,12 +162,6 @@ def make_cmdbuf(lin, devs):
   buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32)
   return buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *[make_patch(buf, off, s) for off, s in patches])
 
-  # pull patches to cmdbuf
-  # afters = dedup(u for _, s in patches for u in s.toposort() if u.op is Ops.AFTER)
-  # deps = tuple(d for p in afters for d in p.src[1:])
-  cmdbuf = buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *[make_patch(buf, off, s) for off, s in patches], *deps)
-  # return cmdbuf.substitute({p: p.src[0] for p in afters}) if afters else cmdbuf
-
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
 def make_signal(devs, queue=None, sentinel=False):
@@ -383,36 +377,35 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbu
 
 # *****************
 
-def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
-  itemsize = bv.src[0].dtype.itemsize if unwrap_after(bv.src[0]).op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
-  return UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
+def unwrap_mstack(u):
+  if u.op is Ops.MSTACK:
+    for x in u.src: yield x
+  yield u
 
-pm_early_simplify = PatternMatcher([
-  # getaddr(slice(base, off)) -> getaddr(base) + byte offset
-  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"),), name="g"), resolve_getaddr_slice),
-])
+def _is_link_patch(p:UOp, buf:UOp, jit=False) -> bool:
+  if p.op is not Ops.STORE or p.buf_uop is not buf: return False # this is not a patch :(
 
-# *****************
-#
+  assert all(x.op is Ops.PARAM for x in unwrap_mstack(p.buf_uop))
 
-# def changes_per_submit(u:UOp) -> bool: return u.op in (Ops.LOAD, Ops.INDEX) or (u.op is Ops.PARAM and u.tag is None)
-# def is_placeholder(b:UOp) -> bool: return (b.op is Ops.PARAM and b.tag is not None) or (b.op is Ops.MSTACK and all(is_placeholder(x) for x in b.src))
-# def is_link_patch(s:UOp) -> bool: return is_placeholder(s.buf_uop) and not any(changes_per_submit(u) for u in s.backward_slice if u is not s.src[0])
-
-def _is_link_patch(p:UOp, jit=False) -> bool:
-  # for jit every goes to link time for speed
-  assert p.buf_uop.op is Ops.PARAM
-  return (p.buf_uop.tag is not None) if jit else (p.buf_uop.tag in {"program"})
+  # TODO: for jit every goes to link time for speed
+  if False: return (p.buf_uop.tag in {"program"})
+  else:
+    has_loads = any(u.op in (Ops.LOAD, Ops.INDEX) for u in p.src[1].backward_slice)
+    param_is_input = all(x.tag is None and x.op is Ops.PARAM for x in unwrap_mstack(p.src[1].buf_uop))
+    return not has_loads and not param_is_input
 
 def trim_link_patches(ctx:list[bool, list[UOp]], a:UOp) -> UOp|None:
-  links, kept = partition(a.src[1:], _is_link_patch, jit=ctx[0])
-  ctx[1] += links
-  return a.src[0].after(*kept) if links else None
+  links, kept = partition(a.src[1:], _is_link_patch, buf=a.src[0], jit=ctx[0])
+
+  # links pacthes might have some
+  afters = dedup(u for s in links for u in s.toposort() if u.op is Ops.AFTER)
+  ctx[1] += UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src
+  return a.src[0].after(*kept, *tuple(d for p in afters for d in p.src[1:])) if links else None
 pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat((Ops.PARAM, Ops.MSTACK)),), allow_any_len=True, name="a"), trim_link_patches)])
 
 def split_patches(ctx:bool, call:UOp) -> UOp|None:
   # trim link-time patches
-  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=[ctx, lt_patches:=[]], name=f"trim link-time patches ({call.arg.aux.name})")
+  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=[ctx, lt_patches:=[]], bottom_up=False, name=f"trim link-time patches ({call.arg.aux.name})")
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
@@ -421,10 +414,6 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 
 # *****************
 
-def _is_input_getaddr(g:UOp) -> bool:
-  assert g.buf_uop.op is Ops.PARAM
-  return g.buf_uop.tag is None
-
 def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
   def _getaddr_key(g:UOp): return (g.buf_uop.arg.slot, to_tuple(g.buf_uop.tag))
 
@@ -432,69 +421,48 @@ def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
 
   order = sorted(dedup([_getaddr_key(gr) for _,gr,_ in gs]))
   b = make_placeholder(call.arg.aux.device, len(order), dtypes.uint64, name)
-  patches = b.after(*[make_patch(b, order.index(_getaddr_key(gr)) * 4, gr) for _,gr,_ in gs])
-  return ({g: b.after(*patches).index(UOp.const(dtypes.int, order.index(_getaddr_key(gr)))).load() for g,gr,patches in gs}, patches) if gs else ({}, None)
+  new_arg = b.after(*[make_patch(b, order.index(_getaddr_key(gr)) * b.dtype.base.itemsize, gr) for _,gr,_ in gs])
+  return ({g: b.after(*p).index(UOp.const(dtypes.int, order.index(_getaddr_key(gr)))).load() for g,gr,p in gs}, new_arg) if gs else ({}, None)
 
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
-  inputs, systems = partition(gaddrs, _is_input_getaddr)
+  inputs, systems = partition(gaddrs, lambda g: all(x.tag is None for x in unwrap_mstack(g.buf_uop)))
 
-  (inpsub, _), (syssub, syspatches) = _make_getaddrs_sub(call, inputs, "inputs"), _make_getaddrs_sub(call, systems, "systems")
-  return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:])+((syspatches,) if syspatches is not None else tuple()))
+  (inpsub, _), (syssub, sysarg) = _make_getaddrs_sub(call, inputs, "inputs"), _make_getaddrs_sub(call, systems, "systems")
+  return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:])+((sysarg,) if sysarg is not None else tuple()),
+                      arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
 pm_rm_rt_getaddrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_getaddrs)])
 
 # *****************
 
 def replace_params(call:UOp) -> UOp|None:
-  param_map = {x.src[0]: i for i,x in enumerate(call.src[1:])}
-
-  new_args:list[UOp] = []
+  args:list[UOp] = []
   def gate_params(u:UOp) -> bool:
-    if (is_param:=u.op in {Ops.PARAM, Ops.MSTACK}) and u not in param_map:
-      param_map[u] = len(param_map)
-      new_args.append(u)
+    if (is_param:=u.op in {Ops.PARAM, Ops.MSTACK}) and u not in args and u not in call.src[0].variables(): args.append(u)
     return not is_param
   call.src[0].toposort(gate=gate_params)
 
-  param_sub = {u: UOp.param(i, u.dtype, device=u.device) for u,i in param_map.items()}
+  pathces, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
+  patch_roots = {p.src[0] for p in pathces}
+  c_args = pathces + [x for x in args if x not in patch_roots]
 
-  info = replace(call.arg.aux, inputs=next((i for u,i in param_map.items() if u.tag == "inputs"), None))
-  return call.replace(src=(call.src[0].substitute(param_sub), *call.src[1:], *new_args), arg=replace(call.arg, aux=info))
+  varsub = {v: v.replace(arg=replace(v.arg, slot=-1)) for v in call.src[0].variables() if v.op is Ops.PARAM}
+  body = call.src[0].substitute({unwrap_after(u): UOp.param(i, u.dtype, device=u.device) for i,u in enumerate(c_args)} | varsub)
+
+  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
+  return call.replace(src=(body, *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
 pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
 # *****************
 
-# def changes_per_submit(u:UOp) -> bool: return u.op in (Ops.LOAD, Ops.INDEX) or (u.op is Ops.PARAM and u.tag is None)
-# def is_placeholder(b:UOp) -> bool: return (b.op is Ops.PARAM and b.tag is not None) or (b.op is Ops.MSTACK and all(is_placeholder(x) for x in b.src))
-# def is_link_patch(s:UOp) -> bool: return is_placeholder(s.buf_uop) and not any(changes_per_submit(u) for u in s.backward_slice if u is not s.src[0])
+def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
+  itemsize = bv.src[0].dtype.itemsize if unwrap_after(bv.src[0]).op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
+  return UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
 
-# def trim_link_patches(ctx:list[UOp], a:UOp) -> UOp|None:
-#   links, kept = partition(a.src[1:], is_link_patch)
-#   ctx += links
-#   return a.src[0].after(*kept) if links else None
-# pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat((Ops.PARAM, Ops.MSTACK)),), allow_any_len=True, name="a"), trim_link_patches)])
-
-# def split_patches(call:UOp) -> UOp|None:
-#   # trim link-time patches
-#   body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(lt_patches:=[]), name=f"trim link-time patches ({call.arg.aux.name})")
-
-#   units:dict[UOp, None] = {}
-#   def unit_gate(u:UOp) -> bool:
-#     if (is_plc:=is_placeholder(u)): units[u] = None
-#     return not is_plc
-#   body.toposort(gate=unit_gate)
-
-#   srcs = dedup(list(call.src[1:]) + list(units) + [s.buf_uop for s in lt_patches])
-#   param_sub = {u: UOp.param(i, u.dtype, device=u.device) for i,u in enumerate(srcs)}
-#   for b in dedup(s.buf_uop for s in lt_patches):
-#     idx = param_sub[b].arg.slot
-#     srcs[idx] = srcs[idx].after(*dedup(s for s in lt_patches if s.buf_uop is b))
-
-#   param_sub |= {v: v.replace(arg=replace(v.arg, slot=-1)) for v in body.variables() if v.op is Ops.PARAM}
-
-#   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(srcs) if unwrap_after(u).tag == "inputs"), None))
-#   return call.replace(src=(body.substitute(param_sub), *srcs), arg=replace(call.arg, aux=info))
-# pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
+pm_early_simplify = PatternMatcher([
+  # getaddr(slice(base, off)) -> getaddr(base) + byte offset
+  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"),), name="g"), resolve_getaddr_slice),
+])
 
 # *****************
 # 5.3. pack placeholders buffers
@@ -551,7 +519,6 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
     linear = graph_rewrite(linear, pm_rm_rt_getaddrs, walk=True, name="replace rt getaddrs")
     linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
 
-    # linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace params")
     linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="early simplify patches", enter_calls=True)
 
     # and compile it
@@ -583,7 +550,7 @@ def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
-  assert buf.op in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT)
+  assert buf.op in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), f"{buf.op}"
 
   devs, b = g.arg, buf.buffer
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
