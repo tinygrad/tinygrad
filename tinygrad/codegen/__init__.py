@@ -21,7 +21,7 @@ from tinygrad.codegen.late.coalese import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar
+from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
@@ -197,11 +197,6 @@ def fix_group_for_reduce(x:UOp):
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
   return buf.reduce(*reduce_loop, arg=(x.arg[0], 0))
 
-pm_group_for_reduce = PatternMatcher([
-  # fix group for reduce
-  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
-])
-
 @dataclass
 class ReduceContext:
   acc_num: int = 0
@@ -244,6 +239,9 @@ def expand_horizontal_reduce(r:UOp):
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+  # remove reduces
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
@@ -270,7 +268,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
-  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -294,24 +292,19 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
-  sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
+
+  # remove reduce
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
-
-  # ** devectorizer (full_graph_rewrite) **
-  # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast, name="*** unbroadcast")
-
-  # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_add_loads, name="** add loads")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
