@@ -218,9 +218,9 @@ class AMDLLVMRenderer(LLVMRenderer):
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
     (UPat(Ops.CAST, dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(16), tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
+      lambda y: UOp(Ops.STACK, dtypes.half.vec(16), tuple(y.index(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
     (UPat(Ops.CAST, dtype=dtypes.half.vec(8), src=UPat.var("y", dtypes.half.vec(16))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(8), tuple(y.gep(i * 2) for i in range(8)))),
+      lambda y: UOp(Ops.STACK, dtypes.half.vec(8), tuple(y.index(i * 2) for i in range(8)))),
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),

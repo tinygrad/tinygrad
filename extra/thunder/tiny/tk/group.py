@@ -93,7 +93,7 @@ class Group:
           d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
           out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
@@ -123,7 +123,7 @@ class Group:
           d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
           out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
@@ -153,7 +153,7 @@ class Group:
           d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
           out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
@@ -183,7 +183,7 @@ class Group:
           d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
           out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)

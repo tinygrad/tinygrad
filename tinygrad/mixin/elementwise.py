@@ -546,7 +546,7 @@ class ElementwiseMixin(CreationMixin):
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
-    if not base.is_floating_point() and not isinstance(x, ElementwiseMixin) and not (isinstance(x, int) and x >= 0):
+    if not base.is_floating_point() and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
       raise RuntimeError("base needs to be float")
     ret = base.alu(Ops.POW, exponent)
     # NOTE: pow(int, float) -> int
@@ -1072,7 +1072,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
     ```
     """
-    if self.dtype == dtypes.uint8 and isinstance(weight, ElementwiseMixin):
+    if self.dtype == dtypes.uint8 and not isinstance(weight, ConstType):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight

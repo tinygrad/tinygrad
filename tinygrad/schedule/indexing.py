@@ -252,7 +252,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and len(x.arg[1]):
-      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
+      out_i, in_rngs = 0, []
+      for i,s in enumerate(x.src[0].shape):
+        if i in x.arg[1]: in_rngs.append(rctx.new_range(s, axistype=AxisType.REDUCE))
+        else:
+          in_rngs.append(out_rngs[out_i])
+          out_i += 1
+      rngs = tuple(in_rngs)
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)

@@ -53,6 +53,12 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 4
 def normal_test(func, shape=(20, 45), alpha=0.05): return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
 
 class TestRandomness(unittest.TestCase):
+  def test_three_lazy_rands_realized_one_at_a_time_are_distinct(self):
+    Tensor.manual_seed(123)
+    r1, r2, r3 = [Tensor.rand(4) for _ in range(3)]
+    self.assertNotEqual(r1.tolist(), r2.tolist())
+    self.assertNotEqual(r2.tolist(), r3.tolist())
+
   def test_randn(self):
     self.assertEqual(Tensor.randn(3,3,dtype=dtypes.half).dtype, dtypes.half)
     self.assertTrue(normal_test(Tensor.randn))

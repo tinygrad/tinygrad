@@ -38,7 +38,7 @@ class Ops(FastEnum):
   SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
-  GEP = auto(); STACK = auto()
+  STACK = auto()
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()
@@ -57,7 +57,7 @@ class Ops(FastEnum):
   # ** 4 -- math **
 
   # tensor core math op, not elementwise
-  WMMA = auto(); SHAPED_WMMA = auto()
+  WMMA = auto()
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
@@ -101,9 +101,6 @@ class Ops(FastEnum):
 
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
-
-  # expander ops
-  UNROLL = auto(); CONTRACT = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}

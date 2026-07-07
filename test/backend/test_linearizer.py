@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
-from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.isa import ISARenderer
@@ -249,7 +249,7 @@ class TestLinearizer(unittest.TestCase):
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
     for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
-      if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace is AddrSpace.REG:
+      if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
           assert u.src[1].op is Ops.CONST
         else:
@@ -307,7 +307,7 @@ class TestLinearizer(unittest.TestCase):
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      reg_stores = [u for u in uops if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace == AddrSpace.REG]
+      reg_stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace == AddrSpace.REG]
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 

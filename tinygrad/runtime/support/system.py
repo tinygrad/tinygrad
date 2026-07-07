@@ -163,6 +163,7 @@ class PCIDevice:
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
+    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")

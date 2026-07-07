@@ -19,6 +19,7 @@ LOG2E = math.log2(math.e)
 def warp_shfl_xor(val, offset, lane):
   """Read val from lane ^ offset using ds_bpermute."""
   idx = ((lane ^ offset) * 4).cast(dtypes.int)
+  if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
   return UOp(Ops.CUSTOM, dtypes.float, (idx, val),
              arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
 
@@ -96,7 +97,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
-  qk = UOp(Ops.SHAPED_WMMA, dtypes.float, (q_frag, k_frag, S_frag.after(k_qk)), arg=WMMA_ARG)
+  qk = UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), WMMA_ARG)
   qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
   S_reg = S_reg.after(qk_done)
 
@@ -160,7 +161,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = KV_lds_v.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
-  pv = UOp(Ops.SHAPED_WMMA, dtypes.float, (p_frag, v_frag, acc_frag.after(k_pv)), arg=WMMA_ARG)
+  pv = UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), WMMA_ARG)
 
   # end KV tile loop
   n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).barrier().end(n_tile)

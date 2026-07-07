@@ -51,7 +51,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   i = UOp.range(dest.shape[0], 0)
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
-  store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
+  store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):

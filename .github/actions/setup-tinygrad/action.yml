@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ''  # if you don't set a key, it doesn't cache
   deps:
-    description: 'Extra dependency groups (comma separated)'
+    description: 'Extra dependency groups (space separated)'
     required: false
     default: ''
   pydeps:
@@ -39,10 +39,6 @@ inputs:
     default: 'false'
   llvm:
     description: "Install LLVM?"
-    required: false
-    default: 'false'
-  mesa:
-    description: "Install mesa (true, false, cpu)"
     required: false
     default: 'false'
   tinydreno:
@@ -114,7 +110,8 @@ runs:
       shell: bash
       run: |
         uv venv .venv
-        uv pip install --python .venv -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        DEPS="${{ inputs.deps }}"
+        uv pip install --python .venv -e ".[${DEPS// /,}]" ${{ inputs.pydeps }} --torch-backend cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == ''
       shell: bash
@@ -146,11 +143,6 @@ runs:
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' | sudo tee -a /etc/apt/apt.conf.d/99keep-debs
 
-    - name: Add OpenCL Repo
-      if: inputs.opencl == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
-
     - name: Add AMD Repo (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
@@ -176,10 +168,7 @@ runs:
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
-          pkgs+=" opencl-headers \
-            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
-            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
-            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16"
+          pkgs+=" ocl-icd-opencl-dev"
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
@@ -286,18 +275,18 @@ runs:
       shell: bash
       run: brew install llvm@20
 
-    # **** mesa ****
-    - name: Install mesa (linux)
-      if: inputs.mesa != 'false' && runner.os == 'Linux'
-      shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}.so
-    - name: Install mesa (macOS)
-      if: inputs.mesa != 'false' && runner.os == 'macOS'
-      shell: bash
-      run: brew install sirhcm/tinymesa/tinymesa${{ inputs.mesa == 'cpu' && '_cpu' || '' }}
-
     # *** tinydreno ***
     - name: Install tinydreno (linux)
       if: inputs.tinydreno == 'true' && runner.os == 'Linux'
       shell: bash
       run: sudo curl -fL https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so -o /usr/lib/libllvm-qcom.so
+
+    # *** OpenCL ***
+    - name: Install rusticl
+      if: inputs.opencl == 'true'
+      shell: bash
+      run: |
+        sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/rusticl-v1/libRusticlOpenCL.so.1.0.0 -o /usr/lib/libRusticlOpenCL.so
+        sudo mkdir -p /etc/OpenCL/vendors
+        echo "/usr/lib/libRusticlOpenCL.so" | sudo tee /etc/OpenCL/vendors/rusticl.icd
+        echo "RUSTICL_ENABLE=llvmpipe" >> "$GITHUB_ENV"

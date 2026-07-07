@@ -89,7 +89,7 @@ class TestLocalAmax(unittest.TestCase):
     x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
     GlobalCounters.reset()
     out = (x * local_abs_max(x)).clone().realize()
-    self.assertEqual(GlobalCounters.kernel_count, 4)
+    self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
 if __name__ == '__main__':

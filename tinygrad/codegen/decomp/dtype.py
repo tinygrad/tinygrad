@@ -116,7 +116,7 @@ def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:

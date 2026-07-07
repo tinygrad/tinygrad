@@ -75,7 +75,8 @@ def reduce_multi(root:UOp, multi:UOp):
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return multi.src[0]._rop(op, axis).multi(axis=multi.axis)
+  new_axis = multi.axis - sum(1 for a in axis if a < multi.axis) if multi.axis is not None else None
+  return multi.src[0]._rop(op, axis).multi(axis=new_axis)
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
@@ -139,7 +140,7 @@ def param_to_multi(p:UOp):
   if p.axis is None: return None
   return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
 
-# NOTE: this is the same pattern as Ops.UNROLL
+# NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
