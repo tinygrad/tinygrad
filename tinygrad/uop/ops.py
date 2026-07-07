@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, DTypeLike, to_dtype, truncate, least_upper_dtype, Invalid, AddrSpace
+from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, to_dtype, truncate, least_upper_dtype, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
@@ -828,7 +828,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return ret
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
+    rdtype = self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
     else: ret = Buffer(self.device, self.max_numel(), rdtype).ref(1)
     buffers[self] = ret

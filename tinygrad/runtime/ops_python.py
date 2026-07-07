@@ -5,7 +5,7 @@
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
-from tinygrad.dtype import DType, dtypes, ImageDType, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
@@ -104,11 +104,10 @@ class PythonProgram:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:
             ret = [src_values[0][i][t] for t,i in enumerate(src_values[1])]
-          elif isinstance(src_dtypes[0], ImageDType):
-            assert len(src_values) == 3, f"image index must be 3 srcs, not {len(src_values)}"
+          elif u.src[0]._shape is not None and len(u.src[0]._shape) == 3 and u.src[0]._shape[-1] == 4:
             for m,oy,ox in zip(*src_values):
-              if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
-              else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
+              if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
+              else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
             for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
           values[u] = ret

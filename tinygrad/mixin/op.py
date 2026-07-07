@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, ImageDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, argsort, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
 from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
 
@@ -366,7 +366,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
     except (RuntimeError, ValueError): pass
     # ptr dtypes aren't in the promo lattice
-    if x.dtype == y.dtype or any(isinstance(d, ImageDType) for d in (x.dtype, y.dtype)): return x, y
+    if x.dtype == y.dtype: return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:

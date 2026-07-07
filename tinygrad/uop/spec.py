@@ -2,7 +2,7 @@ import math
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
-from tinygrad.dtype import DType, ImageDType, dtypes, AddrSpace, Invalid, ConstFloat
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same
 
 # ***** uop helpers *****
@@ -13,7 +13,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
-  if not CHECK_OOB or isinstance(buf.dtype, ImageDType): return True
+  if not CHECK_OOB or (buf._shape is not None and len(buf._shape) == 3 and buf._shape[-1] == 4): return True
 
   # buffer size
   sz = buf.max_numel()
