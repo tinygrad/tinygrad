@@ -286,6 +286,10 @@ def bitwise64(ctx, x:UOp, ins):
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
   return multireg(lo, hi, dtype=x.dtype)
 
+# Allows embedding special alu instructions ex. mul_hi without introducing
+# Ops.INS which have None shape and cause alu() _broadcast to error
+def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
+
 # 32 bit Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
 # TODO: sext / zext???, if dtype sizes dont match
@@ -293,30 +297,25 @@ def cdiv(ctx, x:UOp):
   # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
   if x.dtype.itemsize == 8:
     raise NotImplementedError()
-    n,d = x.src
-    d = UOp(Ops.RECIPROCAL, dtypes.float64, src=(d.cast(dtypes.float64),)) # d.cast(dtypes.float64).reciprocal()
-    return UOp(Ops.MUL, dtypes.float64, src=(n.cast(dtypes.float64),d)).cast(dtypes.ulong)
-    # return (n.cast(dtypes.float64) * d).cast(dtypes.ulong)
-  else:
-    def _safeneg(u:UOp): return UOp(Ops.SUB, dtypes.uint32, src=(const(dtypes.uint32,0), u))
-    def _umulh(a:UOp, b:UOp): return UOp(Ops.MUL, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
-    a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) 
-    is_signed = not dtypes.is_unsigned(x.dtype)
-    if is_signed:
-      def _getsign32(u:UOp): return (u >> 31).replace(arg=RDNA3Ops.v_ashrrev_i32_e32)
-      sa, sb = _getsign32(a), _getsign32(b)
-      a, b = (a + sa) ^ sa, (b + sb) ^ sb
-      sign = sa ^ sb
-    z = b.cast(dtypes.float32).reciprocal().replace(arg=RDNA3Ops.v_rcp_iflag_f32_e64)
-    z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
-    z += _umulh(z, _safeneg(b) * z)
-    q = _umulh(a, z)
-    r = a + _safeneg(q) * b
-    cond = r < b
-    q = cond.where(q, q + const(dtypes.uint32, 1))
-    r = cond.where(r, r + _safeneg(b))
-    q = (r < b).where(q, q + const(dtypes.uint32, 1))
-    return (q ^ sign) + _safeneg(sign) if is_signed else q
+  def _safeneg(u:UOp): return UOp(Ops.SUB, dtypes.uint32, src=(const(dtypes.uint32,0), u))
+  def _umulh(a:UOp, b:UOp): return _aluhint(a * b, RDNA3Ops.v_mul_hi_u32)
+  a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) 
+  is_signed = not dtypes.is_unsigned(x.dtype)
+  if is_signed:
+    def _getsign32(u:UOp): return _aluhint(u >> 31, RDNA3Ops.v_ashrrev_i32_e32)
+    sa, sb = _getsign32(a), _getsign32(b)
+    a, b = (a + sa) ^ sa, (b + sb) ^ sb
+    sign = sa ^ sb
+  z = _aluhint(b.cast(dtypes.float32).reciprocal(), RDNA3Ops.v_rcp_iflag_f32_e64)
+  z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
+  z += _umulh(z, _safeneg(b) * z)
+  q = _umulh(a, z)
+  r = a + _safeneg(q) * b
+  cond = r < b
+  q = cond.where(q, q + const(dtypes.uint32, 1))
+  r = cond.where(r, r + _safeneg(b))
+  q = (r < b).where(q, q + const(dtypes.uint32, 1))
+  return (q ^ sign) + _safeneg(sign) if is_signed else q
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -476,10 +475,9 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
-  # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
-  # (UPat(Ops.LOAD, dtypes.int8s, allow_any_len=True, name="x"), lambda x: x.bitcast(_smux(x.dtype, dtypes.int16, dtypes.uint16))),
-  # (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.int8s)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16))))),
+  # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
+  (UPat(GroupOp.All, name="x", src=(UPat(Ops.LOAD, dtypes.int8s, name="y"),), allow_any_len=True), lambda x,y: x.replace(dtype=_smux(y.dtype, dtypes.uint16, dtypes.int16))),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
@@ -606,7 +604,6 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-  print("encoding", opc, args, kw)
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
