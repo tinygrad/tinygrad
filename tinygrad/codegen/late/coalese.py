@@ -37,7 +37,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   idx = uop_given_valid(valid, start_idx)
-  return None if idx is start_idx else buf.index(idx.valid(valid), ptr=True)
+  return None if idx is start_idx or idx is start_idx.simplify() else buf.index(idx.valid(valid))
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
   if not isinstance(buf.dtype, ImageDType): return None
@@ -48,7 +48,7 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   idx_y, idx_x = idx.index(1), idx.index(0)
-  return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), ptr=True) if new_valid is not None else buf.index(idx_y, idx_x, ptr=True)
+  return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid)) if new_valid is not None else buf.index(idx_y, idx_x)
 
 indexing_simplify = PatternMatcher([
   # image load valid idx simplification

@@ -1,6 +1,6 @@
 import unittest, pickle
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, ImageDType, PtrDType, to_dtype, Invalid, InvalidType
+from tinygrad.dtype import dtypes, DType, ImageDType, to_dtype, Invalid, InvalidType
 
 class TestImageDType(unittest.TestCase):
   def test_image_scalar(self):
@@ -10,48 +10,6 @@ class TestImageDType(unittest.TestCase):
     assert dtypes.imagef((10,10)).base.vec(4) == dtypes.float32.vec(4)
     assert dtypes.imageh((10,10)).base.vec(4) == dtypes.float32.vec(4)
 
-class TestPtrDType(unittest.TestCase):
-  def test_vec_double(self):
-    dt1 = dtypes.float.vec(4).ptr().vec(4)
-    dt2 = dtypes.float.vec(4).ptr().vec(4)
-    self.assertEqual(dt1, dt2)
-    self.assertEqual(str(dt1), str(dt2))
-
-  def test_scalar(self):
-    dt = dtypes.float.vec(4).ptr().scalar()
-    self.assertEqual(dt.base, dtypes.float.vec(4))
-
-    dt = dtypes.float.vec(4).ptr().vec(4).scalar()
-    self.assertEqual(dt.base, dtypes.float.vec(4))
-
-    dt = dtypes.float.vec(4).scalar()
-    self.assertEqual(dt, dtypes.float)
-
-  def test_serialize(self):
-    dt = dtypes.float.vec(4).ptr().vec(4)
-    self.assertEqual(dt, eval(str(dt)))
-
-  def test_vec_ptr_sz(self):
-    dt = dtypes.float.ptr(1024).vec(4)
-    self.assertEqual(dt, eval(str(dt)))
-    self.assertEqual(str(dt), "dtypes.float.ptr(1024).vec(4)")
-
-  def test_vcount(self):
-    dt = dtypes.float.ptr().vec(4)
-    self.assertEqual(dt.vcount, 4)
-    self.assertEqual(dt.v, 4)
-    self.assertEqual(dt.count, 1)
-
-    dt = dtypes.float.vec(4).ptr()
-    self.assertEqual(dt.vcount, 1)
-    self.assertEqual(dt.v, 1)
-    self.assertEqual(dt.count, 4)
-
-    dt = dtypes.float.vec(4).ptr().vec(4)
-    self.assertEqual(dt.vcount, 4)
-    self.assertEqual(dt.v, 4)
-    self.assertEqual(dt.count, 4)
-
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
     if ImageDType is None: raise unittest.SkipTest("no ImageDType support")
@@ -60,17 +18,8 @@ class TestEqStrDType(unittest.TestCase):
     assert dtypes.imageh((1,2,4)) != dtypes.imageh((1,4,2)), "different shape doesn't match"
     assert dtypes.imageh((1,2,4)) == dtypes.imageh((1,2,4)), "same shape matches"
     assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
-  def test_ptr_eq(self):
-    assert dtypes.float32.ptr() == dtypes.float32.ptr()
-    assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
-  def test_ptr_nbytes(self):
-    assert dtypes.float16.ptr(32).nbytes() == 32 * dtypes.float16.itemsize
-  def test_ptr_nbytes_unlimited(self):
-    self.assertRaises(RuntimeError, lambda: dtypes.float32.ptr().nbytes())
   def test_strs(self):
-    if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(dtypes.float32.ptr(16)), "dtypes.float.ptr(16)")
 
 class TestToDtype(unittest.TestCase):
   def test_dtype_to_dtype(self):
