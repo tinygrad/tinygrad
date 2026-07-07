@@ -2,7 +2,7 @@ import math
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
-from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
+from tinygrad.dtype import DType, ImageDType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same
 
 # ***** uop helpers *****
@@ -26,7 +26,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # VECTORIZE can't be properly modeled in z3 since it doesn't support vectors
   # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
   for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
-    if x.op in {Ops.BITCAST, Ops.STACK} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.STACK}: return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3

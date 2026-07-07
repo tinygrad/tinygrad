@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, DTypeLike, to_dtype, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, DTypeLike, to_dtype, truncate, least_upper_dtype, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
@@ -215,11 +215,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
-  @property
-  def ptrdtype(self) -> PtrDType:
-    if not isinstance(self.dtype, PtrDType): raise RuntimeError(f"ptrdtype called on UOp with type {self.dtype}")
-    return self.dtype
-
   # *** uop shape stuff ***
 
   @recursive_property
@@ -256,11 +251,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       case Ops.STACK:
         if len(self.src) == 0: return ()
-        if isinstance(self.dtype, PtrDType):
-          # TODO: this is broken
-          return self.src[0].shape
-        else:
-          return (len(self.src),) + self.src[0].shape
+        return (len(self.src),) + self.src[0].shape
       case Ops.CONST:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
@@ -270,7 +261,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
         if len(self.src): return self.src[0].as_shape
-        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
         return (self.dtype.count,) if self.dtype.count > 1 else ()
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
@@ -286,7 +276,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
-        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
         return self.src[0].as_shape if len(self.src) >= 1 else None
 
       # wmma output shape = accumulator shape (src[2])
@@ -975,7 +964,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
-    if self.op is Ops.INDEX and not isinstance(self.src[0].dtype, PtrDType): return self.src[0]._min_max
+    if self.op is Ops.INDEX: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
     if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
       return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
@@ -1038,7 +1027,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
-    addrspace = self.addrspace if isinstance(self.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL
+    addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
       return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].expr, addrspace)
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
