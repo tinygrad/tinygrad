@@ -375,7 +375,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = (ld<1).cast(dtypes.bool)
-    out = d0.index(idx, ptr=True).store(alu)
+    out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
@@ -385,7 +385,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = ld.cast(dtypes.float).cast(dtypes.float)
-    out = d0.index(idx, ptr=True).store(alu)
+    out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
 
@@ -421,7 +421,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = (ridx0<50).where(ld, 5)
     out = UOp.param(1, dtypes.long, (100,))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg==5
@@ -443,7 +443,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(gate_idx).cast(dtypes.float)
     w = (ridx0<50).where(ld, 5.0)
     out = UOp.param(1, dtypes.float, (100,))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
@@ -454,7 +454,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
     out = UOp.param(1, dtypes.half, (100,))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
@@ -464,14 +464,14 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
     out = UOp.param(1, dtypes.half, (100,))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.long, (100,))
-    idx = d0.index(ridx0, ptr=True)
+    idx = d0.index(ridx0)
     ld = idx.load()
     val = (ridx0<50).where(5, ld)
     st = idx.store(val).end(ridx0)
@@ -525,7 +525,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld0 = glbl1.index(UOp.invalid())
     ld1 = glbl2.index(idx.valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([glbl0.index(idx, ptr=True).store(ld1+ld0)])
+    uops = to_uops_list([glbl0.index(idx).store(ld1+ld0)])
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
 
@@ -533,11 +533,11 @@ class TestUOpGraph(unittest.TestCase):
     glbl0 = UOp.param(0, dtypes.int, (16,))
     smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0", dtypes.int)
-    st = smem.index(lidx, ptr=True).store(glbl0.index(lidx, ptr=True).load())
+    st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
     ld0 = smem.after(barrier).index(UOp.invalid())
     ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([glbl0.index(lidx, ptr=True).store(ld1+ld0)])
+    uops = to_uops_list([glbl0.index(lidx).store(ld1+ld0)])
 
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 2)
@@ -546,8 +546,8 @@ class TestUOpGraph(unittest.TestCase):
     glbl = UOp.param(0, dtypes.int, (1,))
     idx0 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = glbl.index(UOp.invalid(), ptr=True).store(val)
-    st1 = glbl.index(idx0.valid(UOp.const(dtypes.bool, True)), ptr=True).store(val)
+    st0 = glbl.index(UOp.invalid()).store(val)
+    st1 = glbl.index(idx0.valid(UOp.const(dtypes.bool, True))).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len([u for u in uops if u.op is Ops.STORE]), 1)

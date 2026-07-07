@@ -30,7 +30,7 @@ def vision_conv_143():
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (128,))
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
-  c67 = c0.index((c2*128+c5+c8*4096), ptr=True).store(c65).end(c8, c2, c5)
+  c67 = c0.index((c2*128+c5+c8*4096)).store(c65).end(c8, c2, c5)
 
   opts = None
   # JITBEAM=2
@@ -56,7 +56,7 @@ def vision_conv_153():
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (256,))
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
-  c67 = c0.index((c2*256+c5+c8*4096), ptr=True).store(c65).end(c8, c2, c5)
+  c67 = c0.index((c2*256+c5+c8*4096)).store(c65).end(c8, c2, c5)
 
   opts = None
   # JITBEAM=2
@@ -77,7 +77,7 @@ def dm_conv_172():
   c39 = c35.reduce(c7, c10, arg=Ops.ADD)+c37.index(c2)
   c50 = (1.0+((c39+0.044708251953125*(c39*(c39*c39)))*-2.3021129851685216).exp2()).reciprocal()*c39
   c53 = c50.reduce(c18, c13, arg=Ops.ADD)*0.010416666666666666
-  c55 = c0.index(c2, ptr=True).store(c53).end(c2)
+  c55 = c0.index(c2).store(c53).end(c2)
 
   opts = None
   # JITBEAM=2
