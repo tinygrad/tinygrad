@@ -239,7 +239,7 @@ def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
   if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
     targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
     lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(y, const(targ, 0))))
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(lo, const(targ, 0))))
   elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
     src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
     if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
@@ -252,7 +252,10 @@ def cmp(ctx, x:UOp):
   if scmp:
     ins = _mask_cmp[x.op]
     if x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
-  else: ins = OP_INS[x.op][64][x.src[0].dtype.scalar()]
+  else:
+    dt = x.src[0].dtype
+    if dt in dtypes.int8s: dt = dtypes.uint16 if dtypes.is_unsigned(x.dtype) else dtypes.int16
+    ins = OP_INS[x.op][64][dt]
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(ctx, x)
 
@@ -324,20 +327,26 @@ def alu(ctx, x:UOp):
   if dpreciz and x.op is Ops.ADD: return add64(ctx, x)
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
-  def _bitwise(sins, hins):
+  # NOTE: ignore b16 instructions for now
+  def _bitwise(sins:InsOp, hins:InsOp):
     if dpreciz: return bitwise64(ctx, x, sins)
-    if x.dtype.itemsize == 4: return _vop2(ctx, x.ins(sins))
-    return _vop3(ctx, x.ins(hins))
+    return _vop2(ctx, x.ins(sins))
+    # if x.dtype.itemsize == 4: return _vop2(ctx, x.ins(sins))
+    # return _vop3(ctx, x.ins(hins))
   if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32, RDNA3Ops.v_and_b16)
   elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32, RDNA3Ops.v_or_b16)
   elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32, RDNA3Ops.v_xor_b16)
 
-  def _bmux(sins, dins): return dins if dpreciz else sins
-  if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b64) if x.arg is None else x.arg))
-  elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b64) if x.arg is None else x.arg))
+  _lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
+  _lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
+  if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_lshl[max(2,x.dtype.itemsize)] if x.arg is None else x.arg))
+  elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_lshr[max(2,x.dtype.itemsize)] if x.arg is None else x.arg))
 
+  dt = x.dtype
+  if dt in dtypes.int8s: dt = dtypes.uint16 if dtypes.is_unsigned(x.dtype) else dtypes.int16
   if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
-  elif x.op in OP_INS and x.dtype in OP_INS[x.op]: ins = OP_INS[x.op][x.dtype]
+  elif x.op in OP_INS and dt in OP_INS[x.op]:
+    ins = OP_INS[x.op][dt]
   else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
@@ -354,10 +363,10 @@ def widenshort(y:UOp, x:UOp):
 def intcast(y:UOp, x:UOp):
   if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
   if x.dtype.itemsize > y.dtype.itemsize:
-    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFFFFFFFF)).bitcast(x.dtype)
   if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
-    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
 
 # TODO: move this into pattern matcher
@@ -442,12 +451,11 @@ def lower_end(ctx, x:UOp):
   return inc, [inc, gate, loop, restoreexec(x.src[-1])]
 
 # --- other stuff ---
-# TODO: get rid of these hacky dtype replaces, just done to avoid triggering recursive rewrite
 # NOTE: this should just be triggered in to_vgpr????
 def gethalf(x:UOp, buf:UOp, idx:UOp):
   i = idx.arg
   b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: return (b32 >> 16).replace(dtype=x.dtype)
+  if i % 2 != 0: return (b32 >> const(dtypes.uint32,16)).bitcast(x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
@@ -477,7 +485,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
-  (UPat(GroupOp.All, name="x", src=(UPat(Ops.LOAD, dtypes.int8s, name="y"),), allow_any_len=True), lambda x,y: x.replace(dtype=_smux(y.dtype, dtypes.uint16, dtypes.int16))),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
@@ -509,6 +516,8 @@ pre_isel_matcher = PatternMatcher([
   # expand 64 bit where, 2 cndmasks
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
     multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
+  # --- perf/folding ---
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("y"),UPat.cvar("x"))), lambda x,y: y if x.arg == 0 else None),
 ])
 
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
@@ -595,8 +604,7 @@ def encode(ctx, x:UOp):
     oprs = oprs[:3]
     kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)))
     for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
-  elif group is RDNA3Ops.VOPC:
-    args = [_immorreg(u) for u in oprs]
+  elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group is RDNA3Ops.VOP2: oprs = oprs[:2]
     if group is RDNA3Ops.VOP3: oprs = oprs[:3]

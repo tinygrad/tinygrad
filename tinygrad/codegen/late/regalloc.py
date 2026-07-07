@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, VSubRegister, rdefs
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK, Ops.INDEX}
 
