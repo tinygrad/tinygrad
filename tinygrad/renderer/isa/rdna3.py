@@ -1,4 +1,4 @@
-from tinygrad.dtype import PtrDType, dtypes, AddrSpace, truncate, DType
+from tinygrad.dtype import dtypes, AddrSpace, truncate, DType
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
