@@ -377,35 +377,28 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbu
 
 # *****************
 
-def unwrap_mstack(u):
-  if u.op is Ops.MSTACK:
-    for x in u.src: yield x
-  yield u
+def unwrap_mstack(u): return u.src if u.op is Ops.MSTACK else (u,)
 
 def _is_link_patch(p:UOp, buf:UOp, jit=False) -> bool:
   if p.op is not Ops.STORE or p.buf_uop is not buf: return False # this is not a patch :(
 
   assert all(x.op is Ops.PARAM for x in unwrap_mstack(p.buf_uop))
+  has_loads = any(u.op in (Ops.LOAD, Ops.INDEX) for u in p.src[1].backward_slice)
+  param_is_input = all(x.tag is None and x.op is Ops.PARAM for x in unwrap_mstack(p.src[1].buf_uop))
 
-  # TODO: for jit every goes to link time for speed
-  if False: return (p.buf_uop.tag in {"program"})
-  else:
-    has_loads = any(u.op in (Ops.LOAD, Ops.INDEX) for u in p.src[1].backward_slice)
-    param_is_input = all(x.tag is None and x.op is Ops.PARAM for x in unwrap_mstack(p.src[1].buf_uop))
-    return not has_loads and not param_is_input
+  return not has_loads and not param_is_input if True else (p.buf_uop.tag in {"program"})
 
-def trim_link_patches(ctx:list[bool, list[UOp]], a:UOp) -> UOp|None:
+def trim_link_patches(ctx:tuple[bool, list[UOp]], a:UOp) -> UOp|None:
   links, kept = partition(a.src[1:], _is_link_patch, buf=a.src[0], jit=ctx[0])
 
-  # links pacthes might have some
-  afters = dedup(u for s in links for u in s.toposort() if u.op is Ops.AFTER)
-  ctx[1] += UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src
-  return a.src[0].after(*kept, *tuple(d for p in afters for d in p.src[1:])) if links else None
+  # keep all patches from the link-time patches' subtrees in the C code
+  afters = [u for u in UOp.sink(*links).toposort() if u.op is Ops.AFTER]
+  ctx[1].extend(UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src)
+  return a.src[0].after(*kept, *[d for p in afters for d in p.src[1:]]) if links else None
 pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat((Ops.PARAM, Ops.MSTACK)),), allow_any_len=True, name="a"), trim_link_patches)])
 
 def split_patches(ctx:bool, call:UOp) -> UOp|None:
-  # trim link-time patches
-  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=[ctx, lt_patches:=[]], bottom_up=False, name=f"trim link-time patches ({call.arg.aux.name})")
+  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(ctx, lt_patches:=[]), name=f"trim link-time patches ({call.arg.aux.name})")
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
@@ -415,42 +408,37 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 # *****************
 
 def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
-  def _getaddr_key(g:UOp): return (g.buf_uop.arg.slot, to_tuple(g.buf_uop.tag))
+  bare = {g: g.replace(src=(unwrap_after(g.src[0]),)) for g in gaddrs}
 
-  gs = [(g, g.replace(src=(g.src[0].src[0],)), g.src[0].src[1:]) if g.src[0].op is Ops.AFTER else (g, g, []) for g in gaddrs]
-
-  order = sorted(dedup([_getaddr_key(gr) for _,gr,_ in gs]))
+  order = sorted(dedup(bare.values()), key=lambda g: (g.buf_uop.arg.slot, to_tuple(g.buf_uop.tag)))
   b = make_placeholder(call.arg.aux.device, len(order), dtypes.uint64, name)
-  new_arg = b.after(*[make_patch(b, order.index(_getaddr_key(gr)) * b.dtype.base.itemsize, gr) for _,gr,_ in gs])
-  return ({g: b.after(*p).index(UOp.const(dtypes.int, order.index(_getaddr_key(gr)))).load() for g,gr,p in gs}, new_arg) if gs else ({}, None)
+
+  sub = {g: b.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(dtypes.int, order.index(gr))).load() for g,gr in bare.items()}
+  return sub, (b.after(*[make_patch(b, i * b.dtype.base.itemsize, gr) for i,gr in enumerate(order)]),) if order else ()
 
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
   inputs, systems = partition(gaddrs, lambda g: all(x.tag is None for x in unwrap_mstack(g.buf_uop)))
 
   (inpsub, _), (syssub, sysarg) = _make_getaddrs_sub(call, inputs, "inputs"), _make_getaddrs_sub(call, systems, "systems")
-  return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:])+((sysarg,) if sysarg is not None else tuple()),
+  return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:], *sysarg),
                       arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
 pm_rm_rt_getaddrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_getaddrs)])
 
 # *****************
 
 def replace_params(call:UOp) -> UOp|None:
-  args:list[UOp] = []
-  def gate_params(u:UOp) -> bool:
-    if (is_param:=u.op in {Ops.PARAM, Ops.MSTACK}) and u not in args and u not in call.src[0].variables(): args.append(u)
-    return not is_param
-  call.src[0].toposort(gate=gate_params)
+  body, variables, param_ops = call.src[0], call.src[0].variables(), {Ops.PARAM, Ops.MSTACK}
+  args = dedup([s for u in body.toposort(gate=lambda u: u.op not in param_ops) for s in u.src if s.op in param_ops and s not in variables])
 
-  pathces, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
-  patch_roots = {p.src[0] for p in pathces}
-  c_args = pathces + [x for x in args if x not in patch_roots]
+  patched, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
+  by_root = {p.src[0]: p for p in patched}
+  c_args = [by_root.get(a, a) for a in args]
 
-  varsub = {v: v.replace(arg=replace(v.arg, slot=-1)) for v in call.src[0].variables() if v.op is Ops.PARAM}
-  body = call.src[0].substitute({unwrap_after(u): UOp.param(i, u.dtype, device=u.device) for i,u in enumerate(c_args)} | varsub)
-
+  sub = {unwrap_after(u): UOp.param(i, u.dtype, device=u.device) for i,u in enumerate(c_args)} | \
+        {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
-  return call.replace(src=(body, *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
+  return call.replace(src=(body.substitute(sub), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
 pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
 # *****************
