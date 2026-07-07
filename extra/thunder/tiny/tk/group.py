@@ -2,7 +2,7 @@ import math
 from typing import cast, Callable
 from tinygrad import dtypes
 from tinygrad.uop.ops import AxisType, UOp, Ops
-from tinygrad.dtype import AddrSpace, PtrDType
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -277,9 +277,7 @@ class Group:
 
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
     dst, src = cast(UOp, dst), cast(UOp, src)
-    assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
-    dst_dtype, src_dtype = dst.dtype, src.dtype
-    if dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.LOCAL:
+    if dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.LOCAL:
       laneid = self.ker.laneid
       rt, st = cast(RT, dst), cast(ST, src)
       elements_per_thread = rt.base_shape.elements_per_thread
@@ -312,7 +310,7 @@ class Group:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load)
             dst_store = dst_store.end(height, width, inner)
-    elif dst_dtype.addrspace == AddrSpace.LOCAL and src_dtype.addrspace == AddrSpace.GLOBAL:
+    elif dst.addrspace == AddrSpace.LOCAL and src.addrspace == AddrSpace.GLOBAL:
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])
 
@@ -346,7 +344,7 @@ class Group:
             src_load = src_load.cast(dst.dtype.base)
           dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
           dst_store = dst_store.end(height, width, outer, inner).barrier()
-    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
+    elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])
 
@@ -379,7 +377,7 @@ class Group:
             if src.dtype.base != dst.dtype.base:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load).end(height, width, inner)
-    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.GLOBAL and isinstance(dst, RV):
+    elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RV):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])
 
@@ -400,16 +398,14 @@ class Group:
           src_load = src_load.cast(dst.dtype.base)
         dst_store = dst[outer, 0].store(src_load).end(outer)
     else:
-      raise NotImplementedError(f"load from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented for {type(dst)=}")
+      raise NotImplementedError(f"load from {src.addrspace} to {dst.addrspace} not implemented for {type(dst)=}")
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
 
   def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0):
     dst, src = cast(UOp, dst), cast(UOp, src)
-    assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
-    dst_dtype, src_dtype = dst.dtype, src.dtype
-    if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.LOCAL:
+    if src.addrspace == AddrSpace.REG and dst.addrspace == AddrSpace.LOCAL:
       laneid = self.ker.laneid
       st, rt = cast(ST, dst), cast(RT, src)
       elements_per_thread = rt.base_shape.elements_per_thread
@@ -431,7 +427,7 @@ class Group:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dst[*idxs[:-2], height, width, srow, scol].store(src_load)
             dst_store = dst_store.end(height, width, inner)
-    elif src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL and isinstance(src, RT):
+    elif src.addrspace == AddrSpace.REG and dst.addrspace == AddrSpace.GLOBAL and isinstance(src, RT):
       dstf = dst.flatten()
       row_stride = prod(dst.shape[axis+1:])
 
@@ -464,7 +460,7 @@ class Group:
             if src.dtype.base != dst.dtype.base:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dstf[dst_i].store(src_load).end(height, width, inner)
-    elif src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL and isinstance(src, RV):
+    elif src.addrspace == AddrSpace.REG and dst.addrspace == AddrSpace.GLOBAL and isinstance(src, RV):
       dstf = dst.flatten()
       row_stride = prod(dst.shape[axis+1:])
 
@@ -485,7 +481,7 @@ class Group:
           src_load = src_load.cast(dst.dtype.base)
         dst_store = dstf[dst_i].store(src_load).end(outer)
     else:
-      raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented for {type(src)=}")
+      raise NotImplementedError(f"store from {src.addrspace} to {dst.addrspace} not implemented for {type(src)=}")
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)

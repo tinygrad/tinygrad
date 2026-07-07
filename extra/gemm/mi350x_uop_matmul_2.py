@@ -72,7 +72,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
 
   # split out the globals into blocks
-  C = C.src[0].cast(dtypes.float.vec(4).ptr(C.ptrdtype.size)).reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
+  C = C.src[0].cast(dtypes.float.vec(4)).reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
   A = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K))[gx, :, K_outer_loop, :]
   B = B.reshape((K//BLOCK_K, BLOCK_K, N//BLOCK_N, BLOCK_N))[K_outer_loop, :, gy, :]
 

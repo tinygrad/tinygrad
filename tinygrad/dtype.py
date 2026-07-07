@@ -78,10 +78,7 @@ class DType(metaclass=DTypeMetaClass):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.bitsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
-    return PtrDType(self.priority, self.bitsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
-  def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
   @functools.cached_property
   def min(self):
     if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.scalar().bitsize-1)
@@ -101,36 +98,24 @@ class DType(metaclass=DTypeMetaClass):
     return ConstFloat(float(val)) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
 
 @dataclass(frozen=True, eq=False)
-class PtrDType(DType):
+class ImageDType(DType):
   _base: DType
   addrspace: AddrSpace
   v: int
   size: int = -1  # -1 is unlimited size
+  shape: tuple[int, ...] = ()   # shape of the Image
   @property
   def base(self): return self._base
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def vec(self, sz:int) -> DType:
-    assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
+    assert self.v == 1, f"can't vectorize image {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
-    if isinstance(self, ImageDType):
-      return ImageDType(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
-    return type(self)(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType: raise RuntimeError("can't make a pointer from a pointer")
+    return ImageDType(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
     return self.size*self.itemsize
   @property
   def vcount(self): return self.v
-  def __repr__(self):
-    return f"{self.base.__repr__()}.ptr({self.size}{', '+str(self.addrspace) if self.addrspace != AddrSpace.GLOBAL else ''})" + \
-      (f'.vec({self.v})' if self.v != 1 else '')
-
-@dataclass(frozen=True, eq=False)
-class ImageDType(PtrDType):
-  shape: tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
-    assert addrspace == AddrSpace.GLOBAL, "images can't be local"
-    return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
   # for 1d images on macos, we need to round pitch up to 256 pixels to make CL happy
