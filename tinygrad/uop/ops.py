@@ -226,7 +226,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
+      case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -276,6 +276,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
         return (self.arg,)
+      case Ops.CUSTOM | Ops.CUSTOMI:
+        if self.dtype is dtypes.void: return None
+        input_shapes = [x._shape for x in self.src if x._shape is not None]
+        return _broadcast_shape(*input_shapes) if input_shapes else None
       case Ops.CUSTOM_FUNCTION: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -520,9 +524,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   @staticmethod
-  def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int], dtype:DType|None=None):
+  def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
     dims, device, threads = arg
-    dtype_in, dtype_out = a.dtype.base, dtype or acc.dtype.base
+    dtype_in, dtype_out = a.dtype.base, acc.dtype.base
     tc_upcast_axes = tuple(((i, s.shape[-1]),) for i,s in enumerate((a, b, acc)))
     name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
     return UOp(Ops.WMMA, dtype_out, (a, b, acc), arg=(name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ()))
