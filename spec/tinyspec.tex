@@ -89,7 +89,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, $n$ & Reduce the first $n$ axes of $T$. A \op{Permute} is inserted before creation to move the reduced axes to the front. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
+\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, $n$ & Reduce the first $n$ axes of $T$. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
 \bottomrule
 \end{tabular}
 
