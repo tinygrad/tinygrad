@@ -1937,29 +1937,31 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
     result = self
     offset = 1
+    # Hillis-Steele: each step doubles the stride, halving the number of
+    # elements left to process.  After log2(n) iterations every slot has
+    # seen all its predecessors.
     while offset < n:
-      left_slice = tuple(
+      # left  = [0, n-offset)  — the elements that have something to combine
+      # right = [offset, n)    — the elements being updated this round
+      left = result.shrink(tuple(
         (0, s if d != axis else n - offset)
         for d, s in enumerate(result.shape)
-      )
-      right_slice = tuple(
+      ))
+      right = result.shrink(tuple(
         (0 if d != axis else offset, s if d != axis else n)
         for d, s in enumerate(result.shape)
-      )
-      left = result.shrink(left_slice)
-      right = result.shrink(right_slice)
+      ))
       combined = fn(left, right)
 
-      head_slice = tuple(
+      # Keep the first `offset` entries unchanged, replace the rest
+      head = result.shrink(tuple(
         (0, s if d != axis else offset)
         for d, s in enumerate(result.shape)
-      )
-      tail_slice = tuple(
+      ))
+      tail = combined.shrink(tuple(
         (0, s if d != axis else n - offset)
         for d, s in enumerate(combined.shape)
-      )
-      head = result.shrink(head_slice)
-      tail = combined.shrink(tail_slice) if offset < n // 2 else combined
+      )) if offset < n // 2 else combined
       result = head.cat(tail, dim=axis)
       offset *= 2
 

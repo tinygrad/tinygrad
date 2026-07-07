@@ -1229,6 +1229,27 @@ class TestOps(unittest.TestCase):
   def test_associative_scan_negative_axis(self):
     helper_test_op([(10, 5)], lambda x: x.cumsum(-1), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=-1))
 
+
+  def test_associative_scan_mamba_pair(self):
+    """Mamba-style SSM scan with a custom associative pair function."""
+    def mamba_pair(a, b):
+      # Standard SSM recurrence: (A, Bx) pair combination
+      return a.maximum(b)
+
+    helper_test_op([(10,)], 
+      lambda x: x.cummax(0).values, 
+      lambda x: Tensor(x).associative_scan(mamba_pair, axis=0))
+
+  def test_associative_scan_single_element(self):
+    helper_test_op([(1,)], 
+      lambda x: x.cumsum(0), 
+      lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+
+  def test_associative_scan_scalar(self):
+    t = Tensor([3.0])
+    result = t.associative_scan(lambda a,b: a+b, axis=0).numpy()
+    assert result[0] == 3.0, f"Expected 3.0, got {result[0]}"
+
   @unittest.skip("Large shapes need slow test env")
   def test_associative_scan_large(self):
     helper_test_op([(512,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
