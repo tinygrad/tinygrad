@@ -82,7 +82,7 @@ class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_multiplication_0_inf(self):
     # vmin and vmax for multiplication with a variable
     x = UOp.const(dtypes.float, 0.0)
-    y = UOp.load(UOp.param(0, dtypes.float.ptr(1)), UOp.const(dtypes.int, 0), dtype=dtypes.float)
+    y = UOp.load(UOp.param(0, dtypes.float, (1,)), UOp.const(dtypes.int, 0), dtype=dtypes.float)
     uop = x * y
     # TODO: these should be 0, but definitely should not be nan
     self.assertEqual(uop.vmin, -math.inf)
@@ -316,9 +316,9 @@ class TestVminVmaxVConst(unittest.TestCase):
 
   def test_vmin_vmax_vector_with_gep(self):
     # vmin and vmax for a vector constant of bool values
-    d1 = UOp.param(1, dtypes.int.ptr())
+    d1 = UOp.param(1, dtypes.int, (-1,))
     idx = UOp.const(dtypes.int, 0)
-    val = UOp(Ops.LOAD, dtypes.int, (d1.index(idx).cast(dtypes.int.ptr()),))
+    val = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
     uop = (val // 32)
     self.assertEqual(uop.vmin, -67108864)
     self.assertEqual(uop.vmax, 67108863)
