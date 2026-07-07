@@ -115,8 +115,9 @@ mop_cleanup = PatternMatcher([
   # STACK on INDEX CONST
   (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].arg for x in stk.src] else None),
-  # INDEX on STACK
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="stk"), UPat(Ops.CONST, name="c"))), lambda stk,c: stk.src[c.arg]),
+  # const INDEX into STACK is src (this is symbolic)
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
+   lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([

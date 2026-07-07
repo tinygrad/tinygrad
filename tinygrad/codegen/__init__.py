@@ -155,10 +155,7 @@ ew_devectorizer = PatternMatcher([
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
-  # const INDEX into STACK is src (this is symbolic)
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
-   lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
-  # INDEX without src is nothing
+  # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
@@ -249,7 +246,7 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
-pm_move_regs = PatternMatcher([
+pm_add_loads = PatternMatcher([
   # BITCAST?
   (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
@@ -310,7 +307,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+unbroadcast, name="*** unbroadcast")
 
   # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
+  sink = graph_rewrite(sink, pm_add_loads, name="** add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
