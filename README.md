@@ -164,9 +164,9 @@ print(y.grad.tolist())  # dz/dy
 
 ## Contributing
 
-There has been a lot of interest in tinygrad lately. Following these guidelines will help your PR get accepted. If you do submit a PR, please include a sentence or two about why you want this merged and why you think it will improve the project. If you used AI, disclose what you used it for.
+There has been a lot of interest in tinygrad lately. Following these guidelines will help your PR get accepted. If you do submit a PR, please include a sentence or two about why you want this merged and why you think it will improve the project.
 
-If you are a new contributor with something that looks at all AI written, it will be closed without feedback and you may be banned from our GitHub.
+If you are a new contributor with something that looks even close to AI written, it will be closed without feedback and you may be banned from our GitHub. No human should waste time reading AI slop. And for everyone, if you used AI, disclose what you used it for.
 
 We'll start with what will get your PR closed with a pointer to this section:
 
@@ -195,8 +195,10 @@ Some examples of running tests locally:
 ```sh
 python3 -m pip install -e '.[testing]'  # install extra deps for testing
 python3 test/backend/test_ops.py        # just the ops tests
-python3 -m pytest test/                 # whole test suite (for agents, always add -n12 for speed)
+python3 -m pytest test/                 # whole test suite
 ```
+
+For agents, always run tests with `-n12` for speed.
 
 #### Process replay tests
 
