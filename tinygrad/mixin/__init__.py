@@ -1908,3 +1908,59 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return int(self.numel()) * self.element_size()
+
+  def associative_scan(self, fn, axis=0):
+    """
+    Compute an inclusive prefix scan using an associative binary function.
+
+    Implements a parallel prefix scan (Hillis-Steele tree reduction) that applies
+    an associative function ``fn`` along the given axis.  The function must satisfy
+    ``fn(fn(a, b), c) == fn(a, fn(b, c))``.
+
+    Compared to the fixed-operator scans (``cumsum``, ``cumprod``, etc.) this
+    method accepts an arbitrary callable, which makes it useful for state-space
+    model implementations (Mamba, S4) and custom recurrence patterns.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a * b).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    n = self.shape[axis]
+    if self.ndim == 0 or n <= 1:
+      return self
+
+    result = self
+    offset = 1
+    while offset < n:
+      left_slice = tuple(
+        (0, s if d != axis else n - offset)
+        for d, s in enumerate(result.shape)
+      )
+      right_slice = tuple(
+        (0 if d != axis else offset, s if d != axis else n)
+        for d, s in enumerate(result.shape)
+      )
+      left = result.shrink(left_slice)
+      right = result.shrink(right_slice)
+      combined = fn(left, right)
+
+      head_slice = tuple(
+        (0, s if d != axis else offset)
+        for d, s in enumerate(result.shape)
+      )
+      tail_slice = tuple(
+        (0, s if d != axis else n - offset)
+        for d, s in enumerate(combined.shape)
+      )
+      head = result.shrink(head_slice)
+      tail = combined.shrink(tail_slice) if offset < n // 2 else combined
+      result = head.cat(tail, dim=axis)
+      offset *= 2
+
+    return result

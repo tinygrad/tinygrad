@@ -1203,6 +1203,36 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
     helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
 
+
+  def test_associative_scan_cumsum_1d(self):
+    helper_test_op([(10,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+
+  def test_associative_scan_cumsum_2d(self):
+    helper_test_op([(10, 5)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(10, 5)], lambda x: x.cumsum(1), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=1))
+
+  def test_associative_scan_cumprod(self):
+    helper_test_op([(7,)], lambda x: x.cumprod(0), lambda x: Tensor(x).associative_scan(lambda a,b: a*b, axis=0))
+
+  def test_associative_scan_cummax(self):
+    def torch_cummax(x):
+      return [torch.cummax(x, dim=0).values]
+    def tiny_cummax(x):
+      return [Tensor(x).associative_scan(lambda a,b: a.maximum(b), axis=0)]
+    helper_test_op([(10,)], torch_cummax, tiny_cummax)
+
+  def test_associative_scan_non_power_of_two(self):
+    helper_test_op([(9,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(17,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(33,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+
+  def test_associative_scan_negative_axis(self):
+    helper_test_op([(10, 5)], lambda x: x.cumsum(-1), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=-1))
+
+  @unittest.skip("Large shapes need slow test env")
+  def test_associative_scan_large(self):
+    helper_test_op([(512,)], lambda x: x.cumsum(0), lambda x: Tensor(x).associative_scan(lambda a,b: a+b, axis=0))
+
   def test_argmax(self):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
