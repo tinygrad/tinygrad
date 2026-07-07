@@ -536,12 +536,18 @@ jobs:
       matrix:
         backend: [amd, amdllvm]
         arch: [gfx1100, gfx1201, gfx950]
+        include:
+          - backend: amdllvm
+            renderer: LLVM
+          - backend: rdna3
+            arch: gfx1100
+            renderer: RDNA3
 
-    name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
+    name: Linux (${{ matrix.renderer }} ${{ matrix.arch }})
     runs-on: *linux
     timeout-minutes: 15
     env:
-      DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
+      DEV: MOCKKFD+AMD:${{ matrix.renderer }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
     steps:
       - name: Checkout Code
