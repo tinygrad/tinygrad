@@ -17,27 +17,6 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 import sys
 sys.setrecursionlimit(10000)
 
-def add_ranges_to_store(ctx, x):
-  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == () or x.src[0].max_numel() == x.src[1].max_numel() == 1: return None
-  assert x.src[0].shape == x.src[1].shape, "bad store shape"
-  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
-  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
-
-def lower_shaped_wmma(ctx, x):
-  dims, device, threads = x.arg
-  dtype_in, dtype_out = x.src[0].dtype.base, x.dtype
-  upcasts = [(s, UOp.range(s.shape[-1], next(ctx), axis_type=AxisType.UPCAST)) for s in x.src]
-  tc_upcast_axes = tuple(((u.arg[0], s.shape[-1]),) for s, u in upcasts)
-  name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
-  wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
-  wmma = UOp(Ops.WMMA, dtype_out, tuple(s[u].contract(u) for s, u in upcasts), arg=wmma_arg)
-  tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG, is_ptr=False)
-  return tmp.after(UOp.group(*[tmp[e].store(wmma.index(e)) for e in range(x.src[2].shape[-1])]))
-
-pm_store_ranges = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
-])
-
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
@@ -83,8 +62,6 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
-  # lower SHAPED_WMMA to WMMA
-  (UPat(Ops.SHAPED_WMMA, name="x"), lower_shaped_wmma),
 ])
 
 # *****************
@@ -444,7 +421,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   if allow_locals:
     # handle locals
-    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL, is_ptr=False)
+    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
     do_store = buf.broadcast(x.src[1].dtype.count).index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 

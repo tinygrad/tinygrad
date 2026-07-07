@@ -158,13 +158,13 @@ def pm4_submit(cmdbuf, devs):
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, ptr=True).store(cmdbuf.index(i, ptr=True).load()).end(i)
-  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put)
-  bump_wptr = wptr.index(zero, ptr=True).store(next_put)
+  copy_to_ring = ring.index(ring_idx).store(cmdbuf.index(i).load()).end(i)
+  bump_put_ptr = put_ptr.index(zero).store(next_put)
+  bump_wptr = wptr.index(zero).store(next_put)
 
   # ring the doorbell once the copy and pointer bumps have landed
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, ptr=True).store(next_put)
+  return doorbell.after(flush).index(zero).store(next_put)
 
 pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
   lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
@@ -225,18 +225,18 @@ def sdma_submit(cmdbuf, devs):
 
   # zero the wrapped tail, then copy the cmdbuf into the ring
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
-  zero_tail = ring.index(tail_off_dw + zi, ptr=True).store(UOp.const(dtypes.uint32, 0)).end(zi)
+  zero_tail = ring.index(tail_off_dw + zi).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
-  copy_to_ring = ring.index(start_dw + i, ptr=True).store(cmdbuf.index(i, ptr=True).load()).end(i)
+  copy_to_ring = ring.index(start_dw + i).store(cmdbuf.index(i).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
-  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put_b)
-  bump_wptr = wptr.index(zero, ptr=True).store(next_put_b)
+  bump_put_ptr = put_ptr.index(zero).store(next_put_b)
+  bump_wptr = wptr.index(zero).store(next_put_b)
 
   # ring the doorbell once the writes have landed
   flush = UOp.barrier(zero_tail, copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, ptr=True).store(next_put_b)
+  return doorbell.after(flush).index(zero).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
   lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
