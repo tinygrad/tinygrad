@@ -667,6 +667,7 @@ class RDNA3Renderer(ISARenderer):
     super().__init__(target)
 
   def is_two_address(self, x:UOp) -> bool: return False
+  def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     nuops = lin.src
