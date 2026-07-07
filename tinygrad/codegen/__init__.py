@@ -294,7 +294,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
 
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
@@ -304,10 +304,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast, name="*** unbroadcast")
-
-  # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_add_loads, name="** add loads")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
