@@ -134,11 +134,10 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple):
     cons, width = x.tag, 1
-    if isinstance(x.tag[0], tuple):
-      cons, width = x.tag
+    if isinstance(x.tag[0], tuple): cons, width = x.tag
     defs = [ctx.vreg(x.tag, width=width)]
   else:
-    if x.op is Ops.BUFFER: n = (x.dtype.itemsize // 4) * x.src[0].arg
+    if x.op is Ops.BUFFER: n = max((x.dtype.itemsize // 4) * x.src[0].arg, 1)
     else: n = max(x.dtype.itemsize // 4, 1)
     defs = [make_vgpr(ctx, width=n)]
   return x.replace(tag=tuple(defs))
@@ -189,7 +188,9 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
   if base.addrspace is AddrSpace.REG: # handle loading/storing multiple registers
-    assert idx.op is Ops.CONST and base.dtype.itemsize == 4 and gate is None
+    # Okay were gonna handle diff sizes now
+    assert idx.op is Ops.CONST and gate is None
+    # assert idx.op is Ops.CONST and base.dtype.itemsize == 4 and gate is None
     # TODO: gated reg load
     return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),))
   # NOTE: handle signed
@@ -292,6 +293,7 @@ def bitwise64(ctx, x:UOp, ins):
 def cdiv(ctx, x:UOp):
   # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
   if x.dtype.itemsize == 8:
+    raise NotImplementedError()
     n,d = x.src
     d = UOp(Ops.RECIPROCAL, dtypes.float64, src=(d.cast(dtypes.float64),)) # d.cast(dtypes.float64).reciprocal()
     return UOp(Ops.MUL, dtypes.float64, src=(n.cast(dtypes.float64),d)).cast(dtypes.ulong)
@@ -470,6 +472,7 @@ extra_matcher = PatternMatcher([
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
+  # (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
