@@ -114,6 +114,8 @@ def nidx(b:mesa.nir_builder, buf, off, space, itemsize, gate=None) -> mesa.nir_d
        lambda: nalu(b, "iadd", buf, nalu(b, "imul", off, nimm(b, itemsize, dtypes.long))))
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
 
+def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
+
 class NIRRenderer(Renderer):
   suffix = "NIR"
   nir_options: bytes
@@ -137,7 +139,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not (buf._shape is not None and len(buf._shape) == 3 and buf._shape[-1] == 4) else None),
+      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
      lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
@@ -290,7 +292,7 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     self.img_idx += 1
     return nimm(self.b, self.img_idx - 1, dtypes.int)
 
-  def param(self, b, x, sz): return self._param_img(x) if (x._shape is not None and len(x._shape) == 3 and x._shape[-1] == 4) else self._param(b, x, sz)
+  def param(self, b, x, sz): return self._param_img(x) if is_image_shape(x._shape) else self._param(b, x, sz)
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
@@ -301,9 +303,10 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
   def postrender(self, uops:list[UOp]):
     bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]
     texs, imgs = itertools.count().__next__, itertools.count().__next__
-    for b in filter(lambda b: b._shape is not None and len(b._shape) == 3 and b._shape[-1] == 4, bufs): nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
+    for b in filter(lambda b: is_image_shape(b._shape), bufs):
+      nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
 
-    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not (u._shape is not None and len(u._shape) == 3 and u._shape[-1] == 4)])
+    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not is_image_shape(u._shape)])
     self.b.shader.contents.info.num_images = texs() + imgs()
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}

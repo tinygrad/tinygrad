@@ -18,7 +18,9 @@ def _load(m, i, dtype: DType):
   return from_storage_scalar(m[i], dtype)
 
 def load(inp, j, dtype: DType):
-  if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]
+  if len(inp) >= 3:
+    defaults = inp[1] if isinstance(inp[1], list) else [inp[1]] * len(inp[0])
+    return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(inp[0], defaults, inp[2])]
   return [_load(m, x+j if x is not None else None, dtype) for m,x in inp[0]]
 
 def _store(m, i, v, dtype: DType):

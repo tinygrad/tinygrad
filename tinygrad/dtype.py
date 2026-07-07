@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv
 from enum import IntEnum, auto
 
 class ConstFloat(float):
