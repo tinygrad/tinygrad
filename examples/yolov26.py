@@ -141,7 +141,7 @@ class C3K2(C2F):
       if attn else 
       C3K(self.c, self.c, 2, shortcut=shortcut, g=g, k=k)
       if c3k else
-      Bottleneck(self.c, self.c, shortcut, g, kernels=(k, k))
+      Bottleneck(self.c, self.c, shortcut, g)
       for _ in range(n)
     ]
 
@@ -398,6 +398,7 @@ class DetectionHead:
     self.nl = len(ch)
     self.reg_max = reg_max
     self.no = nc + self.reg_max * 4  #
+    self.end2end = end2end
     self.stride = (8,16,32)
     c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100)) # channels
     self.cv2 = [
@@ -417,13 +418,20 @@ class DetectionHead:
       self.one2one_cv3 = copy.deepcopy(self.cv3)
 
   @property
+  def one2many(self):
+    return dict(box_head=self.cv2, cls_head=self.cv3)
+
+  @property
   def one2one(self):
     return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3)
   
   @property
   def end2end(self):
-    # return hasattr(self, "onen2one_cv2") and hasattr(self, "one2one_cv3")
-    return getattr(self, "_end2end", True) and hasattr(self, "one2one")
+    return getattr(self, "_end2end", False) and hasattr(self, "one2one_cv2") and hasattr(self, "one2one_cv3")
+
+  @end2end.setter
+  def end2end(self, value):
+    self._end2end = value
 
   def _get_decode_boxes(self, x:dict[str,Tensor])->Tensor:
     shape = x["feats"][0].shape
@@ -448,7 +456,7 @@ class DetectionHead:
       scores, indices = scores.topk(k, dim=1)
       labels = labels.gather(1, indices)
       return scores, labels, indices
-    ori_index = scores.max(axis=-1)[0].topk(k)[1].unsqueeze(-1)
+    ori_index = scores.max(axis=-1).topk(k)[1].unsqueeze(-1)
     scores = scores.gather(dim=1, index=ori_index.repeat(1, 1, nc))
     scores, index = scores.flatten(1).topk(k)
     idx = ori_index[Tensor.arange(batch_size)[..., None], index // nc]  # original index
@@ -456,10 +464,10 @@ class DetectionHead:
 
   def postprocess(self, preds: Tensor) -> Tensor:
     boxes, scores = preds.split([4, self.nc], dim=-1)
-    scores, conf, idx = self.get_topk_index(scores, self.max_det)
+    conf, cls, idx = self.get_topk_index(scores, self.max_det)
     idx = idx.unsqueeze(-1)
     boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
-    return boxes.cat(scores, conf, dim=-1)
+    return boxes.cat(conf, cls, dim=-1)
 
   def decode_bboxes(self, bboxes: Tensor, anchors: Tensor, xywh: bool = True) -> Tensor:
     return dist2bbox(
@@ -484,14 +492,13 @@ class DetectionHead:
     return dict(boxes=boxes, scores=scores, feats=x)
   
   def __call__(self, x:list[Tensor]):
-    preds = self.forward_head(x, **self.one2one)
     if self.end2end:
-      x_detach = [xi.detach() for xi in x]
-      one2one = self.forward_head(x_detach, **self.one2one)
-      preds = {"one2many": preds, "one2one": one2one}
-    y = self._inference(preds["one2one"] if self.end2end else preds)
-    if self.end2end:
+      preds = self.forward_head(x, **self.one2one)
+      y = self._inference(preds)
       y = self.postprocess(y.permute(0,2,1))
+      return y
+    preds = self.forward_head(x, **self.one2many)
+    y = self._inference(preds)
     return y
 
 class Concat:
@@ -513,31 +520,33 @@ class Sequential(list):
 
 class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
+    c3k = w >= 1.0
+    c64, c128, c256, c512, c1024 = (int(min(c, ch) * w) for c in (64, 128, 256, 512, 1024))
     self.model = [
-      Conv(c1=3, c2=int(64*w), k=3, s=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
-      Conv(c1=int(64*w), c2=int(128*w), k=3, s=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
-      C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
-      Conv(c1=int(256*w), c2=int(256*w), k=3, s=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
-      C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
-      Conv(c1=int(512*w), c2=int(512*w), k=3, s=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
-      C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
-      Conv(c1=int(512*w), c2=int(1024*w), k=3, s=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
-      C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
-      SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
-      C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)), # [-1, 2, C2PSA, [1024]] # 10
+      Conv(c1=3, c2=c64, k=3, s=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
+      Conv(c1=c64, c2=c128, k=3, s=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
+      C3K2(c1=c128,c2=c256,n=depth_scale(2,d),c3k=c3k,e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
+      Conv(c1=c256, c2=c256, k=3, s=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
+      C3K2(c1=c256,c2=c512,n=depth_scale(2,d),c3k=c3k,e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
+      Conv(c1=c512, c2=c512, k=3, s=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
+      C3K2(c1=c512,c2=c512,c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
+      Conv(c1=c512, c2=c1024, k=3, s=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
+      C3K2(c1=c1024,c2=c1024,c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
+      SPPF(c1=c1024,c2=c1024,k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
+      C2PSA(c1=c1024,c2=c1024,n=depth_scale(2,d)), # [-1, 2, C2PSA, [1024]] # 10
       Upsample(scale_factor=2, mode="nearest"),
       Concat(),
-      C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3),
+      C3K2(c1=c1024 + c512, c2=c512, n=depth_scale(2, d), c3k=True, k=3),
       Upsample(scale_factor=2, mode="nearest"),
       Concat(),
-      C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3),
-      Conv(c1=int(256 * w), c2=int(256 * w), k=3, s=2),
+      C3K2(c1=c512 + c512, c2=c256, n=depth_scale(2, d), c3k=True, k=3),
+      Conv(c1=c256, c2=c256, k=3, s=2),
       Concat(),
-      C3K2(c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,),
-      Conv(c1=int(512 * w), c2=int(512 * w), k=3, s=2),
+      C3K2(c1=c256 + c512, c2=c512, n=depth_scale(2, d), c3k=True, k=3,),
+      Conv(c1=c512, c2=c512, k=3, s=2),
       Concat(),
-      C3K2(c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True),
-      DetectionHead(num_classes, reg_max=1, end2end=True, ch=(int(256*w), int(512*w), int(1024*w)))
+      C3K2(c1=c512 + c1024, c2=c1024, n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True),
+      DetectionHead(num_classes, reg_max=1, end2end=True, ch=(c256, c512, c1024))
     ]
 
 
@@ -700,7 +709,7 @@ if __name__=="__main__":
   print(f'did inference in {int(round(((time() - st) * 1000)))}ms')
   print(f"predictions {predictions}")
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
-  print(f"detections after NMS: {len(predictions)}")
+  print(f"detections after confidence filter: {len(predictions)}")
   predictions = scale_boxes(preprocessed_image.shape[2:], predictions, image.shape)
   draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels)
   sys.exit(0)
