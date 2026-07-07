@@ -123,33 +123,16 @@ class MovementMixin:
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    # EXPAND only adds dims on the left. squeeze existing 1s that need expanding, then EXPAND, then permute back.
+    # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
     n_left = len(new_shape) - len(self.shape)
-    expand_positions:set[int] = set()
-    squeeze_shape:list[sint] = []
-    for i, s in enumerate(self.shape):
-      ns = new_shape[n_left + i]
-      if resolve(s == 1, default=False) and resolve(ns != 1):
-        expand_positions.add(i)
-      else:
-        squeeze_shape.append(s)
-    n_expand = len(expand_positions)
-    expand_arg = tuple(new_shape[:n_left]) + tuple(new_shape[n_left + pos] for pos in sorted(expand_positions))
-    squeezed = self.reshape(tuple(squeeze_shape)) if n_expand > 0 else self
-    expanded = squeezed._mop(Ops.EXPAND, arg=expand_arg)
-    if n_expand == 0:
-      return expanded
-    # EXPAND output = expand_arg + squeeze_shape, need to permute to new_shape
-    perm = list(range(n_left))
-    expand_idx, match_idx = 0, 0
-    for i in range(len(self.shape)):
-      if i in expand_positions:
-        perm.append(n_left + expand_idx)
-        expand_idx += 1
-      else:
-        perm.append(n_left + n_expand + match_idx)
-        match_idx += 1
-    return expanded.permute(tuple(perm))
+    expand_at = tuple(i for i, s in enumerate(self.shape) if resolve(s == 1, default=False) and resolve(new_shape[n_left+i] != 1))
+    kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
+    squeezed = self.reshape(tuple(self.shape[i] for i in kept))
+    expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
+    # expanded shape = [left] + [expand_at dims] + [kept dims], permute to new_shape
+    perm = tuple(range(n_left)) + tuple(
+      n_left + (expand_at.index(i) if i in expand_at else len(expand_at) + kept.index(i)) for i in range(len(self.shape)))
+    return expanded.permute(perm)
 
   def expand(self, shape, *args) -> Self:
     """
