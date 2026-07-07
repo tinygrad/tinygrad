@@ -85,9 +85,9 @@ def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   if len(kvs) != len(set(kv[0] for kv in kvs)): raise RuntimeError(f"{kvs} contains different values for the same key")
   return {k:v for d in ds for k,v in d.items()}
-def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]]:
+def partition(itr:Iterable[T], fxn:Callable[[T],bool], **kwargs) -> tuple[list[T], list[T]]:
   ret:tuple[list[T], list[T]] = ([], [])
-  for s in itr: (ret[0] if fxn(s) else ret[1]).append(s)
+  for s in itr: (ret[0] if fxn(s, **kwargs) else ret[1]).append(s)
   return ret
 def unwrap(x:T|None) -> T:
   assert x is not None
