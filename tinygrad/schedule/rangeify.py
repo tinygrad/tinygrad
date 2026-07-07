@@ -17,16 +17,6 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 import sys
 sys.setrecursionlimit(10000)
 
-def add_ranges_to_store(ctx, x):
-  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == () or x.src[0].max_numel() == x.src[1].max_numel() == 1: return None
-  assert x.src[0].shape == x.src[1].shape, "bad store shape"
-  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
-  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
-
-pm_store_ranges = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
-])
-
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
