@@ -197,11 +197,6 @@ def fix_group_for_reduce(x:UOp):
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
   return buf.reduce(*reduce_loop, arg=(x.arg[0], 0))
 
-pm_group_for_reduce = PatternMatcher([
-  # fix group for reduce
-  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
-])
-
 @dataclass
 class ReduceContext:
   acc_num: int = 0
@@ -244,6 +239,9 @@ def expand_horizontal_reduce(r:UOp):
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+  # remove reduces
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
@@ -294,14 +292,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
-  sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
+
+  # remove reduce
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
-
-  # ** devectorizer (full_graph_rewrite) **
-  # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
