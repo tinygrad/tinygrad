@@ -274,9 +274,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
+
+      # param has shape as the only arg
       case Ops.PARAM:
-        if isinstance(self.dtype, ImageDType): return self.dtype.shape
-        return self.src[0].as_shape if len(self.src) >= 1 else None
+        return self.src[0].as_shape
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA:
