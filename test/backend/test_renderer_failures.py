@@ -85,15 +85,15 @@ class TestWGSLFailures(unittest.TestCase):
 
   # WGSL has a specific select(alt, val, gate) ternary operator instead of gate?val:alt
   def test_gated_load(self):
-    a = UOp.param(0, dtypes.int.ptr(4))
-    b = UOp.param(1, dtypes.int.ptr(4))
-    c = UOp.param(2, dtypes.int.ptr(4))
+    a = UOp.param(0, dtypes.int, (4,))
+    b = UOp.param(1, dtypes.int, (4,))
+    c = UOp.param(2, dtypes.int, (4,))
     lidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), "lidx0")
     gate = lidx0.ne(0)
-    alt = c.index(lidx0, ptr=True).load()
-    ld = UOp.load(b.index(lidx0.valid(gate), ptr=True))
+    alt = c.index(lidx0).load()
+    ld = UOp.load(b.index(lidx0.valid(gate)))
     alt_load = gate.where(ld, alt)
-    store = UOp.store(a.index(lidx0, ptr=True), alt_load)
+    store = UOp.store(a.index(lidx0), alt_load)
     sink = UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo())
     ret = _test_uop_result([Tensor([0,1,2,3], dtype=dtypes.int), Tensor([4,5,6,7], dtype=dtypes.int)], sink, local_size=[4])[0]
     np.testing.assert_equal(ret, [4,1,2,3])
