@@ -687,6 +687,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg) -> UOp:
     # early NOOP
+    if op is Ops.EXPAND and len(arg) == 0: return self
     if op in {Ops.SHRINK, Ops.PAD} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
       return self
