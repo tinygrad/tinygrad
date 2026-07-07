@@ -24,7 +24,7 @@ insdefs = [
   (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.MAX, "v_max", ["f16_e32", "f32_e32", "u16", "i16", "u32_e32", "i32_e32"], False),
   (Ops.TRUNC, "v_trunc", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "u64", "i32", "i64"], True),
+  (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "u64", "i32", "i64", "u16", "i16"], True),
   (Ops.CMPNE, "v_cmp", ["neq_f16", "neq_f32", "neq_f64", "ne_u32", "ne_u64", "ne_i32", "ne_i64", "ne_i16", "ne_u16"], True),
   (Ops.CMPEQ, "v_cmp_eq", ["f16", "f32", "f64", "u16", "u32", "u64", "i16", "i32", "i64"], True)
 ]
@@ -94,7 +94,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
-def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if x.op is Ops.CONST else x
+def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if x.op is Ops.CONST else x # NOTE: wrong
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
 # ---- operand legalization wrappers ----
@@ -109,13 +109,13 @@ def _vop3(ctx, x:UOp):
 # TODO: pass in original op to use GroupOp.COMMUTATIVE?
 def _vop2(ctx, x:UOp):
   # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
-  def _isconst(u:UOp): return u.op is Ops.CONST
+  def _isconst(u:UOp): return u.op is Ops.CONST or (u.op is Ops.CAST and u.src[0].op is Ops.CONST) # TODO: fix?
   if not _isconst(x.src[1]): return x
   rest = x.src[2:] if len(x.src) > 2 else ()
-  non_commutative = x.arg in (RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-  if not non_commutative and not _isconst(x.src[0]):
-    return x.replace(src=(x.src[1], x.src[0]) + rest)
-  return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
+  non_commutative = x.arg in (RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
+  if not non_commutative and not _isconst(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
+  return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
+  # return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
@@ -286,6 +286,9 @@ def bitwise64(ctx, x:UOp, ins):
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
   return multireg(lo, hi, dtype=x.dtype)
 
+# 32 bit Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
+# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
+# TODO: sext / zext???, if dtype sizes dont match
 def cdiv(ctx, x:UOp):
   # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
   if x.dtype.itemsize == 8:
@@ -294,18 +297,25 @@ def cdiv(ctx, x:UOp):
     return UOp(Ops.MUL, dtypes.float64, src=(n.cast(dtypes.float64),d)).cast(dtypes.ulong)
     # return (n.cast(dtypes.float64) * d).cast(dtypes.ulong)
   else:
-    # Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
-    # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
-    # TODO: add remainder refinements?
+    def _safeneg(u:UOp): return UOp(Ops.SUB, dtypes.uint32, src=(const(dtypes.uint32,0), u))
+    def _umulh(a:UOp, b:UOp): return UOp(Ops.MUL, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
+    a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) 
     is_signed = not dtypes.is_unsigned(x.dtype)
-    # TODO implement signed
-    # NOTE: use ashr, look at llvm output for mod test
-    def _umulh(a:UOp, b:UOp): return UOp(Ops.INS, dtypes.uint32, arg=RDNA3Ops.v_mul_hi_u32, src=(a,b))
-    a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) # note: hack
-    z = b.cast(dtypes.float32).reciprocal() # initial estimate
-    z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32) # convert back from float
-    z += _umulh(z, -b * z) # Unsigned integer Newton-Raphson round
-    return _umulh(a, z)
+    if is_signed:
+      def _getsign32(u:UOp): return (u >> 31).replace(arg=RDNA3Ops.v_ashrrev_i32_e32)
+      sa, sb = _getsign32(a), _getsign32(b)
+      a, b = (a + sa) ^ sa, (b + sb) ^ sb
+      sign = sa ^ sb
+    z = b.cast(dtypes.float32).reciprocal().replace(arg=RDNA3Ops.v_rcp_iflag_f32_e64)
+    z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
+    z += _umulh(z, _safeneg(b) * z)
+    q = _umulh(a, z)
+    r = a + _safeneg(q) * b
+    cond = r < b
+    q = cond.where(q, q + const(dtypes.uint32, 1))
+    r = cond.where(r, r + _safeneg(b))
+    q = (r < b).where(q, q + const(dtypes.uint32, 1))
+    return (q ^ sign) + _safeneg(sign) if is_signed else q
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
@@ -314,16 +324,20 @@ def alu(ctx, x:UOp):
   if dpreciz and x.op is Ops.ADD: return add64(ctx, x)
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
-  def _bitwise(ins): return bitwise64(ctx, x, ins) if dpreciz else _vop2(ctx, x.ins(ins))
-  if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32)
-  elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32)
-  elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32)
+  def _bitwise(sins, hins):
+    if dpreciz: return bitwise64(ctx, x, sins)
+    if x.dtype.itemsize == 4: return _vop2(ctx, x.ins(sins))
+    return _vop3(ctx, x.ins(hins))
+  if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32, RDNA3Ops.v_and_b16)
+  elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32, RDNA3Ops.v_or_b16)
+  elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32, RDNA3Ops.v_xor_b16)
 
   def _bmux(sins, dins): return dins if dpreciz else sins
-  if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b64)))
-  elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b64)))
+  if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b64) if x.arg is None else x.arg))
+  elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_bmux(RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b64) if x.arg is None else x.arg))
 
-  if x.op in OP_INS and x.dtype in OP_INS[x.op]: ins = OP_INS[x.op][x.dtype]
+  if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
+  elif x.op in OP_INS and x.dtype in OP_INS[x.op]: ins = OP_INS[x.op][x.dtype]
   else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
@@ -451,7 +465,7 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
-  (UPat((Ops.SHR, Ops.SHL), dtype=(dtypes.long, dtypes.ulong, dtypes.float64), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
+  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
@@ -459,10 +473,14 @@ pre_isel_matcher = PatternMatcher([
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
-  (UPat(Ops.LOAD, dtype=dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
+  (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
+  # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
+  # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
+  # (UPat(Ops.LOAD, dtypes.int8s, allow_any_len=True, name="x"), lambda x: x.bitcast(_smux(x.dtype, dtypes.int16, dtypes.uint16))),
+  # (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.int8s)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16))))),
   # realize bool const as sgpr mask
-  (UPat.cvar("x", dtype=dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
-  (UPat.var("y", dtype=dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
+  (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
   # (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG?
@@ -474,7 +492,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32))),
   (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
-  (UPat.var("y", dtype=dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
+  (UPat.var("y", dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
   # int -> float
   (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
@@ -483,10 +501,10 @@ pre_isel_matcher = PatternMatcher([
   # other
   (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
   # narrowing long goes through b32
-  (UPat.var("y", dtype=(dtypes.long, dtypes.ulong)).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
+  (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   # NOTE: this only works because we assume upper half is right, widen cast is noop
-  (UPat(Ops.MUL, src=(UPat.var("a"), UPat.var("b")), dtype=dtypes.int16), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
+  (UPat(Ops.MUL, dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
   # expand 64 bit where, 2 cndmasks
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
@@ -586,7 +604,7 @@ def encode(ctx, x:UOp):
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
-  # print("encoding", opc, args, kw)
+  print("encoding", opc, args, kw)
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
