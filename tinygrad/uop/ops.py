@@ -554,13 +554,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def invalid(): return UOp.const(dtypes.weakint, Invalid)
   def valid(self, cond):
-    return cond.where(self.cast(dtypes.weakint), UOp.invalid())
+    return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
-    assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
+    assert dtypes.is_int(self.dtype), "Can only call get_idx on index dtype"
     if self.op is Ops.STACK: return UOp.vectorize(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
-    assert self.dtype.scalar() is dtypes.weakint, "Can only call get_valid on index dtype"
+    assert dtypes.is_int(self.dtype), "Can only call get_valid on index dtype"
     if self.op is Ops.STACK: return UOp.vectorize(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
