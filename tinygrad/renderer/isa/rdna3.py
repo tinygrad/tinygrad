@@ -177,9 +177,8 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
-  return (idx.cast(dtypes.uint32) << shft, const(dtypes.uint16, 0), base)
-
-# TODO: handle 16 bit loads?
+  # NOTE: manual SHR construction to avoid none shape error mixing with Ops.INS? fix this somehow
+  return (UOp(Ops.SHR, dtypes.uint32, src=(idx.cast(dtypes.uint32), shft)), const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
@@ -472,11 +471,11 @@ extra_matcher = PatternMatcher([
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
-  # (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
+  (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   # (UPat(Ops.LOAD, dtypes.int8s, allow_any_len=True, name="x"), lambda x: x.bitcast(_smux(x.dtype, dtypes.int16, dtypes.uint16))),
