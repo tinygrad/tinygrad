@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
-from tinygrad.dtype import dtypes, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
@@ -112,6 +112,18 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
+# shape-changing bitcast
+def expand_bitcast(bc:UOp) -> UOp|None:
+  x = bc.src[0]
+  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS"))): return None
+  new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
+  if ns > os:
+    tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
+    parts = [tmp.shrink((None,)*(len(tmp.shape)-1) + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]
+    return parts[0].usum(*parts[1:]).squeeze(-1).bitcast(bc.dtype)
+  parts = [tmp>>8*i*ns for i in range(os//ns)]
+  return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
@@ -165,6 +177,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
    lambda target, src: target.store(src.bitcast(target.dtype))),
+
+  (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
 
   # ** size 0 **
 

@@ -611,33 +611,6 @@ class Tensor(RandMixin):
     fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
-  # ***** cast ops *****
-
-  def bitcast(self, dtype:DTypeLike) -> Tensor:
-    """
-    Bitcasts `self` to the given `dtype` of the same itemsize.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.bitcast(dtypes.uint32)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    dt = to_dtype(dtype)
-    if (ns:=dt.itemsize) != (os:=self.dtype.itemsize) and (self.shape[-1]*os) % ns != 0: raise RuntimeError("unsupported size in bitcast")
-    if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and ns != os:
-      new_uint, old_uint = to_dtype(f"uint{8*ns}"), to_dtype(f"uint{8*os}")
-      tmp = self.bitcast(old_uint)
-      if ns > os:
-        tmp = tmp.reshape(self.shape[:-1] + (self.shape[-1]//(rate := ns//os), rate))
-        nones = (None,) * (tmp.ndim - 1)
-        return Tensor.usum(*[tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]).squeeze(-1).bitcast(dtype)
-      return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
-    return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
-
 P = ParamSpec("P")
 T = TypeVar("T")
 
