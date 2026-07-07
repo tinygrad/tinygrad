@@ -54,21 +54,12 @@ def get_variant_scales(variant: str):
   }
   return VARIANTS[variant]
 
-class ModuleList:
-  def __init__(self,*layers):
-    self.layers = layers
-  def __iter__(self):
-    return iter(self.layers)
-
 def autopad(k:int|tuple[int, ...], p:int|tuple[int, ...]|None=None, d:int=1):
   if d > 1:
     k = d * (k - 1) + 1 if isinstance(k, int) else tuple(d * (x - 1) + 1 for x in k)
   return (k // 2 if isinstance(k, int) else tuple(x // 2 for x in k)) if p is None else p
 
 def depth_scale(n:int, d:float): return max(round(n * d), 1) if n > 1 else n
-
-class Upclass:
-  pass
 
 class Conv:
   def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True) -> None:
@@ -213,24 +204,6 @@ class PSABlock:
       y = layer(y)
     return x + y if self.add else y
 
-class PSA:
-  def __init__(self, c1:int, c2:int|None=None, e:float=0.5):
-    assert c1 == c2
-    self.c = int(c1 * e)
-    self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-    self.cv2 = Conv(2 * self.c, c1, 1)
-    self.attn = Attention(self.c, attn_ratio=0.5, num_heads=max(self.c // 64, 1))
-    self.ffn = [Conv(self.c, self.c * 2, 1), Conv(self.c * 2, self.c, 1, act=False)]
-
-  def __call__(self, x:Tensor)->Tensor:
-    a, b = self.cv1(x).split((self.c, self.c), dim=1)
-    b = b + self.attn(b)
-    y = b
-    for layer in self.ffn:
-      y = layer(y)
-    b = b + y
-    return self.cv2(a.cat(b, dim=1))
-
 class C2PSA:
   def __init__(self, c1, c2, n=1, e=0.5):
     assert c1 == c2
@@ -245,58 +218,6 @@ class C2PSA:
       b = block(b)
     return self.cv2(a.cat(b, dim=1))
 
-class Backbone:
-  def __init__(self, w: float, d: float, ch: int):
-    self.b1 = [
-      Conv(c1=3, c2=int(64*w), k=3, s=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
-      Conv(c1=int(64*w), c2=int(128*w), k=3, s=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
-    ]
-    self.b2 = [
-      C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
-      Conv(c1=int(256*w), c2=int(256*w), k=3, s=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
-    ]
-    self.b3 = [
-      C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
-      Conv(c1=int(512*w), c2=int(512*w), k=3, s=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
-    ]
-    self.b4 = [
-      C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
-      Conv(c1=int(512*w), c2=int(1024*w), k=3, s=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
-    ]
-    self.b5 = [
-      SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
-      C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)) # [-1, 2, C2PSA, [1024]] # 10
-    ]
-    # self.layers = [
-    #   Conv(ch_in=3,ch_out=int(64*w),kernel_size=3,strides=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
-    #   Conv(ch_in=int(64*w),ch_out=int(128*w),kernel_size=3,strides=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
-    #   C3K2(c1=int(128*w),c2=int(256*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [256, False, 0.25]]
-    #   Conv(ch_in=int(256*w),ch_out=int(256*w),kernel_size=3,strides=2), # 3-P3/8 [-1, 1, Conv, [256, 3, 2]]
-    #   C3K2(c1=int(256*w),c2=int(512*w),n=depth_scale(2,d),e=0.25,k=3), # [-1, 2, C3k2, [512, False, 0.25]]
-    #   Conv(ch_in=int(512*w),ch_out=int(512*w),kernel_size=3,strides=2), # 5-P4/16 [-1, 1, Conv, [512, 3, 2]] 
-    #   C3K2(c1=int(512*w),c2=int(512*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [512, True]]
-    #   Conv(ch_in=int(512*w),ch_out=int(1024*w),kernel_size=3,strides=2), # 7-P5/32 [-1, 1, Conv, [1024, 3, 2]]
-    #   C3K2(c1=int(1024*w),c2=int(1024*w),c3k=True,n=depth_scale(2,d),k=3), # [-1, 2, C3k2, [1024, True]]
-    #   SPPF(c1=int(1024*w),c2=int(1024*w),k=5, n=3, shortcut=True), # [-1, 1, SPPF, [1024, 5, 3, True]] # 9
-    #   C2PSA(c1=int(1024*w),c2=int(1024*w),n=depth_scale(2,d)) # [-1, 2, C2PSA, [1024]] # 10
-    # ]
-  
-  def return_modules(self):
-    return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
-
-  def __call__(self, x: Tensor):
-    x1 = x
-    for layer in self.b1: x1 = layer(x1)
-    x2 = x1
-    for layer in self.b2: x2 = layer(x2)
-    x3 = x2
-    for layer in self.b3: x3 = layer(x3)
-    x4 = x3
-    for layer in self.b4: x4 = layer(x4)
-    x5 = x4
-    for layer in self.b5: x5 = layer(x5)
-    return (x2,x3,x5)
-
 class Upsample:
   def __init__(self, scale_factor:int, mode: str = "nearest") -> None:
     assert mode == "nearest" # only mode supported for now
@@ -308,31 +229,6 @@ class Upsample:
     (b, c), _lens = x.shape[:2], len(x.shape[2:])
     tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
     return tmp.reshape(list(x.shape) + [self.scale_factor] * _lens).permute([0, 1] + list(chain.from_iterable([[y+2, y+2+_lens] for y in range(_lens)]))).reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
-
-class Neck:
-  def __init__(self, w:int, d:int, ch:int):
-    self.up = Upsample(scale_factor=2, mode="nearest")
-    self.n1 = C3K2(c1=int((1024 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3)
-    # self.n2 = Upsample(scale_factor=2, mode="nearest")
-    self.n2 = C3K2(c1=int((512 + 512) * w), c2=int(256 * w), n=depth_scale(2, d), c3k=True, k=3)
-    self.n3 = Conv(c1=int(256 * w), c2=int(256 * w), k=3, s=2)
-    self.n4 = C3K2(c1=int((256 + 512) * w), c2=int(512 * w), n=depth_scale(2, d), c3k=True, k=3,)
-    self.n5 = Conv(c1=int(512 * w), c2=int(512 * w), k=3, s=2)
-    self.n6 = C3K2(c1=int((512 + 1024) * w), c2=int(1024 * w), n=depth_scale(1, d), c3k=True, e=0.5, shortcut=True, k=3, attn=True)
-
-  def return_modules(self):
-    return [self.n1, self.n2, self.n3, self.n4, self.n5, self.n6]
-
-  def __call__(self,p3:Tensor,p4:Tensor,p5:Tensor):
-    x = self.up(p5).cat(p4, dim=1)
-    head_p4 = self.n1(x)
-    x = self.n2(head_p4).cat(p3, dim=1)
-    head_p3 = self.n3(x)
-    x = self.n4(head_p3).cat(head_p4, dim=1)
-    head_p4_out = self.n5(x)
-    x = self.n6(head_p4_out).cat(p5, dim=1)
-    head_p5_out = self.n6(x)
-    return [head_p3, head_p4_out, head_p5_out]
 
 # utility functions for forward pass.
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -605,43 +501,6 @@ def scale_boxes(img1_shape, predictions:np.ndarray, img0_shape, ratio_pad=None)-
     boxes_np = clip_boxes(boxes_np, img0_shape)
     pred[:4] = boxes_np
   return predictions
-
-def box_iou(box:np.ndarray, boxes:np.ndarray)->np.ndarray:
-  x1 = np.maximum(box[0], boxes[:, 0])
-  y1 = np.maximum(box[1], boxes[:, 1])
-  x2 = np.minimum(box[2], boxes[:, 2])
-  y2 = np.minimum(box[3], boxes[:, 3])
-  inter = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-  area1 = np.maximum(0, box[2] - box[0]) * np.maximum(0, box[3] - box[1])
-  area2 = np.maximum(0, boxes[:, 2] - boxes[:, 0]) * np.maximum(0, boxes[:, 3] - boxes[:, 1])
-  return inter / (area1 + area2 - inter + 1e-7)
-
-def nms(predictions:np.ndarray, iou_thres:float=0.45, max_det:int=300)->np.ndarray:
-  if len(predictions) == 0: return predictions
-  keep = []
-  for cls in np.unique(predictions[:, 5]).astype(np.int32):
-    dets = predictions[predictions[:, 5] == cls]
-    dets = dets[np.argsort(-dets[:, 4])]
-    while len(dets) and len(keep) < max_det:
-      keep.append(dets[0])
-      if len(dets) == 1: break
-      dets = dets[1:][box_iou(dets[0, :4], dets[1:, :4]) <= iou_thres]
-  return np.array(keep, dtype=np.float32) if keep else np.empty((0, 6), dtype=np.float32)
-
-def postprocess(predictions:Tensor, conf_thres:float=0.001, iou_thres:float=0.45)->np.ndarray:
-  print(f"predictions type: {type(predictions)}")
-  pred = predictions[0] if predictions.ndim == 3 else predictions
-  if pred.shape[0] < pred.shape[1]: pred = pred.T
-  boxes, scores = pred[:, :4], pred[:, 4:]
-  class_ids = scores.argmax(axis=1)
-  conf = scores.max(axis=1)
-  print(f"max confidence: {conf.max().numpy()}, threshold: {conf_thres}")
-  mask = conf > conf_thres
-  boxes, conf, class_ids = boxes[mask], conf[mask], class_ids[mask]
-  if len(boxes) == 0: return np.empty((0, 6), dtype=np.float32)
-  x, y, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-  detections = np.stack((x - w / 2, y - h / 2, x + w / 2, y + h / 2, conf, class_ids), axis=1).astype(np.float32)
-  return nms(detections, iou_thres=iou_thres)
 
 def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels):
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
