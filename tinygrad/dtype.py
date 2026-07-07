@@ -111,9 +111,6 @@ class ImageDType(DType):
     assert self.v == 1, f"can't vectorize image {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
     return ImageDType(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> 'ImageDType':
-    assert addrspace == AddrSpace.GLOBAL, "images can't be local"
-    return self
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
     return self.size*self.itemsize
