@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
+ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
 FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 IMMEDIATE_SCALE = getenv("IMMEDIATE_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
@@ -25,13 +26,23 @@ class GradAccClipAdamW(Optimizer):
     super().__init__(params, lr, device, fused)
     self.b1, self.b2, self.eps, self.wd = b1, b2, eps, weight_decay
     self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device) for _ in [b1, b2])
-    self.m = self._new_optim_param()
-    self.v = self._new_optim_param()
+    self.zero = bool(ZERO_OPTIM) and isinstance(self.device, tuple) and not self.fused
+    self.m = [self._zero_shard(x) for x in self._new_optim_param()]
+    self.v = [self._zero_shard(x) for x in self._new_optim_param()]
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
     if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
-      self.master_params:list[Tensor]|None = [p.to(self.device).float().contiguous() for p in self.params]
+      self.master_params:list[Tensor]|None = [self._zero_shard(p.to(self.device).float().contiguous()) for p in self.params]
     else:
       self.master_params = None
+
+  def _zero_shard(self, t:Tensor) -> Tensor:
+    if not self.zero or (t.shape[0] % len(self.device)) != 0: return t
+    return Tensor(t.uop._shard(0, len(self.device)).multi(0)).clone()
+
+  def _zero_gather(self, t:Tensor) -> Tensor:
+    if not isinstance(t.device, tuple) or t.uop.axis != 0: return t
+    n, sz = len(t.device), t.shape[0] // len(t.device)
+    return Tensor.cat(*[t[p*sz:(p+1)*sz] for p in range(n)], dim=0)
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -85,6 +96,7 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
+    if self.zero: new_w = self._zero_gather(new_w)
     # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
     offloaded = master is not None and master.device != t.device
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
