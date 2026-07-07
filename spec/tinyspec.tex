@@ -73,7 +73,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \op{Permute} & $(T,)$ & axis order $\pi$ & Reorder axes. $\pi = (1,0)$ is transpose. \\
 \op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
-\op{Expand} & $(T, \mathbf{s'})$ & --- & Prepend axes $\mathbf{s'}$ on the left. Output shape is $\mathbf{s'} + T.\mathrm{shape}$. \\
+\op{Expand} & $(T, \mathbf{n})$ & --- & Prepend axes $\mathbf{n}$ on the left. Output shape is $\mathbf{n} + T.\mathrm{shape}$. \\
 \op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in an invalid-filled output of shape $s'_k$. \\
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
@@ -284,7 +284,7 @@ Default \emph{dtype range}: $[\mathrm{dtype\_min},\, \mathrm{dtype\_max}]$.
 
 \medskip
 \textbf{axis} tracks the multi-device sharding dimension. \op{Buffer} with $n$-tuple device: axis $= 0$ (device dim).
-\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts axis right by $|\mathbf{s'}|$.
+\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts axis right by $|\mathbf{n}|$.
 \op{Reduce} on the shard axis $\to$ \textsc{null} (shard axis is among the first $n$ axes). \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
 
 %% ============================================================
