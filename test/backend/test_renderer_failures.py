@@ -83,6 +83,21 @@ class TestWGSLFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MUL, 5.0, UOp.const(dtypes.float32, float("inf")))
     self.assertEqual(ret[0], float("inf"))
 
+  # WGSL has a specific select(alt, val, gate) ternary operator instead of gate?val:alt
+  def test_gated_load(self):
+    a = UOp.param(0, dtypes.int, (4,))
+    b = UOp.param(1, dtypes.int, (4,))
+    c = UOp.param(2, dtypes.int, (4,))
+    lidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), "lidx0")
+    gate = lidx0.ne(0)
+    alt = c.index(lidx0).load()
+    ld = UOp.load(b.index(lidx0.valid(gate)))
+    alt_load = gate.where(ld, alt)
+    store = UOp.store(a.index(lidx0), alt_load)
+    sink = UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo())
+    ret = _test_uop_result([Tensor([0,1,2,3], dtype=dtypes.int), Tensor([4,5,6,7], dtype=dtypes.int)], sink, local_size=[4])[0]
+    np.testing.assert_equal(ret, [4,1,2,3])
+
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "tests for ptx renderer")
 class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
