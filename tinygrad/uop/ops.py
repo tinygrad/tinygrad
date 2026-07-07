@@ -453,7 +453,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
-    is_img = self.op is Ops.PARAM and self._shape is not None and len(self._shape) == 3 and self._shape[-1] == 4
+    is_img = self.op in {Ops.PARAM, Ops.AFTER} and self._shape is not None and len(self._shape) == 3 and \
+      self._shape[-1] == 4
     dtype = dtypes.float if is_img else self.dtype.base
     return UOp(Ops.INDEX, kwargs.pop("dtype", dtype), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
