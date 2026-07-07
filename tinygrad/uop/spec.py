@@ -118,9 +118,6 @@ spec_shared = PatternMatcher([
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
-
-  # TOOD: remove SHAPED_WMMA
-  (UPat(Ops.SHAPED_WMMA), lambda: True),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
