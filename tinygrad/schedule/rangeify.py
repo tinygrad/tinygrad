@@ -18,12 +18,6 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 import sys
 sys.setrecursionlimit(10000)
 
-pm_syntactic_sugar = PatternMatcher([
-  # early rangeify
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
-   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
-])
-
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
@@ -568,7 +562,7 @@ split_kernels = PatternMatcher([
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
