@@ -1,7 +1,7 @@
 from typing import Any
 import itertools, functools
 from collections import defaultdict
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType, DType
+from tinygrad.dtype import dtypes, Invalid, ImageDType, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv
@@ -109,7 +109,6 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalesing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
-      if buf.addrspace == AddrSpace.REG: continue
       idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
       valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
@@ -129,8 +128,6 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       lengths = [128,64,32,16,8,4]
       must_divide = False
     elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
-      pass
-    elif buf.addrspace == AddrSpace.REG:
       pass
     elif isinstance(buf.dtype, ImageDType):
       lengths = [4]
