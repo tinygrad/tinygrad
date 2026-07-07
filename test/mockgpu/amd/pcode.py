@@ -584,7 +584,7 @@ class Parser:
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
         ws = self.vars.get('_wave_size', 32)
-        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane), ptr=True).load()
+        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane)).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -610,7 +610,7 @@ class Parser:
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
           ws = self.vars.get('_wave_size', 32)
-          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx)), ptr=True).load()
+          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx))).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -828,22 +828,22 @@ class Parser:
     assert mem is not None, "memory load requires _vmem or _lds"
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
-    def mindex(idx:UOp, ptr=False): return mem.index(idx.valid(active) if active is not None else idx, ptr=ptr)
+    def mindex(idx:UOp): return mem.index(idx.valid(active) if active is not None else idx)
     byte_mem = mem.dtype.base == dtypes.uint8
     if byte_mem:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
-        for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
+        for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
-        val = mindex(idx, ptr=True).load().cast(dt)
+        val = mindex(idx).load().cast(dt)
       elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
-        lo = mindex(idx, ptr=True).load().cast(dtypes.uint32)
-        hi = mindex(idx + _const(dtypes.int, 1), ptr=True).load().cast(dtypes.uint32)
+        lo = mindex(idx).load().cast(dtypes.uint32)
+        hi = mindex(idx + _const(dtypes.int, 1)).load().cast(dtypes.uint32)
         val = (lo | (hi << _u32(8))).cast(dt)
       else:
         val = _u32(0)
-        for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
+        for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
       idx = addr >> _const(addr.dtype, 2)
       val = mindex(idx)

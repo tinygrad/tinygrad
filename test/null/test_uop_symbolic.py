@@ -977,7 +977,7 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0), ptr=True), expr)).sink())
+    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     # the vars are now scalar PARAMs
@@ -1316,7 +1316,7 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     # cond has a range that the rewrite can move into the valid: gate (a<4) goes into load valid
     cond = (a < 4) & (r < 2)
     valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
-    idx = buf.index(a.valid(valid), ptr=True)
+    idx = buf.index(a.valid(valid))
     expr = cond.where(idx, 0)
     out = graph_rewrite(expr, pm_move_where_on_load)
     # any WHERE in the rewritten graph must have matched-dtype branches

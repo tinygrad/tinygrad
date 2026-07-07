@@ -15,12 +15,12 @@ def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
-    UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid), ptr=True),
+    UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)),
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float, (
-    UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
+    UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid)),
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
@@ -542,7 +542,7 @@ class TestRangeShrink(unittest.TestCase):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
     load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
-    load2 = UOp(Ops.LOAD, dtypes.float, (UOp.param(1, dtypes.float, (204,)).index(r, ptr=True),))
+    load2 = UOp(Ops.LOAD, dtypes.float, (UOp.param(1, dtypes.float, (204,)).index(r),))
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)

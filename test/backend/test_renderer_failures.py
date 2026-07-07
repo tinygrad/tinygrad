@@ -25,9 +25,9 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   a = UOp.param(0, dtype, (1,))
   b = UOp.param(1, dtype, (1,))
   idx = UOp.const(dtypes.int, 0)
-  ld = b.index(idx, ptr=True).load()
+  ld = b.index(idx).load()
   alu = ld.alu(alu_op, *alu_src_uops)
-  store = UOp.store(a.index(idx, ptr=True), alu)
+  store = UOp.store(a.index(idx), alu)
   return _test_uop_result([Tensor([input_val])], UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo()))[0]
 
 class TestRendererFailures(unittest.TestCase):
@@ -35,7 +35,7 @@ class TestRendererFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
     a = UOp.param(0, dtypes.int, (4,))
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu), ptr=True), UOp.const(dtypes.int, 1)))
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu)), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
@@ -45,7 +45,7 @@ class TestRendererFailures(unittest.TestCase):
     a = UOp.param(0, dtypes.int, (8,))
     gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1), ptr=True), UOp.const(dtypes.int, 1)))
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
