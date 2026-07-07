@@ -404,7 +404,7 @@ jobs:
   testcommalatest:
     name: comma Benchmark (0.11.0)
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 10
+    timeout-minutes: 12
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -435,7 +435,7 @@ jobs:
   testcommaold:
     name: comma Benchmark (0.10.1)
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 10
+    timeout-minutes: 12
     defaults:
       run:
         shell: bash -e -o pipefail {0}
