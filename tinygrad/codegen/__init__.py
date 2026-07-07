@@ -304,13 +304,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, mop_cleanup+symbolic_simple+unbroadcast, name="*** unbroadcast")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
   # simplify indexing
-  sink = graph_rewrite(sink, pm_add_loads+indexing_simplify, name="simplify load/store indexing")
+  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
 
   # some coalesing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
