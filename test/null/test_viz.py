@@ -214,6 +214,8 @@ class TestViz(unittest.TestCase):
     # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
+    # cut after the first error, instead of going through all REWRITE_STACK_LIMIT matches
+    self.assertEqual(len(graphs), 3)
 
   def test_walk_rewrite(self):
     from tinygrad.uop.ops import _substitute

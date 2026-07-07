@@ -1053,7 +1053,7 @@ async function main() {
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
-  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null && !cache[ckey].done)) {
+  if (!(ckey in cache) || (!cache[ckey].done && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
