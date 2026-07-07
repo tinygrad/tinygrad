@@ -41,6 +41,11 @@ class IselContext:
   def vreg(self, cons:tuple[Register, ...], width:int=1) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", width, cons if isinstance(cons, tuple) else (cons,))
 
+def greg(u:UOp):
+  if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return greg(u.src[0])
+  if isinstance(u.tag, tuple): return u.tag[0]
+  return u.tag
+
 @dataclass
 class PreRegAllocContext:
   lock: UOp|None = None

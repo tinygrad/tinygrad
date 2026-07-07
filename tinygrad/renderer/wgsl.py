@@ -40,8 +40,7 @@ def is_nan(a):
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
-  # TODO: load alt value doesnt have to be a const
-  (UPat.load(UPat.var("b"), UPat.cvar("c"), UPat.var("gate"), name="l"),
+  (UPat.load(UPat.var("b"), UPat.var("c"), UPat.var("gate"), name="l"),
    lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l) else None),
   (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l,b,l.dtype) if is_packed(l) else None),
   (UPat.store(UPat.var("b"), UPat.var("var"), UPat.var("gate"), name="s"),
@@ -82,8 +81,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, dtype=dtypes.short, name="x"), lambda ctx,x: f"bitcast<i32>(vec2<f16>({ctx[x.src[0]]},0))" \
      if x.src[0].dtype == dtypes.half else f"((i32({ctx[x.src[0]]}&0xFFFF)<<16)>>16)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]})"),
-    # TODO: load alt value doesnt have to be a const
-    (UPat.load(UPat.var("b"), UPat.cvar("v"), UPat.var("gate")),
+    (UPat.load(UPat.var("b"), UPat.var("v"), UPat.var("gate")),
       lambda ctx,b,v,gate: f"select({ctx[v]}, {ctx.render_load(ctx[b], b.src[0])}, {ctx[gate]})"),
     (UPat.load(UPat.var("b")), lambda ctx, b: ctx.render_load(ctx[b], b)),
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v:\

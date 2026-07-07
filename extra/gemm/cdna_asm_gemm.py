@@ -64,7 +64,8 @@ def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(*batch, scale_K, 1).expand(*batch, scale_K, 32).reshape(*batch, K)
   x_scaled = x.float() * qscale
   x_clamped = x_scaled + (x_scaled.detach().clamp(-448.0, 448.0) - x_scaled.detach())  # STE
-  return x_clamped.cast(FP8_DTYPE), e8, (mx_pack(e8) if len(batch) == 1 else None)
+  packed = mx_pack(e8) if len(batch) == 1 and scale_K % 4 == 0 else None
+  return x_clamped.cast(FP8_DTYPE), e8, packed
 
 def mx_pack(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
@@ -118,7 +119,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   mul = (A.flatten().index((m*UOp.const(dtypes.weakint, K)+k))*
          B.flatten().index((k*UOp.const(dtypes.weakint, N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
-  store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n), ptr=True).store(red).end(m, n)
+  store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n)).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
 # ** bf16 A @ B.T kernel in C

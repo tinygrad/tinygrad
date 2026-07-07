@@ -98,9 +98,9 @@ pm_data_invalid = PatternMatcher([
 
 propagate_invalid = pm_index_invalid + pm_data_invalid
 
-# TODO: this does nothing now
+# NOTE: this happens in padded WMMA, so rewrite to 0
 pm_remove_invalid = PatternMatcher([
-  (UPat(Ops.CONST, arg=Invalid, name="i"), lambda i: i.const_like(0) if i.dtype.scalar() is not dtypes.weakint else None),
+  (invalid_pat, lambda i: i.const_like(0) if i.dtype.scalar() is not dtypes.weakint else None),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
@@ -288,7 +288,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
   # only RANGE/IF/STORE/KERNEL have side effects
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
-    tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.UNROLL, Ops.LINEAR, Ops.STAGE}
+    tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.LINEAR, Ops.STAGE}
                         else y.src for y in x.src[1:]]))))),
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
@@ -422,7 +422,7 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.STACK, Ops.SINK, Ops.GROUP}
+REMOVE_FROM_SINK_LIKE = {Ops.NOOP, Ops.STACK, Ops.SINK, Ops.GROUP}
 pm_clean_up_group_sink = PatternMatcher([
   # clean up GROUP/SINK
   (UPat(Ops.GROUP, src=(UPat.var("x"),)), lambda x: x),

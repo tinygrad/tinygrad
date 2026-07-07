@@ -20,7 +20,7 @@ def const_values(u:UOp):
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
-    v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
+    v1 = UOp.const(dtypes.int, (0,1,2))
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
@@ -250,7 +250,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
-    d0 = UOp.param(0, dtypes.float.ptr())
+    d0 = UOp.param(0, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
     ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
@@ -262,9 +262,9 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_gep_vec_fold(self):
-    d0 = UOp.param(0, dtypes.float.ptr())
-    d1 = UOp.param(1, dtypes.float.ptr())
-    d2 = UOp.param(2, dtypes.float.ptr())
+    d0 = UOp.param(0, dtypes.float, (1,))
+    d1 = UOp.param(1, dtypes.float, (1,))
+    d2 = UOp.param(2, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(Ops.STACK, dtypes.float.vec(count), geps)
@@ -303,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
-      vec = UOp(Ops.STACK, dtypes.float.vec(vec_size), tuple(consts))
+      vec = UOp(Ops.STACK, dtypes.float, tuple(consts))
       with Context(SPEC=0):
         uops = to_uops_list([vec.index(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):
@@ -370,22 +370,22 @@ class TestUOpGraph(unittest.TestCase):
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
   def test_cast_alu_fold(self):
-    d0 = UOp.param(0, dtypes.bool.ptr(1))
-    d1 = UOp.param(1, dtypes.int.ptr(1))
+    d0 = UOp.param(0, dtypes.bool, (1,))
+    d1 = UOp.param(1, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = (ld<1).cast(dtypes.bool)
-    out = d0.index(idx, ptr=True).store(alu)
+    out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
   def test_double_cast_fold(self):
-    d0 = UOp.param(0, dtypes.float.ptr(1))
-    d1 = UOp.param(1, dtypes.int.ptr(1))
+    d0 = UOp.param(0, dtypes.float, (1,))
+    d1 = UOp.param(1, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = ld.cast(dtypes.float).cast(dtypes.float)
-    out = d0.index(idx, ptr=True).store(alu)
+    out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
 
@@ -404,7 +404,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
-      d0 = UOp.param(0, dt.ptr(1))
+      d0 = UOp.param(0, dt, (1,))
       v = d0.index(UOp.const(dtypes.int, 0))
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
@@ -417,18 +417,18 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long.ptr(100))
+    d0 = UOp.param(0, dtypes.long, (100,))
     ld = d0.index(ridx0.valid(ridx0<50))
     w = (ridx0<50).where(ld, 5)
-    out = UOp.param(1, dtypes.long.ptr(100))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    out = UOp.param(1, dtypes.long, (100,))
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg==5
 
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long.ptr(100))
+    d0 = UOp.param(0, dtypes.long, (100,))
     ld = d0.index(ridx0.valid((ridx0<50).logical_not()))
     w = (ridx0<50).where(5, ld)
     uops = to_uops_list([w])
@@ -438,40 +438,40 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_where_on_gated_load_with_cast(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.int.ptr(100))
+    d0 = UOp.param(0, dtypes.int, (100,))
     gate_idx = ridx0.valid((ridx0<50))
     ld = d0.index(gate_idx).cast(dtypes.float)
     w = (ridx0<50).where(ld, 5.0)
-    out = UOp.param(1, dtypes.float.ptr(100))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    out = UOp.param(1, dtypes.float, (100,))
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
 
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.float.ptr(100))
+    d0 = UOp.param(0, dtypes.float, (100,))
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
-    out = UOp.param(1, dtypes.half.ptr(100))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    out = UOp.param(1, dtypes.half, (100,))
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
   def test_where_on_casted_gated_load_extra_cond_swapped(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.float.ptr(100))
+    d0 = UOp.param(0, dtypes.float, (100,))
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
-    out = UOp.param(1, dtypes.half.ptr(100))
-    uops = to_uops_list([out.index(ridx0, ptr=True).store(w)])
+    out = UOp.param(1, dtypes.half, (100,))
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long.ptr(100))
-    idx = d0.index(ridx0, ptr=True)
+    d0 = UOp.param(0, dtypes.long, (100,))
+    idx = d0.index(ridx0)
     ld = idx.load()
     val = (ridx0<50).where(5, ld)
     st = idx.store(val).end(ridx0)
@@ -483,14 +483,14 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_idx_becomes_int(self):
     # mnist indexing with split reduceop
     # Make sure we are not doign math on the loaded index, which would promote it to long
-    c0 = UOp.param(0, dtypes.uchar.ptr(128000))
+    c0 = UOp.param(0, dtypes.uchar, (128000,))
     c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
     c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
-    c3 = UOp.param(1, dtypes.int.ptr(512))
+    c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
     c6 = ((c2*UOp.const(dtypes.weakint, 240))+c5)
-    c7 = UOp.param(2, dtypes.uchar.ptr(60000))
+    c7 = UOp.param(2, dtypes.uchar, (60000,))
     c8 = c7.index(c6)
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
     c10 = c0.index(((c1*UOp.const(dtypes.weakint, 250))+c2)).store(c9).end(c1, c2)
@@ -500,14 +500,14 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_load_idx_no_math_on_loaded(self):
     # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
-    c0 = UOp.param(0, dtypes.uchar.ptr(128000))
+    c0 = UOp.param(0, dtypes.uchar, (128000,))
     c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
     c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
-    c3 = UOp.param(1, dtypes.int.ptr(512))
+    c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)  # c4 is a load
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
     c6 = ((c2*UOp.const(dtypes.weakint, 240))+c5)
-    c7 = UOp.param(2, dtypes.uchar.ptr(60000))
+    c7 = UOp.param(2, dtypes.uchar, (60000,))
     c8 = c7.index(c6)
     # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
     loaded_idx = c4.cast(dtypes.weakint)
@@ -519,42 +519,42 @@ class TestUOpGraph(unittest.TestCase):
       self.assertNotEqual(u.dtype, dtypes.long)
 
   def test_fold_gated_load(self):
-    glbl0 = UOp.param(0, dtypes.int.ptr(1))
-    glbl1 = UOp.param(1, dtypes.int.ptr(1))
-    glbl2 = UOp.param(2, dtypes.int.ptr(1))
+    glbl0 = UOp.param(0, dtypes.int, (1,))
+    glbl1 = UOp.param(1, dtypes.int, (1,))
+    glbl2 = UOp.param(2, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     ld0 = glbl1.index(UOp.invalid())
     ld1 = glbl2.index(idx.valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([glbl0.index(idx, ptr=True).store(ld1+ld0)])
+    uops = to_uops_list([glbl0.index(idx).store(ld1+ld0)])
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
 
   def test_fold_gated_load_local(self):
-    glbl0 = UOp.param(0, dtypes.int.ptr(16))
+    glbl0 = UOp.param(0, dtypes.int, (16,))
     smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0", dtypes.int)
-    st = smem.index(lidx, ptr=True).store(glbl0.index(lidx, ptr=True).load())
+    st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
     ld0 = smem.after(barrier).index(UOp.invalid())
     ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([glbl0.index(lidx, ptr=True).store(ld1+ld0)])
+    uops = to_uops_list([glbl0.index(lidx).store(ld1+ld0)])
 
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 2)
 
   def test_fold_gated_store(self):
-    glbl = UOp.param(0, dtypes.int.ptr(1))
+    glbl = UOp.param(0, dtypes.int, (1,))
     idx0 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = glbl.index(UOp.invalid(), ptr=True).store(val)
-    st1 = glbl.index(idx0.valid(UOp.const(dtypes.bool, True)), ptr=True).store(val)
+    st0 = glbl.index(UOp.invalid()).store(val)
+    st1 = glbl.index(idx0.valid(UOp.const(dtypes.bool, True))).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len([u for u in uops if u.op is Ops.STORE]), 1)
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
-    glbl0 = UOp.param(0, dtypes.int.ptr())
+    glbl0 = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
