@@ -196,7 +196,7 @@ class Attention:
     q,k,v= self.qkv(x).reshape(b, self.num_heads, self.key_dim * 2 + self.head_dim, h*w).split([self.key_dim, self.key_dim, self.head_dim], dim=2)
     attn: Tensor = q*self.scale
     attn = attn.transpose(-2,-1) @ k
-    attn = attn.softmax(dim=-1)
+    attn = attn.softmax(axis=-1)
     x = (v @ attn.transpose(-2, -1)).reshape(b, c, h, w) + self.pe(v.reshape(b, c, h, w))
     return self.proj(x)
 
@@ -334,17 +334,6 @@ class Neck:
     head_p5_out = self.n6(x)
     return [head_p3, head_p4_out, head_p5_out]
 
-class DFL:
-  def __init__(self, c1=16):
-    self.conv = Conv2d(c1, 1, 1, bias=False)
-    x = Tensor.arange(c1)
-    self.conv.weight.replace(x.reshape(1, c1, 1, 1))
-    self.c1 = c1
-
-  def __call__(self, x):
-    b, c, a = x.shape # batch, channels, anchors
-    return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
-
 # utility functions for forward pass.
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
   lt, rb = distance.chunk(2, dim)
@@ -393,21 +382,33 @@ class Identity:
   def __call__(self, x): return x
 
 class DetectionHead:
+  dynamic = False  # force grid reconstruction
+  export = False  # export mode
+  format = None  # export format
+  max_det = 300  # max_det
+  agnostic_nms = False
+  shape = None
+  anchors = Tensor.empty(0)  # init
+  strides = Tensor.empty(0)  # init
+  xyxy = False  # xyxy or xywh output
+
+
   def __init__(self, nc=80, reg_max:int=16, end2end=False, ch=()):
     self.nc = nc  # number of classes
     self.nl = len(ch)
     self.reg_max = reg_max
     self.no = nc + self.reg_max * 4  #
+    self.stride = (8,16,32)
     c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100)) # channels
     self.cv2 = [
-      [Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4*self.reg_max, 1)] for x in ch
+      Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), Conv2d(c2, 4*self.reg_max, 1)) for x in ch
     ]
     self.cv3 = [
-      [
+      Sequential(
         Sequential(DwConv(x,x,3), Conv(x,c3,1)),
         Sequential(DwConv(c3,c3,3), Conv(c3,c3,1)),
         Conv2d(c3, self.nc, 1)
-      ]
+      )
       for x in ch
     ]
     self.dfl = DFL(self.reg_max) if self.reg_max > 1 else Identity()
@@ -417,11 +418,56 @@ class DetectionHead:
 
   @property
   def one2one(self):
-    return dict(box_head=self.one2one_cv2, cls_head=self.one2one)
+    return dict(box_head=self.one2one_cv2, cls_head=self.one2one_cv3)
   
   @property
   def end2end(self):
+    # return hasattr(self, "onen2one_cv2") and hasattr(self, "one2one_cv3")
     return getattr(self, "_end2end", True) and hasattr(self, "one2one")
+
+  def _get_decode_boxes(self, x:dict[str,Tensor])->Tensor:
+    shape = x["feats"][0].shape
+    if self.dynamic or self.shape != shape:
+      self.anchors, self.strides = (a.transpose(0, 1) for a in make_anchors(x["feats"], self.stride, 0.5))
+      self.shape = shape
+
+    dbox = self.decode_bboxes(self.dfl(x["boxes"]), self.anchors.unsqueeze(0)) * self.strides
+    return dbox
+
+  def _inference(self, x: dict[str, Tensor]) -> Tensor:
+    dbox = self._get_decode_boxes(x)
+    return dbox.cat((x["scores"].sigmoid()), dim=1)
+
+  def get_topk_index(self, scores: Tensor, max_det: int) -> tuple[Tensor, Tensor, Tensor]:
+    batch_size, anchors, nc = scores.shape  # i.e. shape(16,8400,80)
+    # Use max_det directly during export for TensorRT compatibility (requires k to be constant),
+    # otherwise use min(max_det, anchors) for safety with small inputs during Python inference
+    k = max_det if self.export else min(max_det, anchors)
+    if self.agnostic_nms:
+      scores, labels = scores.max(dim=-1, keepdim=True)
+      scores, indices = scores.topk(k, dim=1)
+      labels = labels.gather(1, indices)
+      return scores, labels, indices
+    ori_index = scores.max(axis=-1)[0].topk(k)[1].unsqueeze(-1)
+    scores = scores.gather(dim=1, index=ori_index.repeat(1, 1, nc))
+    scores, index = scores.flatten(1).topk(k)
+    idx = ori_index[Tensor.arange(batch_size)[..., None], index // nc]  # original index
+    return scores[..., None], (index % nc)[..., None].float(), idx
+
+  def postprocess(self, preds: Tensor) -> Tensor:
+    boxes, scores = preds.split([4, self.nc], dim=-1)
+    scores, conf, idx = self.get_topk_index(scores, self.max_det)
+    idx = idx.unsqueeze(-1)
+    boxes = boxes.gather(dim=1, index=idx.repeat(1, 1, 4))
+    return boxes.cat(scores, conf, dim=-1)
+
+  def decode_bboxes(self, bboxes: Tensor, anchors: Tensor, xywh: bool = True) -> Tensor:
+    return dist2bbox(
+        bboxes,
+        anchors,
+        xywh=xywh and not self.end2end and not self.xyxy,
+        dim=1,
+    )
   
   def forward_head(self, x:list[Tensor], box_head = None, cls_head = None):
     if box_head is None or cls_head is None:
@@ -434,6 +480,7 @@ class DetectionHead:
     scores = []
     for i in range(self.nl):
       scores.append(cls_head[i](x[i]).reshape(bs, self.nc, -1))
+    scores = scores[0].cat(*scores[1:], dim=2)
     return dict(boxes=boxes, scores=scores, feats=x)
   
   def __call__(self, x:list[Tensor]):
@@ -442,7 +489,10 @@ class DetectionHead:
       x_detach = [xi.detach() for xi in x]
       one2one = self.forward_head(x_detach, **self.one2one)
       preds = {"one2many": preds, "one2one": one2one}
-      return preds
+    y = self._inference(preds["one2one"] if self.end2end else preds)
+    if self.end2end:
+      y = self.postprocess(y.permute(0,2,1))
+    return y
 
 class Concat:
   def __init__(self, dim:int=1):
@@ -463,9 +513,6 @@ class Sequential(list):
 
 class YOLOv26:
   def __init__(self, w: float, d: float, ch: int, num_classes:int):
-    # self.net = Backbone(w,d,ch)
-    # self.fpn= Neck(w,d,ch)
-    # self.head = DetectionHead(num_classes, filters=(int(256*w), int(512*w), int(1024*w)))
     self.model = [
       Conv(c1=3, c2=int(64*w), k=3, s=2), # 0-P1/2 [-1, 1, Conv, [64, 3, 2]]
       Conv(c1=int(64*w), c2=int(128*w), k=3, s=2), # 1-P2/4 [-1, 1, Conv, [128, 3, 2]]
@@ -493,6 +540,7 @@ class YOLOv26:
       DetectionHead(num_classes, reg_max=1, end2end=True, ch=(int(256*w), int(512*w), int(1024*w)))
     ]
 
+
   def __call__(self, x: Tensor)->Tensor:
     outputs = []
     for i, layer in enumerate(self.model):
@@ -505,7 +553,7 @@ class YOLOv26:
       elif i == 21:
         x = layer([outputs[-1], outputs[10]])
       elif i == 23:
-        x = layer([outputs[16], outputs[19]], outputs[22])
+        x = layer([outputs[16], outputs[19], outputs[22]])
       else:
         x = layer(x)
       
@@ -571,13 +619,14 @@ def nms(predictions:np.ndarray, iou_thres:float=0.45, max_det:int=300)->np.ndarr
       dets = dets[1:][box_iou(dets[0, :4], dets[1:, :4]) <= iou_thres]
   return np.array(keep, dtype=np.float32) if keep else np.empty((0, 6), dtype=np.float32)
 
-def postprocess(predictions:np.ndarray, conf_thres:float=0.001, iou_thres:float=0.45)->np.ndarray:
+def postprocess(predictions:Tensor, conf_thres:float=0.001, iou_thres:float=0.45)->np.ndarray:
+  print(f"predictions type: {type(predictions)}")
   pred = predictions[0] if predictions.ndim == 3 else predictions
   if pred.shape[0] < pred.shape[1]: pred = pred.T
   boxes, scores = pred[:, :4], pred[:, 4:]
   class_ids = scores.argmax(axis=1)
   conf = scores.max(axis=1)
-  print(f"max confidence: {conf.max():.6f}, threshold: {conf_thres}")
+  print(f"max confidence: {conf.max().numpy()}, threshold: {conf_thres}")
   mask = conf > conf_thres
   boxes, conf, class_ids = boxes[mask], conf[mask], class_ids[mask]
   if len(boxes) == 0: return np.empty((0, 6), dtype=np.float32)
@@ -627,8 +676,8 @@ if __name__=="__main__":
     print("Error: image path is required")
     sys.exit(1)
   img_path = sys.argv[1]
-  yolo_variant = sys.argv[2] if len(sys.argv)>=3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n') # default to nano
-  conf_thres = float(sys.argv[3]) if len(sys.argv)>=4 else 0.001
+  yolo_variant = sys.argv[2] if len(sys.argv)>=3 else (print("No variant given, so choosing 'n' as the default. Yolo26 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n') # defaults to nano
+  conf_thres = float(sys.argv[3]) if len(sys.argv)>=4 else 0.25
   print(f"args {sys.argv}")
   print(f"Running inference for YOLO26 variant {yolo_variant}")
   (output_folder_path := Path('./outputs-yolov26')).mkdir(parents=True, exist_ok=True)
@@ -642,18 +691,15 @@ if __name__=="__main__":
   depth, width, max_channels = get_variant_scales(yolo_variant)
   yolo_infer = YOLOv26(w=width, d=depth, ch=max_channels, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
-  # with open("state_dict", "w+") as file:
-  #   for key in sorted(state_dict.keys()):
-  #     file.write(f"{key}\n")
-  print(f"State dict: {state_dict.keys()}")
-  print(f"State dict len: {len(state_dict.keys())}")
-  x = load_state_dict(yolo_infer, state_dict)
-  print(f"loaded tensors: {len(x)}")
+  load_state_dict(yolo_infer, state_dict)
   st = time()
-  predictions = yolo_infer(preprocessed_image).numpy()
+  print(f"runnning inference")
+  predictions = yolo_infer(preprocessed_image)
+  predictions = predictions.numpy()[0]
+  predictions = predictions[predictions[:,4] > conf_thres]
   print(f'did inference in {int(round(((time() - st) * 1000)))}ms')
+  print(f"predictions {predictions}")
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
-  predictions = postprocess(predictions, conf_thres=conf_thres)
   print(f"detections after NMS: {len(predictions)}")
   predictions = scale_boxes(preprocessed_image.shape[2:], predictions, image.shape)
   draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels)
