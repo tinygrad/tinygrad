@@ -89,7 +89,7 @@ def fs_store(t:Tensor) -> Tensor:
   Store a tensor to storage.
   """
   # TODO: this should work locally as well
-  data = t.contiguous().flatten().bitcast(dtypes.uint8)
+  data = t.contiguous().bitcast(dtypes.uint8).flatten()
 
   # pad to a multiple of 1mb
   if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
