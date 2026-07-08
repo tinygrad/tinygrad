@@ -365,7 +365,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       out_shape = _broadcast_shape(x.shape, y.shape)
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
     except (RuntimeError, ValueError): pass
-    # ptr dtypes aren't in the promo lattice
     if x.dtype == y.dtype: return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
