@@ -424,6 +424,10 @@ class TestTensorUOpConv2d(unittest.TestCase):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop, stride=2))
 
+class TestTensorUOpHashing(unittest.TestCase):
+  def test_keccak_sha3_256(self):  _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak())
+  def test_keccak_shake_128(self): _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak("shake_128"))
+
 class TestTensorUOpEinsum(unittest.TestCase):
   def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))
   def test_einsum_transpose(self): _check(self, _t(2, 3), lambda x: type(x).einsum("ij->ji", x))
