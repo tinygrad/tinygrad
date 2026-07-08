@@ -36,7 +36,7 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   smooth = label_smoothing / vocab
   grad = (prob - target - smooth) * scale[0]
 
-  return d_logits[b, s, v].store(grad.cast(d_logits.dtype.base)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
+  return d_logits[b, s, v].store(grad.cast(d_logits.dtype)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
 
 def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)

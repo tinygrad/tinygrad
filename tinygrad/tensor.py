@@ -1,10 +1,10 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import prod, all_int, getenv, fully_flatten, ceildiv, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
+from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
@@ -237,7 +237,7 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.cast(self.dtype.base).contiguous()
+    x = self.cast(self.dtype).contiguous()
     if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
@@ -252,11 +252,12 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
-    assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
-    return self._data().cast(self.dtype.base.fmt, self.shape)
+    fmt = self.dtype.fmt
+    assert fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert fmt != "e" or sys.version_info >= (3, 12)
+    return self._data().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -288,8 +289,8 @@ class Tensor(RandMixin):
     """
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
-    if self.dtype.base in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
-    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
+    if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
+    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype))
     return self._buffer().numpy().reshape(self.shape)
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
@@ -472,86 +473,6 @@ class Tensor(RandMixin):
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
 
-  # ***** reduce ops *****
-
-  def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
-    """
-    Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
-
-    ```python exec="false" source="above" session="tensor" result="python"
-    t = Tensor(b"Hello World!").keccak()
-    print(t.data().hex())
-    ```
-    """
-
-    # https://keccak.team/keccak_specs_summary.html
-
-    def ctensor(l: Sequence[PyConst], dtype: DType = dtypes.uint64):
-      # TODO: contiguous is here for compile speed
-      return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l)).contiguous()
-    rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
-    rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
-
-    # calculated from π step
-    reorder_indexes = ctensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], dtype=dtypes.int32)
-    rnd_const_masks = [ctensor([v]).pad((0, 24)) for v in (1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081,
-    0x8000000000008009, 0x8a, 0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
-    0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008)]
-
-    rate, dsbyte = {"sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31)}[cfg] if isinstance(cfg, str) else cfg
-    data = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1])
-    data_pad = rate - data.shape[-1] % rate
-    # pad batches then pad blocks
-    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad_to(None, None, 200)
-
-    # create pad mask
-    lbe = (data.shape[1] - 1) * 200 + rate - data_pad
-    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (200 - rate, 0)]
-    else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
-
-    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
-
-    state = Tensor.zeros(bs, 25, dtype=dtypes.uint64, buffer=False)
-    for k in range(int(data.shape[1])):
-      state = state ^ data[:, k]
-      for i in range(24): # f1600
-        # θ step
-        p = state.reshape(bs, 5, 5).transpose(2, 1)
-        t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
-        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand(bs, 5, 5).transpose(2, 1).flatten(1))
-        # ρ and π steps
-        state = state[:, reorder_indexes]
-        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(bs, 5, 5)
-        # χ and ι step
-        state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
-        state = state.flatten(1) ^ rnd_const_masks[i]
-      # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
-    return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
-
-  def _hash_1mb(self) -> Tensor:
-    assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
-    assert self.ndim == 2, "only support batched 1d tensors"
-    assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
-    return self.reshape(-1, 4096).keccak("shake_128").reshape(self.shape[0], -1).keccak("shake_128")
-
-  def hash(self) -> Tensor:
-    """
-    Calculates a 16-byte hash of the tensor.
-    ```python exec="false source="above" session="tensor" result="python"
-    t = Tensor(b"Hello World!").hash()
-    print(t.data().hex())
-    ```
-    """
-    data = self.flatten().bitcast(dtypes.uint8)
-    n = data.shape[0]
-    assert isinstance(n, int), "hash requires concrete shape"
-    chunks = ceildiv(n, 2**20)
-    while chunks > 1:
-      data = data.pad_to(chunks * 2**20).reshape(chunks, 2**20)._hash_1mb().flatten()
-      chunks = ceildiv(chunks, 65536)
-    return data.pad_to(2**20).unsqueeze(0)._hash_1mb().flatten()[:16]
-
   # ***** broadcasted elementwise ops *****
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
@@ -610,33 +531,6 @@ class Tensor(RandMixin):
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
     fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
-
-  # ***** cast ops *****
-
-  def bitcast(self, dtype:DTypeLike) -> Tensor:
-    """
-    Bitcasts `self` to the given `dtype` of the same itemsize.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.bitcast(dtypes.uint32)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    dt = to_dtype(dtype)
-    if (ns:=dt.itemsize) != (os:=self.dtype.itemsize) and (self.shape[-1]*os) % ns != 0: raise RuntimeError("unsupported size in bitcast")
-    if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and ns != os:
-      new_uint, old_uint = to_dtype(f"uint{8*ns}"), to_dtype(f"uint{8*os}")
-      tmp = self.bitcast(old_uint)
-      if ns > os:
-        tmp = tmp.reshape(self.shape[:-1] + (self.shape[-1]//(rate := ns//os), rate))
-        nones = (None,) * (tmp.ndim - 1)
-        return Tensor.usum(*[tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]).squeeze(-1).bitcast(dtype)
-      return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
-    return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
 
 P = ParamSpec("P")
 T = TypeVar("T")

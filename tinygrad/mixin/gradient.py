@@ -5,14 +5,7 @@ from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
-  def broadcast_to_input(x):
-    shape, j = [], 0
-    for i in range(len(ret.src[0].shape)):
-      if i < ret.arg[1]: shape.append(1)
-      else:
-        shape.append(x.shape[j])
-        j += 1
-    return x.reshape(tuple(shape)).expand(ret.src[0].shape)
+  def broadcast_to_input(x:UOp) -> UOp: return x._broadcast_to(ret.src[0].shape)
   if op == Ops.ADD: return (broadcast_to_input(ctx),)
   if op == Ops.MAX:
     assert ret.op is Ops.REDUCE, "only works on REDUCE"

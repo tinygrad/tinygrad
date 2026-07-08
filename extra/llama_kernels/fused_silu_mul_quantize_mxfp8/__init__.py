@@ -41,7 +41,7 @@ def _custom_silu_mul_quantize_mxfp8(fp8_out:UOp, e8_out:UOp, si_out:UOp, x_w1:UO
   scaled = (act * qscale).maximum(-FP8_MAX).minimum(FP8_MAX)
   e8u8 = e8f.cast(dtypes.uint8)
 
-  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
+  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype)).end(lane)
   e8_store = e8_out.after(fp8_store)[super_idx * PACK + sb].store(e8u8)
   packed = (e8u8.cast(dtypes.uint32) << (sb.cast(dtypes.uint32) * 8)).reduce(sb, arg=Ops.ADD)
   row, col4 = super_idx // sk4, super_idx % sk4
@@ -72,8 +72,8 @@ def _custom_silu_mul_bwd_mxfp8(gx1_out:UOp, gx3_out:UOp, x_w1:UOp, x_w3:UOp, gra
   sig = (1.0 + (w1 * -LOG2E).exp2()).reciprocal()
   s = w1 * sig
   sprime = sig * (1.0 + w1 * (1.0 - sig))
-  gx1 = gx1_out[idx].store((ga * sprime * w3).cast(gx1_out.dtype.base))
-  gx3 = gx3_out.after(gx1)[idx].store((ga * s).cast(gx3_out.dtype.base))
+  gx1 = gx1_out[idx].store((ga * sprime * w3).cast(gx1_out.dtype))
+  gx3 = gx3_out.after(gx1)[idx].store((ga * s).cast(gx3_out.dtype))
   return gx3.end(lane, tid, wg).sink(arg=KernelInfo(f"silu_mul_bwd_mxfp8_{n_elems}", opts_to_apply=()))
 
 def _silu_mul_quantize_mxfp8_bwd(gradient:UOp, kernel:UOp):

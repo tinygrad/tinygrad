@@ -82,9 +82,9 @@ def reduce_unparented(red:UOp) -> UOp|None:
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg[0] is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype)
   if red.arg[0] is Ops.MUL:
-    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype)
   return ret
 
 pm_reduce_unparented = PatternMatcher([

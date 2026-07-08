@@ -27,7 +27,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_st
   abs_x = (x_f < 0.0).where(-x_f, x_f)
   scaled = (x_f * scale).maximum(-FP8_MAX).minimum(FP8_MAX)
 
-  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
+  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype)).end(lane)
   lane_max = abs_x.reduce(lane, arg=Ops.MAX)
 
   lmax = UOp.placeholder((1,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
@@ -56,7 +56,7 @@ def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
 
   x_f = x.reshape(n_elems)[i].cast(dtypes.float)
   scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
-  store = fp8_out.reshape(n_elems)[i].store((x_f * scale).cast(fp8_out.dtype.base))
+  store = fp8_out.reshape(n_elems)[i].store((x_f * scale).cast(fp8_out.dtype))
 
   return store.end(i).sink(arg=KernelInfo(f"quantize_fp8_scalar_{n_elems}"))
 

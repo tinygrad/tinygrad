@@ -222,6 +222,10 @@ class TestTensorUOpBitcast(unittest.TestCase):
     t = _t(4)
     self.assertIs(t.bitcast("uint32").uop, t.uop.bitcast("uint32"))
     self.assertIs(t.uop.bitcast("uint32").dtype, dtypes.uint32)
+  def test_bitcast_same_and_diff_size(self):
+    _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.uint32))              # same size
+    _check(self, _t(4).cast(dtypes.uint8), lambda x: x.bitcast(dtypes.uint16))   # widen: uint8[4] -> uint16[2]
+    _check(self, _t(4).cast(dtypes.uint16), lambda x: x.bitcast(dtypes.uint8))   # narrow: uint16[4] -> uint8[8]
 
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):
@@ -419,6 +423,10 @@ class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv_transpose2d_stride(self):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop, stride=2))
+
+class TestTensorUOpHashing(unittest.TestCase):
+  def test_keccak_sha3_256(self):  _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak())
+  def test_keccak_shake_128(self): _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak("shake_128"))
 
 class TestTensorUOpEinsum(unittest.TestCase):
   def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))

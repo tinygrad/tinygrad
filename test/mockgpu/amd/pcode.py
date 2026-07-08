@@ -829,7 +829,7 @@ class Parser:
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
     def mindex(idx:UOp): return mem.index(idx.valid(active) if active is not None else idx)
-    byte_mem = mem.dtype.base == dtypes.uint8
+    byte_mem = mem.dtype == dtypes.uint8
     if byte_mem:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):

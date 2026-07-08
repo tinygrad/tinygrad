@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod, round_up, OSX
+from tinygrad.helpers import getenv
 from enum import IntEnum, auto
 
 class ConstFloat(float):
@@ -69,19 +69,12 @@ class DType(metaclass=DTypeMetaClass):
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt, self.count) < (o.priority, o.bitsize, o.name, o.fmt, o.count)
-  @property
-  def base(self): return self
-  @property
-  def vcount(self): return self.count
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.bitsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
-    return PtrDType(self.priority, self.bitsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
-  def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
   @functools.cached_property
   def min(self):
     if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.scalar().bitsize-1)
@@ -100,48 +93,11 @@ class DType(metaclass=DTypeMetaClass):
     # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
     return ConstFloat(float(val)) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
 
-@dataclass(frozen=True, eq=False)
-class PtrDType(DType):
-  _base: DType
-  addrspace: AddrSpace
-  v: int
-  size: int = -1  # -1 is unlimited size
-  @property
-  def base(self): return self._base
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def vec(self, sz:int) -> DType:
-    assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
-    if sz == 1: return self  # sz=1 is a scalar
-    if isinstance(self, ImageDType):
-      return ImageDType(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
-    return type(self)(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType: raise RuntimeError("can't make a pointer from a pointer")
-  def nbytes(self) -> int:
-    if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
-    return self.size*self.itemsize
-  @property
-  def vcount(self): return self.v
-  def __repr__(self):
-    return f"{self.base.__repr__()}.ptr({self.size}{', '+str(self.addrspace) if self.addrspace != AddrSpace.GLOBAL else ''})" + \
-      (f'.vec({self.v})' if self.v != 1 else '')
-
-@dataclass(frozen=True, eq=False)
-class ImageDType(PtrDType):
-  shape: tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
-    assert addrspace == AddrSpace.GLOBAL, "images can't be local"
-    return self
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
-
-  # for 1d images on macos, we need to round pitch up to 256 pixels to make CL happy
-  @property
-  def pitch(self): return (round_up(self.shape[1], 256) if OSX else self.shape[1]) * 4 * self.itemsize
-
 
 class dtypes:
   @staticmethod
   @functools.cache
-  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
+  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.ints + (dtypes.weakint,))
@@ -193,12 +149,6 @@ class dtypes:
   uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
   char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
-  # NOTE: these are image dtypes
-  @staticmethod
-  def imageh(shp): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
-  @staticmethod
-  def imagef(shp): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
-
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
@@ -237,8 +187,7 @@ def _get_recursive_parents(dtype:DType) -> set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.cache
 def least_upper_dtype(*ds:DType) -> DType:
-  return min(set.intersection(*[_get_recursive_parents(d.scalar()) for d in ds])) \
-      if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
+  return min(set.intersection(*[_get_recursive_parents(d.scalar()) for d in ds]))
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weakint", "_"))}

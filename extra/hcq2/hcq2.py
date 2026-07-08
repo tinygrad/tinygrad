@@ -27,7 +27,7 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx.timeline_value()),
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx.timeline_signal("sentinel", (1 << 64) - 1)),
       (UPat(Ops.PARAM, name="b"), lambda ctx, b:
-        Buffer(ctx.device, b.max_numel(), b.dtype.base, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))
+        Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))
         if b.tag is not None else None), # TODO: remove nolru
     ])
 
@@ -149,10 +149,10 @@ def make_ins(op, *srcs):
   return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
 
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
-  return UOp.param(next(UOp.unique_num) if unique else 0, dtype.ptr(size), device=devs).rtag(name or "buf")
+  return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "buf")
 
 def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
-  return buf.index(UOp.const(dtypes.int, off//buf.dtype.base.itemsize)).store(val.cast(dtype or buf.dtype.base))
+  return buf.index(UOp.const(dtypes.int, off//buf.dtype.itemsize)).store(val.cast(dtype or buf.dtype))
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []
@@ -199,7 +199,7 @@ def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS) and not all_d
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
 
-  stage = UOp.new_buffer("CPU", src.max_numel() * src.dtype.base.itemsize, dtypes.uint8)
+  stage = UOp.new_buffer("CPU", src.max_numel() * src.dtype.itemsize, dtypes.uint8)
   return UOp(Ops.LINEAR, dtypes.void, (src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy)])
 
@@ -232,7 +232,7 @@ pm_tag_hcq_calls = PatternMatcher([(UPat(Ops.LINEAR, name="linear"),
 class HCQDepsTracker(DepsTracker):
   @staticmethod
   def _key(buf:Any) -> tuple[Any, int, int]:
-    return (buf.arg.slot, 0, buf.max_numel() * buf.dtype.base.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
+    return (buf.arg.slot, 0, buf.max_numel() * buf.dtype.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
 
 def make_deps(u:UOp, dep_lanes:list[tuple[UOp, int, int]], nlanes:int) -> UOp:
   deps:dict[UOp, list[int|None]] = collections.defaultdict(lambda: [None]*nlanes)
@@ -414,7 +414,7 @@ def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
   b = make_placeholder(call.arg.aux.device, len(order), dtypes.uint64, name)
 
   sub = {g: b.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(dtypes.int, order.index(gr))).load() for g,gr in bare.items()}
-  return sub, (b.after(*[make_patch(b, i * b.dtype.base.itemsize, gr) for i,gr in enumerate(order)]),) if order else ()
+  return sub, (b.after(*[make_patch(b, i * b.dtype.itemsize, gr) for i,gr in enumerate(order)]),) if order else ()
 
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
@@ -534,7 +534,7 @@ def fold_blob_store(buf:UOp, blob:UOp) -> UOp:
 
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for b, v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, truncate[v.dtype](v.arg))
+    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.itemsize, truncate[v.dtype](v.arg))
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
