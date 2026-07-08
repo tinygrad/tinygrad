@@ -281,7 +281,7 @@ class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16)
+      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
 
   def test_bitcast_float_to_int32(self):
     a = Tensor([1.,2,3])
