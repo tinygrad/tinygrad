@@ -3,7 +3,7 @@ from typing import cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError
 
@@ -57,7 +57,7 @@ class CLProgram:
     i = 0
     for i,b in enumerate(bufs):
       for real_i, dt, shape in self.arg_dtypes[i]:
-        if shape is not None and len(shape) == 3 and shape[-1] == 4:
+        if is_image_shape(shape):
           pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
           fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
           desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], image_row_pitch=pitch, buffer=b)

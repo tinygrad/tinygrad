@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, OSX
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, OSX, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
@@ -200,8 +200,8 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, bufs, vals=vals)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [b for i,b in enumerate(bufs) for _,dt,shape in prg.buf_dtypes[i] if not (shape is not None and len(shape) == 3 and shape[-1] == 4)]
-    uavs = [(dt,shape,b) for i,b in enumerate(bufs) for _,dt,shape in prg.buf_dtypes[i] if shape is not None and len(shape) == 3 and shape[-1] == 4]
+    ubos = [b for i,b in enumerate(bufs) for _,dt,shape in prg.buf_dtypes[i] if not is_image_shape(shape)]
+    uavs = [(dt,shape,b) for i,b in enumerate(bufs) for _,dt,shape in prg.buf_dtypes[i] if is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:

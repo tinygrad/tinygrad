@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv
+from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -127,11 +127,11 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not (buf._shape is not None and len(buf._shape) == 3 and buf._shape[-1] == 4):
+    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass
-    elif buf._shape is not None and len(buf._shape) == 3 and buf._shape[-1] == 4:
+    elif is_image_shape(buf._shape):
       lengths = [4]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx

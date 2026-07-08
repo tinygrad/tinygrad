@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
@@ -106,7 +106,7 @@ class PythonProgram:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:
             ret = [src_values[0][i][t] for t,i in enumerate(src_values[1])]
-          elif u.src[0]._shape is not None and len(u.src[0]._shape) == 3 and u.src[0]._shape[-1] == 4:
+          elif is_image_shape(u.src[0]._shape):
             for m,oy,ox in zip(*src_values):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))

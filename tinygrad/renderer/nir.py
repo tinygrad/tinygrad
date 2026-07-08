@@ -1,6 +1,6 @@
 from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
@@ -113,8 +113,6 @@ def nidx(b:mesa.nir_builder, buf, off, space, itemsize, gate=None) -> mesa.nir_d
   f = (functools.partial(reg, b, buf) if space == AddrSpace.REG else
        lambda: nalu(b, "iadd", buf, nalu(b, "imul", off, nimm(b, itemsize, dtypes.long))))
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
-
-def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
 
 class NIRRenderer(Renderer):
   suffix = "NIR"
