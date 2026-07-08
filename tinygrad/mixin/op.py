@@ -1934,7 +1934,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
     pad_mask = type(self).cat(*(type(self).const(dtypes.uint8, v).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
-    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
+    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 25, 8).bitcast(dtypes.uint64)
 
     state = type(self).zeros(bs, 25, dtype=dtypes.uint64, buffer=False)
     for k in range(int(data.shape[1])):
@@ -1951,7 +1951,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
       # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
-    return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
+    return state.bitcast(dtypes.uint8).reshape(-1, 200)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _hash_1mb(self) -> Self:
     assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
