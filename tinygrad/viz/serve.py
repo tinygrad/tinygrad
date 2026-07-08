@@ -239,7 +239,6 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
       if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
         fmt["FLOPS"] = int(sym_infer(ki.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6))
         fmt["B/s mem"], fmt["B/s lds"] = int(sym_infer(ki.estimates.mem, var_vals)/t), int(sym_infer(ki.estimates.lds, var_vals)/t)
-        if ei.arg["metadata"]: fmt["metadata"] = ",".join([str(m) for m in ei.arg['metadata']+["batched" if isinstance(e,ProfileGraphEntry) else ""]])
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name

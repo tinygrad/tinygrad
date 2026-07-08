@@ -1036,14 +1036,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
-  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     if self.op in UOp._OPAQUE_CALL_BODIES:
-      return UOp(Ops.CALL, dtypes.void, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward, aux))
+      return UOp(Ops.CALL, dtypes.void, (self,)+srcs, CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
     # value-producing bodies are always wrapped in TUPLE so FUNCTION dtype is always void
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
-    return UOp(Ops.FUNCTION, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward, aux))
+    return UOp(Ops.FUNCTION, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
@@ -1112,16 +1112,15 @@ class ProgramInfo:
 @dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
-  metadata: tuple[Metadata, ...] = ()
   name: str|None = None
   precompile: bool = False
   precompile_backward: bool = False
   aux: Any = None
-  # grad_fxn can't be pickled, but metadata can
-  def __reduce__(self): return (CallInfo, (None, self.metadata, self.name, self.precompile, self.precompile_backward, self.aux))
+  # grad_fxn can't be pickled
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {self.metadata}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
 
 # ******** ops in python ********
 

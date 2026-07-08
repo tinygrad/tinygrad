@@ -72,7 +72,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
         buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
-        linearized.append(k.src[0].call(*buf_uops, metadata=k.arg.metadata))
+        linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
