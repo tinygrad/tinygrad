@@ -386,7 +386,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # NOTE: this has been fixed up a bit
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
-  size = prod(x.shape) // x.dtype.count
+  size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
@@ -418,7 +418,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if allow_locals:
     # handle locals
     buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
-    do_store = buf.broadcast(x.src[1].dtype.count).index(idx).store(x.src[0]).end(*rngs)
+    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
 # collapse any BUFFERIZE to single input BUFFERIZE
@@ -535,13 +535,6 @@ rangeify_codegen = PatternMatcher([
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
   (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
-
-  (UPat(Ops.BUFFER).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if dg.addrspace is not AddrSpace.LOCAL else
-      idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar())),
-  (UPat(Ops.BUFFER).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if dg.addrspace is not AddrSpace.LOCAL else
-      idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar())),
 ])
 
 pm_add_param_range_tags = PatternMatcher([
