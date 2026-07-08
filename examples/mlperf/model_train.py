@@ -2006,7 +2006,7 @@ def train_stable_diffusion():
     # move to CPU first so more GPU bufs aren't created (can trigger OOM)
     for k,v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
     Tensor.realize(*[v for v in ckpt.values()])
-    for k,v in ckpt.items(): ckpt[k] = v.cast(v.dtype.base).contiguous()
+    for k,v in ckpt.items(): ckpt[k] = v.cast(v.dtype).contiguous()
     Tensor.realize(*[v for v in ckpt.values()])
     return ckpt
 

@@ -46,8 +46,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   # -- GLOBAL -> LOCAL --
   # wmma: spatial outer, k inner (k contiguous for vectorized WMMA tile loads)
   # gemm: k outer, spatial inner
-  A_local = UOp.placeholder((BLOCK_M, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype.base, slot=0, addrspace=AddrSpace.LOCAL)
-  B_local = UOp.placeholder((BLOCK_N, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype.base, slot=1, addrspace=AddrSpace.LOCAL)
+  A_local = UOp.placeholder((BLOCK_M, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype, slot=0, addrspace=AddrSpace.LOCAL)
+  B_local = UOp.placeholder((BLOCK_N, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype, slot=1, addrspace=AddrSpace.LOCAL)
 
   a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
   b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)

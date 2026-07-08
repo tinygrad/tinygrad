@@ -176,7 +176,7 @@ class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TR
 
 def sdma_copy(ctx, call):
   dst, src = call.src[1], call.src[2]
-  sz = src.max_numel() * src.dtype.base.itemsize
+  sz = src.max_numel() * src.dtype.itemsize
   src_addr, dst_addr = make_getaddr(src, ctx.devs), make_getaddr(dst, ctx.devs)
   return UOp(Ops.LINEAR, dtypes.void, tuple([make_ins(SDMAOps.COPY,
      ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),

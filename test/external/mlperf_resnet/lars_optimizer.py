@@ -149,7 +149,7 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
     return self._resource_apply_dense(grad, var, apply_state)
 
   def _resource_apply_dense(self, grad, var, apply_state=None):
-    var_device, var_dtype = var.device, var.dtype.base_dtype
+    var_device, var_dtype = var.device, var.dtype_dtype
     coefficients = ((apply_state or {}).get((var_device, var_dtype))
                     or self._fallback_apply_state(var_device, var_dtype))
 
@@ -175,7 +175,7 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
 
   # Fallback to momentum optimizer for sparse tensors
   def _apply_sparse(self, grad, var, apply_state=None):
-    var_device, var_dtype = var.device, var.dtype.base_dtype
+    var_device, var_dtype = var.device, var.dtype_dtype
     coefficients = ((apply_state or {}).get((var_device, var_dtype))
                     or self._fallback_apply_state(var_device, var_dtype))
 
@@ -191,7 +191,7 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
         use_nesterov=self.use_nesterov)
 
   def _resource_apply_sparse(self, grad, var, indices, apply_state=None):
-    var_device, var_dtype = var.device, var.dtype.base_dtype
+    var_device, var_dtype = var.device, var.dtype_dtype
     coefficients = ((apply_state or {}).get((var_device, var_dtype))
                     or self._fallback_apply_state(var_device, var_dtype))
 

@@ -35,7 +35,7 @@ class Estimates:
         while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.base.scalar().itemsize * mults
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.scalar().itemsize * mults
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.scalar().itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)

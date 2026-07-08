@@ -202,8 +202,8 @@ class Buffer:
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
-    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
-    return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype.base))
+    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
+    return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
