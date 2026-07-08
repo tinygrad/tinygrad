@@ -452,7 +452,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
-    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype.base.scalar()), (self,)+tuple(new_srcs), **kwargs)
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype.base), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if self.addrspace in (None, AddrSpace.ALU) or self.device is not None: return super(UOp, self).__getitem__(idx)
@@ -485,7 +485,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.const_like(x)
     return self.const_like(x, dtypes.from_py(x))
   def broadcast(self, count:int):
-    assert self.dtype.vcount == 1
     if count == 1: return self
     return UOp(Ops.STACK, self.dtype, (self,)*count)
   def cast(self, dtype:DTypeLike):
@@ -528,7 +527,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
-    assert dtype.vcount == 1, f"const dtype must be scalar, got {dtype}"
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
       stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
@@ -1147,16 +1145,16 @@ python_alu: dict[Ops, Callable]  = {
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if any(isinstance(x, tuple) for x in operands):
     count = max(len(x) for x in operands if isinstance(x, tuple))
-    return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
+    return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.weakint and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
 def bitcast(x, in_dtype:DType, out_dtype:DType):
   assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
-  packed = struct.pack(storage_fmt_for_dtype(in_dtype.scalar()), to_storage_scalar(x, in_dtype.scalar()))
-  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype.scalar()), packed)[0]
-  return from_storage_scalar(out_val, out_dtype.scalar())
+  packed = struct.pack(storage_fmt_for_dtype(in_dtype), to_storage_scalar(x, in_dtype))
+  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype), packed)[0]
+  return from_storage_scalar(out_val, out_dtype)
 
 # ***** pattern matcher *****
 

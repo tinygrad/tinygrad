@@ -224,7 +224,7 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   topo = r.src[0].toposort()
   ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
   input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
-  acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype.scalar()))
+  acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype))
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")

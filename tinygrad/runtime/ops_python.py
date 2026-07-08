@@ -81,13 +81,13 @@ class PythonProgram:
           store_gate = exec_masks[-1]
           for j,val in enumerate(src_values[1] if u.max_numel() > 1 else [src_values[1]]):
             for (m,o),v,g in zip(src_values[0], val, store_gate):
-              if g: _store(m, o+j, v, src_dtypes[1].scalar())
+              if g: _store(m, o+j, v, src_dtypes[1])
           i += 1
           continue
         if u.op is Ops.AFTER: values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
-          storage_fmt = storage_fmt_for_dtype(u.dtype.base.scalar())
+          storage_fmt = storage_fmt_for_dtype(u.dtype.base)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert storage_fmt != "e"
           if u.addrspace == AddrSpace.REG:
@@ -129,13 +129,13 @@ class PythonProgram:
           if (load_sz := u.max_numel()) > 1:
             # buf and gate are not vecs
             values[u] = [load([src_values[k] if k in [0,2] else src_values[k][j] \
-                               for k in range(len(src_values))], j, u.dtype.scalar()) for j in range(load_sz)]
+                               for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy
-          dims, dtype_in, device, threads = u.arg[1], first_src_dtype.scalar(), u.arg[4], u.arg[5]
+          dims, dtype_in, device, threads = u.arg[1], first_src_dtype, u.arg[4], u.arg[5]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
           # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
