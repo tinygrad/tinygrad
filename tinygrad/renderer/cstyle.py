@@ -116,6 +116,7 @@ class CStyleLanguage(Renderer):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
+  reg_prefix: str = ""
   arg_int_prefix: str = "const int"
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
@@ -170,6 +171,7 @@ class CStyleLanguage(Renderer):
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
       if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
       if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
+    if addrspace == AddrSpace.REG and override_ptr: prefix = self.reg_prefix
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL) or override_ptr:
       suffix = "*"
     if sz > 1:
@@ -348,6 +350,7 @@ class MetalRenderer(CStyleLanguage):
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
+  reg_prefix = "thread "
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
