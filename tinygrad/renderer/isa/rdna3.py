@@ -178,7 +178,7 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
   # NOTE: manual SHR construction to avoid none shape error mixing with Ops.INS? fix this somehow
-  return (UOp(Ops.SHR, dtypes.uint32, src=(idx.cast(dtypes.uint32), shft)), const(dtypes.uint16, 0), base)
+  return (UOp(Ops.SHL, dtypes.uint32, src=(idx.cast(dtypes.uint32), shft)), const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
@@ -478,6 +478,7 @@ extra_matcher = PatternMatcher([
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
+  (UPat(Ops.CDIV, name="x"), cdiv),
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
@@ -485,8 +486,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
-  # realize bool const as sgpr mask
-  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
   # what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
@@ -500,7 +499,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
   (UPat.var("y", dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
-  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None), # cast to ptr
   # int -> float
   (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
   (UPat.var("y", dtypes.int8s).cast((dtypes.half, dtypes.float, dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(x.dtype)),
@@ -523,9 +521,11 @@ pre_isel_matcher = PatternMatcher([
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
+  # realize bool const as sgpr mask
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat(name="x").bitcast(), lambda x: x),
   # NOTE: prolly belong in pre-isel?
-  (UPat(Ops.CDIV, name="x"), cdiv),
+  # (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
   (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
@@ -555,7 +555,6 @@ isel_matcher = PatternMatcher([
   # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf),
   # unified alu experiment
-  # (UPat(Ops.CDIV, name="x"), cdiv),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
