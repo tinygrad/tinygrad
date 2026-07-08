@@ -293,9 +293,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         ps = self.src[0]._shape
         if ps is None: return None
         if (output_sz:=self.dtype.itemsize) < (input_sz:=self.src[0].dtype.itemsize): return ps+(input_sz // output_sz,)
-        if output_sz > input_sz:
-          assert ps[-1] == output_sz // input_sz, f"invalid widening bitcast: input shape {ps}, final dim should be {output_sz // input_sz}"
-          return ps[:-1]
+        if output_sz > input_sz: return ps[:-1]
         return ps
 
       # MULTI marker has no shape

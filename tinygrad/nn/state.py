@@ -222,7 +222,7 @@ def zip_extract(t: Tensor) -> dict[str, Tensor]:
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
     # sadly, the extra length needs to be read from the local header of each file.
     # this is a limitation of the zip file format
-    header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
+    header_contents = [t[zi.header_offset+26:zi.header_offset+30].reshape(-1, 2).bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
     Tensor.realize(*header_contents)
     for zi, header_content in zip(myzip.filelist, header_contents):
       # header_offset + sizeFileHeader + File name length + Extra field length
@@ -277,7 +277,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in storage_source: return None
     byte_start, byte_end = storage_offset*storage[1].itemsize, (storage_offset + prod(size))*storage[1].itemsize
-    ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
+    ret = storage_source[storage[2]][byte_start:byte_end].reshape(-1, storage[1].itemsize).bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
