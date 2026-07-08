@@ -137,7 +137,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
     if isinstance(x.tag[0], tuple): cons, width = x.tag
     defs = [ctx.vreg(x.tag, width=width)]
   else:
-    if x.op is Ops.BUFFER: n = max((x.dtype.itemsize // 4) * x.src[0].arg, 1)
+    if x.op is Ops.BUFFER: n = max((x.dtype.itemsize//4) * x.src[0].arg, 1)
     else: n = max(x.dtype.itemsize // 4, 1)
     defs = [make_vgpr(ctx, width=n)]
   return x.replace(tag=tuple(defs))
@@ -187,12 +187,13 @@ def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
-  if base.addrspace is AddrSpace.REG: # handle loading/storing multiple registers
-    # Okay were gonna handle diff sizes now
-    assert idx.op is Ops.CONST and gate is None
-    # assert idx.op is Ops.CONST and base.dtype.itemsize == 4 and gate is None
+  if base.addrspace is AddrSpace.REG: 
     # TODO: gated reg load
-    return x.ins(RDNA3Ops.v_mov_b32_e32, dtype=base.dtype, src=(base.index(idx),))
+    assert idx.op is Ops.CONST and gate is None
+    # NOTE: the problem with indexing into base with b64 dtypes 
+    # is that it will interpret it as accessing a subreg??
+    if base.dtype.itemsize <= 4: return vmov(base.index(idx))
+    else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
   # NOTE: handle signed
   imap = {
     1 : [(RDNA3Ops.global_load_u8,RDNA3Ops.ds_load_u8), (RDNA3Ops.global_load_i8,RDNA3Ops.ds_load_i8)],
@@ -215,7 +216,13 @@ def store(ctx, addr:UOp, x:UOp):
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
   # NOTE: reg buf stores have to happen pre-regalloc after buffer is already given a vreg
-  if base.addrspace is AddrSpace.REG: return None
+  if base.addrspace is AddrSpace.REG:
+    if len(rdefs(base)) == 0: return None
+    vreg = rdefs(base)[0]
+    if base.dtype.itemsize <= 4: return vmov(val).replace(tag=(vreg.sub(idx.arg),)) # hack
+    else:
+      assert base.src[0].arg == 1
+      return UOp.group(*[vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)])
 
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
@@ -228,11 +235,6 @@ def store(ctx, addr:UOp, x:UOp):
     16:(RDNA3Ops.global_store_b128,RDNA3Ops.ds_store_b128)
   }
   return _gate(UOp(Ops.INS, arg=_insspace(imap[n * addr.dtype.itemsize],base), dtype=dtypes.void, src=fold_address(ctx, addr) + (to_vgpr(ctx,val),)))
-
-def regstore(addr:UOp, x:UOp):
-  base, idx = addr.src
-  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],), tag=(rdefs(base)[0].sub(idx.arg),))
-  return nx, [nx]
 
 # ------ ALU ------
 def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
@@ -563,10 +565,6 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.GROUP, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
-pre_regalloc_matcher = PatternMatcher([
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), regstore),
-])
-
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
@@ -659,7 +657,6 @@ class RDNA3Renderer(ISARenderer):
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   extra_matcher = extra_matcher
-  pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   post_regalloc_ctx = RDNA3LinearCtx()
