@@ -12,7 +12,7 @@ from tinygrad.dtype import Invalid
 # PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
 def vision_conv_143():
-  c0 = UOp.param(0, dtypes.imageh((16, 1024, 4)))
+  c0 = UOp.param(0, dtypes.half, shape=(16, 1024, 4))
   c2 = UOp.range(32, 3, AxisType.LOOP)
   c5 = UOp.range(128, 4, AxisType.LOOP)
   c8 = UOp.range(16, 2, AxisType.LOOP)
@@ -22,11 +22,11 @@ def vision_conv_143():
   c26 = UOp.range(7, 1, AxisType.REDUCE)
   c27 = c2*2+c26
   c32 = ((c27<3)!=True)&(c27<67)
-  c34 = UOp.param(1, dtypes.imageh((32, 1024, 4)))
+  c34 = UOp.param(1, dtypes.half, shape=(32, 1024, 4))
   c38 = c5//2
   c45 = (c32&c24).where((c27*64+c38+c17*4096+-12480), UOp.const(dtypes.weakint, Invalid))
   c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
-  c49 = UOp.param(2, dtypes.imageh((64, 49, 4)))
+  c49 = UOp.param(2, dtypes.half, shape=(64, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (128,))
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
@@ -38,7 +38,7 @@ def vision_conv_143():
   return c67.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
 def vision_conv_153():
-  c0 = UOp.param(0, dtypes.imageh((8, 1024, 4)))
+  c0 = UOp.param(0, dtypes.half, shape=(8, 1024, 4))
   c2 = UOp.range(16, 3, AxisType.LOOP)
   c5 = UOp.range(256, 4, AxisType.LOOP)
   c8 = UOp.range(8, 2, AxisType.LOOP)
@@ -48,11 +48,11 @@ def vision_conv_153():
   c26 = UOp.range(7, 1, AxisType.REDUCE)
   c27 = c2*2+c26
   c32 = ((c27<3)!=True)&(c27<35)
-  c34 = UOp.param(1, dtypes.imageh((16, 1024, 4)))
+  c34 = UOp.param(1, dtypes.half, shape=(16, 1024, 4))
   c38 = c5//2
   c45 = (c32&c24).where((c27*128+c38+c17*4096+-12672), UOp.const(dtypes.weakint, Invalid))
   c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
-  c49 = UOp.param(2, dtypes.imageh((128, 49, 4)))
+  c49 = UOp.param(2, dtypes.half, shape=(128, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (256,))
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
@@ -64,14 +64,14 @@ def vision_conv_153():
   return c67.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
 def dm_conv_172():
-  c0 = UOp.param(0, dtypes.imageh((1, 240, 4)))
+  c0 = UOp.param(0, dtypes.half, shape=(1, 240, 4))
   c2 = UOp.range(960, 4, AxisType.LOOP)
-  c5 = UOp.param(1, dtypes.imageh((8, 384, 4)))
+  c5 = UOp.param(1, dtypes.half, shape=(8, 384, 4))
   c7 = UOp.range(32, 0, AxisType.REDUCE)
   c10 = UOp.range(4, 1, AxisType.REDUCE)
   c13 = UOp.range(12, 3, AxisType.REDUCE)
   c18 = UOp.range(8, 2, AxisType.REDUCE)
-  c23 = UOp.param(2, dtypes.imageh((240, 128, 4)))
+  c23 = UOp.param(2, dtypes.half, shape=(240, 128, 4))
   c35 = c5.index((c7*4+c10+c13*128+c18*1536))*c23.index((c10*4+c2%4+c7*16+c2//4*512))
   c37 = UOp.param(3, dtypes.float, (960,))
   c39 = c35.reduce(c7, c10, arg=Ops.ADD)+c37.index(c2)
