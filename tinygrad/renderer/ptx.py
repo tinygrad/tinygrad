@@ -197,7 +197,8 @@ class PTXRenderer(Renderer):
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register(s) (must be CONST) and LOAD is a noop
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][slice(u.src[1].arg, u.src[1].arg+u.src[2].arg) if u.op is Ops.SHRINK else u.src[1].arg]
+        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][slice(u.src[1].arg, u.src[1].arg+u.src[2].arg) \
+          if u.op is Ops.SHRINK else u.src[1].arg]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:
