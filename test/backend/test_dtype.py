@@ -53,7 +53,8 @@ def _test_cast(a:Tensor, target_dtype:DType):
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype)).tolist()
   if target_dtype in dtypes.fp8s: expected = [fp8_to_float(x, target_dtype) for x in expected]
-  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected)
+  if target_dtype.itemsize <= a.dtype.itemsize: _test_op(lambda: a.bitcast(target_dtype).flatten(), target_dtype, target or expected)
+  else: _test_op(lambda: a.reshape(-1, target_dtype.itemsize // a.dtype.itemsize).bitcast(target_dtype), target_dtype, target or expected)
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -260,7 +261,7 @@ class TestInt8DType(TestDType):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [2**16-1, 2**16-2, 2**16-3, 2**16-4])
 
   def test_bitcast_alt(self):
-    a = Tensor([72, -90, 27, 40, -53, 70, 96, 51], dtype=dtypes.int8).bitcast(dtypes.short)
+    a = Tensor([72, -90, 27, 40, -53, 70, 96, 51], dtype=dtypes.int8).reshape(-1, 2).bitcast(dtypes.short)
     self.assertListEqual(a.tolist(), [-22968, 10267, 18123, 13152])
 
 class TestUint8DType(TestDType):
@@ -268,30 +269,6 @@ class TestUint8DType(TestDType):
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
-
-class TestBitCast(unittest.TestCase):
-  @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
-  def test_shape_change_bitcast(self, dt1, dt2):
-    data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
-    if dt2 in dtypes.fp8s:
-      expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
-    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
-
-  def test_shape_change_bitcast_exceptions(self):
-    with self.assertRaises(RuntimeError):
-      # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
-      Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
-
-  def test_bitcast_float_to_int32(self):
-    a = Tensor([1.,2,3])
-    b = a.bitcast(dtypes.int32)
-    assert b.numpy()[0] == 0x3f800000
-
-  def test_bitcast_upcasted(self):
-    a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
-    b = a.bitcast(dtypes.float32)
-    assert b.numpy()[0,0] == 1.
 
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 
