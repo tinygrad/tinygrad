@@ -253,8 +253,7 @@ class TestLinearizer(unittest.TestCase):
         if uops.index(u) < begin_range:
           assert u.src[1].op is Ops.CONST or (u.src[1].op is Ops.STACK and all(x.op is Ops.CONST for x in u.src[1].src))
         else:
-          assert u.src[1].op is Ops.CONST or u.src[1].op in GroupOp.ALU \
-            or (u.src[1].op is Ops.STACK and all(x.op in GroupOp.ALU for x in u.src[1].src))
+          assert u.src[1].op in {Ops.CONST, *GroupOp.ALU} or (u.src[1].op is Ops.STACK and all(x.op in GroupOp.ALU for x in u.src[1].src))
           assert begin_range < uops.index(u) < end_range
       # children of END are placed after ENDRANGE
       if any(x.op is Ops.END and x.src[1].op in GroupOp.ALU for x in u.src):
