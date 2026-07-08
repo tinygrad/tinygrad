@@ -70,7 +70,7 @@ def reduce_multi(root:UOp, multi:UOp):
   if multi.axis is not None and multi.axis < num_axes:
     local = multi.src[0]._rop(op, tuple(range(num_axes)))
     # allreduce in pre-cast dtype when sum_acc_dtype promoted from bf16/half
-    if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype.scalar() in (dtypes.bfloat16, dtypes.half):
+    if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
