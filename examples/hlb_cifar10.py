@@ -314,6 +314,9 @@ def train_cifar():
   opt_bias     = optim.SGD(params_bias,     lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
 
+  # realize model params and optimizer state before JIT to avoid cache misses
+  Tensor.realize(*params_dict.values(), *opt_bias.b, *opt_non_bias.b)
+
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = hyp['opt']['initial_div_factor']
   final_lr_ratio = hyp['opt']['final_lr_ratio']
