@@ -1,4 +1,3 @@
-from typing import Any
 import itertools, functools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
@@ -70,8 +69,7 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   shapes, ren = ctx
   if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
-  valid = UOp.const(dtypes.bool, True)
-  if x.op == Ops.WHERE and x.src[2].op == Ops.CONST and x.src[2].arg == Invalid: valid,x,_= x.src
+  valid, x = x.get_valid(), x.get_idx()
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
@@ -102,7 +100,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalesing
     if u.op in {Ops.LOAD, Ops.STORE}:
@@ -110,8 +108,8 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalesing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
-      idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
-      valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
+      idx, valid = idx_u.get_idx(), idx_u.get_valid()
+      root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
       elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
