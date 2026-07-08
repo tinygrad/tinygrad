@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, OSX, is_image_shape
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
@@ -217,7 +217,7 @@ class QCOMArgsState(HCQArgsState):
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
-      pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * imgdt.itemsize
+      pitch = shape[1] * 4 * imgdt.itemsize
       fmt = mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
       return [qreg.a6xx_tex_const_0(fmt=fmt) if ibo else qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=fmt),
               qreg.a6xx_tex_const_1(width=shape[1], height=shape[0]),

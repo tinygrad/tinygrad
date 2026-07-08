@@ -40,7 +40,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return None if idx is start_idx or idx is start_idx.simplify() else buf.index(idx.valid(valid))
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
-  if buf._shape is None or len(buf._shape) != 3 or buf._shape[-1] != 4: return None
+  if not is_image_shape(buf._shape): return None
   start_idx = idx_x._stack(idx_y)
   idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
