@@ -1993,9 +1993,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def bitcast(self, dtype:DTypeLike) -> Self:
     """
-    Bitcasts `self` to the given `dtype`. The shape behavior matches JAX: if the dtype sizes match, the shape is preserved, otherwise
-    if the new dtype is larger than the input dtype, the final dimension of the input tensor must be `dtype.itemsize // input_dtype.itemsize`,
-    and if the new dtype is smaller that the input dtype, a new final dimension is added of size `input_dtype.itemsize // dtype.itemsize`.
+    Bitcasts `self` to the given `dtype`. The shape behavior matches JAX:
+
+      - if the dtype sizes match, the shape is preserved
+      - if the new dtype is larger than the input dtype, the final dimension of the input tensor must be `dtype.itemsize // input_dtype.itemsize`
+      - if the new dtype is smaller that the input dtype, a new final dimension is added of size `input_dtype.itemsize // dtype.itemsize`
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([-1, 2, 3], dtype=dtypes.int32)
