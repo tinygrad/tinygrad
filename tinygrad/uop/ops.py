@@ -134,7 +134,7 @@ class recursive_property(property):
     return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
-from tinygrad.mixin import OpMixin
+from tinygrad.mixin.op import OpMixin
 from tinygrad.mixin.rand import RandMixin
 
 # NOTE: this should be frozen, but frozen is slower
@@ -253,7 +253,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if len(self.src) == 0: return ()
         return (len(self.src),) + self.src[0].shape
       case Ops.CONST:
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
+        return ()
 
       # some ops init the shape
       case Ops.GETADDR: return ()
@@ -261,7 +261,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
         if len(self.src): return self.src[0].as_shape
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
+        return ()
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
@@ -290,12 +290,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
 
-      # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
-          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),) if len(ps) > 0 else ps
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize) and len(ps) > 0:
+          if isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz: raise RuntimeError("unsupported size in bitcast")
+          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
       # MULTI marker has no shape
@@ -663,7 +663,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
-    if self.op is Ops.CONST: return (self.arg,)*self.dtype.count # NOTE: this will break
+    if self.op is Ops.CONST: return (self.arg,)
     if self.op is not Ops.STACK: return (ssimplify(self),)
     return tuple(s.arg if s.op is Ops.CONST else ssimplify(s) for s in self.src)
 
@@ -853,7 +853,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint) -> UOp:
-    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((dtype.count,) if dtype.count > 1 else ()),),
+    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg(()),),
                arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
   @property
   def expr(self) -> str:
@@ -1007,9 +1007,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      buf_shape = (prod(shape),) + ((dtype.count,) if dtype.count > 1 else ())
+      buf_shape = (prod(shape),)
       ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
-    if len(shape) > 1: ret = ret.reshape(shape + ((dtype.count,) if addrspace in (AddrSpace.LOCAL, AddrSpace.REG) and dtype.count > 1 else ()))
+    if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
@@ -1155,13 +1155,9 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 def bitcast(x, in_dtype:DType, out_dtype:DType):
   assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
-  in_count, out_count = in_dtype.count, out_dtype.count
-  in_vals = (x,) if in_count == 1 else tuple(x)
-  assert len(in_vals) == in_count, f"bitcast expected {in_count} values, got {len(in_vals)}"
-  packed = struct.pack(f"{in_count}{storage_fmt_for_dtype(in_dtype.scalar())}", *[to_storage_scalar(v, in_dtype.scalar()) for v in in_vals])
-  out_vals = struct.unpack(f"{out_count}{storage_fmt_for_dtype(out_dtype.scalar())}", packed)
-  ret = tuple(from_storage_scalar(v, out_dtype.scalar()) for v in out_vals)
-  return ret[0] if out_count == 1 else ret
+  packed = struct.pack(storage_fmt_for_dtype(in_dtype.scalar()), to_storage_scalar(x, in_dtype.scalar()))
+  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype.scalar()), packed)[0]
+  return from_storage_scalar(out_val, out_dtype.scalar())
 
 # ***** pattern matcher *****
 
@@ -1221,9 +1217,6 @@ class UPat(OpMixin):
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
-  def or_after(self, name:str|None=None):
-    return UPat.any(self if name is None else self.named(name), UPat(Ops.AFTER, name=name, src=(self,), allow_any_len=True))
-
   @staticmethod
   @functools.cache
   def var(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None): return UPat(dtype=dtype, name=name)
@@ -1243,7 +1236,6 @@ class UPat(OpMixin):
     if dtype is not None and self.match_dtype == (dtype,): return self
     return UPat(Ops.CAST, dtype, (self,), **kwargs)
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
-  def gep(self, i:int|None=None, **kwargs): return UPat(Ops.INDEX, None, (self, UPat.cvar("i") if i is not None else UPat()), **kwargs)
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, src=(self,)+src, **kwargs)
   def reduce(self, *src:UPat, **kwargs):

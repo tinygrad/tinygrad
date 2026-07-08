@@ -10,7 +10,7 @@ from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
-from tinygrad.schedule.rangeify import mop_cleanup
+from tinygrad.uop.movement import mop_cleanup
 from dataclasses import dataclass
 
 def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:

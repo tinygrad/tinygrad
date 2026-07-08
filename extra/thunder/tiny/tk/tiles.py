@@ -3,7 +3,7 @@ import functools
 from typing import Callable
 from dataclasses import dataclass
 from tinygrad.dtype import AddrSpace, DType
-from tinygrad.mixin import ElementwiseMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
