@@ -160,7 +160,7 @@ def make_cmdbuf(lin, devs):
     if s.op is not Ops.CONST: patches.append((len(blob), s))
     blob += struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0)
   buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32)
-  return buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *[make_patch(buf, off, s) for off, s in patches])
+  return buf.after(buf.store(UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob)), *[make_patch(buf, off, s) for off, s in patches])
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
@@ -435,7 +435,7 @@ def replace_params(call:UOp) -> UOp|None:
   by_root = {p.src[0]: p for p in patched}
   c_args = [by_root.get(a, a) for a in args]
 
-  sub = {unwrap_after(u): UOp.param(i, u.dtype, device=u.device) for i,u in enumerate(c_args)} | \
+  sub = {unwrap_after(u): UOp.param(i, u.dtype, shape=unwrap_after(u).shape, device=u.device) for i,u in enumerate(c_args)} | \
         {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
