@@ -57,7 +57,7 @@ def safe_load(fn:Tensor|str|pathlib.Path) -> dict[str, Tensor]:
   """
   t, data_start, metadata = safe_load_metadata(fn)
   data = t[data_start:]
-  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].reshape(-1, (dt:=safe_dtypes[v['dtype']]).itemsize).bitcast(dt).reshape(v['shape'])
           for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=None):
@@ -78,7 +78,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   j += "\x20"*(round_up(len(j),8)-len(j))
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
-  t[0:8].bitcast(dtypes.int64).assign([len(j)])
+  t[0:8].bitcast(dtypes.int64).assign(len(j))
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
