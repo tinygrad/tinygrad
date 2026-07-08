@@ -31,25 +31,6 @@ class DTypeMixin:
     """
     return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.cast(dt))
 
-  def bitcast(self, dtype:DTypeLike) -> Self:
-    """
-    Bitcasts `self` to the given `dtype`. The shape behavior matches JAX: if the dtype sizes match, the shape is preserved, otherwise
-    if the new dtype is larger than the input dtype, the final dimension of the input tensor must be `dtype.itemsize // input_dtype.itemsize`,
-    and if the new dtype is smaller that the input dtype, a new final dimension is added of size `input_dtype.itemsize // dtype.itemsize`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.bitcast(dtypes.uint32)
-    print(t.dtype, t.numpy())
-    ```
-    """
-    if (out_sz:=(dt:=to_dtype(dtype)).itemsize) > (in_sz:=self.dtype.itemsize): assert self.shape[-1] == out_sz // in_sz, \
-        f"widening bitcast from {self.dtype} to {dt} must have final dimension {out_sz // in_sz = }, but got shape {self.shape}"
-    return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.bitcast(dt))
-
   def element_size(self) -> int:
     """
     Returns the size in bytes of an individual element in the tensor.

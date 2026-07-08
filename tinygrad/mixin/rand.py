@@ -32,7 +32,7 @@ class RandMixin(OpMixin):
   def _bits_to_rand(bits, shape:tuple[int, ...], dtype:DType):
     _, nmant = dtypes.finfo(dtype)
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
-    uint_bits = bits.bitcast(uint_dtype)
+    uint_bits = bits.reshape(-1, 2).bitcast(uint_dtype) if uint_dtype == dtypes.uint64 else bits.bitcast(uint_dtype).flatten()
     float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 

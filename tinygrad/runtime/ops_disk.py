@@ -86,7 +86,7 @@ class DiskAllocator(Allocator):
   def _as_buffer(self, src:DiskBuffer): return src._buf()
   def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and self.dev.fd is not None:
+    if False and OSX and self.dev.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.dev.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
