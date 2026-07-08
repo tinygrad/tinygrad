@@ -237,7 +237,7 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.cast(self.dtype.base).contiguous()
+    x = self.cast(self.dtype).contiguous()
     if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
@@ -252,11 +252,11 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
-    assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
-    return self._data().cast(self.dtype.base.fmt, self.shape)
+    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert self.dtype.fmt != "e" or sys.version_info >= (3, 12)
+    return self._data().cast(self.dtype.fmt, self.shape)  # type: ignore[arg-type,return-value]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -288,8 +288,8 @@ class Tensor(RandMixin):
     """
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
-    if self.dtype.base in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
-    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
+    if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
+    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype))
     return self._buffer().numpy().reshape(self.shape)
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:

@@ -87,7 +87,7 @@ class PythonProgram:
         if u.op is Ops.AFTER: values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
-          storage_fmt = storage_fmt_for_dtype(u.dtype.base)
+          storage_fmt = storage_fmt_for_dtype(u.dtype)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert storage_fmt != "e"
           if u.addrspace == AddrSpace.REG:
