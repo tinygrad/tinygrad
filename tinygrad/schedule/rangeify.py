@@ -386,7 +386,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # NOTE: this has been fixed up a bit
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
-  size = prod(x.shape) // x.dtype.count
+  size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
@@ -418,7 +418,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if allow_locals:
     # handle locals
     buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
-    do_store = buf.broadcast(x.src[1].dtype.count).index(idx).store(x.src[0]).end(*rngs)
+    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
 # collapse any BUFFERIZE to single input BUFFERIZE

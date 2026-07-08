@@ -23,7 +23,7 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
   def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
-  return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
+  return root.const_like(convert(c.arg))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.arg
@@ -430,7 +430,7 @@ pm_clean_up_group_sink = PatternMatcher([
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
+   lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),))),
   # ** where **
   # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
   # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
