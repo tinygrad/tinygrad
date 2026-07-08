@@ -453,7 +453,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
-    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype.base), (self,)+tuple(new_srcs), **kwargs)
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if self.addrspace in (None, AddrSpace.ALU) or self.device is not None: return super(UOp, self).__getitem__(idx)
@@ -473,10 +473,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
+    return UOp.const(dtype or self.dtype, b, shape=self._shape)
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
     # for use after movement ops have been removed
-    ret = UOp.const(dtype or self.dtype.base, b)
+    ret = UOp.const(dtype or self.dtype, b)
     if self.shape == (): return ret
     if len(self.shape) == 1: return UOp(Ops.STACK, ret.dtype, (ret,)*self.max_numel())
     raise RuntimeError(f"vconst_like only works on 0 or 1D shapes, not {self.shape}")
@@ -495,7 +495,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def bitcast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
     return self if self.dtype == dtype else UOp(Ops.BITCAST, dtype, (self,))
-  def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
+  def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype), src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, dtypes.void, srcs, **kwargs)
@@ -512,7 +512,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
     dims, device, threads = arg
-    dtype_in, dtype_out = a.dtype.base, acc.dtype.base
+    dtype_in, dtype_out = a.dtype, acc.dtype
     tc_upcast_axes = tuple(((i, s.shape[-1]),) for i,s in enumerate((a, b, acc)))
     name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
     return UOp(Ops.WMMA, dtype_out, (a, b, acc), arg=(name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ()))
@@ -828,7 +828,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return ret
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     if (cret:=buffers.get(self)) is not None: return cret
-    rdtype = self.dtype.base
+    rdtype = self.dtype
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
     else: ret = Buffer(self.device, self.max_numel(), rdtype).ref(1)
     buffers[self] = ret

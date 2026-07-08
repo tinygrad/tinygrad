@@ -118,7 +118,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   k = UOp.range(K, 0, AxisType.REDUCE)
   mul = (A.flatten().index((m*UOp.const(dtypes.weakint, K)+k))*
          B.flatten().index((k*UOp.const(dtypes.weakint, N)+n))).cast(dtypes.float32)
-  red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
+  red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype)
   store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n)).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 

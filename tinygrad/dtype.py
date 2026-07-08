@@ -69,10 +69,6 @@ class DType(metaclass=DTypeMetaClass):
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt, self.count) < (o.priority, o.bitsize, o.name, o.fmt, o.count)
-  @property
-  def base(self): return self
-  @property
-  def vcount(self): return self.count
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"

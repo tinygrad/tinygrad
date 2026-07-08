@@ -211,14 +211,14 @@ class TestLinearizer(unittest.TestCase):
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
         local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
-        assert local[0].dtype.base == acc_dtype
+        assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
       local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
-      self.assertEqual(local[0].dtype.base, expected_dtype)
+      self.assertEqual(local[0].dtype, expected_dtype)
 
     tests = (
       (dtypes.float16, None, dtypes.float),

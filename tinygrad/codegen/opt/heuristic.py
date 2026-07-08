@@ -50,7 +50,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   if IMAGE:
     for buf_index,buf in enumerate(k.bufs):
-      if image_valid_dims(buf.src[0].dtype.base, buf.src[0].max_numel(), k.ren.target.arch):
+      if image_valid_dims(buf.src[0].dtype, buf.src[0].max_numel(), k.ren.target.arch):
         # part of is_expanded
         unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
           c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
