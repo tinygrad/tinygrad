@@ -292,9 +292,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize) and len(ps) > 0:
-          if isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz: raise RuntimeError("unsupported size in bitcast")
-          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
+        if (output_sz:=self.dtype.itemsize) < (input_sz:=self.src[0].dtype.itemsize): return ps+(input_sz // output_sz,)
+        if output_sz > input_sz:
+          assert ps[-1] == output_sz // input_sz, f"invalid widening bitcast: input shape {ps}, final dim should be {output_sz // input_sz}"
+          return ps[:-1]
         return ps
 
       # MULTI marker has no shape
