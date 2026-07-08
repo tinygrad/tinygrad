@@ -36,8 +36,9 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  n_bufs, n_vars, gids = len(prginfo.globals), len(prginfo.vars), set(prginfo.globals)
-  sink, lds_size = prg.src[0], 0
+  sink, lds_size, n_bufs, n_vars, gids = prg.src[0], 0, len(prginfo.globals), len(prginfo.vars), set([0, 1, 2])
+  # Hack for now, derive from local_size/global_size?
+  # - maybe just add which kernel shape indices are used to program info ex. gidx_used, lidx_used or sum
   for u in sink.toposort():
     if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
   code_bytes = b"".join(inst.to_bytes() for inst in insts)

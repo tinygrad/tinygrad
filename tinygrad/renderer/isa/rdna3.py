@@ -168,7 +168,8 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = to_vgpr(ctx, const(dtypes.int, disp_scale.bit_length() - 1))
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
-  return (idx << shft, base, const(dtypes.int16, 0))
+  # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
+  return (UOp(Ops.SHL, dtypes.uint32, src=(idx, shft)), base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
@@ -177,7 +178,7 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
   shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
-  # NOTE: manual SHR construction to avoid none shape error mixing with Ops.INS? fix this somehow
+  # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
   return (UOp(Ops.SHL, dtypes.uint32, src=(idx.cast(dtypes.uint32), shft)), const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
