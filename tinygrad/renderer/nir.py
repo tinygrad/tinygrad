@@ -121,6 +121,13 @@ class NIRRenderer(Renderer):
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
   extra_matcher = PatternMatcher([
+    # scalarize register vectors
+    (UPat(Ops.STORE, src=(UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.cvar("start"), UPat.cvar("slen"))), UPat.var("val"))),
+     lambda buf,start,slen,val: UOp.group(*[buf.index(start.const_like(start.arg+i)).store(val.index(i)) for i in range(slen.arg)]) \
+       if buf.addrspace == AddrSpace.REG and slen.arg > 1 else None),
+    (UPat(Ops.LOAD, src=(UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.cvar("start"), UPat.cvar("slen"))),), name="ld"),
+     lambda buf,start,slen,ld: UOp(Ops.STACK, ld.dtype, tuple(buf.index(start.const_like(start.arg+i)).load() for i in range(slen.arg))) \
+       if buf.addrspace == AddrSpace.REG and slen.arg > 1 else None),
     # handle negative unsigned CONST
     (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype, x.dtype.max+x.arg+1) if x.arg < 0 else None),
     # from ptx
