@@ -97,7 +97,7 @@ string_rewrite = PatternMatcher([
    lambda ctx, x, a: f"cvt{modifier(x.dtype, a.dtype)}.{ctx.cast_types[x.dtype]}.{ctx.cast_types[a.dtype]} {ctx.r[x]}, {ctx.r[a]};"),
   # store / gated load / load
   (UPat(Ops.STORE, src=(UPat(name="loc"), UPat.var("var"))), lambda ctx, loc, var:
-   f"mov.{'pred' if var.dtype == dtypes.bool else 'b'+ctx.types[var.dtype][1:]} {ctx.r[loc]}, {ctx.r[var]};" \
+   [f"mov.{'pred' if var.dtype == dtypes.bool else 'b'+ctx.types[var.dtype][1:]} {l}, {v};" for l, v in zip(ctx.r[loc], ctx.r[var])] if isinstance(ctx.r[loc], list) and isinstance(ctx.r[var], list) else f"mov.{'pred' if var.dtype == dtypes.bool else 'b'+ctx.types[var.dtype][1:]} {ctx.r[loc]}, {ctx.r[var]};"
      if loc.addrspace == AddrSpace.REG else None),
   (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("var"))),
    lambda ctx, loc, var: f"st.{mem_type(loc)}" + \
@@ -195,8 +195,13 @@ class PTXRenderer(Renderer):
         r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
-        # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].arg]
+        # on REG, INDEX/SHRINK pick the register(s) (must be CONST) and LOAD is a noop
+        if u.op is Ops.LOAD:
+          r[u] = r[u.src[0]]
+        elif u.op is Ops.SHRINK:
+          r[u] = r[u.src[0]][u.src[1].arg:(u.src[1].arg + u.src[2].arg)]
+        else:
+          r[u] = r[u.src[0]][u.src[1].arg]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:
