@@ -1629,11 +1629,11 @@ pm_lower_index_dtype = PatternMatcher([
   # remove hanging casts for images
   (UPat(Ops.PARAM, src=(UPat.var("shape").cast(),), name="p"), lambda p,shape: p.replace(src=(shape,))),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_y", dtypes.ints).cast(), UPat.var("idx_x", dtypes.ints).cast()),),
-   lambda buf,idx_x,idx_y: buf.index(idx_y, idx_x)),
+   lambda buf,idx_x,idx_y: buf.index(idx_y, idx_x, dtype=dtypes.float)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"),
                         UPat.var("gate").where(UPat.var("idx_y", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)),
                         UPat.var("gate").where(UPat.var("idx_x", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
-   lambda buf,idx_x,idx_y,gate: buf.index(idx_y.valid(gate), idx_x.valid(gate))),
+   lambda buf,idx_x,idx_y,gate: buf.index(idx_y.valid(gate), idx_x.valid(gate), dtype=dtypes.float)),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
 ])
