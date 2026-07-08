@@ -274,9 +274,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
+
+      # param has shape as the only arg
       case Ops.PARAM:
-        if isinstance(self.dtype, ImageDType): return self.dtype.shape
-        return self.src[0].as_shape if len(self.src) >= 1 else None
+        return self.src[0].as_shape
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA:
@@ -1626,6 +1627,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(idx.valid(gate))),
   # remove hanging casts for images
+  (UPat(Ops.PARAM, src=(UPat.var("shape").cast(),), name="p"), lambda p,shape: p.replace(src=(shape,))),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_y", dtypes.ints).cast(), UPat.var("idx_x", dtypes.ints).cast()),),
    lambda buf,idx_x,idx_y: buf.index(idx_y, idx_x)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"),
