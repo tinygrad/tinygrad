@@ -104,10 +104,8 @@ class Ops(FastEnum):
 
   # ** 7 -- pattern compiler IR (used in upat.py) **
   # PLITERAL carries a Python literal as an arg for CUSTOM predicates
-  # PCAPTURE binds a matched UOp to a name (replaces misused STORE)
   # PFORALL is a for-all quantifier over sources (replaces misused RANGE)
-  # PFRAGMENT is a rendered string fragment (replaces misused NOOP)
-  PLITERAL = auto(); PCAPTURE = auto(); PFORALL = auto(); PFRAGMENT = auto()
+  PLITERAL = auto(); PFORALL = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}

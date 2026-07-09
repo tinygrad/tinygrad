@@ -103,7 +103,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PLITERAL | Ops.PFRAGMENT | Ops.PCAPTURE | Ops.PFORALL:
+    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PLITERAL | Ops.PFORALL:
       return dtypes.void
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
@@ -340,7 +340,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         input_shapes = [x._shape for x in self.src if x._shape is not None]
         return _broadcast_shape(*input_shapes) if input_shapes else None
       case Ops.CUSTOM_FUNCTION: return None
-      case Ops.PLITERAL | Ops.PFRAGMENT | Ops.PCAPTURE | Ops.PFORALL: return None
+      case Ops.PLITERAL | Ops.PFORALL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape

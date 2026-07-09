@@ -21,7 +21,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=self.arg)), arg="{0}.arg == {1}"))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
-  if self.name is not None: and_clause.append(UOp(Ops.PCAPTURE, src=(UOp(Ops.CUSTOMI, arg=self.name), base)))
+  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=self.name), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=tuple(self.match_dtype))),
@@ -38,7 +38,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-      it = UOp(Ops.PFRAGMENT, arg=f"ituop{depth}")
+      it = UOp(Ops.CUSTOMI, arg=f"ituop{depth}")
       match = _get_clause(next(self.src[0]), it, depth+1)
       and_clause.append(UOp(Ops.PFORALL, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
     # multi match (fork)
@@ -72,26 +72,26 @@ def do_process_and(a:UOp) -> UOp|None:
     or_clause = [UOp(Ops.OR, src=tuple([UOp(Ops.AND, src=x) for x in itertools.product(*[x.src for x in or_clause])]))]
     found = True
 
-  # handle captures
-  stores, new_src = partition(new_src, lambda x: x.op is Ops.PCAPTURE)
+  # handle stores
+  stores, new_src = partition(new_src, lambda x: x.op is Ops.STORE)
   if len(stores):
     if len(or_clause):
-      # push captures to the top if we have an or_clause
+      # push stores to the top if we have an or_clause
       assert len(or_clause) == 1 and all(x.op is Ops.AND for x in or_clause[0].src)
       or_clause = [UOp(Ops.OR, src=tuple([x.replace(src=x.src+tuple(stores)) for x in or_clause[0].src]))]
       found = True
     else:
-      # check for duplicate captures
+      # check for duplicate stores
       dict_stores: dict[UOp, UOp] = {}
       for a in stores:
         if a.src[0] in dict_stores:
-          # duplicate capture is an identity compare
+          # duplicate store is an identity compare
           new_src.append(UOp(Ops.CUSTOM, src=(dict_stores[a.src[0]], a.src[1]), arg="{0} is {1}"))
           found = True
         else:
           dict_stores[a.src[0]] = a.src[1]
-      # put the captures back
-      for k,v in dict_stores.items(): new_src.append(UOp(Ops.PCAPTURE, src=(k,v)))
+      # put the stores back
+      for k,v in dict_stores.items(): new_src.append(UOp(Ops.STORE, src=(k,v)))
 
   # reassemble, if there's any deduping to do, do it
   if len(dretand:=dedup(new_src+or_clause)) != len(new_src)+len(or_clause): found = True
@@ -103,17 +103,17 @@ pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=F
 # renderer
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
-  return UOp(Ops.PFRAGMENT, arg=ret)
+  return UOp(Ops.CUSTOMI, arg=ret)
 
 pm_renderer = PatternMatcher([
   (UPat(Ops.PLITERAL, name="x"), wrap),
 
   # PFORALL can't have OR inside it
-  (UPat(Ops.PFORALL, src=(UPat(Ops.AND, src=UPat(Ops.PFRAGMENT), name="x"), UPat(), UPat()), name="r"),
-    lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.PFRAGMENT, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
+  (UPat(Ops.PFORALL, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
+    lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
-  (UPat(Ops.CUSTOM, src=UPat(Ops.PFRAGMENT), name="x"), lambda x: UOp(Ops.PFRAGMENT, arg=x.arg.format(*[y.arg for y in x.src]))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.PFRAGMENT, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
+  (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=x.arg.format(*[y.arg for y in x.src]))),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
@@ -124,10 +124,10 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
-    elif s.op is Ops.PCAPTURE:
-      assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.PFRAGMENT
+    elif s.op is Ops.STORE:
+      assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.CUSTOMI
       store_pieces.append(f"{s.src[0].arg}={s.src[1].arg}")
-    elif s.op is Ops.PFRAGMENT: and_pieces.append(s.arg)
+    elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
@@ -140,7 +140,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp(Ops.PFRAGMENT, arg="uop"))
+  ret = _get_clause(self, UOp(Ops.CUSTOMI, arg="uop"))
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):
