@@ -108,7 +108,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return None
     case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
-         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE:
+         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
       # pass through first
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
@@ -122,9 +122,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
       return src[0].dtype
     case Ops.BIND:
-      # TODO: BIND should have src[0].dtype == src[1].dtype, but pm_post_sched_cache replaces shape PARAMs
-      # with input BUFFERs of a different dtype when resolving linear calls
-      return None
+      assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
+      return src[0].dtype
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
@@ -135,9 +134,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.BUFFER | Ops.PARAM:
       # TODO: dtype should move to ParamArg
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
-      return None
-    case Ops.SPECIAL:
-      # TODO: special should always be int probably, or maybe shouldn't exist
       return None
     case Ops.SLICE:
       # TODO: slice just shouldn't exist
