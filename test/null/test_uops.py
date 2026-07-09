@@ -344,10 +344,10 @@ class TestUopsObject(unittest.TestCase):
 
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_empty(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=())
+    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(simplify=False), "{}")
   def test_render_vectorize_empty_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=())
+    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
     u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
