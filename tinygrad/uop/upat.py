@@ -6,6 +6,10 @@ from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deco
 class UPatCompileError(Exception): pass
 
 # **** UPat compiled ****
+# This file builds an IR of match predicates and compiles them to Python source.
+# Ops used: CUSTOM (format-string predicate over operands), CUSTOMI (inline string fragment),
+#           STORE (bind a matched UOp to a name), PYLITERAL (Python literal for CUSTOM operands),
+#           AND/OR (clause combininers).
 
 def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.is_any:
@@ -14,24 +18,25 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   # build the and_clause for acceptance
   and_clause:list[UOp] = []
   if self.op is not None:
-    if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
+    if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=self.arg)), arg="{0}.arg == {1}"))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.arg)), arg="{0}.arg == {1}"))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=self.name), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=tuple(self.match_dtype))),
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_dtype))),
                             arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=self.match_dtype[0])),
-                               arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
+    else:
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])),
+                            arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
   if self.match_tag is not None:
     if len(self.match_tag) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=tuple(self.match_tag))), arg="{0}.tag in {1}"))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PLITERAL, arg=self.match_tag[0])), arg="{0}.tag == {1}"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_tag))), arg="{0}.tag in {1}"))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_tag[0])), arg="{0}.tag == {1}"))
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
@@ -40,7 +45,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.CUSTOMI, arg=f"ituop{depth}")
       match = _get_clause(next(self.src[0]), it, depth+1)
-      and_clause.append(UOp(Ops.PFORALL, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
@@ -106,11 +111,11 @@ def wrap(ctx, x) -> UOp:
   return UOp(Ops.CUSTOMI, arg=ret)
 
 pm_renderer = PatternMatcher([
-  (UPat(Ops.PLITERAL, name="x"), wrap),
+  (UPat(Ops.PYLITERAL, name="x"), wrap),
 
-  # PFORALL can't have OR inside it
-  (UPat(Ops.PFORALL, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
-    lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
+  # AND of CUSTOMI fragments inside a CUSTOM becomes a single CUSTOMI (joined with " and ")
+  (UPat(Ops.CUSTOM, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
+    lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=x.arg.format(*[y.arg for y in x.src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))

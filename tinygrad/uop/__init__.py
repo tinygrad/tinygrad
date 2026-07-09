@@ -103,9 +103,8 @@ class Ops(FastEnum):
   REDUCE = auto(); ALLREDUCE = auto()
 
   # ** 7 -- pattern compiler IR (used in upat.py) **
-  # PLITERAL carries a Python literal as an arg for CUSTOM predicates
-  # PFORALL is a for-all quantifier over sources (replaces misused RANGE)
-  PLITERAL = auto(); PFORALL = auto()
+  # PYLITERAL carries a Python literal as an arg for CUSTOM predicates
+  PYLITERAL = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
