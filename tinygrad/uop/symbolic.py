@@ -99,9 +99,8 @@ pm_data_invalid = PatternMatcher([
 
 propagate_invalid = pm_index_invalid + pm_data_invalid
 
-# NOTE: this happens in padded WMMA, so rewrite to 0
 pm_remove_invalid = PatternMatcher([
-  (invalid_pat, lambda i: i.const_like(0) if i.dtype is not dtypes.weakint else None),
+  (invalid_pat, lambda i: i.const_like(0)),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
