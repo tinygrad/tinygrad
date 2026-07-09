@@ -95,10 +95,74 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
       if s in ret: ret[s][u] = None
   return ret
 
+def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
+  # here are the dtype production rules, eventually this will go in UOp as a recursive property
+  match op:
+    case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | \
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
+         Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
+      # always void
+      return dtypes.void
+    case Ops.NOOP:
+      # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
+      return None
+    case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
+         Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
+         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE:
+      # pass through first
+      return src[0].dtype
+    case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
+      return dtypes.bool
+    case Ops.WHERE:
+      assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
+      assert src[1].dtype == src[2].dtype, f"dtype mismatch in where {src[1].dtype} != {src[2].dtype}"
+      return src[1].dtype
+    case Ops.STACK:
+      if len(src) == 0: return dtypes.void
+      if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
+      return src[0].dtype
+    case Ops.BIND:
+      # TODO: BIND should have src[0].dtype == src[1].dtype, but pm_post_sched_cache replaces shape PARAMs
+      # with input BUFFERs of a different dtype when resolving linear calls
+      return None
+    case Ops.WMMA:
+      # WMMA output dtype is the accumulator dtype (src[2])
+      return src[2].dtype
+    case Ops.GETTUPLE:
+      # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+      in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
+      return in_tuple.src[arg].dtype
+    case Ops.BUFFER | Ops.PARAM:
+      # TODO: dtype should move to ParamArg
+      assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
+      return None
+    case Ops.SPECIAL:
+      # TODO: special should always be int probably, or maybe shouldn't exist
+      return None
+    case Ops.SLICE:
+      # TODO: slice just shouldn't exist
+      return None
+    case Ops.CAST | Ops.BITCAST:
+      # TODO: dtype should move to arg
+      return None
+    case Ops.CONST:
+      # TODO: need const refactor to bool/weakint/weakfloat
+      return None
+  if op in GroupOp.Unary: return src[0].dtype
+  # NOTE: CMPLT, CMPNE, CMPEQ, and WHERE are handled above
+  if op in GroupOp.Broadcastable:
+    # TODO: support dtype broadcasting (promotion)
+    if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
+    return src[0].dtype
+  if op in GroupOp.Movement: return src[0].dtype
+  raise RuntimeError(f"no dtype for {op} with arg {arg}")
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+      raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
