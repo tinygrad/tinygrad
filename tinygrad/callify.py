@@ -126,7 +126,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
-  new_call = UOp(Ops.CALL, c.dtype, (fxn, *input_buffers, *outs), c.arg)
+  new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape

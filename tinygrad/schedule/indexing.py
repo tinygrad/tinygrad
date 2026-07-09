@@ -75,7 +75,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         # LOCAL: None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
-        new_src = UOp(Ops.STAGE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
+        new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
   return x.replace(src=tuple(new_srcs))
@@ -91,7 +91,7 @@ def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
   new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
-  return UOp(Ops.REDUCE, x.dtype, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
+  return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]

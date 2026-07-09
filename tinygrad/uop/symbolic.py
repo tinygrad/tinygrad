@@ -422,14 +422,14 @@ pm_clean_up_group_sink = PatternMatcher([
   # clean up GROUP/SINK
   (UPat(Ops.GROUP, src=(UPat.var("x"),)), lambda x: x),
   (UPat((Ops.SINK, Ops.GROUP), name="root"),
-    lambda root: UOp(root.op, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), root.arg)
+    lambda root: UOp(root.op, src=tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), arg=root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype, (x,y)),))),
+   lambda x,y,alu: UOp(Ops.STACK, src=(UOp(alu.op, src=(x,y)),))),
   # ** where **
   # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
   # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),

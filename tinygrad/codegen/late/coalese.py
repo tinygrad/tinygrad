@@ -40,6 +40,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
   if not is_image_shape(buf._shape): return None
+  if idx_x.dtype != idx_y.dtype: idx_x, idx_y = idx_x.cast(dtypes.int), idx_y.cast(dtypes.int)
   start_idx = idx_x._stack(idx_y)
   idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
@@ -145,7 +146,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.index, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(dtypes.index, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):

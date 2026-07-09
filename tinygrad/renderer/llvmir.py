@@ -256,27 +256,27 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint16.vec(4)), x.src[1].bitcast(dtypes.uint16.vec(4)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(4) else None),
+          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint16.vec(4)), x.src[1].bitcast(dtypes.uint16.vec(4)),
+            x.src[2]), arg=(*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(4) else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
+          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
+            x.src[2]), arg=(*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
       ])
     if target.arch in {"gfx1100", "gfx1151"}:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8))),
-        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
-          x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
+          lambda x: UOp(Ops.WMMA, src=(x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), arg=(*x.arg,)).cast(dtypes.half.vec(8))),
+        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
+          x.src[2]), arg=x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
       ])
     if target.arch in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
-          (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA,
+          src=(x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), arg=(*x.arg,))
             .bitcast(dtypes.bfloat16.vec(8)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(8), (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
+          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
+            x.src[2]), arg=(*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
       ])
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
