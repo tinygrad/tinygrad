@@ -28,6 +28,7 @@ class ParamArg:
   addrspace: AddrSpace|None = AddrSpace.GLOBAL
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
+  def with_dtype(self, dtype:DType): return ParamArg(self.slot, dtype, self.vmin_vmax, self.name, self.addrspace, self.axis, self.device)
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
@@ -1680,8 +1681,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.weakint),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=dtypes.int, arg=ParamArg(u.arg.slot, dtypes.int, u.arg.vmin_vmax, u.arg.name,
-      u.arg.addrspace, u.arg.axis, u.arg.device)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(dtype=dtypes.int, arg=u.arg.with_dtype(dtypes.int)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
