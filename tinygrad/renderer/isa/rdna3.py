@@ -349,7 +349,11 @@ def alu(ctx, x:UOp):
   _lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
   _lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
   if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_lshl[max(2,x.dtype.itemsize)] if x.arg is None else x.arg))
-  elif x.op is Ops.SHR: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_lshr[max(2,x.dtype.itemsize)] if x.arg is None else x.arg))
+  elif x.op is Ops.SHR:
+    if x.arg is not None: ins = x.arg
+    elif x.dtype is dtypes.int32: ins = RDNA3Ops.v_ashrrev_i32_e32 # TODO: handle 64 bit
+    else: ins = _lshr[max(2,x.dtype.itemsize)]
+    return _vop2(ctx, x.replace(src=x.src[::-1]).ins(ins))
 
   dt = x.dtype
   if dt in dtypes.int8s: dt = dtypes.uint16 if dtypes.is_unsigned(x.dtype) else dtypes.int16
