@@ -102,7 +102,7 @@ class PythonProgram:
         elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
-          if u.src[0].addrspace == AddrSpace.ALU:
+          if u.src[0].addrspace == AddrSpace.ALU or u.src[0].op is Ops.STACK:
             ret = [src_values[0][i][t] for t,i in enumerate(src_values[1])]
           elif is_image_shape(u.src[0]._shape):
             for m,oy,ox in zip(*src_values):
@@ -223,6 +223,7 @@ class PythonRenderer(Renderer):
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
+  def _map(self, buf): return buf.owner.allocator._as_buffer(buf)
   def _copyin(self, dest, src:memoryview): dest[:] = src
   def _copyout(self, dest:memoryview, src): dest[:] = src
 
