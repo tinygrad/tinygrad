@@ -98,7 +98,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.reshape(src.shape).multi(resolved.arg).contiguous(tag=c.tag)
+    return view.reshape(resolved.src[0].shape).multi(resolved.arg).contiguous(tag=c.tag)
 
   return None
 
