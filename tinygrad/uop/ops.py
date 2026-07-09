@@ -104,7 +104,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # always void
       return dtypes.void
     case Ops.NOOP:
-      # NOOP can be void or pass through dtype (e.g. x.f(Ops.NOOP) or substitute with NOOP)
+      # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
     case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
@@ -122,7 +122,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
       return src[0].dtype
     case Ops.BIND:
-      # TODO: BIND dtype is src[0].dtype, but rewrites can change src[0] (PARAM->BUFFER)
+      # TODO: BIND should have src[0].dtype == src[1].dtype, but pm_post_sched_cache replaces shape PARAMs
+      # with input BUFFERs of a different dtype when resolving linear calls
       return None
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
