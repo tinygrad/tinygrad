@@ -115,7 +115,7 @@ class GroupOp:
 
   Defines = {Ops.PARAM, Ops.BUFFER}
 
-  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM}
+  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   # BinaryOps that can be flipped

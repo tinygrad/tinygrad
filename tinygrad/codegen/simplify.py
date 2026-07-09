@@ -9,8 +9,7 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
+  return r.replace(src=r.src[:off]+tuple(UOp.sink(*rngs).ranges))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
