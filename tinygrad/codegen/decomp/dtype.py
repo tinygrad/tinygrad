@@ -120,7 +120,7 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   x.arg.with_dtype(l2i_dt[x.dtype]).replace(dtype=l2i_dt[x.dtype], src=(sz*2,)) if x.dtype in l2i_dt else None),
+   x.replace(dtype=l2i_dt[x.dtype], src=(sz*2,), arg=x.arg.with_dtype(l2i_dt[x.dtype])) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag(0), val.rtag(0))).group(st.replace(src=(idx.rtag(1), val.rtag(1)))) if val.tag is None else None),
@@ -144,7 +144,7 @@ pm_long_decomp = PatternMatcher([
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
-   x.arg.with_dtype(f2f_dt[ctx[0]]).replace(dtype=f2f_dt[ctx[0]], tag=ctx[0])
+   x.replace(dtype=f2f_dt[ctx[0]], arg=x.arg.with_dtype(f2f_dt[ctx[0]]), tag=ctx[0])
    if x.dtype == ctx[0] and (x.op is not Ops.INDEX or x.src[0].op not in {Ops.LOAD, Ops.STACK}) else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
   # bitcasted load should just replace load
