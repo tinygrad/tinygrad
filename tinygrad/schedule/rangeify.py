@@ -377,7 +377,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, x.dtype, (shape_to_shape_arg((size,)),), ParamArg(next(ctx), device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
     if x.src[0].op is Ops.SLICE:
       # no INDEX on SLICE, this could be cleaner
       do_store = buf.store(x.src[0]).end(*rngs)
@@ -439,8 +439,8 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp(Ops.PARAM, buf.dtype, (UOp.const(dtypes.int, prod(buf.max_shape)),),
-              arg=ParamArg(ctx.dg, addrspace=buf.addrspace, device=buf.device))
+  param = UOp(Ops.PARAM, src=(UOp.const(dtypes.int, prod(buf.max_shape)),),
+              arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, to_dtype, truncate, least_upper_dtype, Invalid, AddrSpace
@@ -22,6 +22,7 @@ class AxisType(Enum):
 @dataclass(frozen=True, order=True)
 class ParamArg:
   slot: int
+  dtype: DType
   vmin_vmax: tuple[PyConst, PyConst]|None = None
   name: str|None = None
   addrspace: AddrSpace|None = AddrSpace.GLOBAL
@@ -29,7 +30,7 @@ class ParamArg:
   device: str|tuple[str, ...]|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
-    args = [repr(self.slot)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
+    args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
@@ -139,15 +140,14 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       assert dtypes.is_int(src[1].dtype), "shift distance must be int"
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
-      # TODO: dtype should move to ParamArg
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
-      return None
+      return arg.dtype
     case Ops.SLICE:
       # TODO: slice just shouldn't exist
       return None
     case Ops.CAST | Ops.BITCAST:
-      # TODO: dtype should move to arg
-      return None
+      assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
+      return arg
     case Ops.CONST:
       # TODO: need const refactor to bool/weakint/weakfloat
       return None
@@ -561,10 +561,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def cast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
     if self.dtype == dtype: return self
-    return UOp(Ops.CAST, dtype, (self,))
+    return UOp(Ops.CAST, arg=dtype, src=(self,))
   def bitcast(self, dtype:DTypeLike):
     dtype = to_dtype(dtype)
-    return self if self.dtype == dtype else UOp(Ops.BITCAST, dtype, (self,))
+    return self if self.dtype == dtype else UOp(Ops.BITCAST, arg=dtype, src=(self,))
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
@@ -763,7 +763,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     slot = next(UOp.unique_num) if num is None else num
-    return UOp(Ops.BUFFER, dtype, (shape_to_shape_arg((size,)),), ParamArg(slot, device=device))
+    return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(slot, dtype, device=device))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
@@ -919,8 +919,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.index) -> UOp:
-    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg(()),),
-               arg=ParamArg(-1, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
+    return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),),
+               arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
   @property
   def expr(self) -> str:
     assert self.op is Ops.PARAM
@@ -1070,11 +1070,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),)
-      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, dtype, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
@@ -1092,7 +1092,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if shape is not None and axis is not None and isinstance(device, tuple):
       shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
-    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
+    return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
@@ -1684,7 +1684,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.index),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.index)),
   (UPat(Ops.PARAM, dtype=dtypes.index, name="u"),
-    lambda u: u.replace(dtype=dtypes.int).cast(dtypes.index) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=dtypes.int)).cast(dtypes.index) if u.addrspace == AddrSpace.ALU else None),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.index), UPat.cvar("val").cast(dtypes.index))),
     lambda var,val: var.bind(val).cast(dtypes.index)),
   # remove hanging casts
