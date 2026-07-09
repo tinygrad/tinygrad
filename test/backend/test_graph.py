@@ -43,6 +43,9 @@ def get_buf_uop(buf:Buffer, cache:dict[Buffer,UOp]) -> UOp:
     buffers[u] = buf
   return cache[buf]
 
+def copy_call(dst:Buffer, src:Buffer, c:dict[Buffer,UOp]) -> UOp:
+  return get_buf_uop(src,c).copy_to_device(dst.device).call(get_buf_uop(dst,c), get_buf_uop(src,c))
+
 def make_graph(graph_cls, calls:list[UOp]):
   linear = compile_linear(UOp(Ops.LINEAR, src=tuple(calls)))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(linear,), arg="graph")
@@ -132,7 +135,7 @@ class TestGraph(unittest.TestCase):
 
     calls = [
       get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c)),
-      UOp(Ops.COPY).call(get_buf_uop(b[3],c), get_buf_uop(b[0],c)),
+      copy_call(b[3], b[0], c),
     ]
 
     zero_bufs([b[0], b[3]])
@@ -151,7 +154,7 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(b[1],c), get_buf_uop(b[0],c)),
+      copy_call(b[1], b[0], c),
       get_ast(d0, 2).call(get_buf_uop(b[3],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c)),
     ]
 
@@ -194,7 +197,7 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(b1[0],c), get_buf_uop(b0[0],c)),
+      copy_call(b1[0], b0[0], c),
       get_ast(d0, 2).call(get_buf_uop(b0[2],c), get_buf_uop(b0[0],c), get_buf_uop(b0[1],c)),
     ]
 
@@ -219,7 +222,7 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(b0,c), get_buf_uop(b2,c)),
+      copy_call(b0, b2, c),
       get_ast(d0, 2).call(get_buf_uop(b1,c), get_buf_uop(b0,c), get_buf_uop(b2,c)),
     ]
 
@@ -245,8 +248,8 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(base,c), get_buf_uop(copy_src_full,c)),
-      UOp(Ops.COPY).call(get_buf_uop(v_lo,c), get_buf_uop(copy_src_lo,c)),
+      copy_call(base, copy_src_full, c),
+      copy_call(v_lo, copy_src_lo, c),
       get_ast(d0, 2).call(get_buf_uop(out,c), get_buf_uop(v_hi,c), get_buf_uop(a,c)),
     ]
 
@@ -272,8 +275,8 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(copy_dst,c), get_buf_uop(base,c)),
-      UOp(Ops.COPY).call(get_buf_uop(v_lo,c), get_buf_uop(copy_src_lo,c)),
+      copy_call(copy_dst, base, c),
+      copy_call(v_lo, copy_src_lo, c),
       get_ast(d0, 2).call(get_buf_uop(v_hi,c), get_buf_uop(a,c), get_buf_uop(b,c)),
     ]
 
@@ -299,8 +302,8 @@ class TestGraph(unittest.TestCase):
     c: dict[Buffer,UOp] = {}
 
     calls = [
-      UOp(Ops.COPY).call(get_buf_uop(base,c), get_buf_uop(copy_src_full,c)),
-      UOp(Ops.COPY).call(get_buf_uop(v_mid,c), get_buf_uop(copy_src_mid,c)),
+      copy_call(base, copy_src_full, c),
+      copy_call(v_mid, copy_src_mid, c),
       get_ast(d0, 2).call(get_buf_uop(out1,c), get_buf_uop(v_lo,c), get_buf_uop(a,c)),
       get_ast(d0, 2).call(get_buf_uop(out2,c), get_buf_uop(v_hi,c), get_buf_uop(a,c)),
     ]

@@ -97,6 +97,9 @@ spec_shared = PatternMatcher([
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
+  # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
+  (UPat(Ops.PYLITERAL), lambda: True),
+
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 

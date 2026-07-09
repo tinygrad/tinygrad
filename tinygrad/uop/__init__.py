@@ -102,6 +102,10 @@ class Ops(FastEnum):
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
 
+  # ** 7 -- pattern compiler IR (used in upat.py) **
+  # PYLITERAL carries a Python literal as an arg for CUSTOM predicates
+  PYLITERAL = auto()
+
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.CDIV, Ops.MAX, Ops.CMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
