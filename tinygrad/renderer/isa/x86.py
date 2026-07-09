@@ -198,16 +198,16 @@ pre_isel_matcher = PatternMatcher([
   (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(arg=x.dtype.scalar().vec(c)) \
     if (c:=max([s.dtype.count for s in x.src], default=1)) > x.dtype.count else None),
   # zero extending scalar 32bit int is a noop
-  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
+  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP, arg=None) if y.dtype.count == 1 else None),
   # cast between signed and unsigned int is a noop
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
+   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize == y.dtype.itemsize else None),
   # cast to < scalar int is a noop
   (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
+   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
   # bitcasts between scalar floats and ints are real, rest are noops
   (UPat.var("y").bitcast().named("x"), lambda y,x: None if y.dtype in dtypes.floats and x.dtype in dtypes.ints or \
-   y.dtype in dtypes.ints and x.dtype in dtypes.floats else x.replace(op=Ops.NOOP)),
+   y.dtype in dtypes.ints and x.dtype in dtypes.floats else x.replace(op=Ops.NOOP, arg=None)),
   # noop of a noop is removed
   (UPat(Ops.NOOP, src=(UPat(Ops.NOOP),), name="x"), lambda x: x.replace(src=x.src[0].src)),
   # moving elements of a single register to another without shuffling is a noop
