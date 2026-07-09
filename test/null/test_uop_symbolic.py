@@ -1317,7 +1317,7 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     cond = (a < 4) & (r < 2)
     valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
     idx = buf.index(a.valid(valid))
-    expr = cond.where(idx, 0)
+    expr = cond.where(idx, idx.const_like(0))
     out = graph_rewrite(expr, pm_move_where_on_load)
     # any WHERE in the rewritten graph must have matched-dtype branches
     for u in out.toposort():

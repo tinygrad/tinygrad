@@ -134,7 +134,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
-      # shift distance in src[1]; result dtype is the value dtype
       assert dtypes.is_int(src[1].dtype), "shift distance must be int"
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
