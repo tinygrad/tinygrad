@@ -759,7 +759,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     slot = next(UOp.unique_num) if num is None else num
-    return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(slot, dtype, device=device))
+    return UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg((size,)),), arg=ParamArg(slot, dtype, device=device))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
@@ -915,7 +915,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint) -> UOp:
-    return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),),
+    return UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg(()),),
                arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
   @property
   def expr(self) -> str:
@@ -1066,11 +1066,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
+      ret = UOp(Ops.PARAM, dtype, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       buf_shape = (prod(shape),)
-      ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, dtype, addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, dtype, src=(shape_to_shape_arg(buf_shape),), arg=ParamArg(slot, dtype, addrspace=addrspace))
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
@@ -1088,7 +1088,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if shape is not None and axis is not None and isinstance(device, tuple):
       shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
-    return UOp(Ops.PARAM, src, arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, axis, device))
+    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
