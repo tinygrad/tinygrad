@@ -52,13 +52,11 @@ def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
 
 def _expr_bits(v: UOp) -> int:
   if v.dtype == dtypes.bool: return 1
-  # look through casts so e.g. DATA[30:0].cast(u32) still reports 31 bits for brace-concat
-  if v.op is Ops.CAST: return _expr_bits(v.src[0])
-  # AND with a low-bit mask narrows width (ignore full-width all-ones masks)
-  if v.op is Ops.AND:
-    widths = [src.arg.bit_length() for src in v.src
-              if src.op is Ops.CONST and isinstance(src.arg, int) and src.arg > 0 and (src.arg & (src.arg + 1)) == 0
-              and src.arg.bit_length() < v.dtype.bitsize]
+  if v.op in (Ops.AND, Ops.XOR):
+    widths: list[int] = []
+    for src in v.src:
+      if src.op == Ops.CONST and isinstance(src.arg, int) and src.arg > 0 and (src.arg & (src.arg + 1)) == 0:
+        widths.append(src.arg.bit_length())
     if widths: return max(widths)
   return v.dtype.bitsize
 
@@ -629,11 +627,7 @@ class Parser:
       if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
         first = self.parse()
-        # declared arrays store elems as name@idx; unknown arrays (HW_REGISTERS) return dummy
-        if any(k.startswith(f'{name}@') for k in self.vars):
-          return self._handle_bracket_rest(first, _u32(0), name)
-        self.eat('RBRACKET')
-        return _u32(0)
+        return self._handle_bracket_rest(first, _u32(0), name)
       if name in self.vars:
         v = self.vars[name]
         assert isinstance(v, UOp), f"expected UOp for {name}, got {type(v)}"
@@ -791,8 +785,7 @@ class Parser:
       else:
         val = int(num)
         if neg: val = -val
-      # 1-bit literals are bool so brace-concat {1'0, x[30:0]} is 32-bit, not 64
-      dt = {1: dtypes.bool, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in suffix else dtypes.uint16,
+      dt = {1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in suffix else dtypes.uint16,
             32: dtypes.int if 'U' not in suffix else dtypes.uint32, 64: dtypes.int64 if 'U' not in suffix else dtypes.uint64}.get(bits, dtypes.uint32)
       return _const(dt, val)
     raise RuntimeError(f"unexpected token after {bits}': {self.peek()}")
@@ -1311,7 +1304,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         result = else_branch[0]
         for c, rv in reversed(conditions):
           if isinstance(rv, UOp) and isinstance(result, UOp):
-            if rv.dtype != result.dtype: result = result.cast(rv.dtype)
+            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
       # If statically true, use that branch directly; otherwise merge with WHERE
@@ -1332,8 +1325,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
             if isinstance(ba, dict) and var in ba:
               tv = ba[var]
               if isinstance(tv, UOp) and isinstance(res, UOp):
-                if tv.dtype != res.dtype: res = res.cast(tv.dtype)
-                res = cond.where(tv, res)
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
           block_assigns[var] = env[var] = res
         # Merge side effects from branches with conditions
         if assigns is not None:
