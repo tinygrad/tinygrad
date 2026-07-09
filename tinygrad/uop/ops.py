@@ -134,7 +134,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
       return in_tuple.src[arg].dtype
     case Ops.BUFFER | Ops.PARAM:
-      # TODO: dtype should move to ParamArg
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
       return arg.dtype
     case Ops.SPECIAL:
