@@ -419,17 +419,19 @@ def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }
 
-def lower_gated(x:UOp):
+def lower_gated(ctx, x:UOp):
   if x.arg.func not in memgroups: return None
   store = x.dtype is dtypes.void
-
-  if store and len(x.src) > 4:
-    branch = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return branch, [branch, x.replace(src=x.src[:-2]), restoreexec(x.src[-1])]
-
-  if not store and len(x.src) > 3:
-    save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-    return x.src[0], [x.src[0], save, x.replace(src=x.src[1:-2]), restoreexec(x.src[-1])]
+  gated_store, gated_load = store and len(x.src) > 4, not store and len(x.src) > 3
+  if not (gated_store or gated_load): return None
+  skip_label = "_".join(str(i) for i in x.src)
+  lbl = label(ctx, f".EXIT_{skip_label}")
+  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".EXIT_{skip_label}")
+  save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
+  nsrc = x.src[:-2] if gated_store else x.src[1:-2]
+  line = [] if gated_store else [x.src[0]]
+  line.extend([save, skip, x.replace(src=nsrc), lbl, restoreexec(x.src[-1])])
+  return line[0], line[1:]
 
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
@@ -574,7 +576,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
-  (UPat(Ops.INS, name="x"), lower_gated),
+  (UPat(Ops.INS, name="x"), lower_gated), # NOTE: find cleaner way to do this?
 ])
 
 def encode(ctx, x:UOp):
