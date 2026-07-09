@@ -64,7 +64,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """(COPY/CONTIGUOUS)(MOPS(BUFFER)) → (COPY/CONTIGUOUS)(SLICE) when movement ops collapse to a contiguous range."""
+  """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
@@ -143,7 +143,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # (BITCAST/CONTIGUOUS/COPY)(MOPS(BUFFER/SLICE)) → (BITCAST/CONTIGUOUS/COPY)(SLICE) when movement ops collapse to contiguous range
+  # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
   (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # push copy past movement ops to disk
