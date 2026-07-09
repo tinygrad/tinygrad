@@ -108,7 +108,7 @@ schedule_cache: dict[bytes, UOp] = {}
 def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
-  cache_key = function.key
+  cache_key = function.key if SCACHE else b""
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs

@@ -447,21 +447,28 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prog_info = ProgramInfo.from_sink(full_sink)
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
-    prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
+    prg = UOp(Ops.PROGRAM, src=(full_sink,))
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+  # PROGRAM lowering is a linear root-only pipeline. Driving it through graph_rewrite
+  # needlessly walks the full SINK and LINEAR graphs between each stage.
+  if len(prg.src) == 1: prg = do_linearize(renderer, prg, prg.src[0])
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], uops=prg.src[1].src))
+  if prg.src[0].arg.estimates is None and (estimated:=do_estimates(prg, prg.src[0], prg.src[1])) is not None: prg = estimated
+  if len(prg.src) == 2:
+    prg = do_assemble(renderer, prg, prg.src[1]) if isinstance(renderer, ISARenderer) else do_render(renderer, prg, prg.src[1])
+  if len(prg.src) == 3 and (compiled:=do_compile(renderer, prg, prg.src[2])) is not None: prg = compiled
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+  # UOps are structurally interned, so identity is already a collision-free structural
+  # cache key within this process and avoids recursively hashing every kernel graph.
+  key = (ast, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

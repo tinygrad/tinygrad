@@ -26,9 +26,8 @@ class Estimates:
     mult_stack: list[sint] = []
     excluded: set[UOp] = set()
     if ignore_indexing:
-      for u in uops:
-        if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded.update(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END))
+      indexing_srcs = [s for u in uops if u.op in {Ops.INDEX, Ops.SHRINK} for s in u.src[1:]]
+      if indexing_srcs: excluded.update(UOp.sink(*indexing_srcs).toposort(lambda x: x.op is not Ops.END))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u

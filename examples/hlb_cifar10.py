@@ -3,14 +3,14 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time, itertools
+import random, time
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod, TRAINING
+from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod, TRAINING, disable_gc
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
@@ -144,6 +144,7 @@ hyp = {
   },
 }
 
+@disable_gc()
 def train_cifar():
 
   def set_seed(seed):
@@ -152,22 +153,20 @@ def train_cifar():
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
-    def _patches(data, patch_size=(kernel_size,kernel_size)):
+    def _patches(data:Tensor, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
-      n, c, H, W = data.shape
-      patches = np.empty((c*h*w, n*(H-h+1)*(W-w+1)), dtype=data.dtype)
-      for ch, y, x in itertools.product(range(c), range(h), range(w)):
-        patches[(ch*h+y)*w+x] = data[:, ch, y:y+H-h+1, x:x+W-w+1].transpose(0, 2, 1).reshape(-1)
-      return patches
+      _, c, H, W = data.shape
+      return Tensor.stack(*[data[:, ch, y:y+H-h+1, x:x+W-w+1].permute(0, 2, 1).flatten()
+                            for ch in range(c) for y in range(h) for x in range(w)])
 
     def _eigens(patches):
       n = patches.shape[1]
-      Σ = (patches @ patches.T) / (n - 1)
+      Σ = ((patches @ patches.T) / (n - 1)).numpy()
       Λ, V = np.linalg.eigh(Σ, UPLO='U')
       return np.flip(Λ, 0), np.flip(V.T.reshape(patches.shape[0], X.shape[1], kernel_size, kernel_size), 0)
 
     # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
-    Λ, V = _eigens(_patches(X.float().numpy()))
+    Λ, V = _eigens(_patches(X.float()))
     W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
     return Tensor(W.astype(np.float32)).cast(dtypes.default_float).is_param_(False)
@@ -350,15 +349,20 @@ def train_cifar():
       return loss.realize()
     return loss.realize()
 
-  train_step_jitted = TinyJit(train_step)
+  train_step_jitted = TinyJit(train_step, warmup=False)
 
-  def eval_step(model, X, Y):
-    out = model(X, training=False)
+  def eval_forward(model, X):
+    return model(X).realize()
+
+  def eval_step(out, out_flipped, Y):
+    out = (out + out_flipped) / 2.
     loss = cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
     return correct.realize(), loss.realize()
-  eval_step_jitted     = TinyJit(eval_step)
-  eval_step_ema_jitted = TinyJit(eval_step)
+  eval_forward_jitted = TinyJit(eval_forward, warmup=False)
+  eval_forward_ema_jitted = TinyJit(eval_forward, warmup=False)
+  eval_step_jitted = TinyJit(eval_step, warmup=False)
+  eval_step_ema_jitted = TinyJit(eval_step, warmup=False)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -388,11 +392,16 @@ def train_cifar():
             Xt.shard_(GPUS, axis=0)
             Yt.shard_(GPUS, axis=0)
 
-          correct, loss = eval_step_jitted(model, Xt, Yt)
+          Xt_contiguous = Xt.contiguous().realize()
+          out = eval_forward_jitted(model, Xt_contiguous).clone().realize()
+          out_flipped = eval_forward_jitted(model, Xt_contiguous[..., ::-1].contiguous().realize())
+          correct, loss = eval_step_jitted(out, out_flipped, Yt)
           losses.append(loss.numpy().tolist())
           corrects.extend(correct.numpy().tolist())
           if model_ema:
-            correct_ema, loss_ema = eval_step_ema_jitted(model_ema.net_ema, Xt, Yt)
+            out_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous).clone().realize()
+            out_flipped_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous[..., ::-1].contiguous().realize())
+            correct_ema, loss_ema = eval_step_ema_jitted(out_ema, out_flipped_ema, Yt)
             losses_ema.append(loss_ema.numpy().tolist())
             corrects_ema.extend(correct_ema.numpy().tolist())
 
@@ -445,5 +454,5 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
-  with Context(SPEC=0), WallTimeEvent(BenchEvent.FULL):
+  with Context(SPEC=0, SCACHE=0), WallTimeEvent(BenchEvent.FULL):
     train_cifar()

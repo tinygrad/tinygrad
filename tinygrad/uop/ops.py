@@ -151,6 +151,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   arg:Any = None
   tag:Any = None
   def __del__(self):
+    if sys.is_finalizing(): return
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
     except AttributeError: pass
@@ -1096,14 +1097,14 @@ class ProgramInfo:
   def vals(self, var_vals:dict[str, int]): return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
 
   @staticmethod
-  def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
+  def from_sink(sink:UOp, aux:tuple=(), uops:Iterable[UOp]|None=None) -> ProgramInfo:
     _vars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in sink.toposort():
+    for u in sink.toposort() if uops is None else uops:
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -1546,7 +1547,7 @@ class RewriteContext:
     return self.replace.get(root, root)
 
   def unified_rewrite(self, root:UOp) -> UOp:
-    stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
+    stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
     replace, ctx, stack_limit, enter_calls = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls
