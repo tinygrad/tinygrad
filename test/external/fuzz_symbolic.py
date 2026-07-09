@@ -40,7 +40,7 @@ def random_int_expr(depth=10):
 def random_bool_expr(depth=10, expr1=None):
   if depth == 0: return True
   if expr1 is None: expr1 = random_int_expr(depth-1)
-  expr2 = random.choice([random_or_sub_expression_int(depth-1, expr1), UOp.const(dtypes.int, random.randint(-10, 10))])
+  expr2 = random.choice([random_or_sub_expression_int(depth-1, expr1), UOp.const(dtypes.index, random.randint(-10, 10))])
   return random.choice(comp_ops)(expr1, expr2)
 
 
@@ -82,8 +82,8 @@ if __name__ == "__main__":
             f"v2=Variable(\"{u2.arg[0]}\", {u2.arg[1]}, {u2.arg[2]})\n" +\
             f"v3=Variable(\"{u3.arg[0]}\", {u3.arg[1]}, {u3.arg[2]})\n" +\
             f"expr = {expr}\n" +\
-            f"v1_val, v2_val, v3_val = UOp.const(dtypes.int, {n1.as_long()}), UOp.const(dtypes.int, {n2.as_long()})," +\
-                f"UOp.const(dtypes.int, {n3.as_long()})\n" +\
+            f"v1_val, v2_val, v3_val = UOp.const(dtypes.index, {n1.as_long()}), UOp.const(dtypes.index, {n2.as_long()})," +\
+                f"UOp.const(dtypes.index, {n3.as_long()})\n" +\
             "num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
             "rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()\n" +\
             "assert num==rn, f\"{num} != {rn}\"\n"
