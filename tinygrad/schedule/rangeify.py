@@ -331,28 +331,6 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
-def late_buffer_view(t:UOp, b:UOp):
-  if not (isinstance(b.device, str) and b.device.startswith(("DISK", "TINYFS"))): return b
-  shape = b.shape
-  size = prod(shape)
-
-  # walk up for the INDEX
-  x = t
-  while not any(u.op is Ops.INDEX for u in x.src):
-    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
-    x = x.src[0]
-  x = next(u for u in x.src if u.op is Ops.INDEX)
-  assert x.op is Ops.INDEX, "must be INDEX"
-
-  if len(shape) == 0: offset = x.src[1].arg
-  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
-
-  return b.replace(src=(UOp(Ops.SLICE, t.dtype, (x.src[0], UOp.const(dtypes.index, offset)), size),))
-
-to_bufferview = PatternMatcher([
-  # (UPat(Ops.STAGE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
-])
-
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
 def limit_bufs(ctx:IndexingContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
@@ -441,7 +419,7 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
   return None
 
-pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
+pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
