@@ -16,7 +16,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
-  assert dtypes.is_float(A.dtype.base), f"buffer dtype must be float32, got {A.dtype}"
+  assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
   insts = [
     s_load_b64(s[0:1], s[0:1], soffset=NULL),
@@ -34,7 +34,7 @@ def custom_add_one(A:UOp) -> UOp:
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
-  assert A.dtype.base == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
+  assert A.dtype == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
   var = UOp.param(2, dtypes.weakint, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
   insts = [

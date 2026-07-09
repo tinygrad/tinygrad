@@ -34,6 +34,7 @@ def get_shape(x) -> tuple[int, ...]:
   if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
+def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st

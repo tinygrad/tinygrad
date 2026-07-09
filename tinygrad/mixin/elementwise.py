@@ -65,7 +65,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
     ```
     """
-    return self.logical_not() if self.dtype.scalar() == dtypes.bool else self * (-1)
+    return self.logical_not() if self.dtype == dtypes.bool else self * (-1)
 
   def _check_dtype(self) -> None:
     if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):

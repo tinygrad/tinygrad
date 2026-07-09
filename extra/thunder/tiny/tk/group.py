@@ -47,8 +47,8 @@ class Group:
     rngs_for_shape = tuple(self.ker.raw_range(dim) for dim in dst.shape)
 
     src_load = src[*rngs_for_shape]
-    if src.dtype.base != dst.dtype.base:
-      src_load = src_load.cast(dst.dtype.base)
+    if src.dtype != dst.dtype:
+      src_load = src_load.cast(dst.dtype)
     dst_store = dst[*rngs_for_shape].store(src_load).end(*rngs_for_shape)
 
     self.ker.push_store(dst_store, dst)
@@ -62,8 +62,8 @@ class Group:
       for width in self.ker.range(src.shape[-2], track=False):
         for inner in self.ker.range(src.shape[-1], track=False):
           src_load = src[height, width, inner]
-          if src.dtype.base != dst.dtype.base:
-            src_load = src_load.cast(dst.dtype.base)
+          if src.dtype != dst.dtype:
+            src_load = src_load.cast(dst.dtype)
           dst_store = dst[width, height, inner].store(src_load).end(height, width, inner)
 
     self.ker.push_store(dst_store, dst)
@@ -209,8 +209,8 @@ class Group:
     vec, src = cast(UOp, vec), cast(UOp, src)
     assert self.warps == 1
 
-    red_local = self.ker.alloc((self.group_threads,), src.dtype.base, AddrSpace.LOCAL)
-    red_reg = self.ker.alloc((1,), src.dtype.base, AddrSpace.REG)
+    red_local = self.ker.alloc((self.group_threads,), src.dtype, AddrSpace.LOCAL)
+    red_reg = self.ker.alloc((1,), src.dtype, AddrSpace.REG)
 
     for height in self.ker.range(src.shape[-3], track=False):
       i = self.ker.raw_range(red_reg.size)
@@ -243,8 +243,8 @@ class Group:
     vec, src = cast(UOp, vec), cast(UOp, src)
     assert self.warps == 1
 
-    red_local = self.ker.alloc((self.group_threads,), src.dtype.base, AddrSpace.LOCAL)
-    red_reg = self.ker.alloc((1,), src.dtype.base, AddrSpace.REG)
+    red_local = self.ker.alloc((self.group_threads,), src.dtype, AddrSpace.LOCAL)
+    red_reg = self.ker.alloc((1,), src.dtype, AddrSpace.REG)
 
     for width in self.ker.range(src.shape[-2], track=False):
       i = self.ker.raw_range(red_reg.size)
@@ -306,8 +306,8 @@ class Group:
             srow, scol = cast(ST, src).swizzle(row, col)
 
             src_load = src[*idxs[:-2], sheight, swidth, srow, scol]
-            if src.dtype.base != dst.dtype.base:
-              src_load = src_load.cast(dst.dtype.base)
+            if src.dtype != dst.dtype:
+              src_load = src_load.cast(dst.dtype)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load)
             dst_store = dst_store.end(height, width, inner)
     elif dst.addrspace == AddrSpace.LOCAL and src.addrspace == AddrSpace.GLOBAL:
@@ -340,8 +340,8 @@ class Group:
           src_i += row * row_stride + col
 
           src_load = srcf[src_i]
-          if src.dtype.base != dst.dtype.base:
-            src_load = src_load.cast(dst.dtype.base)
+          if src.dtype != dst.dtype:
+            src_load = src_load.cast(dst.dtype)
           dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
           dst_store = dst_store.end(height, width, outer, inner).barrier()
     elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
@@ -374,8 +374,8 @@ class Group:
             src_i += srow * row_stride + scol
 
             src_load = srcf[src_i]
-            if src.dtype.base != dst.dtype.base:
-              src_load = src_load.cast(dst.dtype.base)
+            if src.dtype != dst.dtype:
+              src_load = src_load.cast(dst.dtype)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load).end(height, width, inner)
     elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RV):
       srcf = src.flatten()
@@ -394,8 +394,8 @@ class Group:
         src_i += outer * reductions + (laneid % reductions)
 
         src_load = srcf[src_i]
-        if src.dtype.base != dst.dtype.base:
-          src_load = src_load.cast(dst.dtype.base)
+        if src.dtype != dst.dtype:
+          src_load = src_load.cast(dst.dtype)
         dst_store = dst[outer, 0].store(src_load).end(outer)
     else:
       raise NotImplementedError(f"load from {src.addrspace} to {dst.addrspace} not implemented for {type(dst)=}")
@@ -423,8 +423,8 @@ class Group:
             srow, scol = cast(ST, dst).swizzle(row, col)
 
             src_load = src[*src_idxs, height, width, inner]
-            if src.dtype.base != dst.dtype.base:
-              src_load = src_load.cast(dst.dtype.base)
+            if src.dtype != dst.dtype:
+              src_load = src_load.cast(dst.dtype)
             dst_store = dst[*idxs[:-2], height, width, srow, scol].store(src_load)
             dst_store = dst_store.end(height, width, inner)
     elif src.addrspace == AddrSpace.REG and dst.addrspace == AddrSpace.GLOBAL and isinstance(src, RT):
@@ -457,8 +457,8 @@ class Group:
             dst_i += srow * row_stride + scol
 
             src_load = src[*src_idxs, height, width, inner]
-            if src.dtype.base != dst.dtype.base:
-              src_load = src_load.cast(dst.dtype.base)
+            if src.dtype != dst.dtype:
+              src_load = src_load.cast(dst.dtype)
             dst_store = dstf[dst_i].store(src_load).end(height, width, inner)
     elif src.addrspace == AddrSpace.REG and dst.addrspace == AddrSpace.GLOBAL and isinstance(src, RV):
       dstf = dst.flatten()
@@ -477,8 +477,8 @@ class Group:
         dst_i += outer * reductions + (laneid % reductions)
 
         src_load = src[outer, 0]
-        if src.dtype.base != dst.dtype.base:
-          src_load = src_load.cast(dst.dtype.base)
+        if src.dtype != dst.dtype:
+          src_load = src_load.cast(dst.dtype)
         dst_store = dstf[dst_i].store(src_load).end(outer)
     else:
       raise NotImplementedError(f"store from {src.addrspace} to {dst.addrspace} not implemented for {type(src)=}")

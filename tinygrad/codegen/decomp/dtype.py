@@ -1,5 +1,5 @@
 from tinygrad.dtype import dtypes, DType, truncate
-from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
+from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 from tinygrad.renderer import Renderer
@@ -169,10 +169,13 @@ pm_float_decomp = PatternMatcher([
 
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
-  for fr in sorted(filter(_should_emulate, ctx[0])):
-    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
-    if DEBUG >= 2: print(f"emulating {fr} as {to}")
-    sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+  # NOTE: dtype decomp creates intermediate UOps that don't follow the spec (e.g. half LOAD on ushort BUFFER)
+  with Context(SPEC=min(SPEC.value, 1)):
+    for fr in sorted(filter(_should_emulate, ctx[0])):
+      to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+      if DEBUG >= 2: print(f"emulating {fr} as {to}")
+      pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
+      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
   ctx[0].clear()
   return sink
 

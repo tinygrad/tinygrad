@@ -2,8 +2,8 @@ import math
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
-from tinygrad.dtype import DType, ImageDType, dtypes, AddrSpace, Invalid, ConstFloat
-from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same
+from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
+from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
 
 # ***** uop helpers *****
 
@@ -13,7 +13,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
-  if not CHECK_OOB or isinstance(buf.dtype, ImageDType): return True
+  if not CHECK_OOB or is_image_shape(buf._shape): return True
 
   # buffer size
   sz = buf.max_numel()
@@ -48,7 +48,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
   # no vec dtypes allowed
-  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.vcount > 1 else None),
+  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.count > 1 else None),
 
   # NOTE: for testing, we let sinks be anything
   (UPat(Ops.SINK, dtypes.void), lambda: True),
@@ -65,11 +65,11 @@ spec_shared = PatternMatcher([
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype == y.dtype),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
+  (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
   # CAST
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
@@ -129,7 +129,7 @@ def valid_gettuple(g:UOp, t:UOp):
 spec_tensor = PatternMatcher([
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and buf.src[0].dtype.scalar() == dtypes.weakint and is_device(buf.arg.device))
+   (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.weakint and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # Tensor variable bindings
@@ -204,10 +204,6 @@ spec_program = PatternMatcher([
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
-
-  # shape of uop must match dtype.count in program
-  (UPat(GroupOp.All-{Ops.INS, Ops.NOOP}, name="x"),
-   lambda x: False if x.dtype.count > 1 and (x.dtype.count,) != x.shape else None),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
