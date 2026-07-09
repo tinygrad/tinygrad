@@ -145,7 +145,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.index, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(dtypes.index, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):

@@ -21,7 +21,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
-    UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+    UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
@@ -122,7 +122,8 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp):
-  return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
+  new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:])
+  return UOp(root.op, root.dtype, src=new_src, arg=root.arg).multi(multi.axis)
 
 def rewrite_into_function(call:UOp):
   if call.arg.precompile: return None

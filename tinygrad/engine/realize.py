@@ -4,7 +4,6 @@ import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
@@ -232,7 +231,7 @@ def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
   shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value

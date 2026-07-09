@@ -83,7 +83,7 @@ pm_pyrender_extra = PatternMatcher([
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.COPY, src=(UPat(name="x"),), name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, {x.dtype}, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
@@ -108,7 +108,8 @@ pm_pyrender_extra = PatternMatcher([
 
 # NOTE: you can remove pm_pyrender_extra and it'll still be correct
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
-  (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
+  (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, src={srcs(ctx,u.src)}"+
+    (f", arg={repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
 def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], split_depth:int=100) -> dict[str, str]:

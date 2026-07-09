@@ -44,16 +44,16 @@ ptx_matcher = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
   # upcast to float32 all the ops that don't support half
   (UPat(doesnt_support_half, dtype=dtypes.half, name="x"),
-    lambda x: (UOp(x.op, dtypes.float32, tuple(vv.cast(dtypes.float32) for vv in x.src), x.arg).cast(dtypes.half))),
+    lambda x: (UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))),
   # load/store bool -> uint8 (only for memory, not registers)
   (UPat(Ops.LOAD, dtypes.bool, src=(UPat(name="idx"),), name="x", allow_any_len=True),
    lambda x,idx: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ()) + x.src[2:]).cast(dtypes.bool) \
      if idx.addrspace != AddrSpace.REG else None),
   (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-   lambda x,idx: UOp(x.op, dtypes.void, (x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:]) if idx.addrspace != AddrSpace.REG else None),
+   lambda x,idx: UOp(x.op, src=(x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:]) if idx.addrspace != AddrSpace.REG else None),
   # ptx shr and shl instructions require y to be uint
-  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
 ])
 
 def mem_type(x:UOp) -> str: return 'shared' if x.addrspace == AddrSpace.LOCAL else 'global'
