@@ -103,6 +103,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
+    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PLITERAL | Ops.PFRAGMENT | Ops.PCAPTURE | Ops.PFORALL:
+      return dtypes.void
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
@@ -149,11 +151,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.CONST:
       # TODO: need const refactor to bool/weakint/weakfloat
       return None
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PLITERAL | Ops.PFRAGMENT:
-      # dtype is free-form (asm/codegen/upat)
-      return None
-    case Ops.PCAPTURE | Ops.PFORALL:
-      return dtypes.void
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
