@@ -205,12 +205,12 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
   nregs = (n * base.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
-  # the alt realize has to load them into the same vreg/subregs?
   nbytes = n * base.dtype.itemsize
   tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not dtypes.is_unsigned(x.dtype)]
   nx = x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,))
   if gate is not None:
-    packed = stack2regs(ctx, alt, vreg) if alt.op is Ops.STACK else vmov(alt).replace(tag=(vreg,))
+    if alt.op is Ops.GROUP: packed = alt.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(alt.src)), tag=(vreg,))
+    else: packed = vmov(alt).replace(tag=(vreg,))
     return nx.replace(src=(packed,) + nx.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS)))
   return nx
 
@@ -218,15 +218,18 @@ def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
-  # NOTE: reg buf stores have to happen pre-regalloc after buffer is already given a vreg
   if base.addrspace is AddrSpace.REG:
-    if len(rdefs(base)) == 0: return None
+    if len(rdefs(base)) == 0: return None # ensure vreg alloc
     vreg = rdefs(base)[0]
-    if base.dtype.itemsize <= 4: return vmov(val).replace(tag=(vreg.sub(idx.arg),)) # hack
+    # keep addr }s a control dep so reduce-identity stores re-run inside their ranges
+    if base.dtype.itemsize <= 4:
+      mov = vmov(val).replace(tag=(vreg.sub(idx.arg),))
+      return mov.replace(src=mov.src+(addr,))
     else:
       buf = base.src[0] if base.op is Ops.BUFFER else base.src[0].src[0]
       assert buf.arg == 1, f"reg buf of multiple ({buf.arg}) 2 reg values"
-      return UOp.group(*[vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)])
+      ms = [vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)]
+      return UOp.group(*[m.replace(src=m.src+(addr,)) for m in ms])
 
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   n = addr.src[-1].arg if addr.op is Ops.SHRINK else 1
@@ -266,8 +269,7 @@ def cmp(ctx, x:UOp):
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(ctx, x)
 
-# TODO: sub64
-
+# TODO: sub64?
 def add64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
@@ -387,7 +389,6 @@ def castint64(ctx, y:UOp, x:UOp):
     return multireg(lo, hi, dtype=x.dtype)
   elif y.dtype is dtypes.float64:
     # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
-    # NOTE: alu not allowed for group, cant .trunc()
     tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
     hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
     hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
@@ -405,14 +406,12 @@ def long2double(x:UOp):
   hi = x.index(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(dtypes.int16, 32)))
   return UOp(Ops.ADD, dtype=dtypes.float64, src=(lo,hi))
-  # return lo + hi
 
 # casting between long/ulong and floats is more complicated, may belong in isel?
 def const64(x:UOp):
   v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   return multireg(vmov(const(dtypes.uint32,v)), vmov(const(hi_dt, v >> 32)), dtype=x.dtype)
-  # return UOp.group(vmov(const(dtypes.uint32,v)), vmov(const(dtypes.uint32, v >> 32))).replace(dtype=x.dtype)
 
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
@@ -431,7 +430,7 @@ def lower_gated(ctx, x:UOp):
   nsrc = x.src[:-2] if gated_store else x.src[1:-2]
   line = [] if gated_store else [x.src[0]]
   line.extend([save, skip, x.replace(src=nsrc), lbl, restoreexec(x.src[-1])])
-  return line[0], line[1:]
+  return line[0], line
 
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
@@ -469,6 +468,8 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
 
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
 def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+  if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
+  # handle bool where, s_cndmask?
   ins = RDNA3Ops.v_cndmask_b32_e64
   #ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
@@ -487,6 +488,7 @@ extra_matcher = PatternMatcher([
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat(Ops.CDIV, name="x"), cdiv),
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
@@ -496,10 +498,8 @@ pre_isel_matcher = PatternMatcher([
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
-  # what cases does this fail?
+  # TODO: what cases does this fail?
   (UPat().cast().named("x").bitcast(), lambda x: x),
-  # (UPat.var("y").bitcast().named("x"), lambda y,x: y.replace(dtype=x.dtype)), # THIS IS WRONG?
-  # (UPat().bitcast().cast().named("x"), lambda x: x.replace(src=x.src[0].src)),
   # --- casting rewrites ---
   # float -> int
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
@@ -535,7 +535,6 @@ isel_matcher = PatternMatcher([
   (UPat(name="x").bitcast(), lambda x: x),
   # NOTE: prolly belong in pre-isel?
   # (UPat(Ops.CDIV, name="x"), cdiv),
-  (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
   (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
@@ -610,7 +609,8 @@ def encode(ctx, x:UOp):
     for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
   elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
-    if group is RDNA3Ops.VOP2: oprs = oprs[:2]
+    if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
+    if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
     if group is RDNA3Ops.VOP3: oprs = oprs[:3]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
@@ -695,8 +695,6 @@ class RDNA3Renderer(ISARenderer):
       simm = (targets[u.tag] - upc) // 4
       return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
-
-    print(prg.arg)
     for u in lin.src: print(u.arg)
 
     from tinygrad.renderer.amd.elf import assemble_linear
