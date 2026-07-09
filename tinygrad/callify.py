@@ -153,10 +153,15 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # BITCAST(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
-  (UPat(Ops.BITCAST, src=(UPat(GroupOp.Movement, name="src"),), name="bc"), bitcast_mops_to_view),
+  (UPat(Ops.BITCAST, src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="bc"), bitcast_mops_to_view),
 
   # (CONTIGUOUS/COPY)(MOPS(BUFFER/SLICE)) → (CONTIGUOUS/COPY)(SLICE) when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
+
+  # push copy past movement ops to disk
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+   x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:]) \
+   if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
