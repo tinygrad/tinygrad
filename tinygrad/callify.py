@@ -85,7 +85,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   # check if view is supported
   from tinygrad.device import Device
-  devs = (c.device,) if isinstance(c.device, str) else c.device
+  devs = (src.device,) if isinstance(src.device, str) else src.device
   if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
