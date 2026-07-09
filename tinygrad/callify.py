@@ -53,7 +53,7 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return SLICE.reshape(src.shape). Otherwise None."""
+  """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
   if buf.op is Ops.SLICE:
