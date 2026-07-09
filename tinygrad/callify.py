@@ -88,9 +88,8 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   devs = (c.device,) if isinstance(c.device, str) else c.device
   if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
-  # NOTE: this contiguous is removed because this SLICE/RESHAPE has_buffer_identity
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    return c.replace(src=(view.reshape(src.shape),))
+    return c.replace(src=(view.reshape(src.shape),)) if c.op is Ops.COPY else view.reshape(src.shape)
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
