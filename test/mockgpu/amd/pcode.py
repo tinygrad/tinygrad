@@ -492,7 +492,10 @@ class Parser:
       case '>=' | '<=' | '>' | '<' | '<>':
         ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b),'<>':(lambda a,b:a.ne(b))}
         return self._cmp_nan(left, right, ops[op])
-      case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
+      case '>>' | '<<':
+        if not dtypes.is_int(left.dtype): left = left.cast(dtypes.uint32)
+        if not dtypes.is_int(right.dtype): right = right.cast(dtypes.uint32)
+        return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':
         if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
         return (left + right) if op == '+' else (left - right)
@@ -1304,7 +1307,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         result = else_branch[0]
         for c, rv in reversed(conditions):
           if isinstance(rv, UOp) and isinstance(result, UOp):
-            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            if rv.dtype != result.dtype: result = result.cast(rv.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
       # If statically true, use that branch directly; otherwise merge with WHERE
@@ -1325,7 +1328,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
             if isinstance(ba, dict) and var in ba:
               tv = ba[var]
               if isinstance(tv, UOp) and isinstance(res, UOp):
-                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype else res)
           block_assigns[var] = env[var] = res
         # Merge side effects from branches with conditions
         if assigns is not None:
