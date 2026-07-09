@@ -61,10 +61,21 @@ def _make_buffer_view(src:UOp) -> UOp|None:
     buf = buf.src[0]
     if byte_offset % buf.dtype.itemsize != 0: return None
     offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel()).reshape(src.shape)
+  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
+
+def bitcast_mops_to_view(bc:UOp, src:UOp):
+  buf = src.base
+  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
+
+  # check if view is supported
+  from tinygrad.device import Device
+  devs = (bc.device,) if isinstance(bc.device, str) else bc.device
+  if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
+
+  if (view := _make_buffer_view(src)) is not None: return view.replace(dtype=bc.dtype, arg=bc.numel()).reshape(bc.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(SLICE) when movement ops collapse to a contiguous range."""
+  """(COPY/CONTIGUOUS)(MOPS(BUFFER)) → (COPY/CONTIGUOUS)(SLICE) when movement ops collapse to a contiguous range."""
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE}: return None
@@ -79,7 +90,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   # NOTE: this contiguous is removed because this SLICE/RESHAPE has_buffer_identity
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    return view.contiguous(tag=c.tag)
+    return c.replace(src=(view.reshape(src.shape),))
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
@@ -87,7 +98,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.multi(resolved.arg).contiguous(tag=c.tag)
+    return view.reshape(src.shape).multi(resolved.arg).contiguous(tag=c.tag)
 
   return None
 
@@ -142,8 +153,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # CONTIGUOUS(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
-  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
+  # BITCAST(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
+  (UPat(Ops.BITCAST, src=(UPat(GroupOp.Movement, name="src"),), name="bc"), bitcast_mops_to_view),
+
+  # (CONTIGUOUS/COPY)(MOPS(BUFFER/SLICE)) → (CONTIGUOUS/COPY)(SLICE) when movement ops collapse to contiguous range
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
