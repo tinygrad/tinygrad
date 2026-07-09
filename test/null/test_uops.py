@@ -244,8 +244,8 @@ class TestFastIdiv(unittest.TestCase):
     # This will be possible with a slightly different method for fast_idiv
     g = UOp.param(0, dtypes.uint32, (8,))
     c = UOp.const(dtypes.uint, 7)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    l = UOp(Ops.LOAD, src=(g.index(c),))
+    a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -256,7 +256,7 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp.param(0, dtypes.uint32, (4,))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
