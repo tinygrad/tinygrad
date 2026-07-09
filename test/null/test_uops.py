@@ -111,11 +111,11 @@ class TestExecALU(unittest.TestCase):
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx = UOp(Ops.INDEX, dtypes.float, (gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
+    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
-    store = UOp(Ops.STORE, dtypes.void, (idx, val))
+    store = UOp(Ops.STORE, src=(idx, val))
     uops = to_uops_list([store])
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
@@ -128,10 +128,10 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_gate_some_stores(self):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float, (gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
-    idx1 = UOp(Ops.INDEX, dtypes.float, (gmem1, idx))
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
+    idx1 = UOp(Ops.INDEX, src=(gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -148,11 +148,11 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_merge_ifs_alt(self):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
     idx = gidx0*UOp.const(dtypes.int, 2)
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx0 = UOp(Ops.INDEX, dtypes.float, (gmem0, idx.valid(gate)))
-    idx1 = UOp(Ops.INDEX, dtypes.float, (gmem1, idx.valid(gate)))
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
+    idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -210,14 +210,14 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp.param(0, dtypes.uint32, (4,))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CDIV, ops)
 
-    b = UOp(Ops.CMOD, dtypes.uint, (l, c))
+    b = UOp(Ops.CMOD, src=(l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -269,8 +269,8 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp.const(dtypes.float, 2.0)
     b = UOp.const(dtypes.float, 3.0)
 
-    add = UOp(Ops.ADD, dtypes.float, (a, b))
-    mul = UOp(Ops.MUL, dtypes.float, (a, b))
+    add = UOp(Ops.ADD, src=(a, b))
+    mul = UOp(Ops.MUL, src=(a, b))
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
@@ -282,7 +282,7 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 8),), arg='gidx0')
     self.assertEqual(UOp.const(dtypes.int, 17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
@@ -315,7 +315,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(a))) == str(a)
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    vec = UOp(Ops.STACK, src=tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
   def test_reduceop_arg(self):

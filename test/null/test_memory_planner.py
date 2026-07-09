@@ -24,7 +24,7 @@ def _make_linear(buffer_lists, copies=None):
       src0 = bufs[0].copy_to_device(bufs[1].device)
     else:
       src0 = UOp(Ops.SINK, src=tuple(bufs))
-    calls.append(UOp(Ops.CALL, dtypes.void, (src0, *bufs)))
+    calls.append(UOp(Ops.CALL, src=(src0, *bufs)))
   return UOp(Ops.LINEAR, src=tuple(calls))
 
 def _get_arena(buf, linear, result):

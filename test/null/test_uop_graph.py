@@ -255,8 +255,8 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
     x = vec.index(0)
-    alu = UOp(Ops.SQRT, dtypes.float, (x, ))
-    out = UOp(Ops.STORE, dtypes.void, (d0, idx, alu))
+    alu = UOp(Ops.SQRT, src=(x, ))
+    out = UOp(Ops.STORE, src=(d0, idx, alu))
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.STACK]), 0)
 
@@ -303,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
-      vec = UOp(Ops.STACK, dtypes.float, tuple(consts))
+      vec = UOp(Ops.STACK, src=tuple(consts))
       with Context(SPEC=0):
         uops = to_uops_list([vec.index(i) for i in range(vec_size)])
         for uop, const in zip(uops, consts):
@@ -315,7 +315,7 @@ class TestUOpGraph(unittest.TestCase):
       vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[0], acc)
       self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -324,7 +324,7 @@ class TestUOpGraph(unittest.TestCase):
       var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
       vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[0], acc)
       self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -337,7 +337,7 @@ class TestUOpGraph(unittest.TestCase):
                 tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
       var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
@@ -347,7 +347,7 @@ class TestUOpGraph(unittest.TestCase):
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
                 tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
@@ -356,7 +356,7 @@ class TestUOpGraph(unittest.TestCase):
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
       var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
+      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
@@ -365,7 +365,7 @@ class TestUOpGraph(unittest.TestCase):
       vec = UOp(Ops.STACK, dtypes.half.vec(i),
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
-      wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
+      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
@@ -557,7 +557,7 @@ class TestUOpGraph(unittest.TestCase):
     glbl0 = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
-    with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
+    with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, src=(glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
   def test_after_end(self):
     r = UOp.range(10, 0)
@@ -617,7 +617,7 @@ class TestConstBufferize(unittest.TestCase):
     from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(dtypes.float, 42.0)
     r1 = UOp.range(3, 0)
-    bufferize_with_range = UOp(Ops.STAGE, dtypes.float, (c, r1), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_range = UOp(Ops.STAGE, src=(c, r1), arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
 
     result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
@@ -632,7 +632,7 @@ class TestConstBufferize(unittest.TestCase):
     c = UOp.const(dtypes.float, 3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
-    bufferize_with_ranges = UOp(Ops.STAGE, dtypes.float, (c, r1, r2), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_ranges = UOp(Ops.STAGE, src=(c, r1, r2), arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
 
     result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')

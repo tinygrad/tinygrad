@@ -27,7 +27,7 @@ class TestGroupedDims(unittest.TestCase):
     flat = UOp.const(dtypes.index, 0)
     for i, idx in enumerate(idxs):
       flat = flat + idx * int(math.prod(dims[i+1:]))
-    flat_p = flat.substitute({s: UOp(Ops.SPECIAL, s.dtype, s.src, s.arg+"_p") for s in specials})
+    flat_p = flat.substitute({s: UOp(Ops.SPECIAL, src=s.src, arg=s.arg+"_p") for s in specials})
     solver = z3.Solver()
     [z3_flat, z3_flat_p] = uops_to_z3(solver, flat, flat_p)
     # bounds
