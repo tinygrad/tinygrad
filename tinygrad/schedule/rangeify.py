@@ -407,7 +407,8 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, x.dtype, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    buf = UOp(Ops.BUFFER, x.dtype, src=(shape_to_shape_arg((size,)),), \
+      arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
     if x.src[0].op is Ops.SLICE:
       # no INDEX on SLICE, this could be cleaner
       do_store = buf.store(x.src[0]).end(*rngs)
