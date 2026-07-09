@@ -107,7 +107,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) ^ 0, lambda x: x), # x^0 -> x
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)) ^ 0, lambda x: x), # x^0 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
@@ -122,9 +122,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, False), UPat.const(dtypes.bool, True)), lambda x: x.logical_not()),
   # CAST(bool -> int) != const — CAST(True)=1, CAST(False)=0, so fold based on const value
-  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)) != UPat.cvar("c"),
+  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint, dtypes.index)) != UPat.cvar("c"),
    lambda x,c: x if c.arg == 0 else x.logical_not() if c.arg == 1 else x.const_like(True)),
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.vconst_like(False, dtypes.bool)), # x < x -> False
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
@@ -136,7 +136,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
    lambda x,mask,k: x >> k.arg if mask.arg | ((1 << k.arg) - 1) == -1 else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
    lambda x,mask,c: x // c.arg if c.arg > 0 and c.arg & (c.arg-1) == 0 and mask.arg | (c.arg-1) == -1 else None),
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)) != UPat.var("x"),
    lambda x: x.vconst_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
@@ -275,7 +275,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
-  (UPat.var('x', dtypes.ints+(dtypes.weakint,)).cast(dtypes.ints+(dtypes.weakint,), name="a").cast(name="b"),
+  (UPat.var('x', dtypes.ints+(dtypes.weakint, dtypes.index)).cast(dtypes.ints+(dtypes.weakint, dtypes.index), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # try to do math in int instead of long
   (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:

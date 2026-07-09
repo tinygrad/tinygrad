@@ -100,7 +100,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.ints + (dtypes.weakint,))
+  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.ints + (dtypes.weakint, dtypes.index))
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
@@ -123,7 +123,7 @@ class dtypes:
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
   void: Final[DType] = DType.new(-1, 0, "void", None)
   weakint: Final[DType] = DType.new(0, 800, "weakint", None)
-  index = weakint  # TODO: split to actual dtype
+  index: Final[DType] = DType.new(0, 800, "index", None)  # NOTE: not in the promo lattice: index math never mixes dtypes
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
@@ -164,7 +164,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  all = floats + ints + (bool, weakint) # noqa: A003
+  all = floats + ints + (bool,) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
@@ -192,7 +192,7 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weakint", "index", "_"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint"}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "index":"index"}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
@@ -200,7 +200,7 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
-    case dtypes.weakint: return dt0 in dtypes.ints
+    case dtypes.weakint | dtypes.index: return dt0 in dtypes.ints
     case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
     case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
