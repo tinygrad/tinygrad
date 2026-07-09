@@ -1,28 +1,30 @@
 from typing import Any, Callable
 import itertools, inspect, functools, types
 from tinygrad.helpers import partition, dedup, Context
-from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
+from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher, graph_rewrite, deconstruct_function
 
 class UPatCompileError(Exception): pass
 
 # **** UPat compiled ****
 
-def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
+def _get_clause(self:UPat, base:UOp, depth=0, root=True) -> UOp:
   if self.is_any:
     assert len(self.src) == 1
-    return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])),))
+    return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth, False) for s in self.src[0])),))
   # build the and_clause for acceptance
   and_clause:list[UOp] = []
-  if self.op is not None:
+  if self.op is not None and not root:
     if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
-  if self.strict_length or self.required_len > 0:
+  fixed_root_len = root and self.op is not None and all((op in GroupOp.Unary and self.required_len == 1) or
+    (op in GroupOp.Binary and self.required_len == 2) or (op in GroupOp.Ternary and self.required_len == 3) for op in self.op)
+  if (self.strict_length or self.required_len > 0) and not fixed_root_len:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=self.name), base)))
-  if self.match_dtype is not None:
+  if self.match_dtype is not None and not root:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.match_dtype))), arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.match_dtype[0])), arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
@@ -33,15 +35,15 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
-      and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
+      and_clause += [_get_clause(s, base.index(i), depth, False) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
       it = UOp(Ops.NOOP, arg=f"ituop{depth}")
-      match = _get_clause(next(self.src[0]), it, depth+1)
+      match = _get_clause(next(self.src[0]), it, depth+1, False)
       and_clause.append(UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
-      fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
+      fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth, False) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
   return UOp(Ops.AND, src=tuple(and_clause))

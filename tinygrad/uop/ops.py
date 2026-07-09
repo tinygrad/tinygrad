@@ -64,6 +64,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  if all_same(shapes): return shapes[0]
   shaped_aligned_left = _align_left(*shapes)
   ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
   if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
@@ -129,9 +130,13 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    if self.nm in x.__dict__: return x.__dict__[self.nm]
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    if (nm:=self.nm) in x.__dict__: return x.__dict__[nm]
+    stack = [x]
+    while stack:
+      if nm in (n:=stack[-1]).__dict__: stack.pop()
+      elif todo:=[s for s in n.src if nm not in s.__dict__]: stack.extend(todo)
+      else: n.__dict__[nm] = self.fxn(stack.pop())
+    return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.op import OpMixin
@@ -402,10 +407,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def simplify(self, tracked=False):
     if self.op is Ops.CONST: return self
     if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
+    if not tracked and (cached:=self.__dict__.get('_simplified', SENTINEL)) is not SENTINEL: return cached
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      ret = graph_rewrite(self, symbolic, name="simplify")
+    if not tracked: self.__dict__['_simplified'] = ret
+    return ret
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -419,6 +427,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
+    if name is None: return _cached_substitute(self, tuple(dvars.items()), extra_pm, walk, enter_calls)
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
                            bottom_up=True, walk=walk, enter_calls=enter_calls, name=name)
@@ -1148,7 +1157,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.weakint and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
+  if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
+  return alu
 
 def bitcast(x, in_dtype:DType, out_dtype:DType):
   assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
@@ -1306,6 +1316,7 @@ def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
   return lazy_compile
 
 class PatternMatcher:
+  __slots__ = ("patterns", "pdict")
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -1314,7 +1325,7 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      entry: list = [p, None, p.early_reject]
+      entry: list = [p, None, p.early_reject or None, p.match_dtype]
       entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
 
@@ -1324,10 +1335,13 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None):
-    if len(pats:=self.pdict.get(uop.op, [])):
-      if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
-      for _,match,early_reject in pats:
-        if not early_reject.issubset(ler): continue
+    if pats:=self.pdict.get(uop.op):
+      ler = None
+      for _,match,early_reject,match_dtype in pats:
+        if match_dtype is not None and uop.dtype not in match_dtype and uop.dtype._scalar not in match_dtype: continue
+        if early_reject is not None:
+          if ler is None and (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
+          if not early_reject.issubset(ler): continue
         if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
@@ -1423,10 +1437,13 @@ class TrackedPatternMatcher(PatternMatcher):
     if len(pats:=self.pdict.get(uop.op, [])):
       ret = None
       ler = {u.op for u in uop.src}
-      for p,match,early_reject in pats:
+      for p,match,early_reject,match_dtype in pats:
         if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
         st = time.perf_counter()
-        if not early_reject.issubset(ler):
+        if match_dtype is not None and uop.dtype not in match_dtype and uop.dtype._scalar not in match_dtype:
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        if early_reject is not None and not early_reject.issubset(ler):
           match_stats[p][2] += time.perf_counter()-st
           continue
         match_stats[p][1] += 1
@@ -1486,6 +1503,7 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
+  __slots__ = ("pm", "bpm", "bpm_cache", "ctx", "replace", "enter_calls")
   def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
@@ -1531,13 +1549,16 @@ class RewriteContext:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
+    replace, ctx, stack_limit, enter_calls = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls
+    bpm, cached_bpm_rewrite = self.bpm, self.cached_bpm_rewrite
+    pm_rewrite = self.pm.rewrite if self.pm is not None else None
     while stack:
-      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
-      if n in self.replace: continue  # skip any nodes we have seen
+      if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
-        if self.bpm is not None:
+        if bpm is not None:
           # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
           test_n: UOp|None = n
           seen = set()
@@ -1545,17 +1566,17 @@ class RewriteContext:
             while test_n is not None:
               if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
               seen.add(test_n)
-              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+              new_n, test_n = test_n, cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = unwrap(test_n)
+            replace[n] = unwrap(test_n)
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[new_n.src[0]] = new_n.src[0]
+        if not enter_calls and (new_n.op is Ops.CALL or new_n.op is Ops.FUNCTION): replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1563,7 +1584,7 @@ class RewriteContext:
       elif stage == 1:
         tmp = []
         for x in new_n.src:
-          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+          if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))
             break
@@ -1572,8 +1593,8 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
-              self.replace[n] = new_n
+            if pm_rewrite is None or (new_src_n:=pm_rewrite(new_n, ctx)) is None:
+              replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
@@ -1584,14 +1605,14 @@ class RewriteContext:
           stack.append((new_src_n, 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
-        if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
+        if (replaced_new_n:=replace.get(new_n, SENTINEL)) is SENTINEL:
           # not ready: register in waitlist instead of spinning
           waitlist.setdefault(new_n, []).append((n, 2, new_n))
         else:
           # otherwise we are done
-          self.replace[n] = replaced_new_n
+          replace[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
-    return self.replace[root]
+    return replace[root]
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
@@ -1639,6 +1660,11 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+@functools.lru_cache(maxsize=32768)
+def _cached_substitute(uop:UOp, dvars:tuple[tuple[UOp, UOp], ...], extra_pm:PatternMatcher|None, walk:bool, enter_calls:bool) -> UOp:
+  with Context(TRACK_MATCH_STATS=0):
+    return graph_rewrite(uop, (extra_pm+_substitute) if extra_pm is not None else _substitute, dict(dvars),
+                         bottom_up=True, walk=walk, enter_calls=enter_calls)
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 

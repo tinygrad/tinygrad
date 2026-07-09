@@ -120,6 +120,8 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_in.append(acc*src)
     acc *= s
   combined_axes = UOp.const(dtypes.weakint, 0).usum(axes_in)
+  if len(in_shape) == 1:
+    return graph_rewrite(UOp.sink(combined_axes), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)

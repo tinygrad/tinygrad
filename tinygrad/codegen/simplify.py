@@ -21,8 +21,9 @@ pm_flatten_range = PatternMatcher([
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
+  divmod_count = count_divmod(u)
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
-  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
+  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.combinations(u.ended_ranges, 2)):
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
       # check if the ranges to merge are in the same reduces
@@ -34,8 +35,8 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
-          u = nidx
+        if (new_divmod_count:=count_divmod(nidx)) <= divmod_count:
+          u, divmod_count = nidx, new_divmod_count
   return u
 
 def mark_gated(ctx, idx):

@@ -112,6 +112,10 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
   return UOp.vectorize(*src).reshape(b.shape)
 
+@functools.cache
+def shape_indexes(shape:tuple[int, ...]) -> tuple[tuple[UOp, ...], ...]:
+  return tuple(tuple(UOp.const(dtypes.weakint, i) for i in idx) for idx in itertools.product(*map(range, shape)))
+
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
@@ -127,15 +131,20 @@ unbroadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-def do_devectorize(b:UOp):
+def do_devectorize(ctx, b:UOp):
+  ren = ctx[-1] if isinstance(ctx, tuple) else ctx
+  if b.op in GroupOp.Elementwise and b.dtype in dtypes.floats and ren.supports_float4: return None
   if b.shape == (): return None
   # broadcasting needs to be already unpacked
   if not all_same([x.shape for x in b.src]): return None
   src = []
-  for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+  for idx_c in shape_indexes(b.shape):
+    src.append(b.replace(src=tuple(x.src[idx_c[0].arg] if len(idx_c) == 1 and x.op is Ops.STACK else UOp(Ops.INDEX, x.dtype, (x,)+idx_c)
+                                   for x in b.src)))
   return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+
+def index_elementwise(x:UOp, idx:UOp):
+  return x.replace(src=tuple(s.index(*idx.src[1:]) if s._shape else s for s in x.src))
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -151,11 +160,13 @@ def do_stack_wmma(u:UOp):
 ew_devectorizer = PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
 ])
 
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
@@ -306,18 +317,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
-  # simplify indexing
-  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
-
   # some coalesing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
-
-  # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid

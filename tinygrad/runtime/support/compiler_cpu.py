@@ -51,7 +51,7 @@ class LLVMCompiler(Compiler):
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
-      llvm.LLVMPassBuilderOptionsSetVerifyEach(self.pbo, True)
+      llvm.LLVMPassBuilderOptionsSetVerifyEach(self.pbo, bool(getenv("LLVM_VERIFY")))
     else:
       self.passes = b'default<O0>'
 

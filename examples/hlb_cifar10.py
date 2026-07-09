@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time
+import random, time, itertools
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -152,20 +152,19 @@ def train_cifar():
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
-    def _cov(X):
-      return (X.T @ X) / (X.shape[0] - 1)
-
     def _patches(data, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
-      c = data.shape[1]
-      axis = (2, 3)
-      return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
+      n, c, H, W = data.shape
+      patches = np.empty((c*h*w, n*(H-h+1)*(W-w+1)), dtype=data.dtype)
+      for ch, y, x in itertools.product(range(c), range(h), range(w)):
+        patches[(ch*h+y)*w+x] = data[:, ch, y:y+H-h+1, x:x+W-w+1].transpose(0, 2, 1).reshape(-1)
+      return patches
 
     def _eigens(patches):
-      n,c,h,w = patches.shape
-      Σ = _cov(patches.reshape(n, c*h*w))
+      n = patches.shape[1]
+      Σ = (patches @ patches.T) / (n - 1)
       Λ, V = np.linalg.eigh(Σ, UPLO='U')
-      return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
+      return np.flip(Λ, 0), np.flip(V.T.reshape(patches.shape[0], X.shape[1], kernel_size, kernel_size), 0)
 
     # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
     Λ, V = _eigens(_patches(X.float().numpy()))
@@ -221,15 +220,23 @@ def train_cifar():
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
-  @TinyJit
-  def augmentations(X:Tensor, Y:Tensor):
-    perms = Tensor.randperm(X.shape[0], device=X.device) # We reuse perms for cutmix, because they are expensivne to generate
+  def shuffled_augmentations(X:Tensor, Y:Tensor, perms:Tensor):
     if getenv("RANDOM_CROP", 1):
       X = random_crop(X, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
       # NOTE: RANGEIFY=1 needs this contiguous or the X[perms] is very slow
       X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X).contiguous() # flip LR
     X, Y = X[perms], Y[perms]
+    return X, Y, perms
+
+  @TinyJit
+  def augmentations(X:Tensor, Y:Tensor, perms:Tensor):
+    X, Y, _ = shuffled_augmentations(X, Y, perms)
+    return X, Y
+
+  @TinyJit
+  def augmentations_cutmix(X:Tensor, Y:Tensor, perms:Tensor):
+    X, Y, perms = shuffled_augmentations(X, Y, perms)
     return X, Y, *cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
@@ -239,8 +246,13 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        X, Y, X_cm, Y_cm = augmentations(X, Y)
-        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']: X, Y = X_cm, Y_cm
+        # Cold-codegen for Tensor.randperm's bitonic sort is much slower than sorting these keys on the host.
+        keys = Tensor.rand(X.shape[0], device=X.device).numpy()
+        perms = Tensor(np.argsort(keys, kind="stable").astype(np.int32), device=X.device)
+        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']:
+          _, _, X, Y = augmentations_cutmix(X, Y, perms)
+        else:
+          X, Y = augmentations(X, Y, perms)
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
 
@@ -334,8 +346,8 @@ def train_cifar():
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
-      lr_scheduler[0].step()
-      lr_scheduler[1].step()
+      Tensor.realize(*lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
+      return loss.realize()
     return loss.realize()
 
   train_step_jitted = TinyJit(train_step)
@@ -433,5 +445,5 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
-  with WallTimeEvent(BenchEvent.FULL):
+  with Context(SPEC=0), WallTimeEvent(BenchEvent.FULL):
     train_cifar()
