@@ -63,17 +63,6 @@ def _make_buffer_view(src:UOp) -> UOp|None:
     offset = byte_offset // buf.dtype.itemsize
   return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
 
-def bitcast_mops_to_view(bc:UOp, src:UOp):
-  buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
-
-  # check if view is supported
-  from tinygrad.device import Device
-  devs = (bc.device,) if isinstance(bc.device, str) else bc.device
-  if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
-
-  if (view := _make_buffer_view(src)) is not None: return view.replace(dtype=bc.dtype, arg=bc.numel()).reshape(bc.shape)
-
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """(COPY/CONTIGUOUS)(MOPS(BUFFER)) → (COPY/CONTIGUOUS)(SLICE) when movement ops collapse to a contiguous range."""
   buf = src.base
@@ -89,7 +78,8 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    return c.replace(src=(view.reshape(src.shape),)) if c.op is Ops.COPY else view.reshape(src.shape)
+    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(src.shape)
+    return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
@@ -152,11 +142,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # BITCAST(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
-  (UPat(Ops.BITCAST, src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="bc"), bitcast_mops_to_view),
-
-  # (CONTIGUOUS/COPY)(MOPS(BUFFER/SLICE)) → (CONTIGUOUS/COPY)(SLICE) when movement ops collapse to contiguous range
-  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
+  # (BITCAST/CONTIGUOUS/COPY)(MOPS(BUFFER/SLICE)) → (BITCAST/CONTIGUOUS/COPY)(SLICE) when movement ops collapse to contiguous range
+  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
