@@ -99,11 +99,16 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
     case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | \
-         Ops.END | Ops.NOOP | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF:
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
+         Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
+    case Ops.NOOP:
+      # NOOP can be void or pass through dtype (e.g. x.f(Ops.NOOP) or substitute with NOOP)
+      return None
     case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
-         Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH:
+         Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
+         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE:
       # pass through first
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
@@ -117,8 +122,15 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
       return src[0].dtype
     case Ops.BIND:
-      assert src[0].dtype == src[1].dtype, "bind dtype must match"
-      return src[0].dtype
+      # TODO: BIND dtype is src[0].dtype, but rewrites can change src[0] (PARAM->BUFFER)
+      return None
+    case Ops.WMMA:
+      # WMMA output dtype is the accumulator dtype (src[2])
+      return src[2].dtype
+    case Ops.GETTUPLE:
+      # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+      in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
+      return in_tuple.src[arg].dtype
     case Ops.BUFFER | Ops.PARAM:
       # TODO: dtype should move to ParamArg
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
