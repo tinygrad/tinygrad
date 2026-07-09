@@ -543,7 +543,7 @@ class TestAssign(unittest.TestCase):
   def test_assign_bitcast_different_size(self):
     # assign to a shape-changing bitcast view (only works on DISK currently)
     a = Tensor([0]*8, dtype=dtypes.uint8).realize()
-    a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
+    a.bitcast(dtypes.int64).assign(Tensor(12345, dtype=dtypes.int64)).realize()
     try:
       np.testing.assert_equal(a.numpy(), [57, 48, 0, 0, 0, 0, 0, 0])
     except AssertionError:

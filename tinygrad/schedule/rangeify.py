@@ -175,8 +175,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1"))), lambda buf,src,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
-  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
-   lambda target, src: target.store(src.bitcast(target.dtype))),
+  (UPat(Ops.STORE, src=(UPat.any(t:=UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(Ops.RESHAPE, src=(t, UPat()))), UPat(name="src")), name="st"),
+   lambda target, src, st: target.store((src.unsqueeze(-1) if st.src[0].op is Ops.RESHAPE else src).bitcast(target.dtype))),
 
   (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
 
