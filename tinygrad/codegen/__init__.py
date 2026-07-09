@@ -39,7 +39,8 @@ pm_number_params = PatternMatcher([
 ])
 
 pm_no_weakints = PatternMatcher([
-  (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
+  (UPat(GroupOp.ALU.union({Ops.CONST}), dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int)),
+  (UPat(Ops.CAST, dtype=dtypes.weakint, src=(UPat.var("x"),)), lambda x: x.cast(dtypes.int)),
 ])
 
 def build_range_map(sink:UOp) -> dict[int, int]:
