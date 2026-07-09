@@ -137,7 +137,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
     if isinstance(x.tag[0], tuple): cons, width = x.tag
     defs = [ctx.vreg(x.tag, width=width)]
   else:
-    if x.op is Ops.BUFFER: n = max((x.dtype.itemsize//4) * x.src[0].arg, 1)
+    if x.op is Ops.BUFFER: n = max(x.dtype.itemsize//4, 1) * x.src[0].arg
     else: n = max(x.dtype.itemsize // 4, 1)
     defs = [make_vgpr(ctx, width=n)]
   return x.replace(tag=tuple(defs))
@@ -189,7 +189,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
   if base.addrspace is AddrSpace.REG: 
     # TODO: gated reg load
-    assert idx.op is Ops.CONST and gate is None
+    assert idx.op is Ops.CONST and gate is None, "gated load on reg BUFFER"
     # NOTE: the problem with indexing into base with b64 dtypes 
     # is that it will interpret it as accessing a subreg??
     if base.dtype.itemsize <= 4: return vmov(base.index(idx))
@@ -206,10 +206,13 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   nregs = (n * base.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
   # the alt realize has to load them into the same vreg/subregs?
-  def _gate(o:UOp): return o.replace(src=(stack2regs(ctx, alt, vreg),) + o.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
   nbytes = n * base.dtype.itemsize
   tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not dtypes.is_unsigned(x.dtype)]
-  return _gate(x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,)))
+  nx = x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,))
+  if gate is not None:
+    packed = stack2regs(ctx, alt, vreg) if alt.op is Ops.STACK else vmov(alt).replace(tag=(vreg,))
+    return nx.replace(src=(packed,) + nx.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS)))
+  return nx
 
 def store(ctx, addr:UOp, x:UOp):
   val = x.src[1]
@@ -221,7 +224,8 @@ def store(ctx, addr:UOp, x:UOp):
     vreg = rdefs(base)[0]
     if base.dtype.itemsize <= 4: return vmov(val).replace(tag=(vreg.sub(idx.arg),)) # hack
     else:
-      assert base.src[0].arg == 1
+      buf = base.src[0] if base.op is Ops.BUFFER else base.src[0].src[0]
+      assert buf.arg == 1, f"reg buf of multiple ({buf.arg}) 2 reg values"
       return UOp.group(*[vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)])
 
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
@@ -302,7 +306,7 @@ def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
 def cdiv(ctx, x:UOp):
   # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
   if x.dtype.itemsize == 8:
-    raise NotImplementedError()
+    raise NotImplementedError("64 bit cdiv")
   def _safeneg(u:UOp): return UOp(Ops.SUB, dtypes.uint32, src=(const(dtypes.uint32,0), u))
   def _umulh(a:UOp, b:UOp): return _aluhint(a * b, RDNA3Ops.v_mul_hi_u32)
   a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) 
