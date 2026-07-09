@@ -68,6 +68,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE}: return None
+  if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
