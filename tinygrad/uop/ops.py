@@ -27,8 +27,9 @@ class ParamArg:
   addrspace: AddrSpace|None = AddrSpace.GLOBAL
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
+  dtype: DType|None = None
   def __repr__(self):
-    fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
+    fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None), ("dtype", None))
     args = [repr(self.slot)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
@@ -135,7 +136,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.BUFFER | Ops.PARAM:
       # TODO: dtype should move to ParamArg
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
-      return None
+      return arg.dtype
     case Ops.SPECIAL:
       # TODO: special should always be int probably, or maybe shouldn't exist
       return None
@@ -759,7 +760,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     slot = next(UOp.unique_num) if num is None else num
-    return UOp(Ops.BUFFER, dtype, (shape_to_shape_arg((size,)),), ParamArg(slot, device=device))
+    return UOp(Ops.BUFFER, dtype, (shape_to_shape_arg((size,)),), ParamArg(slot, dtype=dtype, device=device))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
     if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
@@ -1088,7 +1089,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if shape is not None and axis is not None and isinstance(device, tuple):
       shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
-    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
+    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device, dtype))
   def param_like(self, slot:int):
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
