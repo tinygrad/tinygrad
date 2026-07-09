@@ -1680,7 +1680,8 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.weakint),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=dtypes.int).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(dtype=dtypes.int, arg=ParamArg(u.arg.slot, dtypes.int, u.arg.vmin_vmax, u.arg.name,
+      u.arg.addrspace, u.arg.axis, u.arg.device)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
   # remove hanging casts
