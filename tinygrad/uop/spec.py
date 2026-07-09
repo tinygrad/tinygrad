@@ -103,9 +103,6 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
-  # SPECIAL. TODO: this should only be in spec_program
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
-
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
@@ -149,6 +146,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.FUNCTION, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
+
+  # SPECIAL is index before index lowering. custom_kernel currently has this
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.index),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
   # inputs to movement ops
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.index), lambda: True),
@@ -211,6 +211,9 @@ spec_program = PatternMatcher([
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+
+  # SPECIAL is int32 after index lowering
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 ])+spec_shared
 
 # these are intermediate ops. everything should be deleted from here

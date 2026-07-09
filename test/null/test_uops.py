@@ -111,9 +111,9 @@ class TestExecALU(unittest.TestCase):
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
-    gate = gidx0<UOp.const(dtypes.int, 1)
-    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
+    gidx0 = UOp.special(4, 'gidx0')
+    gate = gidx0<UOp.const(dtypes.index, 1)
+    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.index, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, src=(idx, val))
     uops = to_uops_list([store])
@@ -128,9 +128,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_gate_some_stores(self):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
-    idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
+    gidx0 = UOp.special(4, 'gidx0')
+    idx = gidx0 * UOp.const(dtypes.index, 2)
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.index, 1))))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
@@ -148,9 +148,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_merge_ifs_alt(self):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
-    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='gidx0')
-    idx = gidx0*UOp.const(dtypes.int, 2)
-    gate = gidx0<UOp.const(dtypes.int, 1)
+    gidx0 = UOp.special(4, 'gidx0')
+    idx = gidx0*UOp.const(dtypes.index, 2)
+    gate = gidx0<UOp.const(dtypes.index, 1)
     idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
