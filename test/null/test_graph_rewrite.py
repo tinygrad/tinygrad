@@ -127,8 +127,8 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
-    lhs = UOp(Ops.ADD, dtypes.int, src=(
-      UOp(Ops.STACK, dtypes.int, arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
+    lhs = UOp(Ops.ADD, src=(
+      UOp(Ops.STACK, arg=None, src=(UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 32),), arg='lidx0'),)*4),
       UOp.const(dtypes.int, (0, 256, 512, 768))))
     rhs = UOp.const(dtypes.int, (2,)*4)
     unopt = lhs<rhs
@@ -203,7 +203,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
     base_vector = UOp.const(dtypes.float32, (5.0, 10.0, 15.0, 20.0))
-    vectorized_uop = UOp(Ops.STACK, dtypes.float32, src=tuple(base_vector.index(i) for i in range(4)))
+    vectorized_uop = UOp(Ops.STACK, src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
 

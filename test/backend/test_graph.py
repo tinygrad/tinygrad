@@ -48,7 +48,7 @@ def copy_call(dst:Buffer, src:Buffer, c:dict[Buffer,UOp]) -> UOp:
 
 def make_graph(graph_cls, calls:list[UOp]):
   linear = compile_linear(UOp(Ops.LINEAR, src=tuple(calls)))
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(linear,), arg="graph")
+  cf = UOp(Ops.CUSTOM_FUNCTION, src=(linear,), arg="graph")
   return graph_cls(cf, [])
 
 def run_schedule(calls:list[UOp]):

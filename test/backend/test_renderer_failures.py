@@ -28,25 +28,25 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   ld = b.index(idx).load()
   alu = ld.alu(alu_op, *alu_src_uops)
   store = UOp.store(a.index(idx), alu)
-  return _test_uop_result([Tensor([input_val])], UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo()))[0]
+  return _test_uop_result([Tensor([input_val])], UOp(Ops.SINK, src=(store,), arg=KernelInfo()))[0]
 
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
     a = UOp.param(0, dtypes.int, (4,))
-    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu)), UOp.const(dtypes.int, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
+    gate_alu = (lidx0:=UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='lidx0')).ne(0)
+    gated_alu_store = UOp(Ops.STORE, src=(a.index(lidx0.valid(gate_alu)), UOp.const(dtypes.int, 1)))
+    sink = UOp(Ops.SINK, src=(gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu_2d(self):
     a = UOp.param(0, dtypes.int, (8,))
-    gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
-    gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(dtypes.int, 1)))
-    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
+    gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='lidx0')).ne(0)
+    gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 2),), arg='lidx1')).ne(0)
+    gated_alu_store = UOp(Ops.STORE, src=(a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(dtypes.int, 1)))
+    sink = UOp(Ops.SINK, src=(gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
 
@@ -88,13 +88,13 @@ class TestWGSLFailures(unittest.TestCase):
     a = UOp.param(0, dtypes.int, (4,))
     b = UOp.param(1, dtypes.int, (4,))
     c = UOp.param(2, dtypes.int, (4,))
-    lidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), "lidx0")
+    lidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg="lidx0")
     gate = lidx0.ne(0)
     alt = c.index(lidx0).load()
     ld = UOp.load(b.index(lidx0.valid(gate)))
     alt_load = gate.where(ld, alt)
     store = UOp.store(a.index(lidx0), alt_load)
-    sink = UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo())
+    sink = UOp(Ops.SINK, src=(store,), arg=KernelInfo())
     ret = _test_uop_result([Tensor([0,1,2,3], dtype=dtypes.int), Tensor([4,5,6,7], dtype=dtypes.int)], sink, local_size=[4])[0]
     np.testing.assert_equal(ret, [4,1,2,3])
 
@@ -103,11 +103,11 @@ class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
   def test_gated_store_with_if(self):
     a = UOp.param(0, dtypes.int, (4,))
-    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
+    gate_alu = (lidx0:=UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 4),), arg='lidx0')).ne(0)
     val = UOp.const(dtypes.int, 1)
-    if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
-    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
+    if_uop = UOp(Ops.IF, src=(gate_alu,))
+    gated_alu_store = UOp(Ops.STORE, src=(a.index(lidx0, if_uop), val))
+    sink = UOp(Ops.SINK, src=(gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 

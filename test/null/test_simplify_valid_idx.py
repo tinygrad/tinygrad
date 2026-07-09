@@ -14,16 +14,16 @@ def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move
 def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(Ops.LOAD, dtypes.float, (
+  return UOp(Ops.LOAD, src=(
     UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)),
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp(Ops.LOAD, dtypes.float, (
+  return UOp(Ops.LOAD, src=(
     UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)),
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, nmax),), expr)
+def Special(expr, nmax): return UOp(Ops.SPECIAL, src=(UOp.const(dtypes.index, nmax),), arg=expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
@@ -501,7 +501,7 @@ class TestDropTrueGate(unittest.TestCase):
     buf = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(dtypes.index, 0)
     true_gate = UOp.const(dtypes.bool, True)
-    index_with_gate = UOp(Ops.INDEX, dtypes.int, (buf, idx.valid(true_gate)))
+    index_with_gate = UOp(Ops.INDEX, src=(buf, idx.valid(true_gate)))
     # apply the optimization
     result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
@@ -542,7 +542,7 @@ class TestRangeShrink(unittest.TestCase):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
     load1 = get_gated_load_uop(r < UOp.const(dtypes.index, 4), r)
-    load2 = UOp(Ops.LOAD, dtypes.float, (UOp.param(1, dtypes.float, (204,)).index(r),))
+    load2 = UOp(Ops.LOAD, src=(UOp.param(1, dtypes.float, (204,)).index(r),))
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)

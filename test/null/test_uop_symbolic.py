@@ -977,7 +977,7 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
+    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     # the vars are now scalar PARAMs
@@ -1355,10 +1355,10 @@ class TestGatedUopGivenValid(unittest.TestCase):
 
     idx0 = (r0 + uconst(-1)) // uconst(3)
     idx1 = r0 % uconst(3)
-    idx:UOp = (r0 < 3).where(UOp(Ops.STACK, dtypes.index, (idx0, idx1)), UOp.invalid())
+    idx:UOp = (r0 < 3).where(UOp(Ops.STACK, src=(idx0, idx1)), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
     # independent simplification: (r0-1)//3 -> (r0+2)//3 - 1, and r0%3 -> r0 when r0 in [0,2]
-    expected_vec = UOp(Ops.STACK, dtypes.index, ((r0 + uconst(2)) // uconst(3) + uconst(-1), r0))
+    expected_vec = UOp(Ops.STACK, src=((r0 + uconst(2)) // uconst(3) + uconst(-1), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
@@ -1369,8 +1369,8 @@ class TestRangeSplitting(unittest.TestCase):
     # create a simple expression using the range with mod: store range%2 to a buffer
     buf = UOp.param(0, dtypes.int, (1,))
     val = (r0 % uconst(2)).cast(dtypes.int)
-    store = UOp(Ops.STORE, dtypes.void, (buf.index(uconst(0)), val))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.END, dtypes.void, (store, r0)),))
+    store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
+    sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))
     # count RANGEs before
     ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
     # apply the range splitting optimization

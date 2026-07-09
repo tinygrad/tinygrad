@@ -75,7 +75,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_variable_inside_special(self):
-    uop = UOp(Ops.SPECIAL, dtypes.int, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
+    uop = UOp(Ops.SPECIAL, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 9)
 
@@ -318,7 +318,7 @@ class TestVminVmaxVConst(unittest.TestCase):
     # vmin and vmax for a vector constant of bool values
     d1 = UOp.param(1, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
-    val = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
+    val = UOp(Ops.LOAD, src=(d1.index(idx),))
     uop = (val // 32)
     self.assertEqual(uop.vmin, -67108864)
     self.assertEqual(uop.vmax, 67108863)

@@ -230,8 +230,8 @@ class TestAssembly(unittest.TestCase):
     c1 = UOp.const(dtypes.int, 2)
     c2 = UOp.const(dtypes.int, 3)
     l1 = g1.index(c1)
-    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
+    a1 = UOp(Ops.MUL, src=(l1, c1))
+    a2 = UOp(Ops.MUL, src=(l1, c2))
     uops = to_uops_list([out.index(UOp.const(dtypes.int, 0)).store(a1), out.index(UOp.const(dtypes.int, 1)).store(a2)],
                         ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
