@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic
@@ -141,6 +141,9 @@ def unwrap_after(uop):
   while uop.op is Ops.AFTER: uop = uop.src[0]
   return uop
 
+def unwrap_mstack(u):
+  return tuple(x for s in u.src for x in unwrap_mstack(s)) if u.op is Ops.MSTACK else (unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,))
+
 def make_getaddr(u, device=None):
   if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM): return u
   return UOp(Ops.GETADDR, dtypes.uint64, src=(u,), arg=device or to_tuple(u.device)[0])
@@ -151,16 +154,26 @@ def make_ins(op, *srcs):
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
   return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "buf")
 
-def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
-  return buf.index(UOp.const(dtypes.int, off//buf.dtype.itemsize)).store(val.cast(dtype or buf.dtype))
+def tag_patch(val:UOp) -> str:
+  if any(u.op in (Ops.LOAD, Ops.INDEX) for u in val.toposort()): return "rt"
+  if not (gaddrs:=[u for u in val.toposort() if u.op is Ops.GETADDR]): return "any"
+  return "rt" if any(x.op is Ops.PARAM and x.tag is None for g in gaddrs for x in unwrap_mstack(g.buf_uop)) else "link"
+
+def make_patch(buf:UOp, off:sint, val:UOp, dtype=None, tag=None) -> UOp:
+  return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype)).rtag(tag or tag_patch(val))
+
+def make_binary_patch(buf:UOp, blob:bytes, tag=None) -> UOp:
+  data, dt, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype, buf.dtype.itemsize
+  r = UOp.range(len(blob) // isz, next(UOp.unique_num))
+  return buf.index(r).store(UOp(Ops.BITCAST, buf.dtype, (data,)).index(r).load()).end(r).rtag(tag or "any")
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []
   for s in (s for ins in lin.src for s in ins.src):
-    if s.op is not Ops.CONST: patches.append((len(blob), s))
-    blob += struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0)
+    if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
+    blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
   buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32)
-  return buf.after(buf.store(UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob)), *[make_patch(buf, off, s) for off, s in patches])
+  return buf.after(make_binary_patch(buf, blob, tag="link"), *[make_patch(buf, off, s) for off, s in patches])
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
@@ -365,7 +378,7 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
   buf = make_placeholder(devs, data.kernargs_alloc_size // 4, dtypes.uint32, name="kernargs")
   words = [w for gi in info.globals for w in data64_le(make_getaddr(get_call_arg_uops(call)[gi], devs))] + list(info.vars)
-  return buf.after(*[make_patch(buf, i * 4, w) for i, w in enumerate(words)])
+  return buf.after(*[make_patch(buf, i * 4, w, tag="rt") for i, w in enumerate(words)])
 
 # *****************
 # 4.2. hcq lowering: ops to ir
@@ -377,19 +390,9 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbu
 
 # *****************
 
-def unwrap_mstack(u): return u.src if u.op is Ops.MSTACK else (u,)
-
-def _is_link_patch(p:UOp, buf:UOp, jit=False) -> bool:
-  if p.op is not Ops.STORE or p.buf_uop is not buf: return False # this is not a patch :(
-
-  assert all(x.op is Ops.PARAM for x in unwrap_mstack(p.buf_uop))
-  has_loads = any(u.op in (Ops.LOAD, Ops.INDEX) for u in p.src[1].backward_slice)
-  param_is_input = all(x.tag is None and x.op is Ops.PARAM for x in unwrap_mstack(p.src[1].buf_uop))
-
-  return not has_loads and not param_is_input if True else (p.buf_uop.tag in {"program"})
-
+def is_link_patch(p:UOp, jit:bool) -> bool: return p.tag == "link" or p.tag == "any" # TODO: jit
 def trim_link_patches(ctx:tuple[bool, list[UOp]], a:UOp) -> UOp|None:
-  links, kept = partition(a.src[1:], lambda p: _is_link_patch(p, a.src[0], jit=ctx[0]))
+  links, kept = partition(a.src[1:], lambda p: is_link_patch(p, ctx[0]))
 
   # keep all patches from the link-time patches' subtrees in the C code
   afters = [u for u in UOp.sink(*links).toposort() if u.op is Ops.AFTER]
@@ -410,7 +413,7 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
   bare = {g: g.replace(src=(unwrap_after(g.src[0]),)) for g in gaddrs}
 
-  order = sorted(dedup(bare.values()), key=lambda g: (g.buf_uop.arg.slot, to_tuple(g.buf_uop.tag)))
+  order = sorted(dedup(bare.values()), key=lambda g: ((b:=unwrap_mstack(g.buf_uop)[0]).arg.slot, to_tuple(b.tag)))
   b = make_placeholder(call.arg.aux.device, len(order), dtypes.uint64, name)
 
   sub = {g: b.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(dtypes.int, order.index(gr))).load() for g,gr in bare.items()}
@@ -418,7 +421,7 @@ def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
 
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
-  inputs, systems = partition(gaddrs, lambda g: all(x.tag is None for x in unwrap_mstack(g.buf_uop)))
+  inputs, systems = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
 
   (inpsub, _), (syssub, sysarg) = _make_getaddrs_sub(call, inputs, "inputs"), _make_getaddrs_sub(call, systems, "systems")
   return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:], *sysarg),
@@ -503,7 +506,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
     linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
 
     # pie
-    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split rt/lt patches")
+    linear = graph_rewrite(linear, pm_split_patches, ctx=input_uops is None, walk=True, name="split rt/lt patches")
     linear = graph_rewrite(linear, pm_rm_rt_getaddrs, walk=True, name="replace rt getaddrs")
     linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
 
@@ -528,8 +531,8 @@ pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
-def fold_blob_store(buf:UOp, blob:UOp) -> UOp:
-  for b in (mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)): b.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
+def fold_binary(buf:UOp, blob:UOp) -> UOp:
+  for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)): b.ensure_allocated()._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
@@ -555,12 +558,17 @@ pm_resolve_patches = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat(name="buf"),), name="g"), resolve_getaddr),
 
   # folders
-  (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
+  (UPat(name="buf").index(UPat(Ops.RANGE), allow_any_len=True)
+    .store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast()).index(UPat(Ops.RANGE), allow_any_len=True).load())
+    .end(UPat(Ops.RANGE)), fold_binary),
   (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").index(UPat.cvar("off"))
     .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
 ])
 
+pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
+
 @track_rewrites(lambda _,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, bottom_up=True, walk=True, name="bufferize placeholders")
-  return graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
+  linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
+  return graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
