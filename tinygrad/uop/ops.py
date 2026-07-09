@@ -149,13 +149,16 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.CONST:
       # TODO: need const refactor to bool/weakint/weakfloat
       return None
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS:
+    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PLITERAL | Ops.PFRAGMENT:
       # dtype is free-form (asm/codegen/upat)
       return None
+    case Ops.PCAPTURE | Ops.PFORALL:
+      return dtypes.void
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
     # TODO: support dtype broadcasting (promotion)
+    if len(src) == 0: return dtypes.void
     if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
     return src[0].dtype
   if op in GroupOp.Movement: return src[0].dtype
@@ -163,8 +166,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
+  def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
@@ -339,6 +343,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         input_shapes = [x._shape for x in self.src if x._shape is not None]
         return _broadcast_shape(*input_shapes) if input_shapes else None
       case Ops.CUSTOM_FUNCTION: return None
+      case Ops.PLITERAL | Ops.PFRAGMENT | Ops.PCAPTURE | Ops.PFORALL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape

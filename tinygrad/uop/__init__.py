@@ -102,6 +102,13 @@ class Ops(FastEnum):
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
 
+  # ** 7 -- pattern compiler IR (not spec-compliant, used in upat.py) **
+  # PLITERAL carries a Python literal as an arg for CUSTOM predicates
+  # PCAPTURE binds a matched UOp to a name (replaces misused STORE)
+  # PFORALL is a for-all quantifier over sources (replaces misused RANGE)
+  # PFRAGMENT is a rendered string fragment (replaces misused NOOP)
+  PLITERAL = auto(); PCAPTURE = auto(); PFORALL = auto(); PFRAGMENT = auto()
+
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.CDIV, Ops.MAX, Ops.CMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
