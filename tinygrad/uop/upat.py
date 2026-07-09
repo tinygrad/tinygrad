@@ -88,13 +88,13 @@ def do_process_and(a:UOp) -> UOp|None:
     else:
       # check for duplicate stores
       dict_stores: dict[UOp, UOp] = {}
-      for a in stores:
-        if a.src[0] in dict_stores:
+      for store in stores:
+        if store.src[0] in dict_stores:
           # duplicate store is an identity compare
-          new_src.append(UOp(Ops.CUSTOM, src=(dict_stores[a.src[0]], a.src[1]), arg="{0} is {1}"))
+          new_src.append(UOp(Ops.CUSTOM, src=(dict_stores[store.src[0]], store.src[1]), arg="{0} is {1}"))
           found = True
         else:
-          dict_stores[a.src[0]] = a.src[1]
+          dict_stores[store.src[0]] = store.src[1]
       # put the stores back
       for k,v in dict_stores.items(): new_src.append(UOp(Ops.STORE, src=(k,v)))
 
