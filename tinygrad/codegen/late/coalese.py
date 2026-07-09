@@ -1,6 +1,6 @@
 import itertools, functools
 from collections import defaultdict
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType, least_upper_dtype
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
@@ -40,7 +40,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
   if not is_image_shape(buf._shape): return None
-  start_idx = idx_x._stack(idx_y)
+  dt = least_upper_dtype(idx_x.dtype, idx_y.dtype)
+  start_idx = idx_x.cast(dt)._stack(idx_y.cast(dt))
   idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
 
