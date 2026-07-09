@@ -36,7 +36,7 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert A.dtype == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  var = UOp.param(2, dtypes.weakint, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
+  var = UOp.param(2, dtypes.index, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
   insts = [
     s_load_b128(s[4:7], s[0:1]),
     s_load_b32(s[8], s[0:1], offset=0x10), # all threads load the same variable

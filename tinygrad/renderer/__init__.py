@@ -83,4 +83,4 @@ class Renderer:
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
-    return set(dtypes.all) - {dtypes.weakint} - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())
+    return set(dtypes.all) - {dtypes.index} - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())

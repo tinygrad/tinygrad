@@ -473,7 +473,7 @@ pm_early_simplify = PatternMatcher([
 #   count_per_tag = collections.Counter(b.tag for b in bufs)
 #   ref_bufs = {b.tag:b for b in bufs if count_per_tag[b.tag] > 1}
 #   bases = {tag:UOp.new_buffer(b.device, size_per_tag[tag], b.dtype).rtag(tag) for tag,b in ref_bufs.items()}
-#   subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.weakint, off_per_buf.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
+#   subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.index, off_per_buf.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
 #   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
 # pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
 
