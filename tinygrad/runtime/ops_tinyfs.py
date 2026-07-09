@@ -74,8 +74,8 @@ class TinyFSDevice(Compiled):
 class TinyFSBuffer:
   def __init__(self, device:TinyFSDevice, size:int, offset=0, copyout_queue=None, hash_buf=None):
     self.device, self.size, self.offset = device, size, offset
-    self.copyout_queue = copyout_queue or []
-    self.hash_buf = hash_buf or bytearray()
+    self.copyout_queue = [] if copyout_queue is None else copyout_queue
+    self.hash_buf = bytearray() if hash_buf is None else hash_buf
   def __repr__(self): return f"<TinyFSBuffer size={self.size} offset={self.offset}>"
 
 class TinyFSAllocator(Allocator[TinyFSDevice]):
@@ -91,11 +91,11 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
     if dest.device.op == "LOAD":
       locs = self.dev.sfile.readline()
-      dest.copyout_queue = json.loads(locs)
-      dest.hash_buf = src.tobytes()
+      dest.copyout_queue[:] = json.loads(locs)
+      dest.hash_buf[:] = src.tobytes()
     elif dest.device.op == "STORE":
       expected_hashes = math.ceil(dest.size / CHUNK_SIZE)
-      dest.hash_buf = bytearray(expected_hashes * 16)
+      dest.hash_buf[:] = bytearray(expected_hashes * 16)
       self.dev.sfile.readinto(dest.hash_buf)
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
