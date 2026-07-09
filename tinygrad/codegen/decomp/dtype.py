@@ -174,7 +174,8 @@ def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
     for fr in sorted(filter(_should_emulate, ctx[0])):
       to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
       if DEBUG >= 2: print(f"emulating {fr} as {to}")
-      sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+      pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
+      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
   ctx[0].clear()
   return sink
 
