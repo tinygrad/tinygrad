@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, functools, sys, inspect, pathlib, hashlib, weakref
+import time, functools, sys, inspect, pathlib, hashlib, weakref, random
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
@@ -382,6 +382,7 @@ class Tensor(RandMixin):
   _seed: int = int(time.time())
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
+  _python_rng: random.Random = random.Random()
   @staticmethod
   def manual_seed(seed=0) -> None:
     """
@@ -399,6 +400,7 @@ class Tensor(RandMixin):
     ```
     """
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
+    Tensor._python_rng = random.Random(seed)
 
   @staticmethod
   def _next_counter(device:str, num:int) -> tuple[Tensor, Tensor]:

@@ -245,7 +245,10 @@ class RandMixin(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    return cls.rand(n, device=device, **kwargs).argsort().cast(dtype)
+    if n <= 1: return cls.arange(n, dtype=dtype)
+    # affine map is a permutation when stride is coprime to n
+    while math.gcd(stride:=cls._python_rng.randrange(1, n), n) != 1: pass  # type: ignore[attr-defined]
+    return ((cls.arange(n, dtype=dtypes.int64) * stride + cls.randint(1, low=0, high=n, device=device, dtype=dtypes.int64)) % n).cast(dtype)
 
   def multinomial(self, num_samples:int = 1, replacement:bool = False) -> Self:
     """
