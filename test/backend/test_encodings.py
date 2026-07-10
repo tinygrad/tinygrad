@@ -64,25 +64,25 @@ class TestEncodingsX86(unittest.TestCase):
 
   # 8bit variants of legacy instructions subtract 1 from opcode
   def test_8bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int32, (def_reg(dtypes.int8, RDX),), RAX)
+    cast = ins(X86Ops.MOVSX32, dtypes.int32, (def_reg(dtypes.int8, RDX),), RAX)
     # movsx eax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("0F BE C2"))
 
   # accessing lower 8 bits of rsp, rbp, rsi, rdi requires rex prefix
   def test_lower_8bits_reg(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int32, (def_reg(dtypes.int8, RDI),), RAX)
+    cast = ins(X86Ops.MOVSX32, dtypes.int32, (def_reg(dtypes.int8, RDI),), RAX)
     # movsx eax, dil
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("40 0F BE C7"))
 
   # test 16 bit variant of legacy instruction
   def test_16bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int16, (def_reg(dtypes.int8, RDX),), RAX)
+    cast = ins(X86Ops.MOVSX16, dtypes.int16, (def_reg(dtypes.int8, RDX),), RAX)
     # movsx ax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("66 0F BE C2"))
 
   # test 64 bit variant of legacy instruction
   def test_64bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int64, (def_reg(dtypes.int8, RDX),), RAX)
+    cast = ins(X86Ops.MOVSX64, dtypes.int64, (def_reg(dtypes.int8, RDX),), RAX)
     # movsx rax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("48 0F BE C2"))
 

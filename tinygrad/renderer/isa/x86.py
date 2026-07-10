@@ -21,7 +21,7 @@ class X86Ops(FastEnum):
   VMOVSS = auto(); VMOVSD = auto(); VMOVUPS = auto()
   VMOVSSm = auto(); VMOVSDm = auto(); VMOVUPSm = auto()
   # casts
-  MOVZX = auto(); MOVSX = auto(); MOVSXD = auto()
+  MOVZX16 = auto(); MOVZX32 = auto(); MOVZX64 = auto(); MOVSX16 = auto(); MOVSX32 = auto(); MOVSX64 = auto(); MOVSXD = auto()
   VPMOVZXBW = auto(); VPMOVZXBD = auto(); VPMOVZXBQ = auto()
   VPMOVZXWD = auto(); VPMOVZXWQ = auto(); VPMOVZXDQ = auto()
   VPMOVSXBW = auto(); VPMOVSXBD = auto(); VPMOVSXBQ = auto()
@@ -29,7 +29,7 @@ class X86Ops(FastEnum):
   VCVTDQ2PS = auto(); VCVTDQ2PD = auto(); VCVTTPS2DQ = auto(); VCVTTPD2DQ = auto()
   VCVTPH2PS = auto(); VCVTPS2PH = auto(); VCVTPS2PD = auto(); VCVTPD2PS = auto()
   VCVTSS2SD = auto(); VCVTSD2SS = auto(); VCVTSI2SS = auto(); VCVTSI2SD = auto()
-  VCVTTSS2SI = auto(); VCVTTSD2SI = auto()
+  VCVTTSS2SI32 = auto(); VCVTTSS2SI64 = auto(); VCVTTSD2SI32 = auto(); VCVTTSD2SI64 = auto()
   # bitcasts
   VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto()
   # comparisons
@@ -77,6 +77,40 @@ class X86Ops(FastEnum):
   # return
   RET = auto()
 
+  @property
+  def dtype(self) -> DType|None:
+    return _X86_DTYPE.get(self)
+
+# None = pass-through (derive from src[0]). These are the ops whose output dtype is fixed by the instruction.
+_X86_DTYPE: dict[X86Ops, DType|None] = {
+  X86Ops.LEA: dtypes.uint64, X86Ops.FRAME_INDEX: dtypes.int32,
+  # void (flags, control flow)
+  X86Ops.VUCOMISS: dtypes.void, X86Ops.VUCOMISD: dtypes.void, X86Ops.CMP: dtypes.void, X86Ops.CMPi: dtypes.void,
+  X86Ops.JNE: dtypes.void, X86Ops.JE: dtypes.void, X86Ops.JL: dtypes.void, X86Ops.JB: dtypes.void,
+  X86Ops.JGE: dtypes.void, X86Ops.JMP: dtypes.void, X86Ops.RET: dtypes.void, X86Ops.LABEL: dtypes.void,
+  # bool
+  X86Ops.SETNE: dtypes.bool, X86Ops.SETE: dtypes.bool, X86Ops.SETL: dtypes.bool, X86Ops.SETB: dtypes.bool,
+  # casts with fixed output dtype
+  X86Ops.VCVTDQ2PS: dtypes.float32, X86Ops.VCVTDQ2PD: dtypes.float64,
+  X86Ops.VCVTTPS2DQ: dtypes.int32, X86Ops.VCVTTPD2DQ: dtypes.int32,
+  X86Ops.VCVTPS2PD: dtypes.float64, X86Ops.VCVTPD2PS: dtypes.float32,
+  X86Ops.VCVTPS2PH: dtypes.float16, X86Ops.VCVTPH2PS: dtypes.float32,
+  X86Ops.VCVTSS2SD: dtypes.float64, X86Ops.VCVTSD2SS: dtypes.float32,
+  X86Ops.VCVTSI2SS: dtypes.float32, X86Ops.VCVTSI2SD: dtypes.float64,
+  X86Ops.VCVTTSS2SI32: dtypes.int32, X86Ops.VCVTTSS2SI64: dtypes.int64,
+  X86Ops.VCVTTSD2SI32: dtypes.int32, X86Ops.VCVTTSD2SI64: dtypes.int64,
+  X86Ops.MOVZX16: dtypes.int16, X86Ops.MOVZX32: dtypes.int32, X86Ops.MOVZX64: dtypes.int64,
+  X86Ops.MOVSX16: dtypes.int16, X86Ops.MOVSX32: dtypes.int32, X86Ops.MOVSX64: dtypes.int64,
+  X86Ops.MOVSXD: dtypes.int64,
+  X86Ops.VPMOVZXBW: dtypes.int16, X86Ops.VPMOVZXBD: dtypes.int32, X86Ops.VPMOVZXBQ: dtypes.int64,
+  X86Ops.VPMOVZXWD: dtypes.int32, X86Ops.VPMOVZXWQ: dtypes.int64, X86Ops.VPMOVZXDQ: dtypes.int64,
+  X86Ops.VPMOVSXBW: dtypes.int16, X86Ops.VPMOVSXBD: dtypes.int32, X86Ops.VPMOVSXBQ: dtypes.int64,
+  X86Ops.VPMOVSXWD: dtypes.int32, X86Ops.VPMOVSXWQ: dtypes.int64, X86Ops.VPMOVSXDQ: dtypes.int64,
+  # bitcasts
+  X86Ops.VMOVD: dtypes.float32, X86Ops.VMOVQ: dtypes.float64,
+  X86Ops.VMOVDm: dtypes.int32, X86Ops.VMOVQm: dtypes.int64,
+}
+
 class X86GroupOp:
   # X86Ops whose first src is also the destination
   TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
@@ -85,10 +119,13 @@ class X86GroupOp:
                 X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
 
   # X86Ops whose first src can read from memory
-  ReadMem1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
+  ReadMem1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS,
+                X86Ops.MOVZX16, X86Ops.MOVZX32, X86Ops.MOVZX64,
+                X86Ops.MOVSX16, X86Ops.MOVSX32, X86Ops.MOVSX64, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
                 X86Ops.VPMOVZXBW, X86Ops.VPMOVZXBD, X86Ops.VPMOVZXBQ, X86Ops.VPMOVZXWD, X86Ops.VPMOVZXWQ, X86Ops.VPMOVZXDQ,
                 X86Ops.VPMOVSXBW, X86Ops.VPMOVSXBD, X86Ops.VPMOVSXBQ, X86Ops.VPMOVSXWD, X86Ops.VPMOVSXWQ, X86Ops.VPMOVSXDQ,
-                X86Ops.VCVTDQ2PS, X86Ops.VCVTDQ2PD, X86Ops.VCVTTPS2DQ, X86Ops.VCVTTPD2DQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,
+                X86Ops.VCVTDQ2PS, X86Ops.VCVTDQ2PD, X86Ops.VCVTTPS2DQ, X86Ops.VCVTTPD2DQ,
+                X86Ops.VCVTTSS2SI32, X86Ops.VCVTTSS2SI64, X86Ops.VCVTTSD2SI32, X86Ops.VCVTTSD2SI64,
                 X86Ops.VCVTPH2PS, X86Ops.VCVTPS2PD, X86Ops.VCVTPD2PS, X86Ops.VROUNDPS, X86Ops.VROUNDPD, X86Ops.VSQRTPS, X86Ops.VSQRTPD,
                 X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ, X86Ops.VBROADCASTSS,
                 X86Ops.CMPi, X86Ops.IMULi, X86Ops.LEA}
@@ -259,9 +296,9 @@ def to_imm(c:UOp) -> UOp|None:
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, c.arg)
   return None
 def cmp(x:UOp) -> UOp:
-  if x.src[0].dtype is dtypes.float32: return x.ins(X86Ops.VUCOMISS, dtype=dtypes.void)
-  if x.src[0].dtype is dtypes.float64: return x.ins(X86Ops.VUCOMISD, dtype=dtypes.void)
-  return x.ins(X86Ops.CMP, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x.src[0], i))
+  if x.src[0].dtype is dtypes.float32: return x.ins(X86Ops.VUCOMISS)
+  if x.src[0].dtype is dtypes.float64: return x.ins(X86Ops.VUCOMISD)
+  return x.ins(X86Ops.CMP) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, src=(x.src[0], i))
 def vcmp(x:UOp) -> UOp:
   v = imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
   if x.dtype.scalar() is dtypes.float32: return x.ins(X86Ops.VCMPSS if x.dtype.count == 1 else X86Ops.VCMPPS, src=x.src + (v,))
@@ -320,8 +357,8 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   elif x.dtype in dtypes.uints: ext = [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=(RDX,))]
   else: ext = [x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=(RDX,))]
   # for 8bit need to zero/sign extend al to ah
-  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=X86Ops.MOVZX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
-  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
+  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=X86Ops.MOVZX16, src=(x.src[0],), tag=(RAX,))
+  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=X86Ops.MOVSX16, src=(x.src[0],), tag=(RAX,))
   else: dividend = x.ins(X86Ops.MOV, src=(x.src[0],), tag=(RAX,))
   # divisor can't be in rax or rdx
   divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
@@ -353,7 +390,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
   def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
   def _stack_arg(disp:int):
-    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp), imm(dtypes.uint8, 8))
+    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, tag=disp), imm(dtypes.uint8, 8))
   if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
   else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
@@ -549,15 +586,19 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).cast(dtypes.float32, name="x"), lambda x: x.ins(X86Ops.VCVTPD2PS) if x.dtype.count > 1 else None),
   (UPat(dtype=dtypes.float32).cast(dtypes.float16, name="x"), lambda x: x.ins(X86Ops.VCVTPS2PH, src=x.src + (imm(dtypes.uint8, 4),))),
   (UPat(dtype=dtypes.float16).cast(dtypes.float32, name="x"), lambda x: x.ins(X86Ops.VCVTPH2PS)),
-  (UPat(dtype=dtypes.float32).cast(dtypes.int32s+dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VCVTTSS2SI)),
-  (UPat(dtype=dtypes.float64).cast(dtypes.int32s+dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VCVTTSD2SI)),
+   (UPat(dtype=dtypes.float32).cast(dtypes.int32s+dtypes.int64s, name="x"),
+    lambda x: x.ins({4: X86Ops.VCVTTSS2SI32, 8: X86Ops.VCVTTSS2SI64}[x.dtype.itemsize])),
+   (UPat(dtype=dtypes.float64).cast(dtypes.int32s+dtypes.int64s, name="x"),
+    lambda x: x.ins({4: X86Ops.VCVTTSD2SI32, 8: X86Ops.VCVTTSD2SI64}[x.dtype.itemsize])),
   (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSS2SD, src=(y, y))),
   (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSD2SS, src=(y, y))),
   (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SS, src=(def_reg(x.dtype), y))),
   (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SD, src=(def_reg(x.dtype), y))),
-  (UPat(dtype=dtypes.uints+(dtypes.bool,)).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOVZX) if x.dtype.count == 1 else None),
-  (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD) if x.dtype.count == 1 else None),
-  (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOVSX) if x.dtype.count == 1 else None),
+   (UPat(dtype=dtypes.uints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
+    lambda x: x.ins({2: X86Ops.MOVZX16, 4: X86Ops.MOVZX32, 8: X86Ops.MOVZX64}[x.dtype.itemsize]) if x.dtype.count == 1 else None),
+   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD) if x.dtype.count == 1 else None),
+   (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"),
+    lambda x: x.ins({2: X86Ops.MOVSX16, 4: X86Ops.MOVSX32, 8: X86Ops.MOVSX64}[x.dtype.itemsize]) if x.dtype.count == 1 else None),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int16s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBW)),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int32s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBD)),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBQ)),
@@ -579,7 +620,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"),
-   lambda x: x.ins(X86Ops.LEA, dtype=dtypes.uint64, src=fold_address(x)) if x.src[0].dtype.count == 1 else None),
+   lambda x: x.ins(X86Ops.LEA, src=fold_address(x)) if x.src[0].dtype.count == 1 else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
@@ -759,8 +800,9 @@ encodings = {
   X86Ops.VMOVD: lambda x: encode(x, 0x6E, pp=1, sel=1), X86Ops.VMOVQ: lambda x: encode(x, 0x6E, pp=1, sel=1, we=1),
   X86Ops.VMOVDm: lambda x: encode(x, 0x7E, pp=1, sel=1), X86Ops.VMOVQm: lambda x: encode(x, 0x7E, pp=1, sel=1, we=1),
   # casts
-  X86Ops.MOVZX: lambda x: encode(x, 0x0FB7),
-  X86Ops.MOVSX: lambda x: encode(x, 0x0FBF), X86Ops.MOVSXD: lambda x: encode(x, 0x63),
+  X86Ops.MOVZX16: lambda x: encode(x, 0x0FB7), X86Ops.MOVZX32: lambda x: encode(x, 0x0FB7), X86Ops.MOVZX64: lambda x: encode(x, 0x0FB7),
+  X86Ops.MOVSX16: lambda x: encode(x, 0x0FBF), X86Ops.MOVSX32: lambda x: encode(x, 0x0FBF), X86Ops.MOVSX64: lambda x: encode(x, 0x0FBF),
+  X86Ops.MOVSXD: lambda x: encode(x, 0x63),
   X86Ops.VPMOVZXBW: lambda x: encode(x, 0x30, pp=1, sel=2), X86Ops.VPMOVZXBD: lambda x: encode(x, 0x31, pp=1, sel=2),
   X86Ops.VPMOVZXBQ: lambda x: encode(x, 0x32, pp=1, sel=2), X86Ops.VPMOVZXWD: lambda x: encode(x, 0x33, pp=1, sel=2),
   X86Ops.VPMOVZXWQ: lambda x: encode(x, 0x34, pp=1, sel=2), X86Ops.VPMOVZXDQ: lambda x: encode(x, 0x35, pp=1, sel=2),
@@ -775,8 +817,8 @@ encodings = {
   # the int src is the 2nd src (the rm field), if it was folded into a memory operand its width is the element size of the address
   X86Ops.VCVTSI2SS: lambda x: encode(x, 0x2A, pp=2, sel=1, we=(x.src[4].arg if len(x.src) > 4 else x.src[1].dtype.itemsize) == 8),
   X86Ops.VCVTSI2SD: lambda x: encode(x, 0x2A, pp=3, sel=1, we=(x.src[4].arg if len(x.src) > 4 else x.src[1].dtype.itemsize) == 8),
-  X86Ops.VCVTTSS2SI: lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype.itemsize == 8),
-  X86Ops.VCVTTSD2SI: lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype.itemsize == 8),
+  X86Ops.VCVTTSS2SI32: lambda x: encode(x, 0x2C, pp=2, sel=1), X86Ops.VCVTTSS2SI64: lambda x: encode(x, 0x2C, pp=2, sel=1, we=1),
+  X86Ops.VCVTTSD2SI32: lambda x: encode(x, 0x2C, pp=3, sel=1), X86Ops.VCVTTSD2SI64: lambda x: encode(x, 0x2C, pp=3, sel=1, we=1),
   # int division
   X86Ops.IDIV: lambda x: encode(x, 0xF7, reg=7), X86Ops.DIV: lambda x: encode(x, 0xF7, reg=6),
   # scalar int binary
