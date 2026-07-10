@@ -71,7 +71,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), jit=True)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
@@ -197,7 +197,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   @functools.cached_property
-  def linear(self) -> UOp: return link_linear(self._linear)
+  def linear(self) -> UOp: return link_linear(self._linear, jit=True)
 
   def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 

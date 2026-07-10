@@ -69,9 +69,9 @@ class Tensor(RandMixin):
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
-      assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype == dtypes.index: data = _index_to_concrete_int(data)
+      if _dtype is not None: data = data.cast(_dtype)
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
