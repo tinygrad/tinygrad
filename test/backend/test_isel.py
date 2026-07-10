@@ -2,7 +2,7 @@ import itertools, unittest
 from typing import cast
 from tinygrad import Device
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
+from tinygrad.uop.ops import UOp, dtypes, graph_rewrite, Insn
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
@@ -10,6 +10,7 @@ from tinygrad.renderer.isa import IselContext
 def lane(y:UOp, i:int) -> UOp: return y.index(UOp.const(dtypes.int, i), dtype=y.dtype)
 
 def vector(name:str, dtype, count:int) -> UOp:
+  # NOOP models an already materialized packed register while retaining STACK's structural shape.
   return UOp(Ops.NOOP, dtype, (UOp.vectorize(*[UOp.variable(f"{name}{i}", 0, 0, dtype) for i in range(count)]),))
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
@@ -28,6 +29,10 @@ class TestIselX86(unittest.TestCase):
         self.assertIs(n.arg.op, op)
         self.assertIs(n.dtype, dt)
         self.assertEqual(n.shape, () if count == 1 else (count,))
+
+  def test_packed_uint64_is_not_address(self):
+    n = UOp(Ops.INS, dtypes.uint64, arg=Insn(X86Ops.MOV, (4,)))
+    self.assertEqual(cast(X86Renderer, Device[Device.DEFAULT].renderer).register_size(n), 32)
 
   def test_cmove(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
@@ -96,10 +101,11 @@ class TestIselX86(unittest.TestCase):
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.op, X86Ops.VSHUFPS)
 
     invalid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
-               UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5))]
-    for shuf in invalid:
-      n = self.isel_rewrite(shuf)
-      self.assertTrue(n.op is not Ops.INS or n.arg.op is not X86Ops.VSHUFPS)
+               UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 4), lane(b, 5)),
+               UOp.vectorize(lane(a, 0), lane(a, 5), lane(b, 2), lane(b, 3)),
+               UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5)),
+               UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 0), lane(b, 0), lane(a, 4), lane(a, 4), lane(b, 4), lane(a, 4))]
+    for shuf in invalid: self.assertIsNot(getattr(self.isel_rewrite(shuf).arg, "op", None), X86Ops.VSHUFPS)
 
   def test_vshufpd(self):
     a, b = vector("a", dtypes.float64, 4), vector("b", dtypes.float64, 4)
@@ -115,10 +121,9 @@ class TestIselX86(unittest.TestCase):
 
     invalid = [UOp.vectorize(c, c, c, c),
                UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 2), lane(b, 3)),
+               UOp.vectorize(lane(a, 2), lane(b, 3), lane(a, 2), lane(b, 3)),
                UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 0), lane(b, 1))]
-    for shuf in invalid:
-      n = self.isel_rewrite(shuf)
-      self.assertTrue(n.op is not Ops.INS or n.arg.op is not X86Ops.VSHUFPD)
+    for shuf in invalid: self.assertIsNot(getattr(self.isel_rewrite(shuf).arg, "op", None), X86Ops.VSHUFPD)
 
   def test_vinsertps(self):
     a, b, c = vector("a", dtypes.float32, 4), vector("b", dtypes.float32, 4), vector("c", dtypes.float32, 4)
@@ -126,7 +131,7 @@ class TestIselX86(unittest.TestCase):
     # moving 0th element to position 0 does nothing so only 1 vinsertps is generated
     n = self.isel_rewrite(UOp.vectorize(lane(a, 0), d))
     self.assertIs(n.arg.op, X86Ops.VINSERTPS)
-    self.assertTrue(n.src[0].op is not Ops.INS or n.src[0].arg.op is not X86Ops.VINSERTPS)
+    self.assertIsNot(n.src[0].arg.op if n.src[0].op is Ops.INS else None, X86Ops.VINSERTPS)
 
     valid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.vectorize(lane(a, 3), lane(b, 2), lane(c, 1), d)]

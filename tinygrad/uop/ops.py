@@ -36,8 +36,7 @@ class ParamArg:
 @dataclass(frozen=True, order=True)
 class Insn:
   op: Any
-  dtype: DType
-  shape: tuple[Any, ...]
+  shape: tuple[sint, ...] = ()
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -113,7 +112,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
       return dtypes.void
     case Ops.INS:
-      return arg.dtype if isinstance(arg, Insn) else None
+      return None
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
@@ -587,8 +586,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, arg, **kwargs):
     dtype = kwargs.pop("dtype", self.dtype)
-    shape = kwargs.pop("shape") if "shape" in kwargs else self.shape
-    return UOp(Ops.INS, dtype, kwargs.pop("src", self.src), Insn(arg, dtype, shape), kwargs.pop("tag", self.tag))
+    return UOp(Ops.INS, dtype, kwargs.pop("src", self.src), Insn(arg, kwargs.pop("shape", self._shape or ())), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
