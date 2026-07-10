@@ -214,7 +214,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
       buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
-  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
+  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
 
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):

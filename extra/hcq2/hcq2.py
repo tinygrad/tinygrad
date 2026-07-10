@@ -471,31 +471,30 @@ def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   return UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
 
 pm_early_simplify = PatternMatcher([
-  # getaddr(slice(base, off)) -> getaddr(base) + byte offset
+  (UPat(Ops.GETADDR, src=(UPat(Ops.AFTER, src=(UPat(Ops.SLICE, name="bv"),), allow_any_len=True, name="a"),), name="g"),
+   lambda a,bv,g: UOp(Ops.GETADDR, dtypes.uint64, (bv.src[0].after(*a.src[1:]),), g.arg) +
+                  UOp.const(dtypes.uint64, bv.src[1].arg * bv.dtype.itemsize)),
   (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"),), name="g"), resolve_getaddr_slice),
+  (UPat(Ops.INDEX, src=(UPat(Ops.SLICE, name="bv"),), allow_any_len=True, name="x"),
+   lambda bv,x: x.replace(src=(bv.src[0], x.src[1] + bv.src[1].cast(x.src[1].dtype), *x.src[2:]))),
 ])
 
 # *****************
 # 5.3. pack placeholders buffers
 
-# def pack_hcq_placeholders(call:UOp) -> UOp|None:
-#   bufs = [b for b in call.src[0].toposort() if b.op is Ops.PARAM and b.tag in (maxtags:={"scratch"}) | (sumtags:={"program", "kernargs"})]
-
-#   off_per_buf:dict[UOp, int] = {}
-#   size_per_tag:dict[str, int] = {}
-#   for b in bufs:
-#     bsz = b.max_numel()
-#     if b.tag in maxtags: size_per_tag[b.tag] = max(size_per_tag.get(b.tag, 0), bsz)
-#     elif b.tag in sumtags:
-#       off_per_buf[b] = round_up(size_per_tag.get(b.tag, 0), {"program": 0x1000}.get(b.tag, 128))
-#       size_per_tag[b.tag] = off_per_buf[b] + bsz
-
-#   count_per_tag = collections.Counter(b.tag for b in bufs)
-#   ref_bufs = {b.tag:b for b in bufs if count_per_tag[b.tag] > 1}
-#   bases = {tag:UOp.new_buffer(b.device, size_per_tag[tag], b.dtype).rtag(tag) for tag,b in ref_bufs.items()}
-#   subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.index, off_per_buf.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
-#   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
-# pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
+def pack_hcq_placeholders(call:UOp) -> UOp|None:
+  bufs = [b for b in call.src[0].toposort() if b.op is Ops.PARAM and b.tag in {"scratch", "kernargs"}]
+  offs, sizes = {}, {}
+  for b in bufs:
+    if b.tag == "scratch": sizes[b.tag] = max(sizes.get(b.tag, 0), b.max_numel())
+    else:
+      offs[b] = round_up(sizes.get(b.tag, 0), 128 // b.dtype.itemsize)
+      sizes[b.tag] = offs[b] + b.max_numel()
+  counts = collections.Counter(b.tag for b in bufs)
+  bases = {b.tag:make_placeholder(b.device, sizes[b.tag], b.dtype, b.tag) for b in bufs if counts[b.tag] > 1}
+  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.index, offs.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
+  return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
+pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
 
 # *****************
 # 8. callify hcq programs
@@ -524,14 +523,14 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
     linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
     linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
     linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
+    linear = graph_rewrite(linear, pm_pack_placeholders, walk=True, name="pack placeholders")
 
     # pie
     linear = graph_rewrite(linear, pm_split_patches, ctx=jit, walk=True, name="split rt/lt patches")
+    linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="simplify packed placeholders", enter_calls=True)
     linear = graph_rewrite(linear, pm_rm_rt_getaddrs, walk=True, name="replace rt getaddrs")
     linear = graph_rewrite(linear, pm_rm_rt_binaries, walk=True, name="replace rt binaries")
     linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
-
-    linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="early simplify patches", enter_calls=True)
 
     # and compile it
     final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
