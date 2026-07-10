@@ -113,6 +113,10 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
   return UOp.stack(*src).reshape(b.shape)
 
+@functools.cache
+def shape_indexes(shape:tuple[int, ...]) -> tuple[tuple[UOp, ...], ...]:
+  return tuple(tuple(UOp.const(dtypes.index, i) for i in idx) for idx in itertools.product(*map(range, shape)))
+
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
@@ -128,8 +132,10 @@ unbroadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-def do_devectorize(b:UOp):
-  if b.shape == (): return None
+def do_devectorize(ctx, b:UOp):
+  ren = ctx[-1] if isinstance(ctx, tuple) else ctx
+  if b.op in GroupOp.Elementwise and b.dtype in dtypes.floats and ren.supports_float4: return None
+  if (shape:=b.shape) == (): return None
   # broadcasting needs to be already unpacked
   if not all_same([x.shape for x in b.src]): return None
   src = []
@@ -137,6 +143,10 @@ def do_devectorize(b:UOp):
     idx_c = [UOp.const(dtypes.index, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+
+def index_elementwise(x:UOp, idx:UOp):
+  indexes = idx.src[1:]
+  return UOp(x.op, x.dtype, tuple(UOp(Ops.INDEX, s.dtype, (s,)+indexes) if s._shape else s for s in x.src), x.arg, x.tag)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -152,11 +162,13 @@ def do_stack_wmma(u:UOp):
 ew_devectorizer = PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
 ])
 
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
@@ -307,18 +319,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
 
-  # simplify indexing
-  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
-
   # some coalesing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
-
-  # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
@@ -335,7 +341,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  candidate_dtypes = {*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong}
+  emulated_dtypes = set(EMULATED_DTYPES.tolist(dtypes)) | (candidate_dtypes - ren.supported_dtypes())
+  if any(u.dtype in emulated_dtypes for u in sink.toposort()):
+    sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
@@ -440,21 +449,28 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prog_info = ProgramInfo.from_sink(full_sink)
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
-    prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
+    prg = UOp(Ops.PROGRAM, src=(full_sink,))
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+  # PROGRAM lowering is a linear root-only pipeline. Driving it through graph_rewrite
+  # needlessly walks the full SINK and LINEAR graphs between each stage.
+  if len(prg.src) == 1: prg = do_linearize(renderer, prg, prg.src[0])
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], uops=prg.src[1].src))
+  if prg.src[0].arg.estimates is None and (estimated:=do_estimates(prg, prg.src[0], prg.src[1])) is not None: prg = estimated
+  if len(prg.src) == 2:
+    prg = do_assemble(renderer, prg, prg.src[1]) if isinstance(renderer, ISARenderer) else do_render(renderer, prg, prg.src[1])
+  if len(prg.src) == 3 and (compiled:=do_compile(renderer, prg, prg.src[2])) is not None: prg = compiled
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+  # UOps are structurally interned, so identity is already a collision-free structural
+  # cache key within this process and avoids recursively hashing every kernel graph.
+  key = (ast, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

@@ -1,4 +1,4 @@
-from typing import Iterator
+from typing import Iterator, cast
 import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
@@ -135,6 +135,17 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_in.append(acc*src)
     acc *= s
   combined_axes = UOp.const(dtypes.index, 0).usum(axes_in)
+  # Devectorization indexes reshapes with concrete lane numbers. Avoid running the
+  # full symbolic-validity pipeline for each lane when the flat index is constant.
+  if all(isinstance(s, int) and s > 0 for s in in_shape) and combined_axes.vmin == combined_axes.vmax and isinstance(combined_axes.vmin, int):
+    flat_idx = int(combined_axes.vmin)
+    const_axes = []
+    for s in cast(tuple[int, ...], in_shape)[::-1]:
+      const_axes.append(UOp.const(dtypes.index, flat_idx % s))
+      flat_idx //= s
+    return UOp.sink(*const_axes[::-1])
+  if len(in_shape) == 1:
+    return graph_rewrite(UOp.sink(combined_axes), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)

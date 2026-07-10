@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, struct
+import math, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
@@ -303,8 +303,10 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     return v.src[0], True, int((v.src[1]).vmax)-1
   return None
 
-def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
+@functools.cache
+def uop_given_valid(valid:UOp, uop:UOp, try_simplex=False) -> UOp:
   # return simplified uop (might be the same as input)
+  if valid.op is Ops.CONST: return uop
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[PyConst|None]] = defaultdict(lambda: [None, None])
@@ -312,6 +314,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     if (res:=parse_valid(stmt)) is None: continue
     expr, is_upper, c = res
     bounds[expr][int(is_upper)] = c
+  if not bounds: return uop
 
   # simplify uop given that valid is True
   all_candidates = []

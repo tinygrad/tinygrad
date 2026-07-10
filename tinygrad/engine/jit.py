@@ -248,18 +248,19 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buf_uops, var_vals, names, expected_input_info
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, warmup=True):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
-    self.cnt: int = 2 if self.fxn is None else 0
+    self.warmup = warmup
+    self.cnt: int = 2 if self.fxn is None else 0 if warmup else 1
     self.prune = prune
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
-    self.cnt = 0
+    self.cnt = 0 if self.warmup else 1
     self.captured = None
 
   def __reduce__(self):
