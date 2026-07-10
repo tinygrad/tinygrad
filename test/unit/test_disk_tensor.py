@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, OSX, dedup
+from tinygrad.helpers import Timing, fetch, OSX, dedup, Context
 from test.helpers import slow
 
 class TempDirTestCase(unittest.TestCase):
@@ -409,6 +409,13 @@ class TestDiskTensor(TempDirTestCase):
       t = Tensor.empty(256*1024, device=f"disk:{self.tmp('dt_copy_from_disk_offset')}", dtype=dtypes.uint8)[off:]
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
+
+  def test_shard_copy_from_disk_slice(self):
+    fn = pathlib.Path(self.tmp("dt_shard_copy_from_disk_slice"))
+    fn.write_bytes(bytes(range(32)))
+    with Context(CACHELEVEL=0):
+      t = Tensor.empty(8, 4, device=f"disk:{fn}", dtype=dtypes.uint8)[0:4].shard(("CPU:0", "CPU:1"), axis=0).realize()
+      np.testing.assert_equal(t.to("CPU").numpy(), np.arange(16, dtype=np.uint8).reshape(4, 4))
 
   @slow
   def test_copy_from_disk_huge(self):

@@ -70,8 +70,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
-        # the Bufferize before a COPY is not removable. there should be a better way to do this
-        removable = x.op is not Ops.COPY and s.op not in ALWAYS_CONTIGUOUS
+        # the Bufferize before a COPY is not removable unless it's a view. there should be a better way to do this
+        removable = (x.op is not Ops.COPY or s.has_buffer_identity()) and s.op not in ALWAYS_CONTIGUOUS
         # LOCAL: None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
