@@ -519,7 +519,7 @@ class HIPRenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
       lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-        x.src[2]), arg=(*x.arg,)) if x.src[0].dtype.count == 8 and x.src[0].dtype.scalar() in (dtypes.fp8e4m3, dtypes.fp8e5m2) else None),
+        x.src[2]), arg=(*x.arg,)) if x.src[0].max_numel() == 8 and x.src[0].dtype.scalar() in (dtypes.fp8e4m3, dtypes.fp8e5m2) else None),
     # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
   ])
