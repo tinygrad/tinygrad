@@ -149,7 +149,7 @@ class TestAsmGEMM(unittest.TestCase):
 
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestGemmLlama(unittest.TestCase):
-  dtype = dtypes.bfloat16
+  dtype = FP8_DTYPE
 
   def setUp(self):
     if not is_cdna4() or DEV.interface.startswith("MOCK"):
