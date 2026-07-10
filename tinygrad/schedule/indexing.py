@@ -153,6 +153,35 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
   return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
+def _apply_int_reshape(in_shape:tuple[int, ...], out_shape:tuple[int, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
+  """Index pure contiguous splits/merges without flattening and symbolically rebuilding the entire shape."""
+  ret:list[UOp] = []
+  i = j = 0
+  while i < len(in_shape) or j < len(out_shape):
+    while i < len(in_shape) and in_shape[i] == 1:
+      ret.append(UOp.const(dtypes.index, 0))
+      i += 1
+    while j < len(out_shape) and out_shape[j] == 1: j += 1
+    if i == len(in_shape) or j == len(out_shape): break
+    ni, nj, in_sz, out_sz = i+1, j+1, in_shape[i], out_shape[j]
+    while in_sz != out_sz:
+      if in_sz < out_sz and ni < len(in_shape): in_sz, ni = in_sz*in_shape[ni], ni+1
+      elif out_sz < in_sz and nj < len(out_shape): out_sz, nj = out_sz*out_shape[nj], nj+1
+      else: return None
+    in_group, out_group, out_idxs = in_shape[i:ni], out_shape[j:nj], rngs[j:nj]
+    if in_group == out_group: ret.extend(out_idxs)
+    elif len(in_group) == 1:
+      ret.append(UOp.const(dtypes.index, 0).usum([r*prod(out_group[k+1:]) for k,r in enumerate(out_idxs)]))
+    elif len(out_group) == 1:
+      flat, rev = out_idxs[0], []
+      for sz in in_group[:0:-1]:
+        rev.append(flat % sz)
+        flat //= sz
+      ret.extend((flat, *rev[::-1]))
+    else: return None
+    i, j = ni, nj
+  return tuple(ret) if i == len(in_shape) and j == len(out_shape) else None
+
 # this is the definition of the movement ops
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -179,6 +208,8 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         return tuple(ret[::-1])
       if len(in_shape) == 1:
         return (UOp.const(dtypes.index, 0).usum([r*prod(arg[i+1:]) for i,r in enumerate(rngs)]),)
+      if all(isinstance(s, int) and s > 0 for s in in_shape+arg) and \
+         (reshaped:=_apply_int_reshape(cast(tuple[int, ...], in_shape), cast(tuple[int, ...], arg), rngs)) is not None: return reshaped
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER, dtype=r.dtype) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src

@@ -1,8 +1,9 @@
 from dataclasses import replace, dataclass
 import itertools, functools
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, PROFILE, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
+from tinygrad.uop.ops import TRACK_MATCH_STATS
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -337,7 +338,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  if VIZ or PROFILE or TRACK_MATCH_STATS: sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  elif (gpu_sink:=pm_add_gpudims.rewrite(sink, ren)) is not None: sink = gpu_sink
 
   # **** optimizations are done, now we lower to actual code ****
 
@@ -355,7 +357,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if IMAGE: sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   has_invalid = (sink.op is Ops.CONST and sink.arg is Invalid) or any(u.op is Ops.CONST and u.arg is Invalid for u in sink.backward_slice)
-  if has_invalid: sink = graph_rewrite(sink, pm_simplify_valid, name="simplify valid after coalescing")
+  if has_invalid:
+    sink = graph_rewrite(sink, pm_simplify_valid, name="simplify valid after coalescing")
+    has_invalid = (sink.op is Ops.CONST and sink.arg is Invalid) or any(u.op is Ops.CONST and u.arg is Invalid for u in sink.backward_slice)
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
@@ -369,12 +373,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
-  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
   candidate_dtypes = {*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong}
   emulated_dtypes = set(EMULATED_DTYPES.tolist(dtypes)) | (candidate_dtypes - ren.supported_dtypes())
-  if sink.dtype in emulated_dtypes or any(u.dtype in emulated_dtypes for u in sink.backward_slice):
+  needs_dtype_decomp = sink.dtype in emulated_dtypes or any(u.dtype in emulated_dtypes for u in sink.backward_slice)
+  if needs_dtype_decomp:
+    sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
     sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
@@ -388,11 +393,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+  final_topo = sink.backward_slice_with_self
+  if any(x.op is Ops.RANGE for x in final_topo):
+    sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink, itertools.chain(sink.backward_slice, (sink,))),
+                         name="add control flow", bottom_up=True)
+    final_topo = sink.backward_slice_with_self
 
   # put unnumbered variable PARAMs in slots
-  num_params = sum(x.op is Ops.PARAM and x.arg.slot != -1 for x in sink.backward_slice_with_self)
-  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+  params = [x for x in final_topo if x.op is Ops.PARAM]
+  if any(x.arg.slot == -1 for x in params):
+    sink = graph_rewrite(sink, pm_number_params, ctx=[sum(x.arg.slot != -1 for x in params)], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
