@@ -260,7 +260,7 @@ def lane(x:UOp, i:int) -> int:
   if (s:=x.src[i]).op is not Ops.INDEX: return 0
   return unwrap(const_arg(s.src[1]))
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def def_reg(dt:DType, reg:Register|None=None, shape:tuple[int, ...]=()) -> UOp:
+def def_reg(dt:DType, reg:Register|None=None, shape:tuple=()) -> UOp:
   return UOp(Ops.INS, dt, arg=Insn(X86Ops.DEFINE, shape), tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
 def to_imm(c:UOp) -> UOp|None:
@@ -359,6 +359,39 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
+def lower_copy(x:UOp) -> UOp:
+  if is_address(x.src[0]) or x.max_numel() == 1 and x.dtype in dtypes.ints+(dtypes.bool,): return x.ins(X86Ops.MOV, shape=())
+  size = x.dtype.itemsize * x.max_numel()
+  if size in (16, 32): return x.ins(X86Ops.VMOVUPS)
+  if size == 8: return x.ins(X86Ops.VMOVSD)
+  if size in (2, 4): return x.ins(X86Ops.VMOVSS)
+  raise RuntimeError(f"unsupported x86 copy size {size}")
+
+def lower_load(ctx:IselContext|None, x:UOp, address:UOp) -> UOp|None:
+  if ctx is not None and any(u.op is Ops.STACK for u in ctx.uses.get(x, ())): return None
+  count, src = x.arg if isinstance(x.arg, int) else 1, fold_address(address)
+  shape = () if count == 1 else (count,)
+  if count == 1 and x.dtype in dtypes.ints+(dtypes.bool,): return x.ins(X86Ops.MOV, shape=shape, src=src)
+  size = x.dtype.itemsize * count
+  if size == 2:
+    return x.ins(X86Ops.VPINSRW, shape=shape,
+                 src=(def_reg(x.dtype, x.tag if isinstance(x.tag, Register) else None, shape),) + src + (imm(dtypes.uint8, 0),))
+  if size in (16, 32): return x.ins(X86Ops.VMOVUPS, shape=shape, src=src)
+  if size == 8: return x.ins(X86Ops.VMOVSD, shape=shape, src=src)
+  if size == 4: return x.ins(X86Ops.VMOVSS, shape=shape, src=src)
+  raise RuntimeError(f"unsupported x86 load size {size}")
+
+def lower_store(x:UOp, address:UOp, value:UOp) -> UOp:
+  src = fold_address(address)
+  if value.max_numel() == 1 and value.dtype in dtypes.ints+(dtypes.bool,):
+    return x.ins(X86Ops.MOVm, src=src+(value,)) if (immv:=to_imm(value)) is None else x.ins(X86Ops.MOVi, src=src+(immv,))
+  size = value.dtype.itemsize * value.max_numel()
+  if size == 2: return x.ins(X86Ops.VPEXTRW, src=src+(value, imm(dtypes.uint8, 0)))
+  if size in (16, 32): return x.ins(X86Ops.VMOVUPSm, src=src+(value,))
+  if size == 8: return x.ins(X86Ops.VMOVSDm, src=src+(value,))
+  if size == 4: return x.ins(X86Ops.VMOVSSm, src=src+(value,))
+  raise RuntimeError(f"unsupported x86 store size {size}")
+
 def select_index(ctx, x:UOp) -> UOp|None:
   if not is_address(x.src[0]): return None
   # INDEX can be an address or an implicit value load. Preserve it when a memory use is reachable through address-only wrappers.
@@ -366,8 +399,7 @@ def select_index(ctx, x:UOp) -> UOp|None:
     return any(u.op in {Ops.LOAD, Ops.STORE} or u.op in {Ops.WHERE, Ops.AFTER, Ops.NOOP} and address_use(u) for u in ctx.uses.get(y, ()))
   if ctx is not None and x.dtype.itemsize <= 2 and any(u.op is Ops.LOAD for u in ctx.uses.get(x, ())): return None
   if ctx is None or address_use(x): return x.ins(X86Ops.LEA, dtype=dtypes.uint64, shape=(), src=fold_address(x))
-  load = UOp(Ops.LOAD, x.dtype, (x,))
-  return isel_matcher.rewrite(load)
+  return isel_matcher.rewrite(UOp(Ops.LOAD, x.dtype, (x,)))
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
@@ -597,29 +629,9 @@ isel_matcher = PatternMatcher([
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
-  (UPat(Ops.COPY, name="x"), lambda x: x.ins(X86Ops.MOV, shape=()) if is_address(x.src[0]) or
-   x.max_numel() == 1 and x.dtype in dtypes.ints+(dtypes.bool,) else x.ins(
-     {2:X86Ops.VMOVSS, 4:X86Ops.VMOVSS, 8:X86Ops.VMOVSD, 16:X86Ops.VMOVUPS, 32:X86Ops.VMOVUPS}[x.dtype.itemsize*x.max_numel()])),
-  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda ctx,x,a:
-   None if ctx is not None and any(u.op is Ops.STACK for u in ctx.uses.get(x, ())) else x.ins(X86Ops.VPINSRW,
-     shape=() if not isinstance(x.arg, int) or x.arg == 1 else (x.arg,),
-     src=(def_reg(x.dtype, x.tag if isinstance(x.tag, Register) else None, () if not isinstance(x.arg, int) or x.arg == 1 else (x.arg,)),) +
-         fold_address(a) + (imm(dtypes.uint8, 0),))
-   if x.dtype.itemsize*(x.arg if isinstance(x.arg, int) else 1) == 2 and
-   (isinstance(x.arg, int) and x.arg > 1 or x.dtype in dtypes.floats) else None),
-  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda ctx,x,a:
-   None if ctx is not None and any(u.op is Ops.STACK for u in ctx.uses.get(x, ())) else x.ins(
-     X86Ops.MOV if (not isinstance(x.arg, int) or x.arg == 1) and x.dtype in dtypes.ints+(dtypes.bool,) else
-     {4:X86Ops.VMOVSS, 8:X86Ops.VMOVSD, 16:X86Ops.VMOVUPS, 32:X86Ops.VMOVUPS}[x.dtype.itemsize*(x.arg if isinstance(x.arg, int) else 1)],
-     shape=() if not isinstance(x.arg, int) or x.arg == 1 else (x.arg,), src=fold_address(a))),
-  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x: x.ins(X86Ops.VPEXTRW,
-   src=fold_address(a) + (b, imm(dtypes.uint8, 0))) if b.dtype.itemsize*b.max_numel() == 2 and
-   (b.max_numel() > 1 or b.dtype in dtypes.floats) else None),
-  (UPat.var("a").store(UPat.var("b", dtypes.ints+(dtypes.bool,)), name="x"), lambda a,b,x:
-   (x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,)))
-   if b.max_numel() == 1 else None),
-  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x: x.ins(
-   {4:X86Ops.VMOVSSm, 8:X86Ops.VMOVSDm, 16:X86Ops.VMOVUPSm, 32:X86Ops.VMOVUPSm}[b.dtype.itemsize*b.max_numel()], src=fold_address(a) + (b,))),
+  (UPat(Ops.COPY, name="x"), lower_copy),
+  (UPat(Ops.LOAD, src=(UPat(name="address"),), name="x"), lower_load),
+  (UPat.var("address").store(UPat.var("value"), name="x"), lower_store),
   # **** X86Op -> X86Op ****
   # fold loads into X86Ops that allow it, if beneficial
   (UPat(Ops.INS, src=(UPat(Ops.LOAD, src=(UPat(name="a"),), name="y"),), allow_any_len=True, name="x"), lambda ctx,y,a,x:
