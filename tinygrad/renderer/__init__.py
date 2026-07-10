@@ -70,7 +70,6 @@ class Renderer:
   global_prod_max: tuple[int, ...]|None = None
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
-  pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
