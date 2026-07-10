@@ -332,6 +332,16 @@ def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
   return n.replace(src=(y.bitcast({2:dtypes.float16, 4:dtypes.float32, 8:dtypes.float64}[y.dtype.itemsize]),))
 
+# INDEX on a packed register extracts one lane (vpextr* for ints, vpsrldq for floats)
+def vextract(ctx:IselContext, y:UOp, c:UOp, x:UOp) -> UOp|None:
+  if is_address(y) or y.max_numel() == 1: return None
+  if (ci:=const_arg(c)) is None: return None
+  if any(u.op is Ops.STACK for u in ctx.uses.get(x, ())): return None  # leave for shuffle matching
+  if y.dtype in dtypes.floats:
+    return x.ins(X86Ops.VPSRLDQ, shape=(), src=(y, imm(dtypes.uint8, ci * x.dtype.itemsize)))
+  op = {1: X86Ops.VPEXTRB, 2: X86Ops.VPEXTRW, 4: X86Ops.VPEXTRD, 8: X86Ops.VPEXTRQ}[y.dtype.itemsize]
+  return x.ins(op, shape=(), src=(y, imm(dtypes.uint8, ci)))
+
 # we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:IselContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
@@ -524,10 +534,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
   (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
   # INDEX on a vector register value extracts a single element
-  (UPat.var("y", dtypes.ints+(dtypes.bool,)+dtypes.floats).index(UPat(name="c"), name="x"), lambda ctx,y,c,x:
-   None if is_address(y) or y.max_numel() == 1 or (ci:=const_arg(c)) is None or any(u.op is Ops.STACK for u in ctx.uses.get(x, ())) else x.ins(
-     X86Ops.VPSRLDQ if y.dtype in dtypes.floats else {1:X86Ops.VPEXTRB, 2:X86Ops.VPEXTRW, 4:X86Ops.VPEXTRD, 8:X86Ops.VPEXTRQ}[y.dtype.itemsize],
-     shape=(), src=(y, imm(dtypes.uint8, ci * x.dtype.itemsize if y.dtype in dtypes.floats else ci)))),
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)+dtypes.floats).index(UPat(name="c"), name="x"), vextract),
   # fused multiply add
   ((UPat(Ops.MUL, (dtypes.float32, dtypes.float64), name="a") + UPat.var("b")).named("c"), lambda ctx,a,b,c:
    fop(a, X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD, src=(*a.src, b)) if is_foldable(ctx, c, a) else None),

@@ -2,7 +2,7 @@ import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, greg
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
@@ -49,9 +49,10 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
-        # the value of a BUFFER is its 64bit address
+        # the value of a BUFFER or global PARAM is its 64bit address
         vdef = self.vdef(v)
-        sz = 8 if vdef.op is Ops.BUFFER else vdef.dtype.itemsize * vdef.max_numel()
+        is_addr = vdef.op is Ops.BUFFER or (vdef.op is Ops.PARAM and vdef.arg.addrspace is AddrSpace.GLOBAL)
+        sz = 8 if is_addr else vdef.dtype.itemsize * vdef.max_numel()
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
