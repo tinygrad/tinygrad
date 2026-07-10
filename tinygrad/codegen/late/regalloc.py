@@ -51,7 +51,7 @@ class LinearScanRegallocContext:
       if v not in self.spills:
         # the value of a BUFFER is its 64bit address
         vdef = self.vdef(v)
-        sz = 8 if vdef.op is Ops.BUFFER else self.ren.register_size(vdef)
+        sz = 8 if vdef.op is Ops.BUFFER else vdef.dtype.itemsize * vdef.max_numel()
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
@@ -133,5 +133,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat(set(Ops), name="x"), regalloc_rewrite),
 ])

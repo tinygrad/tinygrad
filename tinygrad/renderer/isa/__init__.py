@@ -42,7 +42,6 @@ class ISARenderer(Renderer):
   post_regalloc_matcher: PatternMatcher
 
   def is_two_address(self, x:UOp) -> bool: return False
-  def register_size(self, x:UOp) -> int: return x.dtype.itemsize * (x.max_numel() if x._shape is not None else 1)
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")

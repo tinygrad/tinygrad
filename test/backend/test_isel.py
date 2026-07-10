@@ -2,7 +2,7 @@ import itertools, unittest
 from typing import cast
 from tinygrad import Device
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, dtypes, graph_rewrite, Insn
+from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
@@ -29,10 +29,6 @@ class TestIselX86(unittest.TestCase):
         self.assertIs(n.arg.op, op)
         self.assertIs(n.dtype, dt)
         self.assertEqual(n.shape, () if count == 1 else (count,))
-
-  def test_packed_uint64_is_not_address(self):
-    n = UOp(Ops.INS, dtypes.uint64, arg=Insn(X86Ops.MOV, (4,)))
-    self.assertEqual(cast(X86Renderer, Device[Device.DEFAULT].renderer).register_size(n), 32)
 
   def test_cmove(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
