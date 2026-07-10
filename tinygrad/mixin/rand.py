@@ -245,13 +245,15 @@ class RandMixin(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    if n <= 1: return cls.arange(n, dtype=dtype)
+    if n == 0: return cls.empty(0, dtype=dtype, device=device)
     # affine map (x*stride + offset) % n is a permutation when gcd(stride, n) == 1
     # stride = 2*randint+1 is always odd (coprime to 2^k), then force away from odd prime factors
-    odd_primes = [p for p in range(3, int(n**0.5)+1, 2) if n % p == 0 and all(p % q != 0 for q in range(3, int(p**0.5)+1, 2))]
-    if n % 2 == 0:
-      odd_primes += [p for p in ([n // (2**((n & -n).bit_length() - 1))]) if p > 1]
-      odd_primes = sorted(set(odd_primes))
+    m, odd_primes = n // (n & -n), []
+    while m > 1:
+      p = 2
+      while m % p: p += 1
+      odd_primes.append(p)
+      m //= p
     stride = cls.randint(1, low=0, high=n, device=device, dtype=dtypes.int64) * 2 + 1
     for p in odd_primes:
       stride = (stride % p == 0).where(stride + 2, stride)  # type: ignore[attr-defined,comparison-overlap]
