@@ -95,6 +95,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     elif a.ndim == 2 and a.uop.axis == 1 and b.uop.axis == 0: K //= len(a.device)
     elif a.ndim == 2 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None: batch //= len(a.device)
+    elif a.ndim == 3 and a.uop.axis == 1 and b.uop.axis is None: M //= len(a.device)
     elif a.ndim == 3 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 2 and b.uop.axis == 0: K //= len(a.device)
     else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
@@ -206,6 +207,11 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     s_g_t = Tensor(s_g, device=a.device) if s_g is not None else None
     w_post_t = Tensor(w_post, device=a.device) if has_w_post else None
     g_t = g_t[:a.shape[0]]
+    # A scalar loss produces a replicated gradient. Restore the custom kernel output's
+    # sharding before quantization so dgrad sees the same local batch on each device.
+    if (isinstance(g_t.device, tuple) and g_t.uop.axis is None and out.axis is not None and
+        g_t.shape[out.axis] % len(g_t.device) == 0):
+      g_t = Tensor(g_t.uop._shard(out.axis, len(g_t.device)).multi(out.axis), device=g_t.device)
     from extra.llama_kernels.cast_amax import _grad_fp8_mailbox
     from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
     gbase = gradient.base if hasattr(gradient, "base") else gradient
@@ -230,9 +236,10 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     # dgrad: uses g_scale * x_scale * w_scale (only when scalar)
     if s_g_t is not None: g_scale = g_scale * s_g_t
     grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=g_scale)
-    # wgrad: no w_scale
+    # wgrad: scalar weight scale participates in the forward dequantization
     g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
-    grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale)
+    grad_b = (asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else
+              asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale))
     # wgrad: rescale if not scalar
     if w_post_t is not None:
       grad_b = grad_b / w_post_t.reshape(*w_post_t.shape, *([1]*(grad_b.ndim - w_post_t.ndim)))

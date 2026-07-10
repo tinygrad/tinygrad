@@ -39,7 +39,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     a_ref, b_ref = a_rand.detach().cast(dtypes.bfloat16), b_rand.detach().cast(dtypes.bfloat16)
   else:
     a_ref, b_ref = a_rand.clone(), b_rand.clone()
-  if multi: a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
+  if multi and isinstance(a.device, str): a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     tst = asm_gemm(a, b.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
   else:
@@ -47,7 +47,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
   tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
-  if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
+  if multi and isinstance(a_ref.device, str): a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     ref = ((a_ref @ b_ref.T) * ((x_scale.float() + 1e-8) / FP8_MAX) * w_scale).cast(dtypes.bfloat16)
   else:
@@ -56,7 +56,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
   Tensor.realize(ref, a_ref.grad, b_ref.grad)
 
   # no validation on the NULL device
-  if a_rand.device.startswith("NULL"): return None
+  if (a_rand.device[0] if isinstance(a_rand.device, tuple) else a_rand.device).startswith("NULL"): return None
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   # allow more rtol for multi because of ALLREDUCE_CAST
   grad_atol, grad_rtol = (16895, 0.125) if dtype == FP8_DTYPE else (atol, 2e-2 if multi else rtol)
