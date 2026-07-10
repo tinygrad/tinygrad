@@ -132,6 +132,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   return nx, before + [nx] + after
 
+# match every op so ctx.idx stays aligned with the linearized uop list
 pm_regalloc_rewrite = PatternMatcher([
   (UPat(set(Ops), name="x"), regalloc_rewrite),
 ])

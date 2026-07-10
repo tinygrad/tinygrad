@@ -37,6 +37,9 @@ class ParamArg:
 class Insn:
   op: Any
   shape: tuple[sint, ...] = ()
+  def __eq__(self, other): return (self.op, self.shape) == (other.op, other.shape) if isinstance(other, Insn) else self.op == other
+  def __hash__(self): return hash(self.op)
+  def __str__(self): return str(self.op)
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
