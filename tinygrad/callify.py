@@ -50,25 +50,25 @@ def replace_contig_with_store_after(u:UOp):
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
   """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
-  buf = src.base
-  if buf.op is Ops.SLICE:
-    byte_offset = buf.src[1].arg * buf.src[0].dtype.itemsize + offset * src.dtype.itemsize
-    buf = buf.src[0]
+  buf, size = src.base, src.numel()
+  # can we check this before calling contiguous_view_offset?
+  if buf.op is Ops.BITCAST:
+    byte_offset = offset * src.dtype.itemsize
     if byte_offset % buf.dtype.itemsize != 0: return None
+    buf = buf.src[0]
     offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
+    size = size * src.dtype.itemsize // buf.dtype.itemsize
+  return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(dtypes.index, offset), UOp.const(dtypes.index, size)))
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
   buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
-  if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
+  if buf.op not in {Ops.BUFFER, Ops.MULTI, Ops.BITCAST}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
@@ -79,7 +79,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
+    view = view.bitcast(c.dtype).reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
@@ -144,7 +144,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
@@ -188,6 +188,11 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].expr if b.op is Ops.BIND else None,
                    b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
+def replace_input_view(ctx:AllocCtx, b:UOp):
+  if (buf:=b.src[0].base).op is not Ops.BUFFER: return None
+  if (offset:=(b.src[0] if b.op is Ops.BITCAST else b).contiguous_view_offset()) is None: return None
+  return replace_input_buffer(ctx, UOp(Ops.SLICE, b.dtype, (buf, UOp.const(dtypes.index, offset)), b.numel()))
+
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
@@ -197,8 +202,8 @@ pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
-  # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.index)), name="b"), replace_input_buffer),
+  # replace BITCAST(SHRINK) with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
+  (UPat((Ops.BITCAST, Ops.SHRINK), allow_any_len=True, name="b"), replace_input_view),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
