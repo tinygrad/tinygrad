@@ -51,7 +51,7 @@ class LinearScanRegallocContext:
       if v not in self.spills:
         # the value of a BUFFER is its 64bit address
         dt = self.vdef(v).dtype
-        sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.itemsize
+        sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.itemsize * self.vdef(v).max_numel()
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz

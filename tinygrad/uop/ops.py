@@ -32,6 +32,14 @@ class ParamArg:
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
+
+@dataclass(frozen=True)
+class Insn:
+  op: Any
+  dtype: DType
+  shape: tuple[Any, ...]|None
+  def __lt__(self, other:Insn): return (self.op, self.dtype, self.shape or ()) < (other.op, other.dtype, other.shape or ())
+
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -106,8 +114,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PYLITERAL:
+    case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
       return dtypes.void
+    case Ops.INS:
+      return arg.dtype if isinstance(arg, Insn) else None
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
@@ -284,7 +294,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, self.arg.op if isinstance(self.arg, Insn) else self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 
@@ -293,8 +303,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
+
+      case Ops.INS:
+        return self.arg.shape if isinstance(self.arg, Insn) else None
 
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:
@@ -576,7 +589,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
-  def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
+  def ins(self, arg, **kwargs):
+    dt = kwargs.pop("dtype", self.dtype)
+    if not isinstance(arg, Insn): arg = Insn(arg, dt, kwargs.pop("shape", () if dt is dtypes.void else self._shape))
+    return UOp(Ops.INS, src=kwargs.pop("src", self.src), arg=arg, tag=kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
