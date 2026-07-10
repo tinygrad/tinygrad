@@ -70,6 +70,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
   ret = []
   for sizes in zip(*_align_left(*shapes)):
@@ -164,7 +165,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
     # TODO: support dtype broadcasting (promotion)
-    if len(src) == 0: return dtypes.void
     if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
     return src[0].dtype
   if op in GroupOp.Movement: return src[0].dtype
@@ -1232,7 +1232,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.index and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
+  if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
+  return alu
 
 def bitcast(x, in_dtype:DType, out_dtype:DType):
   assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"

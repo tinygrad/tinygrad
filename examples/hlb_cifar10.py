@@ -152,24 +152,19 @@ def train_cifar():
 
   # ========== Model ==========
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
-    def _cov(X):
-      return (X.T @ X) / (X.shape[0] - 1)
-
-    def _patches(data, patch_size=(kernel_size,kernel_size)):
+    def _patches(data:Tensor, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
-      c = data.shape[1]
-      axis = (2, 3)
-      return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
+      _, c, _, _ = data.shape
+      return data._pool((h, w)).permute(1, 4, 5, 0, 3, 2).reshape(c*h*w, -1)
 
     def _eigens(patches):
-      n,c,h,w = patches.shape
-      Σ = _cov(patches.reshape(n, c*h*w))
-      Λ, V = np.linalg.eigh(Σ, UPLO='U')
-      return np.flip(Λ, 0), np.flip(V.T.reshape(c*h*w, c, h, w), 0)
+      cov = ((patches @ patches.T) / (patches.shape[1] - 1)).numpy()
+      eigvals, eigvecs = np.linalg.eigh(cov, UPLO='U')
+      return np.flip(eigvals, 0), np.flip(eigvecs.T.reshape(patches.shape[0], X.shape[1], kernel_size, kernel_size), 0)
 
     # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
-    Λ, V = _eigens(_patches(X.float().numpy()))
-    W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
+    eigvals, eigvecs = _eigens(_patches(X.float()))
+    W = eigvecs/np.sqrt(eigvals+1e-2)[:,None,None,None]
 
     return Tensor(W.astype(np.float32)).cast(dtypes.default_float).is_param_(False)
 
@@ -223,7 +218,7 @@ def train_cifar():
 
   @TinyJit
   def augmentations(X:Tensor, Y:Tensor):
-    perms = Tensor.randperm(X.shape[0], device=X.device) # We reuse perms for cutmix, because they are expensivne to generate
+    perms = Tensor.randperm(X.shape[0], device=X.device) # We reuse perms for cutmix, because they are expensive to generate
     if getenv("RANDOM_CROP", 1):
       X = random_crop(X, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
@@ -333,9 +328,7 @@ def train_cifar():
       # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
       loss.backward()
-      optimizer.step()
-      lr_scheduler[0].step()
-      lr_scheduler[1].step()
+      return loss.realize(*optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
     return loss.realize()
 
   train_step_jitted = TinyJit(train_step)
