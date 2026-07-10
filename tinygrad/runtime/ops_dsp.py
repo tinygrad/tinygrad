@@ -12,16 +12,19 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 from tinygrad.uop.ops import PatternMatcher, UPat
 
 dsp_pm = PatternMatcher([
-  (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar.vec(128)),
-   lambda x: UOp(Ops.CUSTOM, dtypes.uchar.vec(128), src=tuple(UOp.vectorize(*[x.index(j) for j in range(i, i+32)]) for i in range(0, 128, 32)),
-     arg="__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B({3}, {2}), __builtin_HEXAGON_V6_vpackwh_sat_128B({1}, {0}))")),
+  (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar),
+   lambda x: UOp(Ops.CUSTOM, dtypes.uchar, src=(UOp.vectorize(*[x.index(j) for j in range(128)]),),
+     arg="{{ uchar128 _v={0}; uchar32* _p=(uchar32*)&_v;"
+         "__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B(_p[3],_p[2]),"
+         "__builtin_HEXAGON_V6_vpackwh_sat_128B(_p[1],_p[0])); }}")
+   if x.max_numel() == 128 else None),
 ])
 
 dsp_pm_late = PatternMatcher([
   (UPat.var("x")+UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")//UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.STACK, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar.vec(128), name="d", allow_any_len=True),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.STACK, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar, name="d", allow_any_len=True),
    lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]) if d.addrspace is AddrSpace.REG else None),
 ])
 
