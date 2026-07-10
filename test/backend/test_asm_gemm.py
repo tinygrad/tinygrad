@@ -9,6 +9,11 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
 def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950")
 
+def has_hipcc():
+  try: system("hipcc --version")
+  except Exception: return False
+  return True
+
 def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=None, gpus:int=1) -> None:
   Tensor.manual_seed(0)
   input_dtype = dtypes.bfloat16 if dtype == FP8_DTYPE else dtype
@@ -223,11 +228,6 @@ class TestGemmLlama(unittest.TestCase):
   def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)
   def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256, dtype=self.dtype)
   def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192, dtype=self.dtype)
-
-def has_hipcc():
-  try: system("hipcc --version")
-  except Exception: return False
-  return True
 
 # mxfp8: 1x32 block scaling along K, e8m0 scales packed iteration-major (K/128, dim) uint32
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
