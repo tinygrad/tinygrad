@@ -455,6 +455,11 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,))
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
+  if VIZ:
+    if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
+    prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+    graph_rewrite(prg, PatternMatcher([]), name="View Program")
+    return prg
   # PROGRAM lowering is a linear root-only pipeline. Driving it through graph_rewrite
   # needlessly walks the full SINK and LINEAR graphs between each stage.
   if len(prg.src) == 1: prg = do_linearize(renderer, prg, prg.src[0])
@@ -463,7 +468,6 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if len(prg.src) == 2:
     prg = do_assemble(renderer, prg, prg.src[1]) if isinstance(renderer, ISARenderer) else do_render(renderer, prg, prg.src[1])
   if len(prg.src) == 3 and (compiled:=do_compile(renderer, prg, prg.src[2])) is not None: prg = compiled
-  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}

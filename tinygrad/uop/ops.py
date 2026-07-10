@@ -221,7 +221,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   arg:Any = None
   tag:Any = None
   def __del__(self):
-    if sys.is_finalizing(): return
+    if getattr(sys, "is_finalizing", lambda: True)(): return
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
     except AttributeError: pass
@@ -504,7 +504,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
-    if name is None: return _cached_substitute(self, tuple(dvars.items()), extra_pm, walk, enter_calls)
+    if name is None:
+      key = (tuple(dvars.items()), extra_pm, walk, enter_calls)
+      cache = self.__dict__.setdefault('_substitute_cache', {})
+      if (cached:=cache.get(key, SENTINEL)) is not SENTINEL: return cached
+      with Context(TRACK_MATCH_STATS=0):
+        ret = graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
+                            bottom_up=True, walk=walk, enter_calls=enter_calls)
+      cache[key] = ret
+      return ret
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
                            bottom_up=True, walk=walk, enter_calls=enter_calls, name=name)
@@ -1739,11 +1747,6 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-@functools.lru_cache(maxsize=32768)
-def _cached_substitute(uop:UOp, dvars:tuple[tuple[UOp, UOp], ...], extra_pm:PatternMatcher|None, walk:bool, enter_calls:bool) -> UOp:
-  with Context(TRACK_MATCH_STATS=0):
-    return graph_rewrite(uop, (extra_pm+_substitute) if extra_pm is not None else _substitute, dict(dvars),
-                         bottom_up=True, walk=walk, enter_calls=enter_calls)
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
