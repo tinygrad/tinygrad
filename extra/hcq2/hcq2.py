@@ -16,133 +16,22 @@ from tinygrad.engine.jit import DepsTracker
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
-class HCQ2Compiled(Compiled):
-  timestamp_divider: float = 1000.0 # GPU timestamp counter ticks per microsecond; override per device
-
-  def __init__(self, device:str, allocator:'HCQAllocator', compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
-    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
-
-    # default pm bufferize
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].timeline_signal()),
-      (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].timeline_value()),
-      (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
-
-      (UPat(Ops.PARAM, tag="program", name="b"),
-        lambda ctx, b: Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True))),
-
-      # all other allocations: use bump allocator for runtime, persistent allocations for jit
-      (UPat(Ops.PARAM, name="b"),
-        lambda ctx, b: Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)) if ctx[1] else \
-          ctx[0].hcq_bump_buffer.view(b.max_numel(), b.dtype, ctx[0].hcq_bump_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))),
-    ])
-
-    super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
-
-    self.hcq_bump_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
-    self.hcq_bump_allocator = BumpAllocator(64 << 20, wrap=False)
-
-  @functools.cache
-  def timeline_signal(self, queue:str|None=None, init_value:int=0) -> Buffer:
-    buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    buf._buf.cpu_view().mv.cast('Q')[0] = init_value
-    return buf
-
-  @functools.cache
-  def timeline_value(self, queue:str|None=None, init_value:int=1) -> Buffer:
-    buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
-    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = init_value
-    return buf
-
-  def synchronize(self, timeout:int|None=None):
-    if not hasattr(self, 'iface'): return
-    sig = self.timeline_signal()._buf.cpu_view().mv.cast('Q')
-    tl = self.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')
-    st = time.perf_counter()
-    while sig[0] < tl[0] - 1:
-      if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
-
-  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
-
-  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
-
-  def _select_iface(self):
-    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
-      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
-    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
-    t = DEV.target(dev:=type(self).__name__[:-6])
-    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
-    filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fall back to mock ifaces
-    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
-                               f"No interface for {dev}:{self.device_id} is available")
-
-  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
-
-  def finalize(self):
-    try: self.synchronize() # try to finalize the device in any case
-    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-
-    # if the device has an interface, call device_fini to clean up resources
-    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
-
-class HCQ2Buffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQ2Buffer|None=None, view:MMIOInterface|None=None, owner:HCQ2Compiled|None=None):
-    self.va_addr, self.size, self.meta, self._base, self.view, self.owner = va_addr, size, meta, _base, view, owner
-
-  def offset(self, offset:int=0, size:int|None=None) -> HCQ2Buffer:
-    return HCQ2Buffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
-      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
-
-  def cpu_view(self) -> MMIOInterface:
-    assert self.view is not None, "buffer has no cpu_view"
-    return self.view
-
-  @property
-  def base(self) -> HCQ2Buffer: return self._base or self
-
-class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
-    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
-    return self._do_map(buf)
-
-  @suppress_finalizing
-  def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
-    self.dev.synchronize()
-    if options is not None and options.external_ptr is not None: return
-    if hasattr(self, '_do_free'): self._do_free(buf, options)
-
-  def _unmap(self, mb):
-    self.dev.synchronize()
-    self.dev.iface.free(mb)
-
-  def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
-
-  def _wrap(self, dev:str, sz:int, opaque:HCQ2Buffer) -> Buffer:
-    return Buffer(dev, sz, dtypes.uint8, opaque=opaque, options=BufferSpec(external_ptr=1))
-
-  def _copy(self, dst:Buffer, src:Buffer):
-    from tinygrad.engine.realize import run_linear
-    su = UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, dtypes.void, (su.copy_to_device(dst.device).call(UOp.from_buffer(dst), su),)), update_stats=False)
-
-  def _copyin(self, dest:HCQ2Buffer, src:memoryview):
-    s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
-    s._buf.cpu_view()[:len(src)] = src
-    self._copy(self._wrap(self.dev.device, len(src), dest), s)
-
-  def _copyout(self, dest:memoryview, src:HCQ2Buffer):
-    d = Buffer(self.dev.device, len(dest), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
-    self._copy(d, self._wrap(self.dev.device, len(dest), src))
-    self.dev.synchronize()
-    dest[:] = d._buf.cpu_view()[:len(dest)]
-
-  # def _as_buffer(self, buf): return buf.cpu_view().mv
-
 # *****************
 # 0. helpers
 
 HCQ_DEVS = frozenset(("AMD",))
 HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
+HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
+
+@dataclass(frozen=True)
+class HCQInfo:
+  name:str
+  estimates:Estimates
+  device:tuple[str, ...]
+  queue:str
+
+  input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
+  inputs:int|None = None
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -172,7 +61,7 @@ def make_patch(buf:UOp, off:sint, val:UOp, dtype=None, tag=None) -> UOp:
   return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype)).rtag(tag or tag_patch(val))
 
 def make_binary_patch(buf:UOp, blob:bytes, tag=None) -> UOp:
-  data, dt, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype, buf.dtype.itemsize
+  data, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype.itemsize
   r = UOp.range(len(blob) // isz, next(UOp.unique_num))
   return buf.index(r).store(UOp(Ops.BITCAST, buf.dtype, (data,)).index(r).load()).end(r).rtag(tag or "any")
 
@@ -181,8 +70,8 @@ def make_cmdbuf(lin, devs):
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
     blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
-  buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32, name="cmdbufs")
-  return buf.after(make_binary_patch(buf, blob, tag="link"), *[make_patch(buf, off, s) for off, s in patches])
+  cmdbuf = make_placeholder(devs, len(blob) // 4, dtypes.uint32, name="cmdbuf")
+  return cmdbuf.after(make_binary_patch(cmdbuf, blob, tag="link"), *[make_patch(cmdbuf, off, s) for off, s in patches])
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
@@ -194,16 +83,6 @@ def make_signal_value(devs, queue=None):
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, dtypes.void, src=tuple(cmds), arg=(to_tuple(devs), queue)))
 def get_submit(ast:UOp) -> UOp: return next(u for u in ast.toposort() if u.op is Ops.CUSTOM_FUNCTION and u.arg == "submit_cmdbuf")
-
-@dataclass(frozen=True)
-class HCQInfo:
-  name:str
-  estimates:Estimates
-  device:tuple[str, ...]
-  queue:str
-
-  input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
-  inputs:int|None = None
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -432,7 +311,7 @@ def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
   inputs, internals = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
-  runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbufs"} for x in unwrap_mstack(g.buf_uop)))
+  runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
 
   (inpsub, _), (rtsub, rtarg), (syssub, sysarg) = (_make_getaddrs_sub(call, x, name) for x,name in
     ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems")))
@@ -587,23 +466,140 @@ pm_resolve_patches = PatternMatcher([
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
 
-hcq_link_cache:dict[tuple[bytes, tuple[Compiled, ...]], UOp] = {}
+hcq_link_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 
-def link_artifacts(linear:UOp) -> tuple[UOp, list[tuple[int, int, tuple[bytes, tuple[Compiled, ...]]]]]:
-  subs, misses = {}, []
-  for j,call in enumerate(linear.src):
-    for i,a in enumerate(call.src[1:], 1):
-      if a.op is not Ops.AFTER: continue
-      key = (a.key, tuple(Device[d] for d in to_tuple(a.device)))
-      if (buf:=hcq_link_cache.get(key)) is not None: subs[a.src[0]], subs[a] = buf, buf
-      elif unwrap_mstack(a.src[0])[0].tag in {"program", "systems", "template"}: misses.append((j, i, key))
-  return linear.substitute(subs, walk=True), misses
+def link_cache_key(a:UOp): return a.key, to_tuple(a.device)
+pm_link_cache = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: hcq_link_cache.get(link_cache_key(a)))])
 
 @track_rewrites(lambda _,jit,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, jit=False) -> UOp:
-  linear, misses = link_artifacts(linear)
+  cacheable = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
+               if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
+  hits = {a.src[0]:hcq_link_cache[key] for a in cacheable.values() if (key:=link_cache_key(a)) in hcq_link_cache}
+  linear = graph_rewrite(linear, pm_link_cache, name="apply link cache").substitute(hits, walk=True)
   linear = graph_rewrite(linear, pm_bufferize, ctx=jit, bottom_up=True, walk=True, name="bufferize placeholders")
   linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
-  for j,i,key in misses: hcq_link_cache[key] = linear.src[j].src[i]
+  for (j,i),a in cacheable.items(): hcq_link_cache.setdefault(link_cache_key(a), linear.src[j].src[i])
   return linear
+
+# *****************
+# Device classes
+
+class HCQ2Compiled(Compiled):
+  timestamp_divider: float = 1000.0
+
+  def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
+    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
+
+    self.pm_bufferize = PatternMatcher([
+      (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].timeline_signal()),
+      (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].timeline_value()),
+      (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, jit=ctx[1]))
+    ])
+
+    super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
+
+    self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
+    self.rt_allocator = BumpAllocator(64 << 20, wrap=False)
+
+  def new_buffer(self, b:UOp, jit:bool) -> Buffer:
+    if jit or b.tag in HCQ_CACHE_TAGS: return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True))
+    return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
+
+  @functools.cache
+  def timeline_signal(self, queue:str|None=None, init_value:int=0) -> Buffer:
+    buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+    buf._buf.cpu_view().mv.cast('Q')[0] = init_value
+    return buf
+
+  @functools.cache
+  def timeline_value(self, queue:str|None=None, init_value:int=1) -> Buffer:
+    buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
+    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = init_value
+    return buf
+
+  def synchronize(self, timeout:int|None=None):
+    if not hasattr(self, 'iface'): return
+    sig = self.timeline_signal()._buf.cpu_view().mv.cast('Q')
+    tl = self.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')
+    st = time.perf_counter()
+    while sig[0] < tl[0] - 1:
+      if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
+
+  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
+
+  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
+
+  def _select_iface(self):
+    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
+      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
+    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
+    t = DEV.target(dev:=type(self).__name__[:-6])
+    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
+    filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fall back to mock ifaces
+    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
+                               f"No interface for {dev}:{self.device_id} is available")
+
+  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
+
+  def finalize(self):
+    try: self.synchronize() # try to finalize the device in any case
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
+
+    # if the device has an interface, call device_fini to clean up resources
+    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
+
+class HCQ2Buffer:
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQ2Buffer|None=None, view:MMIOInterface|None=None, owner:HCQ2Compiled|None=None):
+    self.va_addr, self.size, self.meta, self._base, self.view, self.owner = va_addr, size, meta, _base, view, owner
+
+  def offset(self, offset:int=0, size:int|None=None) -> HCQ2Buffer:
+    return HCQ2Buffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
+      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
+
+  def cpu_view(self) -> MMIOInterface:
+    assert self.view is not None, "buffer has no cpu_view"
+    return self.view
+
+  @property
+  def base(self) -> HCQ2Buffer: return self._base or self
+
+class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
+  def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
+    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
+    return self._do_map(buf)
+
+  @suppress_finalizing
+  def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
+    self.dev.synchronize()
+    if options is not None and options.external_ptr is not None: return
+    if hasattr(self, '_do_free'): self._do_free(buf, options)
+
+  def _unmap(self, mb):
+    self.dev.synchronize()
+    self.dev.iface.free(mb)
+
+  def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
+
+  def _wrap(self, dev:str, sz:int, opaque:HCQ2Buffer) -> Buffer:
+    return Buffer(dev, sz, dtypes.uint8, opaque=opaque, options=BufferSpec(external_ptr=1))
+
+  def _copy(self, dst:Buffer, src:Buffer):
+    from tinygrad.engine.realize import run_linear
+    su = UOp.from_buffer(src)
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (su.copy_to_device(dst.device).call(UOp.from_buffer(dst), su),)), update_stats=False)
+
+  def _copyin(self, dest:HCQ2Buffer, src:memoryview):
+    s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
+    s._buf.cpu_view()[:len(src)] = src
+    self._copy(self._wrap(self.dev.device, len(src), dest), s)
+
+  def _copyout(self, dest:memoryview, src:HCQ2Buffer):
+    d = Buffer(self.dev.device, len(dest), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
+    self._copy(d, self._wrap(self.dev.device, len(dest), src))
+    self.dev.synchronize()
+    dest[:] = d._buf.cpu_view()[:len(dest)]
+
+  # def _as_buffer(self, buf): return buf.cpu_view().mv
