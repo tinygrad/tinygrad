@@ -393,6 +393,7 @@ def db_connection():
     # another connection has set it already or is in the process of setting it
     # that connection will lock the database
     with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
+    _db_connection.execute("PRAGMA synchronous=NORMAL")
     if DEBUG >= 8: _db_connection.set_trace_callback(print)
   return _db_connection
 
