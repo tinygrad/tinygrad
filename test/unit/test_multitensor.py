@@ -78,8 +78,9 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(Y.device, devices_2)
     np.testing.assert_equal(X.numpy(), Y.numpy())
 
-    with self.assertRaises(AssertionError):
-      _ = Tensor(X.uop, dtype=dtypes.float)
+    Z = Tensor(X.uop, dtype=dtypes.float)
+    self.assertEqual(Z.dtype, dtypes.float)
+    np.testing.assert_equal(Z.numpy(), [1.0, 2.0])
 
   def test_sharded_arange(self):
     sharded_arange = Tensor.arange(1000).clone().shard(devices_2, 0)

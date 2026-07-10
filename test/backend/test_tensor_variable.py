@@ -28,16 +28,16 @@ class TestTensorVariable(unittest.TestCase):
 
   def test_variable_tensor_dtype_arg(self):
     vv = Variable("a", 1, 10).bind(2)
-    # TODO: dtype arg is silently dropped for a symbolic int, should be honored (or rejected)
-    try:
-      self.assertEqual(Tensor(vv, dtype=dtypes.float32).dtype, dtypes.float32)
-    except AssertionError: pass
+    t = Tensor(vv, dtype=dtypes.float32)
+    self.assertEqual(t.dtype, dtypes.float32)
+    self.assertEqual(t.item(), 2.0)
 
   def test_unbound_variable_tensor(self):
-    # TODO: Tensor creation from unbound variable should assert
-    # with self.assertRaises(AssertionError): Tensor(Variable("u", 1, 10))
-    t = Tensor(Variable("u", 1, 10))
-    self.assertRaises(KeyError, t.item)  # today it builds silently and fails at execution
+    # an unbound variable schedules fine, but can't execute
+    with self.assertRaisesRegex(RuntimeError, "unbound"): Tensor(Variable("u", 1, 10)).item()
+    with self.assertRaisesRegex(RuntimeError, "unbound"): (Tensor(Variable("u", 1, 10)) + 1).item()
+    # bound variables in an expression are fine
+    self.assertEqual(Tensor(Variable("u", 1, 10).bind(2) + 1).item(), 3)
 
   def test_shrink_beyond_buffer_variable(self):
     # TODO: shrink by a variable whose vmax exceeds the dim should fail at build, today only CHECK_OOB=1 rejects it
