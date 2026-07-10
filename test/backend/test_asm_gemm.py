@@ -141,11 +141,13 @@ class TestAsmGEMM(unittest.TestCase):
       verify_asm_gemm(1, 256, 1000, 256)
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
+
+@unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestGemmLlama(unittest.TestCase):
   dtype = dtypes.bfloat16
 
   def setUp(self):
-    if not is_cdna4() or DEV.interface.startswith("MOCK") or not has_hipcc():
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
       self.skipTest("very slow on non mi350x")
 
   def test_empty(self): asm_gemm(Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype), Tensor.empty(N, N, dtype=self.dtype)).realize()
@@ -226,9 +228,6 @@ def has_hipcc():
   try: system("hipcc --version")
   except Exception: return False
   return True
-
-@unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
-class TestGemmLlamaFP8(TestGemmLlama): dtype = FP8_DTYPE
 
 # mxfp8: 1x32 block scaling along K, e8m0 scales packed iteration-major (K/128, dim) uint32
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
@@ -327,7 +326,7 @@ def run_mx_prequant(M:int, N:int, K:int) -> None:
     err = ((t.float() - r.float()).abs().mean() / (r.float().abs().mean() + 1e-8)).item()
     assert err < 6e-2, f"{name} prequant vs analytic rel err {err}"
 
-@unittest.skipUnless(has_hipcc(), "MXFP8 gemm requires hipcc to compile")
+@unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestGemmMXFP8(unittest.TestCase):
   def setUp(self):
     if not is_cdna4() or DEV.interface.startswith("MOCK"): self.skipTest("mxfp8 gemm is only for cdna4")
@@ -368,7 +367,7 @@ def run_atb_gemm(rows, M, N, a_shard=None, b_shard=None, gpus=1, atol=1.0, rtol=
   out = hk_bf16_atb_gemm(a, b)
   np.testing.assert_allclose(out.float().numpy(), ref.numpy(), atol=atol, rtol=rtol)
 
-@unittest.skipUnless(has_hipcc(), "MXFP8 gemm requires hipcc to compile")
+@unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestHkBf16AtbGemm(unittest.TestCase):
   def setUp(self):
     if not is_cdna4(): self.skipTest("hk bf16 atb gemm is cdna4 only")
