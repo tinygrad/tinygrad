@@ -329,9 +329,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** decomps ****
 
-  # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
-
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)

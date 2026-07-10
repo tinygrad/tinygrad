@@ -11,15 +11,6 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-dsp_pm = PatternMatcher([
-  (((UPat.var('x').maximum(0) ^ -1).maximum(-256) ^ -1).cast(dtypes.uchar),
-   lambda x: UOp(Ops.CUSTOM, dtypes.uchar, src=(UOp.vectorize(*[x.index(j) for j in range(128)]),),
-     arg="{{ uchar128 _v={0}; uchar32* _p=(uchar32*)&_v;"
-         "__builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B(_p[3],_p[2]),"
-         "__builtin_HEXAGON_V6_vpackwh_sat_128B(_p[1],_p[0])); }}")
-   if x.max_numel() == 128 else None),
-])
-
 dsp_pm_late = PatternMatcher([
   (UPat.var("x")+UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
   (UPat.var("x")*UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
@@ -39,7 +30,6 @@ class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
   extra_args = []
-  pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
