@@ -9,6 +9,7 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
 from tinygrad.engine.jit import DepsTracker
@@ -23,15 +24,23 @@ class HCQ2Compiled(Compiled):
 
     # default pm bufferize
     self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx.timeline_signal()),
-      (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx.timeline_value()),
-      (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx.timeline_signal("sentinel", (1 << 64) - 1)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b:
-        Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(host=False, uncached=True, cpu_access=True, nolru=True))
-        if b.tag is not None else None), # TODO: remove nolru
+      (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].timeline_signal()),
+      (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].timeline_value()),
+      (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
+
+      (UPat(Ops.PARAM, tag="program", name="b"),
+        lambda ctx, b: Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True))),
+
+      # all other allocations: use bump allocator for runtime, persistent allocations for jit
+      (UPat(Ops.PARAM, name="b"),
+        lambda ctx, b: Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)) if ctx[1] else \
+          ctx[0].hcq_bump_buffer.view(b.max_numel(), b.dtype, ctx[0].hcq_bump_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))),
     ])
 
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
+
+    self.hcq_bump_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
+    self.hcq_bump_allocator = BumpAllocator(64 << 20, wrap=False)
 
   @functools.cache
   def timeline_signal(self, queue:str|None=None, init_value:int=0) -> Buffer:
@@ -152,7 +161,7 @@ def make_ins(op, *srcs):
   return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
 
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
-  return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "buf")
+  return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "temp")
 
 def tag_patch(val:UOp) -> str:
   if any(u.op in (Ops.LOAD, Ops.INDEX) for u in val.toposort()): return "rt"
@@ -172,7 +181,7 @@ def make_cmdbuf(lin, devs):
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
     blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
-  buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32)
+  buf = make_placeholder(devs, len(blob) // 4, dtypes.uint32, name="cmdbufs")
   return buf.after(make_binary_patch(buf, blob, tag="link"), *[make_patch(buf, off, s) for off, s in patches])
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
@@ -390,7 +399,8 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbu
 
 # *****************
 
-def is_link_patch(p:UOp, jit:bool) -> bool: return p.tag == "link" or p.tag == "any" # TODO: jit
+def is_link_patch(p:UOp, jit:bool) -> bool:
+  return p.tag in {"link", "any"} if jit else (p.src[0] if p.op is Ops.END else p).buf_uop.tag == "program"
 def trim_link_patches(ctx:tuple[bool, list[UOp]], a:UOp) -> UOp|None:
   links, kept = partition(a.src[1:], lambda p: is_link_patch(p, ctx[0]))
 
@@ -421,12 +431,22 @@ def _make_getaddrs_sub(call:UOp, gaddrs:list[UOp], name:str):
 
 def rm_rt_getaddrs(call:UOp) -> UOp|None:
   if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
-  inputs, systems = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
+  inputs, internals = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
+  runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbufs"} for x in unwrap_mstack(g.buf_uop)))
 
-  (inpsub, _), (syssub, sysarg) = _make_getaddrs_sub(call, inputs, "inputs"), _make_getaddrs_sub(call, systems, "systems")
-  return call.replace(src=(call.src[0].substitute(inpsub | syssub), *call.src[1:], *sysarg),
+  (inpsub, _), (rtsub, rtarg), (syssub, sysarg) = (_make_getaddrs_sub(call, x, name) for x,name in
+    ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems")))
+  return call.replace(src=(call.src[0].substitute(inpsub | rtsub | syssub), *call.src[1:], *rtarg, *sysarg),
                       arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
 pm_rm_rt_getaddrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_getaddrs)])
+
+# *****************
+
+def rm_rt_binaries(call:UOp) -> UOp|None:
+  if not (bins:=dedup([u for u in call.src[0].toposort() if u.op is Ops.BITCAST and u.src[0].op is Ops.BINARY])): return None
+  sub = {b: make_placeholder(call.arg.aux.device, b.max_numel(), b.dtype, "template") for b in bins}
+  return call.replace(src=(call.src[0].substitute(sub), *call.src[1:], *[t.after(make_binary_patch(t, b.src[0].arg)) for b,t in sub.items()]))
+pm_rm_rt_binaries = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_binaries)])
 
 # *****************
 
@@ -483,13 +503,13 @@ pm_early_simplify = PatternMatcher([
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
   lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
 
-hcq_compile_cache:dict[bytes, UOp] = {}
+hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
-@track_rewrites(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+@track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
 
-  if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
+  if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
     # schedule
     linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
     linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
@@ -506,8 +526,9 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
     linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
 
     # pie
-    linear = graph_rewrite(linear, pm_split_patches, ctx=input_uops is None, walk=True, name="split rt/lt patches")
+    linear = graph_rewrite(linear, pm_split_patches, ctx=jit, walk=True, name="split rt/lt patches")
     linear = graph_rewrite(linear, pm_rm_rt_getaddrs, walk=True, name="replace rt getaddrs")
+    linear = graph_rewrite(linear, pm_rm_rt_binaries, walk=True, name="replace rt binaries")
     linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
 
     linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="early simplify patches", enter_calls=True)
@@ -520,9 +541,9 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
 # *****************
 # 6. bufferize placeholders: replace placeholders with real buffers.
 
-def bufferize_buf(buf:UOp) -> UOp|None:
+def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=dv), "CPU") for dev in to_tuple(buf.device)))
+  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), "CPU") for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
 # *****************
@@ -567,8 +588,23 @@ pm_resolve_patches = PatternMatcher([
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
 
-@track_rewrites(lambda _,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp) -> UOp:
-  linear = graph_rewrite(linear, pm_bufferize, bottom_up=True, walk=True, name="bufferize placeholders")
+hcq_link_cache:dict[tuple[bytes, tuple[Compiled, ...]], UOp] = {}
+
+def link_artifacts(linear:UOp) -> tuple[UOp, list[tuple[int, int, tuple[bytes, tuple[Compiled, ...]]]]]:
+  subs, misses = {}, []
+  for j,call in enumerate(linear.src):
+    for i,a in enumerate(call.src[1:], 1):
+      if a.op is not Ops.AFTER: continue
+      key = (a.key, tuple(Device[d] for d in to_tuple(a.device)))
+      if (buf:=hcq_link_cache.get(key)) is not None: subs[a.src[0]], subs[a] = buf, buf
+      elif unwrap_mstack(a.src[0])[0].tag in {"program", "systems", "template"}: misses.append((j, i, key))
+  return linear.substitute(subs, walk=True), misses
+
+@track_rewrites(lambda _,jit,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, jit=False) -> UOp:
+  linear, misses = link_artifacts(linear)
+  linear = graph_rewrite(linear, pm_bufferize, ctx=jit, bottom_up=True, walk=True, name="bufferize placeholders")
   linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
-  return graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
+  linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
+  for j,i,key in misses: hcq_link_cache[key] = linear.src[j].src[i]
+  return linear
