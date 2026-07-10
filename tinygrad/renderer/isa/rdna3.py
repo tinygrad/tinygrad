@@ -439,7 +439,8 @@ def lower_gated(ctx, x:UOp):
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
   mask = def_reg(dtypes.uint32, GP_SGPRS)
-  return x.replace(src=(bnd,mask)).replace(dtype=dtypes.uint32)
+  # keep control-flow edges from pm_add_control_flow (src[1:]) so nest/sibling order is preserved through linearize
+  return x.replace(src=(bnd,)+x.src[1:]+(mask,)).replace(dtype=dtypes.uint32)
 
 def prep_end(ctx, x:UOp, rng:UOp):
   if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
@@ -458,7 +459,7 @@ def lower_range(ctx, x:UOp):
 
 def lower_end(ctx, x:UOp):
   gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
-  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2]))
+  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2])) # TODO: one fold to imm
   loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return inc, [inc, gate, loop, restoreexec(x.src[-1])]
 
@@ -671,7 +672,9 @@ class RDNA3Renderer(ISARenderer):
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
+    from tinygrad.codegen.opt import tc
     super().__init__(target)
+    self.tensor_cores = tc.get_amd(target.arch)
 
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
