@@ -218,7 +218,7 @@ class TestGemmLlama(unittest.TestCase):
   def test_shape_non_square(self): verify_asm_gemm(1, 1024, 2048, 512, dtype=self.dtype)
   def test_shape_batched_small(self): verify_asm_gemm(2, 256, 256, 256, dtype=self.dtype)
   def test_shape_batched_rect(self): verify_asm_gemm(2, 512, 1024, 256, dtype=self.dtype)
-  # K edge cases: iters=1,2,3 exercise different loop path, dtype=self.dtypes
+  # K edge cases: iters=1,2,3 exercise different loop path
   def test_shape_k64(self): verify_asm_gemm(1, 256, 256, 64, dtype=self.dtype)
   def test_shape_k128(self): verify_asm_gemm(1, 256, 256, 128, dtype=self.dtype)
   def test_shape_k192(self): verify_asm_gemm(1, 256, 256, 192, dtype=self.dtype)
