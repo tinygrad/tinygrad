@@ -50,10 +50,10 @@ def replace_contig_with_store_after(u:UOp):
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
+  """If movement ops on src collapse to a contiguous range, return SLICE.reshape(src.shape). Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
   if buf.op is Ops.SLICE:
@@ -61,26 +61,25 @@ def _make_buffer_view(src:UOp) -> UOp|None:
     buf = buf.src[0]
     if byte_offset % buf.dtype.itemsize != 0: return None
     offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
+  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel()).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
+  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(SLICE) when movement ops collapse to a contiguous range."""
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
-  if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
+  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
 
   # check if view is supported
   from tinygrad.device import Device
-  devs = (src.device,) if isinstance(src.device, str) else src.device
+  devs = (c.device,) if isinstance(c.device, str) else c.device
   if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
 
+  # NOTE: this contiguous is removed because this SLICE/RESHAPE has_buffer_identity
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
-    return c.replace(src=(view,)) if c.op is Ops.COPY else view
+    return view.contiguous(tag=c.tag)
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
@@ -88,7 +87,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.reshape(resolved.src[0].shape).multi(resolved.arg).contiguous(tag=c.tag)
+    return view.multi(resolved.arg).contiguous(tag=c.tag)
 
   return None
 
@@ -143,16 +142,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
-
-  # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
-   copy.replace(src=(x,)+copy.src[1:], tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
-  # push copy past movement ops to disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:]) \
-   if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  # CONTIGUOUS(MOPS(BUFFER/SLICE)) → CONTIGUOUS(SLICE) when movement ops collapse to contiguous range
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
