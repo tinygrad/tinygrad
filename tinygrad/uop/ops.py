@@ -33,12 +33,11 @@ class ParamArg:
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Insn:
   op: Any
   dtype: DType
-  shape: tuple[Any, ...]|None
-  def __lt__(self, other:Insn): return (self.op, self.dtype, self.shape or ()) < (other.op, other.dtype, other.shape or ())
+  shape: tuple[Any, ...]
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -587,8 +586,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, arg, **kwargs):
-    dtype = kwargs.pop("dtype") if "dtype" in kwargs else self.dtype
-    shape = kwargs.pop("shape") if "shape" in kwargs else self._shape
+    dtype = kwargs.pop("dtype", self.dtype)
+    shape = kwargs.pop("shape") if "shape" in kwargs else self.shape
     return UOp(Ops.INS, dtype, kwargs.pop("src", self.src), Insn(arg, dtype, shape), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"

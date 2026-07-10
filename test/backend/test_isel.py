@@ -3,7 +3,7 @@ from typing import cast
 from tinygrad import Device
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
-from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops, x86op
+from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
@@ -25,7 +25,7 @@ class TestIselX86(unittest.TestCase):
       with self.subTest(dtype=dt, count=count):
         v = [UOp.variable(str(i), 0, 0, dt) if count == 1 else vector(str(i), dt, count) for i in range(nargs)]
         n = self.isel_rewrite(expr(*v))
-        self.assertIs(x86op(n), op)
+        self.assertIs(n.arg.op, op)
         self.assertIs(n.dtype, dt)
         self.assertEqual(n.shape, () if count == 1 else (count,))
 
@@ -36,9 +36,9 @@ class TestIselX86(unittest.TestCase):
     d = (a != b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
-    self.assertTrue(x86op(n.src[0]) is X86Ops.CMOVL and x86op(n.src[1]) is X86Ops.CMOVNE)
+    self.assertTrue(n.src[0].arg.op is X86Ops.CMOVL and n.src[1].arg.op is X86Ops.CMOVNE)
     # both comparisons become the same instruction
-    self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and x86op(n.src[0].src[2]) is X86Ops.CMP)
+    self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg.op is X86Ops.CMP)
 
   def test_vmax(self):
     dt_op = [(dtypes.float32, 1, X86Ops.VMAXSS), (dtypes.float64, 1, X86Ops.VMAXSD),
@@ -65,22 +65,22 @@ class TestIselX86(unittest.TestCase):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     n = self.isel_rewrite(a.broadcast(4))
     # need to move src from gpr to xmm before broadcasting
-    self.assertTrue(x86op(n) is X86Ops.VPBROADCASTD and x86op(n.src[0]) is X86Ops.VMOVD)
+    self.assertTrue(n.arg.op is X86Ops.VPBROADCASTD and n.src[0].arg.op is X86Ops.VMOVD)
     # if we can fuse a load we can skip the move and access memory directly
     load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
     n = self.isel_rewrite(load.broadcast(4))
-    self.assertTrue(x86op(n) is X86Ops.VPBROADCASTD and len(n.src) == 4)
+    self.assertTrue(n.arg.op is X86Ops.VPBROADCASTD and len(n.src) == 4)
 
   def test_narrow_load_fold(self):
     load = UOp.param(0, dtypes.uint8, (1,)).index(UOp.const(dtypes.index, 0)).load().cast(dtypes.uint16)
     n = self.isel_rewrite(load)
-    self.assertIs(x86op(n), X86Ops.MOVZX)
+    self.assertIs(n.arg.op, X86Ops.MOVZX)
     self.assertEqual(len(n.src), 4)
 
   def test_vbroadcastss(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
     valid = [UOp.vectorize(a, a, a, a), UOp.vectorize(a, a, a, a, a, a, a, a)]
-    for shuf in valid: self.assertIs(x86op(self.isel_rewrite(shuf)), X86Ops.VBROADCASTSS)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.op, X86Ops.VBROADCASTSS)
 
   def test_vshufps(self):
     a, b = vector("a", dtypes.float32, 8), vector("b", dtypes.float32, 8)
@@ -93,11 +93,13 @@ class TestIselX86(unittest.TestCase):
              UOp.vectorize(lane(a, 1), lane(a, 2), lane(a, 3), lane(a, 0)),
              UOp.vectorize(lane(a, 3), lane(a, 2), lane(a, 1), lane(a, 0), lane(a, 7), lane(a, 6), lane(a, 5), lane(a, 4)),
              UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 1), lane(b, 1), lane(a, 4), lane(a, 4), lane(b, 5), lane(b, 5))]
-    for shuf in valid: self.assertIs(x86op(self.isel_rewrite(shuf)), X86Ops.VSHUFPS)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.op, X86Ops.VSHUFPS)
 
     invalid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
                UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5))]
-    for shuf in invalid: self.assertIsNot(x86op(self.isel_rewrite(shuf)), X86Ops.VSHUFPS)
+    for shuf in invalid:
+      n = self.isel_rewrite(shuf)
+      self.assertTrue(n.op is not Ops.INS or n.arg.op is not X86Ops.VSHUFPS)
 
   def test_vshufpd(self):
     a, b = vector("a", dtypes.float64, 4), vector("b", dtypes.float64, 4)
@@ -109,24 +111,26 @@ class TestIselX86(unittest.TestCase):
              UOp.vectorize(lane(a, 1), lane(b, 1)),
              UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.vectorize(lane(a, 1), lane(a, 1), lane(a, 3), lane(a, 3))]
-    for shuf in valid: self.assertIs(x86op(self.isel_rewrite(shuf)), X86Ops.VSHUFPD)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.op, X86Ops.VSHUFPD)
 
     invalid = [UOp.vectorize(c, c, c, c),
                UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 2), lane(b, 3)),
                UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 0), lane(b, 1))]
-    for shuf in invalid: self.assertIsNot(x86op(self.isel_rewrite(shuf)), X86Ops.VSHUFPD)
+    for shuf in invalid:
+      n = self.isel_rewrite(shuf)
+      self.assertTrue(n.op is not Ops.INS or n.arg.op is not X86Ops.VSHUFPD)
 
   def test_vinsertps(self):
     a, b, c = vector("a", dtypes.float32, 4), vector("b", dtypes.float32, 4), vector("c", dtypes.float32, 4)
     d = UOp.variable("e", 0, 0, dtypes.float32)
     # moving 0th element to position 0 does nothing so only 1 vinsertps is generated
     n = self.isel_rewrite(UOp.vectorize(lane(a, 0), d))
-    self.assertIs(x86op(n), X86Ops.VINSERTPS)
-    self.assertIsNot(x86op(n.src[0]), X86Ops.VINSERTPS)
+    self.assertIs(n.arg.op, X86Ops.VINSERTPS)
+    self.assertTrue(n.src[0].op is not Ops.INS or n.src[0].arg.op is not X86Ops.VINSERTPS)
 
     valid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.vectorize(lane(a, 3), lane(b, 2), lane(c, 1), d)]
-    for shuf in valid: self.assertIs(x86op(self.isel_rewrite(shuf)), X86Ops.VINSERTPS)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.op, X86Ops.VINSERTPS)
 
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
