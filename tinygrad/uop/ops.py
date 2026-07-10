@@ -65,6 +65,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  if all_same(shapes): return shapes[0]
   shaped_aligned_left = _align_left(*shapes)
   ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
   if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
@@ -1216,7 +1217,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if dtype==dtypes.index and op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
+  if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
+  return alu
 
 def bitcast(x, in_dtype:DType, out_dtype:DType):
   assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
