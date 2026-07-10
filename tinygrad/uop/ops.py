@@ -1154,7 +1154,9 @@ class ProgramInfo:
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size]) if self.local_size is not None else None
     return global_size, local_size
 
-  def vals(self, var_vals:dict[str, int]): return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+  def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
+    try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+    except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
   def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
