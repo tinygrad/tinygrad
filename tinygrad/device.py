@@ -284,6 +284,8 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
+  def compile_cached_batch(self, srcs:list[tuple[str, str]]) -> list[tuple[str, str, bytes]]:
+    return [(name, src, self.compile_cached(src)) for name,src in srcs]
   def disassemble(self, lib:bytes): pass
 
 class Compiled:

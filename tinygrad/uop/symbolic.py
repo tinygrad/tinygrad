@@ -51,6 +51,7 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
+  if not any(u.op is Ops.FLOORMOD or (u.op is Ops.MUL and any(s.op is Ops.FLOORMOD for s in u.src)) for u in terms): return None
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
     if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
@@ -315,6 +316,10 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=False) -> UOp:
     expr, is_upper, c = res
     bounds[expr][int(is_upper)] = c
   if not bounds: return uop
+  if not try_simplex:
+    uop_nodes = uop.backward_slice_with_self
+    bounds = defaultdict(lambda: [None, None], ((expr, v) for expr,v in bounds.items() if expr in uop_nodes))
+    if not bounds: return uop
 
   # simplify uop given that valid is True
   all_candidates = []
@@ -347,7 +352,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=False) -> UOp:
 
 def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
+  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.backward_slice_with_self else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
@@ -402,7 +407,7 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if x.dtype is not dtypes.index: return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
-  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
+  return cond.where(new_x, i) if (new_x:=uop_given_valid(cond, x, try_simplex=False)) is not x else None
 
 # TODO: this is O(number of WHERE * number of node)
 # def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:

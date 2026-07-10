@@ -33,15 +33,23 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   return validate_index_with_z3(sz, idx, gate)
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
-  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+  lst = [*ast.backward_slice, ast] if isinstance(ast, UOp) else ast
   if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
+  verified = type_verify_caches[-1].setdefault(check_spec, set()) if type_verify_caches else None
   with Context(TRACK_MATCH_STATS=0):
     for i,u in enumerate(lst):
+      if verified is not None and u in verified: continue
       ret: bool|None = check_spec.rewrite(u)
       if ret is not True:
         if DEBUG >= 3: print_uops(lst)
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+      if verified is not None: verified.add(u)
+
+type_verify_caches: list[dict[PatternMatcher, set[UOp]]] = []
+class scoped_type_verify_cache:
+  def __enter__(self): type_verify_caches.append({})
+  def __exit__(self, *args): type_verify_caches.pop()
 
 # ***** new specs *****
 

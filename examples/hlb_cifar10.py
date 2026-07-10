@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time
+import random, time, math
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -220,13 +220,10 @@ def train_cifar():
     return X_cutmix, Y_cutmix
 
   def random_permutation(rows:int, cols:int) -> Tensor:
-    # Alternating modular additions are bijections on the rows x cols domain.
-    idx = Tensor.arange(rows * cols)
-    row, col = idx // cols, idx % cols
-    for _ in range(4):
-      row = (row + col * col + random.randrange(rows) * col + random.randrange(rows)) % rows
-      col = (col + row * row + random.randrange(cols) * row + random.randrange(cols)) % cols
-    return row * cols + col
+    size = rows * cols
+    # An affine map is a permutation when its stride is coprime to the domain size.
+    while math.gcd(stride:=random.randrange(1, size), size) != 1: pass
+    return (Tensor.arange(size) * stride + random.randrange(size)) % size
 
   def shuffled_augmentations(X:Tensor, Y:Tensor):
     perms = random_permutation(X.shape[0] // BS, BS)
@@ -398,10 +395,9 @@ def train_cifar():
     while i <= STEPS:
       if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Using Context(TRAINING=0) here actually bricks batchnorm, even with track_running_stats=True
-        corrects = []
-        corrects_ema = []
-        losses = []
-        losses_ema = []
+        correct_sum = loss_sum = None
+        correct_sum_ema = loss_sum_ema = None
+        correct_len = correct_len_ema = eval_batches = 0
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
           if len(GPUS) > 1:
             Xt.shard_(GPUS, axis=0)
@@ -411,23 +407,31 @@ def train_cifar():
           out = eval_forward_jitted(model, Xt_contiguous).clone().realize()
           out_flipped = eval_forward_jitted(model, Xt_contiguous[..., ::-1].contiguous().realize())
           correct, loss = eval_step_jitted(out, out_flipped, Yt)
-          losses.append(loss.numpy().tolist())
-          corrects.extend(correct.numpy().tolist())
+          batch_correct, batch_loss = correct.sum().realize(), loss.clone().realize()
+          correct_sum = batch_correct if correct_sum is None else correct_sum + batch_correct
+          loss_sum = batch_loss if loss_sum is None else loss_sum + batch_loss
+          correct_len += correct.numel()
+          eval_batches += 1
           if model_ema:
             out_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous).clone().realize()
             out_flipped_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous[..., ::-1].contiguous().realize())
             correct_ema, loss_ema = eval_step_ema_jitted(out_ema, out_flipped_ema, Yt)
-            losses_ema.append(loss_ema.numpy().tolist())
-            corrects_ema.extend(correct_ema.numpy().tolist())
+            batch_correct_ema, batch_loss_ema = correct_ema.sum().realize(), loss_ema.clone().realize()
+            correct_sum_ema = batch_correct_ema if correct_sum_ema is None else correct_sum_ema + batch_correct_ema
+            loss_sum_ema = batch_loss_ema if loss_sum_ema is None else loss_sum_ema + batch_loss_ema
+            correct_len_ema += correct_ema.numel()
 
         # collect accuracy across ranks
-        correct_sum, correct_len = sum(corrects), len(corrects)
-        if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
+        assert correct_sum is not None and loss_sum is not None
+        correct_count, eval_loss = correct_sum.item(), (loss_sum / eval_batches).item()
+        if model_ema:
+          assert correct_sum_ema is not None and loss_sum_ema is not None
+          correct_count_ema, eval_loss_ema = correct_sum_ema.item(), (loss_sum_ema / eval_batches).item()
 
-        eval_acc_pct = correct_sum/correct_len*100.0
-        if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-        print(f"eval     {correct_sum}/{correct_len} {eval_acc_pct:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-        if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+        eval_acc_pct = correct_count/correct_len*100.0
+        if model_ema: acc_ema = correct_count_ema/correct_len_ema*100.0
+        print(f"eval     {correct_count}/{correct_len} {eval_acc_pct:.2f}%, {eval_loss:7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+        if model_ema: print(f"eval ema {correct_count_ema}/{correct_len_ema} {acc_ema:.2f}%, {eval_loss_ema:7.2f} val_loss STEP={i}")
 
       if STEPS == 0 or i == STEPS: break
 

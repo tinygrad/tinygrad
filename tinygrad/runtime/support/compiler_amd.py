@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system, getenv
+from tinygrad.helpers import system, getenv, diskcache_get, diskcache_get_batch, diskcache_put_batch
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -45,7 +45,7 @@ def set_options(action_info, options:bytes):
   return amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
-def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True) -> bytes:
+def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True, backend_opt=3) -> bytes:
   check(comgr.amd_comgr_create_action_info(ctypes.byref(action_info := comgr.amd_comgr_action_info_t())))
   check(comgr.amd_comgr_action_info_set_language(action_info, comgr.AMD_COMGR_LANGUAGE_HIP))
   check(comgr.amd_comgr_action_info_set_isa_name(action_info, b"amdgcn-amd-amdhsa--" + arch.encode()))
@@ -80,7 +80,8 @@ def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True) -> byt
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
       raise RuntimeError("compile failed")
-    check(set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
+    check(set_options(action_info, f"-O{backend_opt} -mllvm -vectorize-loops=false "
+                                     "-mllvm -vectorize-slp=false -mllvm -unroll-threshold=0".encode()))
     check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
 
   check(set_options(action_info, b""))
@@ -99,6 +100,58 @@ class HIPCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text', use_device_libs="__ocml_" in src)
     except RuntimeError as e: raise CompileError(e) from e
+  def compile_cached_batch(self, srcs:list[tuple[str, str]]) -> list[tuple[str, str, bytes]]:
+    batch_size = getenv("AMD_COMPILE_BATCH_SIZE", 256)
+    if batch_size <= 1 or any(src.split('\n', 1)[0].strip() == '.text' for _,src in srcs): return super().compile_cached_batch(srcs)
+
+    renamed = []
+    for name,src in srcs:
+      new_name = f"{name}_{hashlib.sha256(src.encode()).hexdigest()[:8]}"
+      renamed.append((new_name, src.replace(f" {name}(", f" {new_name}(", 1)))
+
+    ret:list[tuple[str, str, bytes]|None] = [None] * len(srcs)
+    missing:dict[tuple[int, bool], list[int]] = {}
+    cache_writes:list[tuple[str, tuple[str, str]]] = []
+    module_writes:list[tuple[str, bytes]] = []
+    cache_srcs = [f"batchO1\n{src}" for _,src in renamed]
+    cached_sources = diskcache_get_batch(self.cachekey, cache_srcs) if self.cachekey is not None else {}
+    refs = {v[1] for v in cached_sources.values() if isinstance(v, tuple) and v[0] == "batch"}
+    module_keys = {key:f"__batch__{key}" for key in refs}
+    same_table_modules = diskcache_get_batch(self.cachekey, list(module_keys.values())) if self.cachekey is not None else {}
+    cached_modules = {key:same_table_modules[module_keys[key]] for key in refs if module_keys[key] in same_table_modules}
+    if self.cachekey is not None and (old_refs:=refs-cached_modules.keys()):
+      cached_modules.update(diskcache_get_batch(f"{self.cachekey}_batch", list(old_refs)))
+    for i,(name,src) in enumerate(renamed):
+      opt = 1
+      cached = cached_sources.get(cache_srcs[i])
+      if isinstance(cached, tuple) and cached[0] == "batch": cached = cached_modules.get(cached[1])
+      if cached is not None: ret[i] = (name, src, cached)
+      else: missing.setdefault((opt, "__ocml_" in src), []).append(i)
+    for (opt,use_device_libs),indices in missing.items():
+      for start in range(0, len(indices), batch_size):
+        batch = indices[start:start+batch_size]
+        preamble = dict.fromkeys(line for i in batch for line in
+                                 renamed[i][1].split('extern "C" __attribute__((global))', 1)[0].splitlines())
+        kernels = []
+        for i in batch:
+          _, kernel = renamed[i][1].split('extern "C" __attribute__((global))', 1)
+          kernels.append('extern "C" __attribute__((global))'+kernel)
+        combined = '\n'.join((*preamble, *kernels))
+        module_key = hashlib.sha256(f"O{opt}\n{combined}".encode()).hexdigest()
+        lib = diskcache_get(self.cachekey, f"__batch__{module_key}") if self.cachekey is not None else None
+        if lib is None and self.cachekey is not None: lib = diskcache_get(f"{self.cachekey}_batch", module_key)
+        if lib is None:
+          try: lib = compile_hip(combined, self.arch, use_device_libs=use_device_libs, backend_opt=opt)
+          except RuntimeError as e: raise CompileError(e) from e
+          if self.cachekey is not None: module_writes.append((f"__batch__{module_key}", lib))
+        for i in batch:
+          name,src = renamed[i]
+          if self.cachekey is not None: cache_writes.append((f"batchO{opt}\n{src}", ("batch", module_key)))
+          ret[i] = (name, src, lib)
+    if self.cachekey is not None:
+      diskcache_put_batch(self.cachekey, module_writes+cache_writes)
+    assert all(x is not None for x in ret)
+    return [x for x in ret if x is not None]
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
 class HIPCCCompiler(Compiler):

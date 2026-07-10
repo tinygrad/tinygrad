@@ -413,6 +413,13 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
+def diskcache_get_batch(table:str, keys:list[str]) -> dict[str, Any]:
+  if CACHELEVEL < 1 or not keys: return {}
+  cur = db_connection().cursor()
+  try: rows = cur.execute(f"SELECT key, val FROM '{table}_{VERSION}' WHERE key IN ({','.join('?' for _ in keys)})", keys).fetchall()
+  except sqlite3.OperationalError: return {}
+  return {key:pickle.loads(val) for key,val in rows}
+
 _db_tables = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
@@ -429,6 +436,16 @@ def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   conn.commit()
   cur.close()
   return val
+
+def diskcache_put_batch(table:str, items:list[tuple[str, Any]]) -> None:
+  if CACHELEVEL < 1 or not items: return
+  conn, cur = db_connection(), db_connection().cursor()
+  if table not in _db_tables:
+    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' (key text, val blob, PRIMARY KEY (key))")
+    _db_tables.add(table)
+  cur.executemany(f"REPLACE INTO '{table}_{VERSION}' (key, val) VALUES (?, ?)", [(key, pickle.dumps(val)) for key,val in items])
+  conn.commit()
+  cur.close()
 
 def diskcache(func:Callable[..., T]):
   def wrapper(*args, **kwargs) -> T:

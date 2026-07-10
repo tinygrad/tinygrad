@@ -75,6 +75,8 @@ class Renderer:
   compiler: Compiler = Compiler()
 
   def __init__(self, target:Target): self.target = target
+  @property
+  def rewrite_cache_key(self): return (type(self), self.target)
   def __reduce__(self): return self.__class__, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def asm(self, prg:UOp, lin:UOp) -> bytes: raise NotImplementedError("needs an assembler")

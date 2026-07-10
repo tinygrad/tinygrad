@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC, prod
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
                       Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
@@ -167,6 +167,18 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
+      if all(isinstance(s, int) for s in in_shape+arg) and tuple(s for s in in_shape if s != 1) == tuple(s for s in arg if s != 1):
+        out_rngs = iter(r for s,r in zip(arg, rngs) if s != 1)
+        return tuple(UOp.const(dtypes.index, 0) if s == 1 else next(out_rngs) for s in in_shape)
+      if all(isinstance(s, int) and s > 0 for s in in_shape+arg) and all(r.op is Ops.CONST and isinstance(r.arg, int) for r in rngs):
+        flat_idx = sum(int(r.arg)*prod(arg[i+1:]) for i,r in enumerate(rngs))
+        ret = []
+        for s in cast(tuple[int, ...], in_shape)[::-1]:
+          ret.append(UOp.const(dtypes.index, flat_idx % s))
+          flat_idx //= s
+        return tuple(ret[::-1])
+      if len(in_shape) == 1:
+        return (UOp.const(dtypes.index, 0).usum([r*prod(arg[i+1:]) for i,r in enumerate(rngs)]),)
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER, dtype=r.dtype) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src

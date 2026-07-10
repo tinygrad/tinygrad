@@ -1589,15 +1589,21 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+rewrite_caches: list[dict[Any, dict[UOp, UOp]]] = []
+class scoped_rewrite_cache:
+  def __enter__(self): rewrite_caches.append({})
+  def __exit__(self, *args): rewrite_caches.pop()
+
 class RewriteContext:
-  __slots__ = ("pm", "bpm", "bpm_cache", "ctx", "replace", "enter_calls")
-  def __init__(self, pm, bpm, ctx=None, enter_calls=False):
+  __slots__ = ("pm", "bpm", "bpm_cache", "ctx", "replace", "enter_calls", "shared_cache")
+  def __init__(self, pm, bpm, ctx=None, enter_calls=False, shared_cache=None):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
+    self.shared_cache: dict[UOp, UOp]|None = shared_cache
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1636,7 +1642,7 @@ class RewriteContext:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
-    replace, ctx, stack_limit, enter_calls = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls
+    replace, ctx, stack_limit, enter_calls, shared_cache = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls, self.shared_cache
     bpm, cached_bpm_rewrite = self.bpm, self.cached_bpm_rewrite
     pm_rewrite = self.pm.rewrite if self.pm is not None else None
     while stack:
@@ -1644,6 +1650,10 @@ class RewriteContext:
       n, stage, new_n = stack.pop()
       if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
+        if shared_cache is not None and (cached:=shared_cache.get(n, SENTINEL)) is not SENTINEL:
+          replace[n] = cached
+          if n in waitlist: stack.extend(waitlist.pop(n))
+          continue
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if bpm is not None:
           # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
@@ -1682,6 +1692,7 @@ class RewriteContext:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if pm_rewrite is None or (new_src_n:=pm_rewrite(new_n, ctx)) is None:
               replace[n] = new_n
+              if shared_cache is not None: shared_cache[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
@@ -1698,12 +1709,17 @@ class RewriteContext:
         else:
           # otherwise we are done
           replace[n] = replaced_new_n
+          if shared_cache is not None: shared_cache[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
     return replace[root]
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
+  cache_ctx = None if ctx is None else getattr(ctx, 'rewrite_cache_key', SENTINEL)
+  cache_key = pm if ctx is None else (pm, cache_ctx)
+  shared_cache = rewrite_caches[-1].setdefault(cache_key, {}) if rewrite_caches and cache_ctx is not SENTINEL and \
+    not bottom_up and bpm is None and not walk else None
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, shared_cache)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
