@@ -158,7 +158,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
     # TODO: support dtype broadcasting (promotion)
-    if len(src) == 0: return dtypes.void
     if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
     return src[0].dtype
   if op in GroupOp.Movement: return src[0].dtype
