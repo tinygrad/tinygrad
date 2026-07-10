@@ -280,7 +280,7 @@ def amd_build_program(prg:UOp) -> UOp:
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
     buf = make_placeholder(prg.device, len(image), dtypes.uint8, "program")
-    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, bytes(image), tag="link")),), arg=(data, prg.arg))
+    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, bytes(image))),), arg=(data, prg.arg))
   return cached
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -580,7 +580,7 @@ class AMDDevice(HCQ2Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx.scratch_buffer(b.max_numel()))]) + self.pm_bufferize
+    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx[0].scratch_buffer(b.max_numel()))]) + self.pm_bufferize
 
     self.pmc_enabled:bool = PROFILE > 0 and PMC > 0
     if self.pmc_enabled:
@@ -630,8 +630,8 @@ class AMDDevice(HCQ2Compiled):
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
     ] + [
-      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.timeline_signal(q)),
-      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.timeline_value(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx[0].timeline_signal(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx[0].timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue
