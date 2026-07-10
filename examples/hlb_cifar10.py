@@ -154,9 +154,8 @@ def train_cifar():
   def whitening(X, kernel_size=hyp['net']['kernel_size']):
     def _patches(data:Tensor, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
-      _, c, H, W = data.shape
-      return Tensor.stack(*[data[:, ch, y:y+H-h+1, x:x+W-w+1].permute(0, 2, 1).flatten()
-                            for ch in range(c) for y in range(h) for x in range(w)])
+      _, c, _, _ = data.shape
+      return data._pool((h, w)).permute(1, 4, 5, 0, 3, 2).reshape(c*h*w, -1)
 
     def _eigens(patches):
       cov = ((patches @ patches.T) / (patches.shape[1] - 1)).numpy()
