@@ -53,7 +53,7 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
+  """If movement ops on src collapse to a contiguous range, return SHRINK. Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
   buf, size = src.base, src.numel()
   # can we check this before calling contiguous_view_offset?
@@ -61,12 +61,11 @@ def _make_buffer_view(src:UOp) -> UOp|None:
     byte_offset = offset * src.dtype.itemsize
     if byte_offset % buf.dtype.itemsize != 0: return None
     buf = buf.src[0]
-    offset = byte_offset // buf.dtype.itemsize
-    size = size * src.dtype.itemsize // buf.dtype.itemsize
+    offset, size = byte_offset // buf.dtype.itemsize, size * src.dtype.itemsize // buf.dtype.itemsize
   return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(dtypes.index, offset), UOp.const(dtypes.index, size)))
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
+  """MOPS(BUFFER) → SHRINK/BITCAST when movement ops collapse to a contiguous range."""
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.MULTI, Ops.BITCAST}: return None
 
@@ -82,7 +81,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     view = view.bitcast(c.dtype).reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
-  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK/BITCAST on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
@@ -143,7 +142,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
+  # fold MOPS+BITCAST over BUFFER into SHRINK/BITCAST when movement ops collapse to contiguous range
   (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
