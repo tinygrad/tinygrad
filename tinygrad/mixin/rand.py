@@ -246,8 +246,15 @@ class RandMixin(OpMixin):
     ```
     """
     if n <= 1: return cls.arange(n, dtype=dtype)
-    # affine map is a permutation when stride is coprime to n
-    while math.gcd(stride:=cls._python_rng.randrange(1, n), n) != 1: pass  # type: ignore[attr-defined]
+    # affine map (x*stride + offset) % n is a permutation when gcd(stride, n) == 1
+    # stride = 2*randint+1 is always odd (coprime to 2^k), then force away from odd prime factors
+    odd_primes = [p for p in range(3, int(n**0.5)+1, 2) if n % p == 0 and all(p % q != 0 for q in range(3, int(p**0.5)+1, 2))]
+    if n % 2 == 0:
+      odd_primes += [p for p in ([n // (2**((n & -n).bit_length() - 1))]) if p > 1]
+      odd_primes = sorted(set(odd_primes))
+    stride = cls.randint(1, low=0, high=n, device=device, dtype=dtypes.int64) * 2 + 1
+    for p in odd_primes:
+      stride = (stride % p == 0).where(stride + 2, stride)  # type: ignore[attr-defined,comparison-overlap]
     return ((cls.arange(n, dtype=dtypes.int64) * stride + cls.randint(1, low=0, high=n, device=device, dtype=dtypes.int64)) % n).cast(dtype)
 
   def multinomial(self, num_samples:int = 1, replacement:bool = False) -> Self:
