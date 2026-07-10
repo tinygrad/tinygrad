@@ -96,13 +96,7 @@ pm_manual_bf16_cast = PatternMatcher([
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
-  ret:list[tuple[DType, int]] = []
-  seen = set()
-  for u in uops:
-    if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
-      ret.append((u.dtype, u.max_numel()))
-      seen.add(key)
-  return ret
+  return dedup((u.dtype, u.max_numel()) for u in uops if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None)
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
 def wmma_args(uops:list[UOp]):
@@ -519,7 +513,7 @@ class HIPRenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
       lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-        x.src[2]), arg=(*x.arg,)) if x.src[0].max_numel() == 8 and x.src[0].dtype.scalar() in (dtypes.fp8e4m3, dtypes.fp8e5m2) else None),
+        x.src[2]), arg=(*x.arg,)) if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),
     # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
   ])
