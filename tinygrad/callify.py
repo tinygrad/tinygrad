@@ -188,10 +188,9 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].expr if b.op is Ops.BIND else None,
                    b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
-def replace_input_view(ctx:AllocCtx, b:UOp):
-  if (buf:=b.src[0].base).op is not Ops.BUFFER: return None
-  if (offset:=(b.src[0] if b.op is Ops.BITCAST else b).contiguous_view_offset()) is None: return None
-  return replace_input_buffer(ctx, UOp(Ops.SLICE, b.dtype, (buf, UOp.const(dtypes.index, offset)), b.numel()))
+buffer_view = UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER, name="buf"), UPat.cvar("offset"), UPat(Ops.CONST)))
+def replace_input_view(ctx:AllocCtx, b:UOp, buf:UOp, offset=None):
+  return replace_input_buffer(ctx, UOp(Ops.SLICE, b.dtype, (buf, UOp.const(dtypes.index, 0) if offset is None else offset), b.numel()))
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
@@ -203,7 +202,8 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace BITCAST(SHRINK) with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat((Ops.BITCAST, Ops.SHRINK), allow_any_len=True, name="b"), replace_input_view),
+  (buffer_view.named("b"), replace_input_view),
+  (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.BUFFER, name="buf"), buffer_view),), name="b"), replace_input_view),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
