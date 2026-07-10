@@ -51,7 +51,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause))
+  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp(Ops.CUSTOMI, arg="True")
 
 # *** pattern matcher ***
 
