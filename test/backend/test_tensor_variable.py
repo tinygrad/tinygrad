@@ -49,11 +49,9 @@ class TestTensorVariable(unittest.TestCase):
     # NOTE: the buffer dim must cover the variable's vmax
     vv = Variable("a", 1, 10).bind(2)
     self.assertEqual((Tensor.ones(10).contiguous()[:vv] * Tensor(vv)).sum().item(), 4.0)
+    # a vmin=0 symbolic dim broadcasts too
     v0 = Variable("z", 0, 10).bind(2)
-    # TODO: broadcasting a vmin=0 symbolic dim fails, max(dim, 1) cannot be proven equal to dim
-    try:
-      self.assertEqual((Tensor.ones(10).contiguous()[:v0] * Tensor(v0)).sum().item(), 4.0)
-    except IndexError: pass
+    self.assertEqual((Tensor.ones(10).contiguous()[:v0] * Tensor(v0)).sum().item(), 4.0)
 
   def test_inner_tvar_node(self):
     vv = Variable("w", 0, 10).bind(2)
