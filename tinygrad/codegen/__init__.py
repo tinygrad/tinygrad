@@ -134,17 +134,19 @@ unbroadcast = pm_wmma_add+PatternMatcher([
 def do_devectorize(ctx, b:UOp):
   ren = ctx[-1] if isinstance(ctx, tuple) else ctx
   if b.op in GroupOp.Elementwise and b.dtype in dtypes.floats and ren.supports_float4: return None
-  if b.shape == (): return None
+  if (shape:=b.shape) == (): return None
   # broadcasting needs to be already unpacked
   if not all_same([x.shape for x in b.src]): return None
   src = []
-  for idx_c in shape_indexes(b.shape):
-    src.append(b.replace(src=tuple(x.src[idx_c[0].arg] if len(idx_c) == 1 and x.op is Ops.STACK else UOp(Ops.INDEX, x.dtype, (x,)+idx_c)
-                                   for x in b.src)))
-  return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+  for idx_c in shape_indexes(shape):
+    new_src = tuple(x.src[idx_c[0].arg] if len(idx_c) == 1 and x.op is Ops.STACK else
+                    UOp(Ops.INDEX, x.dtype, (x,)+idx_c) for x in b.src)
+    src.append(UOp(b.op, b.dtype, new_src, b.arg, b.tag))
+  return UOp(Ops.STACK, b.dtype, tuple(src)).reshape(shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def index_elementwise(x:UOp, idx:UOp):
-  return x.replace(src=tuple(s.index(*idx.src[1:]) if s._shape else s for s in x.src))
+  indexes = idx.src[1:]
+  return UOp(x.op, x.dtype, tuple(UOp(Ops.INDEX, s.dtype, (s,)+indexes) if s._shape else s for s in x.src), x.arg, x.tag)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None

@@ -79,16 +79,16 @@ class ConvGroup:
     self.norm2 = BatchNorm(channels_out)
 
   def __call__(self, x):
-    x = self.conv1(x)
+    x = self.conv1(x).contiguous()
     x = x.max_pool2d(2)
     x = x.float()
-    x = self.norm1(x)
+    x = self.norm1(x).contiguous()
     x = x.cast(dtypes.default_float)
-    x = x.quick_gelu()
+    x = x.quick_gelu().contiguous()
     residual = x
-    x = self.conv2(x)
+    x = self.conv2(x).contiguous()
     x = x.float()
-    x = self.norm2(x)
+    x = self.norm2(x).contiguous()
     x = x.cast(dtypes.default_float)
     x = x.quick_gelu()
 
@@ -111,7 +111,10 @@ class SpeedyResNet:
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+    def forward(x):
+      x = x.conv2d(self.whitening).pad((1,0,0,1)).contiguous()
+      for layer in self.net: x = layer(x).contiguous()
+      return x
     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
@@ -296,6 +299,15 @@ def train_cifar():
 
   # initialize model weights
   model = SpeedyResNet(W)
+  model_state = get_state_dict(model)
+  random_params = [x for name,x in model_state.items() if x.is_param and "bias" not in name]
+  Tensor.manual_seed(getenv('SEED', hyp['seed']))
+  random_values = Tensor.rand(sum(x.numel() for x in random_params))
+  offset = 0
+  for param in random_params:
+    bound = prod(param.shape[1:]) ** -0.5
+    param.replace(((random_values[offset:offset+param.numel()] * (2 * bound)) - bound).reshape(param.shape).cast(param.dtype))
+    offset += param.numel()
 
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
@@ -312,7 +324,7 @@ def train_cifar():
         x.to_(GPUS)
 
   # parse the training params into bias and non-bias
-  params_dict = get_state_dict(model)
+  params_dict = model_state
   params_bias = []
   params_non_bias = []
   for params in params_dict:
@@ -336,7 +348,7 @@ def train_cifar():
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   def train_step(model, optimizer, lr_scheduler, X, Y):
-    out = model(X)
+    out = model(X).contiguous()
     loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -344,9 +356,8 @@ def train_cifar():
       # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
       loss.backward()
-      optimizer.step()
-      Tensor.realize(*lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
-      return loss.realize()
+      Tensor.realize(loss, *optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
+      return loss
     return loss.realize()
 
   train_step_jitted = TinyJit(train_step, warmup=False)
@@ -454,5 +465,5 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
-  with Context(SPEC=0, SCACHE=0), WallTimeEvent(BenchEvent.FULL):
+  with Context(SPEC=0, SCACHE=0, TRACEMETA=0), WallTimeEvent(BenchEvent.FULL):
     train_cifar()
