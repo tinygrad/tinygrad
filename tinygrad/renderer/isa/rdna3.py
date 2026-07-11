@@ -66,7 +66,9 @@ def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=wid
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
 # NOTE: call this buildvector like LLVM?
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
-def getsign(u:UOp, nbits): return _aluhint(UOp(Ops.SHR, dtypes.uint32, src=(u, const(dtypes.uint16, nbits-1))), RDNA3Ops.v_ashrrev_i32_e32 if nbits == 32 else RDNA3Ops.v_ashrrev_i64)
+def getsign(u:UOp, nbits):
+  if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(dtypes.uint16, 32 - nbits)))
+  return _aluhint(UOp(Ops.SHR, dtypes.uint32, src=(u, const(dtypes.uint16, 31 if nbits <= 32 else 63))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -381,6 +383,7 @@ def alu(ctx, x:UOp):
 
 # NOTE: make this a pm?
 def intcast(y:UOp, x:UOp):
+  # NOTE: use v_bfe instead of hand rolled masking
   if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
   if x.dtype.itemsize > y.dtype.itemsize:
     if y.dtype.itemsize == 1: return y.bitcast(x.dtype)
@@ -395,8 +398,13 @@ def intcast(y:UOp, x:UOp):
 def castint64(ctx, y:UOp, x:UOp):
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   if y.dtype in dtypes.ints:
-    lo = vmov(y)
-    hi = vmov(getsign(lo, 32))
+    do_sext = not dtypes.is_unsigned(y.dtype)
+    if do_sext:
+      nbits = y.dtype.itemsize*8
+      hi = getsign(vmov(y), nbits)
+      # extend sign to upper part of low
+      lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(dtypes.uint32, ~((1 << nbits) - 1)))))) # TODO: cleanup manual constr.
+    else: lo, hi = vmov(y), vmov(const(dtypes.uint32, 0))
     return multireg(lo, hi, dtype=x.dtype)
   elif y.dtype is dtypes.float64: # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
     tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
@@ -522,6 +530,8 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int8s+dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   # other
   (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
+  (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
+  (UPat.var("y", dtype=dtypes.int32s+dtypes.int16s+dtypes.int8s+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # narrowing long goes through b32
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
@@ -541,10 +551,6 @@ isel_matcher = PatternMatcher([
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat(name="x").bitcast(), lambda x: x),
-  # NOTE: prolly belong in pre-isel?
-  # (UPat(Ops.CDIV, name="x"), cdiv),
-  (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
-  (UPat.var("y", dtype=dtypes.ints+dtypes.uints+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -623,6 +629,8 @@ def encode(ctx, x:UOp):
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
+
+  print("encode", opc, args, kw)
 
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
