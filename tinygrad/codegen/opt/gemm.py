@@ -116,9 +116,11 @@ def _gemm_block_m(g:GemmMatch) -> int:
     64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
   if g.n == 576 and g.old is None and not g.a_kxm and g.b_kxn: return 192
+  if g.old is not None and g.a_kxm and g.b_kxn and g.m == 256 and g.k >= 65536: return 64
   return 64 if g.n == 64 and g.old is None and not g.a_kxm and not g.b_kxn else BLOCK_N
 def _gemm_block_k(g:GemmMatch) -> int:
-  if g.old is not None and g.m < 512 and g.k % 64 == 0: return 64
+  if g.old is not None and g.a_kxm and g.b_kxn and g.m == 256 and g.k >= 65536: return BLOCK_K
+  if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) and g.k % 64 == 0: return 64
   return 96 if _gemm_block_n(g) == 64 and g.k == 288 else BLOCK_K
 def _batched_block_k(g:BatchedGemmMatch) -> int:
   return 128 if g.m == 64 and g.batch >= 96 and g.k % 128 == 0 else BLOCK_K
@@ -128,7 +130,7 @@ def _batched_threads(g:BatchedGemmMatch) -> int:
   return _batched_block_n(g)
 def _gemm_threads(g:GemmMatch) -> int:
   if _gemm_block_n(g) == 192: return 192
-  return 64 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 512 and g.k >= 65536 else THREADS
+  return 64 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 256 and g.k >= 65536 else THREADS
 def _render_gemm(g:GemmMatch, name:str) -> str:
   bm, bn_size, bk, threads = _gemm_block_m(g), _gemm_block_n(g), _gemm_block_k(g), _gemm_threads(g)
   waves_m, waves_n = (2, 3) if threads == 192 else (1, 2) if threads == 64 else \
