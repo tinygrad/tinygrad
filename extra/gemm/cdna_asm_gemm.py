@@ -95,6 +95,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     elif a.ndim == 2 and a.uop.axis == 1 and b.uop.axis == 0: K //= len(a.device)
     elif a.ndim == 2 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None: batch //= len(a.device)
+    elif a.ndim == 3 and a.uop.axis == 1 and b.uop.axis is None: M //= len(a.device)
     elif a.ndim == 3 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 2 and b.uop.axis == 0: K //= len(a.device)
     else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
@@ -116,10 +117,10 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   m = UOp.range(M, 1, AxisType.LOOP)
   n = UOp.range(N, 2, AxisType.LOOP)
   k = UOp.range(K, 0, AxisType.REDUCE)
-  mul = (A.flatten().index((m*UOp.const(dtypes.weakint, K)+k))*
-         B.flatten().index((k*UOp.const(dtypes.weakint, N)+n))).cast(dtypes.float32)
-  red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
-  store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n)).store(red).end(m, n)
+  mul = (A.flatten().index((m*UOp.const(dtypes.index, K)+k))*
+         B.flatten().index((k*UOp.const(dtypes.index, N)+n))).cast(dtypes.float32)
+  red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype)
+  store = C.flatten().index((m*UOp.const(dtypes.index, N)+n)).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
 # ** bf16 A @ B.T kernel in C

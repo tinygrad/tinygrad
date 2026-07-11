@@ -7,12 +7,12 @@ from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 def custom_arange_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
-  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
+  return C[i].store(i.cast(C.dtype)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
 
 def custom_eye_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
   j = UOp.range(C.shape[1], 1)
-  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
+  return C[i, j].store((i.eq(j)).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
 
 def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -57,7 +57,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0)
   slice_src = src[G, :]
-  reg = UOp.placeholder((1,), dest.dtype.base, 0, addrspace=AddrSpace.REG)
+  reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
   reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
@@ -73,12 +73,12 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
 
   k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
-  qk_acc = UOp.placeholder((1,), Q.dtype.base, 0, addrspace=AddrSpace.REG)
+  qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
   qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
   qk_score = qk_acc[0] / (d ** 0.5)
 
-  out_acc = UOp.placeholder((1,), Q.dtype.base, 1, addrspace=AddrSpace.REG)
+  out_acc = UOp.placeholder((1,), Q.dtype, 1, addrspace=AddrSpace.REG)
   out_acc = out_acc.after(i, d_out)[0].set(0.0)
   out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
 

@@ -77,7 +77,7 @@ def _val_to_bits(val):
   return val if val.dtype == dtypes.uint32 else val.cast(dtypes.uint32)
 
 def _floor(x):
-  t = UOp(Ops.TRUNC, x.dtype, (x,))
+  t = UOp(Ops.TRUNC, src=(x,))
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
@@ -156,10 +156,10 @@ def _trig_reduce(x, phase=0.0):
     turns, two_pi = match
     if phase: turns = turns + _const(turns.dtype, phase)
     n = _floor(turns + _const(turns.dtype, 0.5))
-    return UOp(Ops.SIN, turns.dtype, ((turns - n) * _const(turns.dtype, two_pi),))
+    return UOp(Ops.SIN, src=((turns - n) * _const(turns.dtype, two_pi),))
   if phase: x = x + _const(x.dtype, phase * 6.283185307179586)
   n = _floor(x * _const(x.dtype, 0.15915494309189535) + _const(x.dtype, 0.5))
-  return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
+  return UOp(Ops.SIN, src=(x - n * _const(x.dtype, 6.283185307179586),))
 
 def _signext(val: UOp) -> UOp:
   for bits, mask, ext in [(4, 0xF, 0xFFFFFFF0), (8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
@@ -184,7 +184,7 @@ def _abs(val: UOp) -> UOp:
 
 def _f_to_u(f, dt):
   clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
-  truncated = UOp(Ops.TRUNC, f.dtype, (clamped,))
+  truncated = UOp(Ops.TRUNC, src=(clamped,))
   return (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
 
 def _cvt_quiet(val: UOp) -> UOp:
@@ -230,7 +230,7 @@ def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
   if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
-  return val * UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
+  return val * UOp(Ops.EXP2, src=(exp.cast(val.dtype),))
 
 def _frexp_mant(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
@@ -288,20 +288,20 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
   return result
 
 _FUNCS: dict[str, Callable[..., UOp]] = {
-  'sqrt': lambda a: UOp(Ops.SQRT, a.dtype, (a,)), 'trunc': lambda a: UOp(Ops.TRUNC, a.dtype, (a,)),
-  'log2': lambda a: UOp(Ops.LOG2, a.dtype, (a,)), 'sin': lambda a: _trig_reduce(a),
+  'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
+  'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
   'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
-  'isEven': lambda a: (UOp(Ops.TRUNC, a.dtype, (a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
-  'max': lambda a, b: UOp(Ops.MAX, a.dtype, (a, b)),
-  'min': lambda a, b: UOp(Ops.MAX, a.dtype, (a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, dtypes.float32, (b.bitcast(dtypes.float32),)),
+  'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
+  'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
+  'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
-  'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int),
+  'f32_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float32),)).cast(dtypes.int),
   'f32_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint32),
-  'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a.bitcast(dtypes.float64),)).cast(dtypes.int),
+  'f64_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float64),)).cast(dtypes.int),
   'f64_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float64), dtypes.uint32),
   'f16_to_f32': lambda a: _f16_extract(a).cast(dtypes.float32),
   'f32_to_f16': lambda a: a.cast(dtypes.half),
@@ -309,8 +309,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'f64_to_f32': lambda a: a.bitcast(dtypes.float64).cast(dtypes.float32),
   'i32_to_f64': lambda a: a.cast(dtypes.int).cast(dtypes.float64),
   'u32_to_f64': lambda a: a.cast(dtypes.uint32).cast(dtypes.float64),
-  'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.int16),
-  'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.uint16),
+  'f16_to_i16': lambda a: UOp(Ops.TRUNC, src=(_f16_extract(a),)).cast(dtypes.int16),
+  'f16_to_u16': lambda a: UOp(Ops.TRUNC, src=(_f16_extract(a),)).cast(dtypes.uint16),
   'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
   'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
   'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
@@ -343,7 +343,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF)),
   'i4_to_i32': lambda a: _signext_4bit(a.cast(dtypes.uint32) & _u32(0xF)),
   # Float to int16 conversions
-  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
+  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float32),)).cast(dtypes.int16),
   'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
   # SAD (Sum of Absolute Differences) - sum |a_i - b_i| for 4 bytes + accumulator
   'v_sad_u8': lambda a, b, c: _sad_u8(a, b, c),
@@ -492,7 +492,10 @@ class Parser:
       case '>=' | '<=' | '>' | '<' | '<>':
         ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b),'<>':(lambda a,b:a.ne(b))}
         return self._cmp_nan(left, right, ops[op])
-      case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
+      case '>>' | '<<':
+        if not dtypes.is_int(left.dtype): left = left.cast(dtypes.uint32)
+        if not dtypes.is_int(right.dtype): right = right.cast(dtypes.uint32)
+        return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':
         if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
         return (left + right) if op == '+' else (left - right)
@@ -504,7 +507,7 @@ class Parser:
           left, right = left.cast(pdt), right.cast(pdt)
         if op == '*': return left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
-      case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
+      case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
 
@@ -829,7 +832,7 @@ class Parser:
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
     def mindex(idx:UOp): return mem.index(idx.valid(active) if active is not None else idx)
-    byte_mem = mem.dtype.base == dtypes.uint8
+    byte_mem = mem.dtype == dtypes.uint8
     if byte_mem:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
@@ -1304,7 +1307,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         result = else_branch[0]
         for c, rv in reversed(conditions):
           if isinstance(rv, UOp) and isinstance(result, UOp):
-            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            if rv.dtype != result.dtype: result = result.cast(rv.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
       # If statically true, use that branch directly; otherwise merge with WHERE
@@ -1325,7 +1328,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
             if isinstance(ba, dict) and var in ba:
               tv = ba[var]
               if isinstance(tv, UOp) and isinstance(res, UOp):
-                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype else res)
           block_assigns[var] = env[var] = res
         # Merge side effects from branches with conditions
         if assigns is not None:

@@ -1,10 +1,9 @@
-from typing import Any
 import itertools, functools
 from collections import defaultdict
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, ImageDType, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv
+from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -40,15 +39,17 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return None if idx is start_idx or idx is start_idx.simplify() else buf.index(idx.valid(valid))
 
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
-  if not isinstance(buf.dtype, ImageDType): return None
-  start_idx = idx_x._stack(idx_y)
+  if not is_image_shape(buf._shape): return None
+  if idx_x.dtype != idx_y.dtype: idx_x, idx_y = idx_x.cast(dtypes.int), idx_y.cast(dtypes.int)
+  start_idx = idx_x.stack(idx_y)
   idx = uop_given_valid(valid, start_idx)
-  drop_stmt = _drop_valid_stmts(valid, idx, buf.dtype.shape[0], buf.dtype.shape[1])
+  drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   idx_y, idx_x = idx.index(1), idx.index(0)
-  return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid)) if new_valid is not None else buf.index(idx_y, idx_x)
+  if new_valid is not None: return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), dtype=dtypes.float)
+  return buf.index(idx_y, idx_x, dtype=dtypes.float)
 
 indexing_simplify = PatternMatcher([
   # image load valid idx simplification
@@ -69,12 +70,11 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   shapes, ren = ctx
   if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
-  valid = UOp.const(dtypes.bool, True)
-  if x.op == Ops.WHERE and x.src[2].op == Ops.CONST and x.src[2].arg == Invalid: valid,x,_= x.src
+  valid, x = x.get_valid(), x.get_idx()
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
-    cidx = uop_given_valid(valid, ((x//4)%cw)._stack(x//(4*cw)))
+    cidx = uop_given_valid(valid, ((x//4)%cw).stack(x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
@@ -82,13 +82,12 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
-  buf = buf.replace(dtype=(dtypes.imageh if buf.dtype.itemsize == 2 else dtypes.imagef)((h, w, 4)))
+  buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
   shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.arg is not True:
-    return buf.index(valid.where(cidx.src[1], cidx.src[1].const_like(Invalid)),
-                     valid.where(cidx.src[0], cidx.src[0].const_like(Invalid)))
+    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid), dtype=dtypes.float)
   else:
-    return buf.index(cidx.src[1], cidx.src[0])
+    return buf.index(cidx.src[1], cidx.src[0], dtype=dtypes.float)
 
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
@@ -102,7 +101,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, Any, Any], dict[int, list[UOp]]]  = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalesing
     if u.op in {Ops.LOAD, Ops.STORE}:
@@ -110,8 +109,8 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalesing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
-      idx: Any = idx_u.src[1] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else idx_u
-      valid: Any = idx_u.src[0] if idx_u.op is Ops.WHERE and idx_u.src[2].arg is Invalid else None
+      idx, valid = idx_u.get_idx(), idx_u.get_valid()
+      root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
       elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
@@ -128,11 +127,11 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
+    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass
-    elif isinstance(buf.dtype, ImageDType):
+    elif is_image_shape(buf._shape):
       lengths = [4]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
@@ -142,24 +141,24 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.weakint, full_grp[0])
+        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.index, full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
-        offset = valid.where(offset, UOp(Ops.CONST, offset.dtype, arg=Invalid)) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, offset, UOp.const(dtypes.weakint, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        offset = offset.valid(valid) if valid is not None else offset
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(dtypes.index, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
             assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
-          store = idx.store(UOp._stack(*datas) if len(datas) > 1 else datas[0])
+          store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
           ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
-              replacements[oo] = ld.index(UOp.const(dtypes.weakint, i)) if len(grp) > 1 else ld
+              replacements[oo] = ld.index(UOp.const(dtypes.index, i)) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
   # apply

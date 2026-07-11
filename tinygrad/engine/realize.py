@@ -2,9 +2,8 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv, to_tuple
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
@@ -54,7 +53,7 @@ first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int]):
   if PROFILE:
     outputs, inputs = get_call_outs_ins(call)
-    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
+    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": var_vals,
       "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs, var_vals), "outputs": outputs, "inputs": inputs}))
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
@@ -81,8 +80,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in call.arg.metadata] if call.arg.metadata else ''}")
+      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(call.src[0].key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
@@ -216,7 +214,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
       buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
-  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
+  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
 
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
@@ -231,9 +229,9 @@ pm_flatten_linear = PatternMatcher([
 
 def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype.base) for p in params)
+  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
@@ -261,24 +259,24 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_compile
-    linear = hcq_compile(linear, input_uops)
+    linear = hcq_compile(linear, input_uops, jit=jit)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp) -> UOp:
+def link_linear(linear:UOp, jit=False) -> UOp:
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_link
-    linear = hcq_link(linear)
+    linear = hcq_link(linear, jit=jit)
   return linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, jit=False))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 

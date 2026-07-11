@@ -126,7 +126,7 @@ class TestValidateOOB(unittest.TestCase):
       buf0 = UOp.param(0, dtypes.int, (16,))
       buf1 = UOp.param(1, dtypes.int, (64,))
       r = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = buf0.index(r.valid(r < 8)).load(dtype=dtypes.int).cast(dtypes.weakint)
+      ld0 = buf0.index(r.valid(r < 8)).load(dtype=dtypes.int).cast(dtypes.index)
       to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32))).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])  # oob
@@ -135,7 +135,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, (16,))
       buf_int = UOp.param(1, dtypes.int, (8,))
-      gidx = UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, 16),), "gidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.index, 16),), arg="gidx0")
       ld_bool = buf_bool.index(gidx).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool)).load()])  # gidx 0..15, buf_int size 8
@@ -149,21 +149,21 @@ class TestValidateOOB(unittest.TestCase):
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
 
       # Define indices, valids and barrier
-      gidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 416),), "gidx0")
-      lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 10),), "lidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 416),), arg="gidx0")
+      lidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 10),), arg="lidx0")
 
       gate = (gidx<400) & (lidx<8)
 
       local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(dtypes.uint, 1))
 
-      barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
-      if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))
+      barrier = UOp(Ops.BARRIER, src=(local_store,))
+      if_barrier = UOp(Ops.IF, src=(gate, barrier))
 
       # Load from local memory (after the IF/barrier)
-      local_load = UOp(Ops.LOAD, dtypes.uint, (sbuf.index(lidx), if_barrier))
+      local_load = UOp(Ops.LOAD, src=(sbuf.index(lidx), if_barrier))
 
       # Store to global memory
-      global_store = UOp(Ops.STORE, dtypes.void, (gbuf.index(gidx), local_load))
+      global_store = UOp(Ops.STORE, src=(gbuf.index(gidx), local_load))
       to_uops_list([global_store])
 
   @unittest.skip("Bool load is not supported yet")
@@ -172,7 +172,7 @@ class TestValidateOOB(unittest.TestCase):
       glbl0 = UOp.param(0, dtypes.int, (16,))
       mask = UOp.param(0, dtypes.bool, (16,))
       ridx = UOp.range(20, 0)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(ridx, ridx<16&mask))))
+      ld0 = UOp(Ops.LOAD, src=(glbl0.index(UOp.const(ridx, ridx<16&mask))))
       to_uops_list([ld0])
 
 if __name__ == "__main__":

@@ -348,18 +348,18 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
       dnum = UOp.variable("_device_num", 0, ndev-1)
       offset = dnum * local_vocab_size
-      global_token_id = idx_flat[i].cast(dtypes.weakint)
+      global_token_id = idx_flat[i].cast(dtypes.index)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
       in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size)) & j_ok
       grad_val = in_range.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     else:
-      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
+      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.index)
       grad_val = j_ok.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(local_token_id, j_idx), grad_val), arg = atomic_arg)
+    atomic = UOp(Ops.CUSTOM, src=(grad_weight.index(local_token_id, j_idx), grad_val), arg = atomic_arg)
     return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]

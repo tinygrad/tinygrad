@@ -18,7 +18,9 @@ constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
 constexpr int ATTN_N = 1024; // sequence length
 #endif
 
+#ifndef ATTN_D
 constexpr int ATTN_D = 128; // dimension
+#endif
 constexpr int STEP_QO = 64; // block size for QO
 constexpr int BLOCK_SIZE_KV = 256; // block size for KV
 constexpr int SLICE_QO = 32;

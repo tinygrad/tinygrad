@@ -3,10 +3,9 @@ from typing import cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError
-from tinygrad.dtype import ImageDType
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
 BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
@@ -57,10 +56,11 @@ class CLProgram:
                wait=False, **kw) -> float|None:
     i = 0
     for i,b in enumerate(bufs):
-      for real_i, dt in self.arg_dtypes[i]:
-        if isinstance(dt, ImageDType):
+      for real_i, dt, shape in self.arg_dtypes[i]:
+        if is_image_shape(shape):
+          pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
           fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
-          desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], image_row_pitch=dt.pitch, buffer=b)
+          desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], image_row_pitch=pitch, buffer=b)
           img = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
           check(cl.clSetKernelArg(self.kernel, real_i, ctypes.sizeof(img), ctypes.byref(img)))
         else: check(cl.clSetKernelArg(self.kernel, real_i, ctypes.sizeof(b), ctypes.byref(b)))

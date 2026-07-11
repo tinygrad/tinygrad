@@ -192,7 +192,7 @@ acc = UOp.placeholder((4,), dtypes.float, 0, AddrSpace.REG)
 acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
 
 # do the wmma
-acc_load = UOp.vectorize(*[acc.after(K_loop)[i] for i in range(4)])
+acc_load = UOp.stack(*[acc.after(K_loop)[i] for i in range(4)])
 wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
 out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
 

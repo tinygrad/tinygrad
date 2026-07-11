@@ -3,7 +3,7 @@ import math
 from typing import Self, cast
 from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
-from tinygrad.mixin import OpMixin
+from tinygrad.mixin.op import OpMixin
 from tinygrad.device import canonicalize_device
 
 

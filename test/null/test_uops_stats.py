@@ -144,8 +144,8 @@ class TestUOpsStats(unittest.TestCase):
     u1 = globl.index(o1)
     u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
-    u4 = UOp(Ops.MUL, dtypes.int, (u1,u2))
-    u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
+    u4 = UOp(Ops.MUL, src=(u1,u2))
+    u5 = UOp(Ops.ADD, src=(u4,u3))
     uops = tuple(u5.toposort())
 
     globl = UOp.param(0, dtypes.int, (3,))
@@ -154,7 +154,7 @@ class TestUOpsStats(unittest.TestCase):
     u1 = globl.index(o1)
     u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
-    u4 = UOp(Ops.MULACC, dtypes.int, (u1,u2,u3))
+    u4 = UOp(Ops.MULACC, src=(u1,u2,u3))
     uops_fma = tuple(u4.toposort())
 
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))

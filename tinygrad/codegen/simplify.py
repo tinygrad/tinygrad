@@ -9,8 +9,7 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
+  return r.replace(src=r.src[:off]+tuple(UOp.sink(*rngs).ranges))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -82,9 +81,9 @@ def reduce_unparented(red:UOp) -> UOp|None:
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg[0] is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype)
   if red.arg[0] is Ops.MUL:
-    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype)
   return ret
 
 pm_reduce_unparented = PatternMatcher([
@@ -150,5 +149,5 @@ def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
-  ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
+  ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])

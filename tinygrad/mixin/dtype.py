@@ -31,7 +31,20 @@ class DTypeMixin:
     """
     return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.cast(dt))
 
-  def bitcast(self, dtype:DTypeLike) -> Self: raise NotImplementedError
+  def bitcast(self, dtype:DTypeLike) -> Self:
+    """
+    Bitcasts `self` to the given `dtype`. If the itemsize differs, the last axis is rescaled.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.bitcast(dtypes.uint32)
+    print(t.dtype, t.numpy())
+    ```
+    """
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.bitcast(dt))
 
   def element_size(self) -> int:
     """
@@ -54,7 +67,7 @@ class DTypeMixin:
     print(t.is_floating_point())
     ```
     """
-    return dtypes.is_float(self.dtype.base)
+    return dtypes.is_float(self.dtype)
 
   def float(self) -> Self:
     """

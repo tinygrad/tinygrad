@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize
-from tinygrad.dtype import DType, PtrDType, _to_np_dtype
+from tinygrad.dtype import DType, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -102,7 +102,7 @@ class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
                uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
-    assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
+    assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
     if base is None:
@@ -202,8 +202,8 @@ class Buffer:
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
-    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
-    return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype.base))
+    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
+    return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"

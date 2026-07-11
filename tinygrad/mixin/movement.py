@@ -123,9 +123,16 @@ class MovementMixin:
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    reshaped = self.reshape(shape)
-    ret = reshaped._mop(Ops.EXPAND, arg=new_shape)
-    return reshaped if ret.shape == reshaped.shape else ret
+    # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
+    n_left = len(new_shape) - len(self.shape)
+    expand_at = tuple(i for i, s in enumerate(self.shape) if resolve(s == 1, default=False) and resolve(new_shape[n_left+i] != 1))
+    kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
+    squeezed = self.reshape(tuple(self.shape[i] for i in kept))
+    expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
+    # expanded shape = [left] + [expand_at dims] + [kept dims], permute to new_shape
+    perm = tuple(range(n_left)) + tuple(
+      n_left + (expand_at.index(i) if i in expand_at else len(expand_at) + kept.index(i)) for i in range(len(self.shape)))
+    return expanded.permute(perm)
 
   def expand(self, shape, *args) -> Self:
     """
@@ -233,6 +240,24 @@ class MovementMixin:
       raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
+
+  def stack(self, *args: Self, dim: int = 0) -> Self:
+    """
+    Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
+    print(t0.stack(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.stack(t1, t2, dim=1).numpy())
+    ```
+    """
+    tensors = argfix(self, *args)
+    dim = tensors[0]._resolve_dim(dim, extra=True)
+    assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
+    ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
+    return ret if dim == 0 else ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
 
   # **** high level ****
 
