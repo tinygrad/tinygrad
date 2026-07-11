@@ -95,6 +95,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     elif a.ndim == 2 and a.uop.axis == 1 and b.uop.axis == 0: K //= len(a.device)
     elif a.ndim == 2 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None: batch //= len(a.device)
+    elif a.ndim == 3 and a.uop.axis == 1 and b.uop.axis is None: M //= len(a.device)
     elif a.ndim == 3 and a.uop.axis is None and b.uop.axis == 1: N //= len(a.device)
     elif a.ndim == 3 and a.uop.axis == 2 and b.uop.axis == 0: K //= len(a.device)
     else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
