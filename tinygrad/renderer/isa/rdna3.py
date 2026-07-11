@@ -20,6 +20,7 @@ insdefs = [
   (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "i32_i24_e32", "lo_u32", "lo_u16"], False), # TODO: mul i16?
   (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
+  (Ops.SIN, "v_sin", ["f32_e32"], False),
   (Ops.EXP2, "v_exp", ["f16_e32", "f32_e32"], False),
   (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.MAX, "v_max", ["f16_e32", "f32_e32", "u16", "i16", "u32_e32", "i32_e32"], False),
@@ -270,26 +271,30 @@ def cmp(ctx, x:UOp):
   return x if scmp else _vop3(ctx, x)
 
 # TODO: sub64?
-def add64(ctx, x:UOp):
-  if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_add_f64)
+def arith64(ctx, x:UOp, add:bool):
+  if dtypes.is_float(x.dtype):
+    assert add
+    return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
+  ins_lo = RDNA3Ops.v_add_co_u32 if add else RDNA3Ops.v_sub_co_u32
+  ins_hi = RDNA3Ops.v_add_co_ci_u32 if add else RDNA3Ops.v_sub_co_ci_u32
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   vreg = make_vgpr(ctx, width=2) # NOTE: after causes a problem for auto allocating group reg
-  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_add_co_u32, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
-  hi = UOp(Ops.INS, dtype=narrow, arg=RDNA3Ops.v_add_co_ci_u32, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
+  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
+  hi = UOp(Ops.INS, dtype=narrow, arg=ins_hi, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
 # a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
   if dtypes.is_float(x.dtype): return x.ins(RDNA3Ops.v_mul_f64)
-  def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_i64_i32 if sign else RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
+  def _mad(a:UOp, b:UOp, c:UOp=const(x.dtype,0)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
   def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(dtypes.int,32),x))
   a, b = x.src
   sign = not dtypes.is_unsigned(x.dtype)
   shup = const(dtypes.int, 32)
   p1 = _up(_mad(a.index(1), b.index(0)))
   p2 = _up(_mad(a.index(0), b.index(1)))
-  p3 = add64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)))
+  p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)), add=True)
   return _mad(a.index(0), b.index(0), p3)
 
 def bitwise64(ctx, x:UOp, ins):
@@ -302,38 +307,46 @@ def bitwise64(ctx, x:UOp, ins):
 # Ops.INS which have None shape and cause alu() _broadcast to error
 def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
 
-# 32 bit Algorithm from LLVM AMDGPUCodeGenPrepareImpl::expandDivRem32
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUCodeGenPrepare.cpp
-# TODO: sext / zext???, if dtype sizes dont match
-def cdiv(ctx, x:UOp):
-  # NOTE: goldschmit algorithm?, https://lauri.võsandi.com/hdl/arithmetic/goldschmidt-division-algorithm.html
-  if x.dtype.itemsize == 8:
-    raise NotImplementedError("64 bit cdiv")
-  def _safeneg(u:UOp): return UOp(Ops.SUB, dtypes.uint32, src=(const(dtypes.uint32,0), u))
-  def _umulh(a:UOp, b:UOp): return _aluhint(a * b, RDNA3Ops.v_mul_hi_u32)
-  a,b = x.src[0].cast(dtypes.uint32), x.src[1].cast(dtypes.uint32) 
-  is_signed = not dtypes.is_unsigned(x.dtype)
-  if is_signed:
-    def _getsign32(u:UOp): return _aluhint(u >> 31, RDNA3Ops.v_ashrrev_i32_e32)
-    sa, sb = _getsign32(a), _getsign32(b)
+# https://arxiv.org/pdf/2207.08420
+def idiv(ctx, x:UOp):
+  signed = not dtypes.is_unsigned(x.dtype)
+  dt = dtypes.uint32 if x.dtype.itemsize == 4 else dtypes.uint64
+  a, b = x.src[0].cast(dt), x.src[1].cast(dt)
+  if signed:
+    def _getsign(u:UOp): return _aluhint(u >> (x.dtype.itemsize*8)-1, RDNA3Ops.v_ashrrev_i32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_ashrrev_i64)
+    sa, sb = _getsign(a), _getsign(b)
     a, b = (a + sa) ^ sa, (b + sb) ^ sb
     sign = sa ^ sb
-  z = _aluhint(b.cast(dtypes.float32).reciprocal(), RDNA3Ops.v_rcp_iflag_f32_e64)
-  z = (z * const(dtypes.float32, 4294966784)).cast(dtypes.uint32)
-  z += _umulh(z, _safeneg(b) * z)
-  q = _umulh(a, z)
-  r = a + _safeneg(q) * b
-  cond = r < b
-  q = cond.where(q, q + const(dtypes.uint32, 1))
-  r = cond.where(r, r + _safeneg(b))
-  q = (r < b).where(q, q + const(dtypes.uint32, 1))
-  return (q ^ sign) + _safeneg(sign) if is_signed else q
+  bs = b.cast(dtypes.float)
+  ad, bd = a.cast(dtypes.double), b.cast(dtypes.double)
+  invbs0  = bs.reciprocal()
+  invbd0 = invbs0.cast(dtypes.double)
+  alpha = -bd * invbd0 + const(dtypes.double, 1.0)
+  invbd = alpha * invbd0 + invbd0
+  qd = ad * invbd
+  q1 = _aluhint(qd.trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtype=dtypes.uint64) # todo: this is hacky, not trunc
+  r1 = UOp(Ops.SUB, dtypes.int64, src=(a.cast(dtypes.int64), b.cast(dtypes.int64) * q1.cast(dtypes.int64)))
+  if x.dtype.itemsize == 4:
+    q = (r1 < const(dtypes.int64, 0)).where(UOp(Ops.SUB, dtypes.ulong, src=(q1, const(dtypes.ulong, 1))), q1).cast(dtypes.uint32)
+  else:
+    q3d = r1.cast(dtypes.double) * invbd
+    q3 = _aluhint(q3d.trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtypes.int64)
+    r3 = UOp(Ops.SUB, dtypes.int64, src=(r1, b.cast(dtypes.int64) * q3))
+    q2 = (r3 < const(dtypes.int64, 0)).where(UOp(Ops.SUB, dtypes.int64, src=(q3, const(dtypes.int64, 1))), q3)
+    q0 = q1 + q2.cast(dtypes.uint64)
+    is_big = b.cast(dtypes.int64) < const(dtypes.int64, 0) # b >= 2^63
+    is_one = b <= const(dtypes.ulong, 1)
+    if_big = (a >= b).cast(dtypes.uint64)
+    special = is_big.where(if_big, a)
+    q = (is_one | is_big).where(special, q0)
+  return (q ^ sign) + -sign if signed else q
 
 # NOTE: booleans should be natively represented as vcc/scc
 # TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
-  if dpreciz and x.op is Ops.ADD: return add64(ctx, x)
+  if dpreciz and x.op is Ops.ADD: return arith64(ctx, x, add=True)
+  if dpreciz and x.op is Ops.SUB: return arith64(ctx, x, add=False)
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
   # NOTE: ignore b16 instructions for now
@@ -396,7 +409,8 @@ def castint64(ctx, y:UOp, x:UOp):
     tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
     hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
     hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
-    lo_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_fma_f64, src=(hi_f, const(dtypes.float64, 0xc1f0000000000000), tr)) # tr - hi_f * 2 ^ 32
+    lo_f = hi_f.ins(RDNA3Ops.v_ldexp_f64, src=(hi_f, const(dtypes.int16, 32))) # tr - hi_f * 2 ^ 32
+    lo_f = UOp(Ops.ADD, dtypes.float64, src=(tr, UOp(Ops.MUL, dtypes.float64, src=(lo_f, const(dtypes.float64, -1.)))))
     return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=x.dtype)
   else: # NOTE: wrong? look at LLVM like f64 cast
     lo = y.float().cast(dtypes.uint32)
@@ -494,7 +508,7 @@ extra_matcher = PatternMatcher([
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 pre_isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), stack2regs),
-  (UPat(Ops.CDIV, name="x"), cdiv),
+  (UPat(Ops.CDIV, name="x"), idiv),
   # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
