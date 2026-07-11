@@ -59,10 +59,6 @@ class TestIselX86(unittest.TestCase):
     n = self.isel_rewrite(a.broadcast(4))
     # need to move src from gpr to xmm before broadcasting
     self.assertTrue(n.arg is X86Ops.VPBROADCASTD and n.src[0].arg is X86Ops.VMOVD)
-    # if we can fuse a load we can skip the move and access memory directly
-    load = UOp.param(0, dtypes.int32, (16,)).index(UOp.const(dtypes.int32, 0)).load()
-    n = self.isel_rewrite(load.broadcast(4))
-    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 4)
 
   def test_vbroadcastss(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
@@ -72,20 +68,12 @@ class TestIselX86(unittest.TestCase):
   def test_vshufps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32.vec(8))
     b = UOp.variable("b", 0, 0, dtypes.float32.vec(8))
-    c = UOp.variable("c", 0, 0, dtypes.float32)
-    d = UOp.variable("d", 0, 0, dtypes.float32)
 
-    valid = [UOp.vectorize(c, c, d, d),
-             UOp.vectorize(lane(a, 0), lane(a, 1), c, c),
-             UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 2), lane(b, 3)),
-             UOp.vectorize(lane(a, 1), lane(a, 2), lane(a, 3), lane(a, 0)),
-             UOp.vectorize(lane(a, 3), lane(a, 2), lane(a, 1), lane(a, 0), lane(a, 7), lane(a, 6), lane(a, 5), lane(a, 4)),
+    valid = [UOp.vectorize(lane(a, 3), lane(a, 2), lane(a, 1), lane(a, 0), lane(a, 7), lane(a, 6), lane(a, 5), lane(a, 4)),
              UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 1), lane(b, 1), lane(a, 4), lane(a, 4), lane(b, 5), lane(b, 5))]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPS)
 
-    invalid = [UOp.vectorize(lane(a, 0), lane(a, 1), lane(b, 4), lane(b, 5)),
-               UOp.vectorize(lane(a, 0), lane(a, 5), lane(b, 2), lane(b, 3)),
-               UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5)),
+    invalid = [UOp.vectorize(lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 0), lane(a, 4), lane(a, 4), lane(a, 4), lane(a, 5)),
                UOp.vectorize(lane(a, 0), lane(a, 0), lane(b, 0), lane(b, 0), lane(a, 4), lane(a, 4), lane(b, 4), lane(a, 4))]
     for shuf in invalid: self.assertIsNot(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPS)
 
@@ -113,10 +101,6 @@ class TestIselX86(unittest.TestCase):
     b = UOp.variable("b", 0, 0, dtypes.float32.vec(4))
     c = UOp.variable("c", 0, 0, dtypes.float32.vec(4))
     d = UOp.variable("e", 0, 0, dtypes.float32)
-    # moving 0th element to position 0 does nothing so only 1 vinsertps is generated
-    n = self.isel_rewrite(UOp.vectorize(lane(a, 0), d))
-    self.assertIs(n.arg, X86Ops.VINSERTPS)
-    self.assertIsNot(n.src[0].arg, X86Ops.VINSERTPS)
 
     valid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.vectorize(lane(a, 3), lane(b, 2), lane(c, 1), d)]

@@ -292,8 +292,7 @@ def vshufpd(x:UOp) -> UOp|None:
 def vinsertps(x:UOp) -> UOp:
   def _insert(ret:UOp, i:int) -> UOp:
     s, v = base(x, i), lane(x, i)
-    # moving the 0th element into the 0th position does nothing
-    return s if i == v == 0 else x.ins(X86Ops.VINSERTPS, src=(ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
+    return x.ins(X86Ops.VINSERTPS, src=(ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
   return functools.reduce(_insert, range(len(x.src)), def_reg(x.dtype))
 
 # vpinsq xmm2, xmm0, rax, imm
@@ -306,9 +305,7 @@ def vpins(x:UOp) -> UOp:
 # inserts scalar int in xmm0 into all lanes of xmm1
 def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   n = x.ins({1: X86Ops.VPBROADCASTB, 2: X86Ops.VPBROADCASTW, 4: X86Ops.VPBROADCASTD, 8: X86Ops.VPBROADCASTQ}[y.dtype.itemsize], src=(y,))
-  if y.op is Ops.LOAD and len(y.src) == 1 and is_foldable(ctx, n, y): return n
-  # if there isn't a load we can fold we need to move y from gpr to xmm
-  # this is hacky but required because int.vec(1) isn't supported
+  # need to move y from gpr to xmm, this is hacky but required because int.vec(1) isn't supported
   y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
   return n.replace(src=(y.bitcast({2:dtypes.float16, 4:dtypes.float32, 8:dtypes.float64}[y.dtype.itemsize]),))
 
@@ -391,10 +388,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: x.replace(dtype=x.dtype.scalar().vec(len(x.src))) if 1 < len(x.src) != x.dtype.count else None),
   # cast of void is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
-  # extracting the 0th float element is a noop as it just moves the 0th element from one xmm register to another
-  # this is done here to not interfere with shuffles
-  (UPat(dtype=dtypes.floats).index(UPat(Ops.CONST, arg=0), name="x"),
-   lambda x: x.replace(op=Ops.NOOP, src=x.src[:1]) if x.src[0].dtype.count > 1 else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
@@ -465,10 +458,10 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.VROUNDSD, src=(y, y, imm(dtypes.uint8, 3))) if x.dtype.count == 1 else x.ins(X86Ops.VROUNDPD, src=(y, imm(dtypes.uint8, 3)))),
   # shufles
   (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
-  # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
-  (UPat(Ops.STACK, dtypes.float16, name="x"), lambda ctx,x:
-   vpins(x.replace(src=tuple(s if s.op is Ops.LOAD and is_foldable(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
-  (UPat(Ops.STACK, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
+  # for float16 we route the srcs through gprs, this is suboptimal for values in xmms, in that case we want vpunpcklwd
+  (UPat(Ops.STACK, dtypes.float16, name="x"), lambda x:
+   vpins(x.replace(src=tuple(s.bitcast(dtypes.int16) for s in x.src)))),
+  (UPat(Ops.STACK, dtypes.float32.vec(8), name="x"), vshufps),
   (UPat(Ops.STACK, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
