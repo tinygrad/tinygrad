@@ -33,17 +33,6 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
-  def test_vpbroadcast(self):
-    a = UOp.variable("a", 0, 0, dtypes.int32)
-    n = self.isel_rewrite(a.broadcast(4))
-    # need to move src from gpr to xmm before broadcasting
-    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and n.src[0].arg is X86Ops.VMOVD)
-
-  def test_vbroadcastss(self):
-    a = UOp.variable("a", 0, 0, dtypes.float32)
-    valid = [UOp.vectorize(a, a, a, a), UOp.vectorize(a, a, a, a, a, a, a, a)]
-    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VBROADCASTSS)
-
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32.vec(4))
     b = UOp.variable("b", 0, 0, dtypes.float32.vec(4))
