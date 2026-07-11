@@ -56,7 +56,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
   Tensor.realize(ref, a_ref.grad, b_ref.grad)
 
   # no validation on the NULL device
-  if (a_rand.device[0] if isinstance(a_rand.device, tuple) else a_rand.device).startswith("NULL"): return None
+  if Device.DEFAULT.startswith("NULL"): return None
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   # allow more rtol for multi because of ALLREDUCE_CAST
   grad_atol, grad_rtol = (16895, 0.125) if dtype == FP8_DTYPE else (atol, 2e-2 if multi else rtol)
