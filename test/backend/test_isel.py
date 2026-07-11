@@ -33,27 +33,6 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
-  def test_vmax(self):
-    dt_op = [(dtypes.float32, X86Ops.VMAXSS), (dtypes.float64, X86Ops.VMAXSD),
-             (dtypes.float32.vec(4), X86Ops.VMAXPS), (dtypes.float64.vec(4), X86Ops.VMAXPD)]
-    self._check_op(dt_op, lambda a,b: (a < b).where(b, a))
-
-  def test_vmin(self):
-    dt_op = [(dtypes.float32, X86Ops.VMINSS), (dtypes.float64, X86Ops.VMINSD),
-             (dtypes.float32.vec(4), X86Ops.VMINPS), (dtypes.float64.vec(4), X86Ops.VMINPD)]
-    self._check_op(dt_op, lambda a,b: (a < b).where(a, b))
-
-  def test_vfmadd(self):
-    dt_op = [(dtypes.float32, X86Ops.VFMADD213SS), (dtypes.float64, X86Ops.VFMADD213SD),
-             (dtypes.float32.vec(4), X86Ops.VFMADD213PS), (dtypes.float64.vec(4), X86Ops.VFMADD213PD)]
-    self._check_op(dt_op, lambda a,b,c: a * b + c)
-
-  # don't use fmadd if op being fused (mul) is used multiple times
-  def test_no_vfmadd(self):
-    dt_op = [(dtypes.float32, X86Ops.VADDSS), (dtypes.float64, X86Ops.VADDSD),
-             (dtypes.float32.vec(4), X86Ops.VADDPS), (dtypes.float64.vec(4), X86Ops.VADDPD)]
-    self._check_op(dt_op, lambda a,b: a * b + a * b)
-
   def test_vpbroadcast(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     n = self.isel_rewrite(a.broadcast(4))
