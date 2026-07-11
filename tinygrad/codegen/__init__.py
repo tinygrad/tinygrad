@@ -385,7 +385,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers lower loads/stores to Ops.INS during isel, so compute estimates from the pre-isel linearized list
   if isinstance(ctx, ISARenderer) and sink.arg.estimates is None:
-    sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lst, ignore_indexing=True)))
+    sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(tuple(lst), ignore_indexing=True)))
     prg = prg.replace(src=(sink,))
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
