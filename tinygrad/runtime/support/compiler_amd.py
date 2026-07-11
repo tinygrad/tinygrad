@@ -70,8 +70,9 @@ def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True, backen
     check(comgr.amd_comgr_set_data_name(data_src, b"<null>"))
     check(comgr.amd_comgr_data_set_add(data_set_src, data_src))
     # -include hiprtc_runtime.h was removed
+    frontend_opt = getenv("AMD_FRONTEND_OPT", 1)
     options = [
-      "-O3", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
+      f"-O{frontend_opt}", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
       "-D__HIPCC_RTC__", "-std=c++14", "-nogpuinc", "-Wno-gnu-line-marker", "-Wno-missing-prototypes", f"--offload-arch={arch}",
       "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu"]
     check(set_options(action_info, ' '.join(options).encode()))
@@ -95,13 +96,16 @@ def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True, backen
 class HIPCompiler(Compiler):
   def __init__(self, arch:str):
     assert comgr.dll.nm in c.DLL._loaded_, f"comgr not available: {comgr.dll.emsg}"
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
+    self.arch, self.frontend_opt, self.generic_opt = arch, getenv("AMD_FRONTEND_OPT", 1), getenv("AMD_GENERIC_COMPILE_OPT", 1)
+    super().__init__(f"compile_hip_{self.arch}_F{self.frontend_opt}G{self.generic_opt}")
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text', use_device_libs="__ocml_" in src)
     except RuntimeError as e: raise CompileError(e) from e
   def compile_cached_batch(self, srcs:list[tuple[str, str]]) -> list[tuple[str, str, bytes]]:
     batch_size = getenv("AMD_COMPILE_BATCH_SIZE", 256)
+    batch_opt = getenv("AMD_COMPILE_OPT", 3)
+    generic_opt = getenv("AMD_GENERIC_COMPILE_OPT", 1)
+    frontend_opt = getenv("AMD_FRONTEND_OPT", 1)
     if batch_size <= 1 or any(src.split('\n', 1)[0].strip() == '.text' for _,src in srcs): return super().compile_cached_batch(srcs)
 
     renamed = []
@@ -113,7 +117,8 @@ class HIPCompiler(Compiler):
     missing:dict[tuple[int, bool], list[int]] = {}
     cache_writes:list[tuple[str, tuple[str, str]]] = []
     module_writes:list[tuple[str, bytes]] = []
-    cache_srcs = [f"batchO1\n{src}" for _,src in renamed]
+    opts = [batch_opt if name.startswith("coop_") else generic_opt for name,_ in renamed]
+    cache_srcs = [f"batchF{frontend_opt}O{opts[i]}\n{src}" for i,(_,src) in enumerate(renamed)]
     cached_sources = diskcache_get_batch(self.cachekey, cache_srcs) if self.cachekey is not None else {}
     refs = {v[1] for v in cached_sources.values() if isinstance(v, tuple) and v[0] == "batch"}
     module_keys = {key:f"__batch__{key}" for key in refs}
@@ -122,7 +127,7 @@ class HIPCompiler(Compiler):
     if self.cachekey is not None and (old_refs:=refs-cached_modules.keys()):
       cached_modules.update(diskcache_get_batch(f"{self.cachekey}_batch", list(old_refs)))
     for i,(name,src) in enumerate(renamed):
-      opt = 1
+      opt = opts[i]
       cached = cached_sources.get(cache_srcs[i])
       if isinstance(cached, tuple) and cached[0] == "batch": cached = cached_modules.get(cached[1])
       if cached is not None: ret[i] = (name, src, cached)
@@ -137,7 +142,7 @@ class HIPCompiler(Compiler):
           _, kernel = renamed[i][1].split('extern "C" __attribute__((global))', 1)
           kernels.append('extern "C" __attribute__((global))'+kernel)
         combined = '\n'.join((*preamble, *kernels))
-        module_key = hashlib.sha256(f"O{opt}\n{combined}".encode()).hexdigest()
+        module_key = hashlib.sha256(f"F{frontend_opt}O{opt}\n{combined}".encode()).hexdigest()
         lib = diskcache_get(self.cachekey, f"__batch__{module_key}") if self.cachekey is not None else None
         if lib is None and self.cachekey is not None: lib = diskcache_get(f"{self.cachekey}_batch", module_key)
         if lib is None:
@@ -146,7 +151,7 @@ class HIPCompiler(Compiler):
           if self.cachekey is not None: module_writes.append((f"__batch__{module_key}", lib))
         for i in batch:
           name,src = renamed[i]
-          if self.cachekey is not None: cache_writes.append((f"batchO{opt}\n{src}", ("batch", module_key)))
+          if self.cachekey is not None: cache_writes.append((f"batchF{frontend_opt}O{opt}\n{src}", ("batch", module_key)))
           ret[i] = (name, src, lib)
     if self.cachekey is not None:
       diskcache_put_batch(self.cachekey, module_writes+cache_writes)

@@ -1673,14 +1673,13 @@ class RewriteContext:
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
-    on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
+    self.replace[root] = SENTINEL  # SENTINEL marks UOps scheduled but not rewritten yet
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
     replace, ctx, stack_limit, enter_calls, shared_cache = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls, self.shared_cache
     bpm, cached_bpm_rewrite = self.bpm, self.cached_bpm_rewrite
     pm_rewrite = self.pm.rewrite if self.pm is not None else None
     while stack:
       n, stage, new_n = stack.pop()
-      if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
         if shared_cache is not None and (cached:=shared_cache.get(n, SENTINEL)) is not SENTINEL:
           replace[n] = cached
@@ -1709,9 +1708,9 @@ class RewriteContext:
         # If you want to graph_rewrite a call, you can
         if not enter_calls and (new_n.op is Ops.CALL or new_n.op is Ops.FUNCTION): replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
-          if x in on_stack: continue
+          if x in replace: continue
+          replace[x] = SENTINEL
           stack.append((x, 0, x))
-          on_stack.add(x)
         if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       elif stage == 1:
         new_src = None
@@ -1737,7 +1736,9 @@ class RewriteContext:
             new_src_n = UOp(new_n.op, new_n.dtype, tuple(new_src), new_n.arg, new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
-          stack.append((new_src_n, 0, new_src_n))
+          if new_src_n not in replace:
+            replace[new_src_n] = SENTINEL
+            stack.append((new_src_n, 0, new_src_n))
           if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       else:
         # in stage 2, we link the result of new_n to the result of n
@@ -1749,7 +1750,8 @@ class RewriteContext:
           replace[n] = replaced_new_n
           if shared_cache is not None: shared_cache[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
-    return replace[root]
+    if (ret:=replace[root]) is SENTINEL: raise RuntimeError("infinite loop in graph_rewrite")
+    return ret
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:

@@ -168,6 +168,10 @@ def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
     ret = index_lane(ctx, x.src[idxs[0].arg], idxs[1:]) if len(idxs) > 1 else x.src[idxs[0].arg]
   elif x.op in GroupOp.Movement and len(idxs) == len(x.shape):
     ret = index_lane(ctx, x.src[0], apply_movement_op(x.op, x.src[0].shape, x.marg, idxs))
+  elif x.op is Ops.INDEX:
+    ret = index_lane(ctx, x.src[0], x.src[1:]+idxs)
+  elif x.op in GroupOp.Elementwise:
+    ret = UOp(x.op, x.dtype, tuple(index_lane(ctx, s, idxs) if s._shape else s for s in x.src), x.arg, x.tag)
   else: ret = UOp(Ops.INDEX, x.dtype, (x,)+idxs)
   ctx.lanes[key] = ret
   return ret
@@ -175,6 +179,10 @@ def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
 def index_elementwise(x:UOp, idx:UOp):
   indexes = idx.src[1:]
   return UOp(x.op, x.dtype, tuple(UOp(Ops.INDEX, s.dtype, (s,)+indexes) if s._shape else s for s in x.src), x.arg, x.tag)
+
+def index_elementwise_lane(ctx:DevectorizeContext, x:UOp, idx:UOp):
+  indexes = idx.src[1:]
+  return UOp(x.op, x.dtype, tuple(index_lane(ctx, s, indexes) if s._shape else s for s in x.src), x.arg, x.tag)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -196,7 +204,7 @@ ew_devectorizer = PatternMatcher([
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
-  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise_lane),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
@@ -365,14 +373,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
 
-  # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic, name="final symbolic")
-
   # **** decomps ****
 
-  # floordiv+mod / dtype decomp (early)
+  # final symbolic + floordiv/mod + dtype decomp
   supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
+  pm_decomp = symbolic+get_simplifying_rewrite_patterns(supported_ops)
 
   # late decomps + move gates from unrenderable INVALID where
   candidate_dtypes = {*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong}
@@ -486,6 +491,8 @@ def do_to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
+  from tinygrad.codegen.opt.gemm import cooperative_gemm_program
+  if ast.op is Ops.SINK and (prg:=cooperative_gemm_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"

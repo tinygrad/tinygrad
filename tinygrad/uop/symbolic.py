@@ -46,12 +46,19 @@ def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   if p is not x or (t:=xa + a - pa) % D: return None
   return base - k*div if (k:=t//D - s) else base
 
+def _has_scaled_mod_term(x:UOp) -> bool:
+  if (cached:=x.__dict__.get("_has_scaled_mod_term")) is not None: return cached
+  if x.op is Ops.ADD: ret = any(_has_scaled_mod_term(s) for s in x.src)
+  else: ret = x.op is Ops.FLOORMOD or (x.op is Ops.MUL and any(s.op is Ops.FLOORMOD for s in x.src))
+  x.__dict__["_has_scaled_mod_term"] = ret
+  return ret
+
 def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   # a scaled mod (base%div)*mul recombines with a partner q*(div*mul) carrying the quotient of a b == base (mod div):
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
+  if not _has_scaled_mod_term(x): return None
   terms = list(x.split_uop(Ops.ADD))
-  if not any(u.op is Ops.FLOORMOD or (u.op is Ops.MUL and any(s.op is Ops.FLOORMOD for s in u.src)) for u in terms): return None
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
     if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
