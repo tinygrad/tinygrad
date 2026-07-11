@@ -72,7 +72,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), jit=True)
-  if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
+  amd_graph = len(linear.src) > 128 and bool(input_uops) and all(isinstance(u.device, str) and u.device.split(":")[0] == "AMD" for u in input_uops)
+  if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=getenv("JIT_BATCH_SIZE", 0 if amd_graph else JIT_BATCH_SIZE.value))
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
 
