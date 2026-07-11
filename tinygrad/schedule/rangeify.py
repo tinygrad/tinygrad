@@ -378,11 +378,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
-    if x.src[0].op is Ops.SLICE:
-      # no INDEX on SLICE, this could be cleaner
-      do_store = buf.store(x.src[0]).end(*rngs)
-    else:
-      do_store = buf.index(idx).store(x.src[0]).end(*rngs)
+    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
