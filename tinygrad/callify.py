@@ -68,6 +68,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK/BITCAST when movement ops collapse to a contiguous range."""
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.MULTI, Ops.BITCAST}: return None
+  if src.op is Ops.BITCAST and src.src[0].op in {Ops.BUFFER, Ops.SHRINK}: return None if c.op is Ops.COPY else src
 
   # no symbolic shape
   if not all_int(c.shape): return None
@@ -143,7 +144,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK/BITCAST when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
@@ -200,6 +201,8 @@ pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.STORE, src=(UPat.var("b"), UPat()), name="s"), lambda ctx, b,s:
+   s.substitute({buf:replace_input_buffer(ctx, buf)}) if (buf:=b.base).op is Ops.BUFFER else None),
   # replace BITCAST(SHRINK) with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
   (buffer_view.named("b"), replace_input_view),
   (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.BUFFER, name="buf"), buffer_view),), name="b"), replace_input_view),
