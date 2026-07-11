@@ -140,15 +140,15 @@ extra_matcher = PatternMatcher([
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
-   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.max_numel() == 1 else None),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float,
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
    tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, src=(a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
-   lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.max_numel() > 1 else None),
+   lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.dtype.count > 1 else None),
   # float where expects a mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
    lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
@@ -164,15 +164,15 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
   return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = scratch_buffer(addr.src[0].dtype.scalar(), x.max_numel(), next(ctx))
+  local = scratch_buffer(addr.src[0].dtype.scalar(), x.dtype.count, next(ctx))
   local_idx = local.index(UOp.const(dtypes.int32, 0), dtype=dtypes.uint64)
   # the selected address is a 64bit value, the AFTER orders the load after the scratch store and carries the element dtype for the encoder
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local_idx)
-  ptr = UOp(Ops.AFTER, addr.dtype, (sel, (local_idx if x.max_numel() == 1 else local).store(alt)))
+  ptr = UOp(Ops.AFTER, addr.dtype, (sel, (local_idx if x.dtype.count == 1 else local).store(alt)))
   return ptr.load(dtype=x.dtype)
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
-  local = scratch_buffer(addr.src[0].dtype.scalar(), val.max_numel(), -1)
+  local = scratch_buffer(addr.src[0].dtype.scalar(), val.dtype.count, -1)
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.const(dtypes.int32, 0), dtype=dtypes.uint64))
   return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
 
@@ -185,11 +185,11 @@ pre_isel_matcher = PatternMatcher([
   (UPat(GroupOp.ALU.union({Ops.CAST, Ops.BITCAST}), name="x"), lambda x: x.replace(arg=x.dtype.scalar().vec(c)) \
     if (c:=max([s.dtype.count for s in x.src], default=1)) > x.dtype.count else None),
   # noop casts: zero extending scalar 32bit int, same-width signed/unsigned, narrowing scalar int
-  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP, arg=None) if y.max_numel() == 1 else None),
+  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP, arg=None) if y.dtype.count == 1 else None),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize == y.dtype.itemsize and y.max_numel() == 1 else None),
+   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize == y.dtype.itemsize and y.dtype.count == 1 else None),
   (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize < y.dtype.itemsize and y.max_numel() == 1 else None),
+   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
   # bitcasts between scalar floats and ints are real, rest are noops
   (UPat.var("y").bitcast().named("x"), lambda y,x: None if y.dtype in dtypes.floats and x.dtype in dtypes.ints or \
    y.dtype in dtypes.ints and x.dtype in dtypes.floats else x.replace(op=Ops.NOOP, arg=None)),
@@ -199,7 +199,7 @@ pre_isel_matcher = PatternMatcher([
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison and a.max_numel() == 1 else None),
+   lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison and a.dtype.count == 1 else None),
 ])
 
 # ***** X86 registers *****
@@ -319,7 +319,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
   elif x.op is Ops.BUFFER or x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.vreg(WGPR)]
-  elif x.dtype in dtypes.floats or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.floats or x.dtype.count > 1: defs = [ctx.vreg(XMM)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
@@ -356,7 +356,7 @@ isel_matcher = PatternMatcher([
    UOp.const(dt:=to_int(x.dtype), struct.unpack(dt.fmt, struct.pack(x.dtype.fmt, x.arg))[0]).bitcast(x.dtype) if not x.tag else None),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")), lambda m,a,b:
-   a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 else None),
+   a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.dtype.count > 1 else None),
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b:
