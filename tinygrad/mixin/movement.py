@@ -241,6 +241,24 @@ class MovementMixin:
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
 
+  def stack(self, *args: Self, dim: int = 0) -> Self:
+    """
+    Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
+    print(t0.stack(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.stack(t1, t2, dim=1).numpy())
+    ```
+    """
+    tensors = argfix(self, *args)
+    dim = tensors[0]._resolve_dim(dim, extra=True)
+    assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
+    ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
+    return ret if dim == 0 else ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
+
   # **** high level ****
 
   def shrink_to(self, shape, *args) -> Self:

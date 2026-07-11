@@ -376,6 +376,13 @@ class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
   def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
+  def test_stack_mixed_dtype(self):
+    w = _t(2, 3).float()
+    _check(self, _t(2, 3), lambda x: x.stack(w if isinstance(x, Tensor) else w.uop))
+    self.assertIs(_t(2, 3).uop.stack(w.uop).dtype, dtypes.float32)
+  def test_stack_index_dtype(self):
+    # index is outside the promotion lattice, equal dtypes bypass promotion
+    self.assertEqual(UOp.const(dtypes.index, 1).stack(UOp.const(dtypes.index, 2)).shape, (2,))
 
 class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_basic(self):

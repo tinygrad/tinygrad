@@ -127,6 +127,15 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
+  def test_stack(self):
+    X = Tensor.rand(4, 4).shard_(devices_2, 0)
+    Y = Tensor.rand(4, 4).shard_(devices_2, 0)
+    Z = Tensor.rand(4, 4).shard_(devices_2, 1)  # mismatched shard axis gets resharded
+    for dim in (0, 1):
+      np.testing.assert_allclose(Tensor.stack(X, Y, Z, dim=dim).numpy(), np.stack([X.numpy(), Y.numpy(), Z.numpy()], axis=dim))
+    grad = Tensor.stack(X, Y).sum().gradient(X)[0]
+    np.testing.assert_allclose(grad.numpy(), 1)
+
   def test_allreduce_naive(self):
     with Context(RING=0):
       a,b = _test_allreduce(Tensor.rand(256, 256))
