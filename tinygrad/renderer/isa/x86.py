@@ -133,8 +133,9 @@ class X86GroupOp:
   All = set(X86Ops)
 
 def is_address(x:UOp) -> bool:
-  # addresses are GLOBAL/LOCAL/REG addrspace values, or uint64 INS values (LEA/MOV/CMOV/DEFINE-RSP from isel)
-  return x.addrspace not in (None, AddrSpace.ALU) or (x.op is Ops.INS and x.dtype is dtypes.uint64)
+  if x.addrspace not in (None, AddrSpace.ALU): return True
+  if x.op in {Ops.AFTER, Ops.WHERE}: return any(is_address(s) for s in x.src)
+  return x.op is Ops.INS and x.dtype is dtypes.uint64
 
 # ***** X86 legalization *****
 
@@ -216,7 +217,7 @@ pre_isel_matcher = PatternMatcher([
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison and (a.max_numel() == 1 or is_address(a)) else None),
+   lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison and a.max_numel() == 1 else None),
 ])
 
 # ***** X86 registers *****
@@ -375,7 +376,7 @@ def pack_numel(x:UOp) -> int:
   return n if x.dtype.itemsize * n in SIMD_LOAD else 1
 
 def lower_copy(x:UOp) -> UOp:
-  if is_address(x.src[0]) or pack_numel(x) == 1 and x.dtype in dtypes.ints+(dtypes.bool,): return x.ins(X86Ops.MOV, shape=())
+  if pack_numel(x) == 1 and x.dtype in dtypes.ints+(dtypes.bool,): return x.ins(X86Ops.MOV, shape=())
   if (size:=x.dtype.itemsize * pack_numel(x)) not in SIMD_COPY: raise RuntimeError(f"unsupported x86 copy size {size}")
   return x.ins(SIMD_COPY[size])
 
@@ -476,7 +477,7 @@ isel_matcher = PatternMatcher([
    fop(a, X86Ops.VMINSS, X86Ops.VMINSD, X86Ops.VMINPS, X86Ops.VMINPD, src=(a, b))),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")), lambda m,a,b:
-   a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 and not is_address(a) else None),
+   a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 else None),
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b:
@@ -695,8 +696,8 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     rm = cast(Register, greg(rm_uop)).index
     idx = cast(Register, greg(idx_uop)).index if idx_uop is not None and greg(idx_uop) is not None else 4
     # for a memory operand the rm size is the element size from the address, otherwise it's the size of the value in the register
-    rm_sz = sz_uop.arg if sz_uop is not None else 8 if is_address(rm_uop) else nbytes(rm_uop)
-    reg_sz = (8 if is_address(reg_uop) else nbytes(reg_uop)) if reg_uop is not None else 0
+    rm_sz = sz_uop.arg if sz_uop is not None else nbytes(rm_uop)
+    reg_sz = nbytes(reg_uop) if reg_uop is not None else 0
     sz = reg_sz or rm_sz
 
     # encode instruction
@@ -937,7 +938,7 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(8 if is_address(s) else nbytes(s), o) if \
+        return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(nbytes(s), o) if \
                 (o:=str(greg(s))) in reg_strs else o for s in src if greg(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, sz:UOp) -> list[str]:
         return [f"[{greg(base)}" + (f" + {greg(idx)}*{sz.arg}" if greg(idx) else "") + (f" + {disp.arg}" if disp.arg else "") + "]"]
