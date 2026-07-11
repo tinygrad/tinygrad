@@ -733,22 +733,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
     return padded[0].usum(*padded[1:])
 
-  def stack(self, *args:Self, dim:int=0) -> Self:
-    """
-    Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
-    print(t0.stack(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.stack(t1, t2, dim=1).numpy())
-    ```
-    """
-    # checks for shapes and number of dimensions delegated to cat
-    unsqueezed = [t.unsqueeze(dim) for t in argfix(self, *args)]
-    return unsqueezed[0].cat(*unsqueezed[1:], dim=dim)
-
   def _cumalu(self, axis:int, op:Ops) -> Self:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
