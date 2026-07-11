@@ -518,8 +518,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
-  def _stack(self, *srcs): return self.stack(*srcs)
-  def vectorize(self, *srcs): return self._stack(*srcs)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
@@ -577,7 +575,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
-    return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
+    return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
@@ -599,7 +597,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
       stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
-      ret = UOp.vectorize(*stk)
+      ret = UOp.stack(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
     return ret._mop(Ops.EXPAND, arg=shape) if shape is not None and shape != () and ret.shape != shape else ret
@@ -624,11 +622,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
     assert dtypes.is_int(self.dtype), "Can only call get_idx on index dtype"
-    if self.op is Ops.STACK: return UOp.vectorize(*(x.get_idx() for x in self.src))
+    if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
     assert dtypes.is_int(self.dtype), "Can only call get_valid on index dtype"
-    if self.op is Ops.STACK: return UOp.vectorize(*(x.get_valid() for x in self.src))
+    if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
