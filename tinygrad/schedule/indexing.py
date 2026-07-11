@@ -87,11 +87,11 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   return valid.where(bx.src[0], UOp.const(x.dtype, 0))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
-  if x.arg[1] == 0: return None
+  if len(x.arg[1]) == 0: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
-  new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
-  return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
+  new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
+  return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], ()))
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
@@ -251,8 +251,14 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
     # REDUCE creates ranges for the axes it is reducing
-    if x.op is Ops.REDUCE and x.arg[1]:
-      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
+    if x.op is Ops.REDUCE and len(x.arg[1]):
+      out_i, in_rngs = 0, []
+      for i,s in enumerate(x.src[0].shape):
+        if i in x.arg[1]: in_rngs.append(rctx.new_range(s, axistype=AxisType.REDUCE))
+        else:
+          in_rngs.append(out_rngs[out_i])
+          out_i += 1
+      rngs = tuple(in_rngs)
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)

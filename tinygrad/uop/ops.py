@@ -403,10 +403,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
-          num_axes = self.arg[1]
-          if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
-            raise ValueError(f"invalid type for axis: {num_axes}")
-          return ps[num_axes:]
+          axis_arg = self.arg[1]
+          if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and 0 <= x < len(ps) for x in axis_arg):
+            raise ValueError(f"invalid type for axis: {axis_arg}")
+          return tuple(s for i,s in enumerate(ps) if i not in axis_arg)
 
     if self.op in GroupOp.Unary.union({Ops.CAST}):
       assert len(self.src) == 1, "unary ops must have 1 src"
@@ -614,11 +614,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: we don't allow reduce on 1s axis
     axis = tuple(sorted(axis))
     reduce_axis = tuple(x for x in axis if resolve(self.shape[x] != 1))
-    if not len(reduce_axis):
-      return self.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
-    # permute so reduced axes are at the front
-    perm = reduce_axis + tuple(i for i in range(len(self.shape)) if i not in reduce_axis)
-    ret = UOp(Ops.REDUCE, src=(self.permute(perm),), arg=(op, len(reduce_axis)))
+    ret = UOp(Ops.REDUCE, src=(self,), arg=(op, reduce_axis)) if len(reduce_axis) else self
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid(): return UOp.const(dtypes.index, Invalid)
@@ -634,7 +630,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
-    if isinstance(arg, Ops): arg = (arg, 0)
+    if isinstance(arg, Ops): arg = (arg, ())
     return UOp(Ops.REDUCE, src=(self,)+src, arg=arg, **kwargs)
 
   def contiguous(self, *args, **kwargs):
@@ -683,8 +679,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE:
       if src_axis is None: return None
-      if src_axis < self.arg[1]: return None
-      return src_axis - self.arg[1]
+      if src_axis in self.arg[1]: return None
+      return src_axis - sum(1 for a in self.arg[1] if a < src_axis)
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
       arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
@@ -1310,7 +1306,7 @@ class UPat(OpMixin):
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, src=(self,)+src, **kwargs)
   def reduce(self, *src:UPat, **kwargs):
     arg = kwargs.pop('arg', None)
-    if isinstance(arg, Ops): arg = (arg, 0)
+    if isinstance(arg, Ops): arg = (arg, ())
     return UPat(Ops.REDUCE, self.match_dtype, src=(self,)+src, arg=arg, **kwargs)
   def broadcast(self, **kwargs): return UPat(Ops.STACK, self.match_dtype, src=self, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)

@@ -599,8 +599,7 @@ class TestSchedule(unittest.TestCase):
     p = P[0]
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
-    # TODO: this should be 3 if fix store hazard worked correctly
-    check_schedule(p, 4)
+    check_schedule(p, 3)
 
   def test_conv2d(self, allowed=4, dtype=dtypes.float):
     old_default_float, dtypes.default_float = dtypes.default_float, dtype
