@@ -56,9 +56,9 @@ def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype))
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
-  data, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype.itemsize
-  r = UOp.range(len(blob) // isz, next(UOp.unique_num))
-  return buf.index(r).store(UOp(Ops.BITCAST, buf.dtype, (data,)).index(r).load()).end(r)
+  data = UOp(Ops.BITCAST, buf.dtype, (UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob),))
+  r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
+  return buf.index(r).store(data.index(r).load()).end(r)
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []
@@ -577,8 +577,8 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   @suppress_finalizing
   def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
-    self.dev.synchronize()
     if options is not None and options.external_ptr is not None: return
+    self.dev.synchronize()
     if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _unmap(self, mb):
@@ -592,8 +592,8 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _copy(self, dst:Buffer, src:Buffer):
     from tinygrad.engine.realize import run_linear
-    su = UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.copy_to_device(dst.device).call(UOp.from_buffer(dst), su),)), update_stats=False)
+    du, su = UOp.from_buffer(dst), UOp.from_buffer(src)
+    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(dst.device).call(du, su),)), update_stats=True)
 
   def _copyin(self, dest:HCQ2Buffer, src:memoryview):
     s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
