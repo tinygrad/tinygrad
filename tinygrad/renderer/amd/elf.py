@@ -11,7 +11,7 @@ from tinygrad.runtime.autogen.amd.common import OpType
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as RDNA4
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
-_arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
+_arch_map = {"gfx9": "cdna", "gfx101": "rdna1", "gfx103": "rdna2", "gfx11": "rdna3", "gfx12": "rdna4"}
 def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   insts = [u.arg for u in lin.src]
 
