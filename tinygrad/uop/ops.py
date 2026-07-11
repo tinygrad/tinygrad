@@ -125,8 +125,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return src[1].dtype
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
-      if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
-      return src[0].dtype
+      if all_same(dts:=[x.dtype for x in src]): return dts[0]
+      return least_upper_dtype(*dts)
     case Ops.BIND:
       assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
       return src[0].dtype
@@ -518,9 +518,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
-  def _stack(self, *srcs):
-    # TODO: this should become the real stack
-    return UOp(Ops.STACK, src=(self,)+srcs)
+  def _stack(self, *srcs): return self.stack(*srcs)
   def vectorize(self, *srcs): return self._stack(*srcs)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in srcs if x is not None]
@@ -673,6 +671,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    # STACK adds a leading axis
+    if self.op is Ops.STACK: return axes[-1]+1 if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
     if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
@@ -749,6 +749,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
+      case Ops.STACK:
+        # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
+        srcs = (self,)+tuple(arg)
+        return UOp(Ops.STACK, src=tuple(u.cast(dtype_from_uop(Ops.STACK, srcs, None)) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)

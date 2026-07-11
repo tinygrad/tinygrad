@@ -41,13 +41,11 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 
 # ***** multi functions *****
 
-def alu_multi(root:UOp):
-  msrcs = root.src
+def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
+  # normalize srcs to local shards on axis
   devices = [x.device for x in msrcs if x.device is not None]
   assert all_same(devices), f"all buffers must have the same device {devices}"
   dcount = len(devices[0])
-  axis = root.axis
-  assert axis is not None
 
   srcs:list[UOp] = []
   for mlb in msrcs:
@@ -63,6 +61,12 @@ def alu_multi(root:UOp):
       else:
         # axis mismatch, copy to all devices, and shard it correctly
         srcs.append(copy_multi(mlb, mlb.device)._shard(axis, dcount))
+  return srcs
+
+def alu_multi(root:UOp):
+  axis = root.axis
+  assert axis is not None
+  srcs = shard_srcs(root.src, axis)
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
@@ -112,6 +116,12 @@ def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
   return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
 
+def stack_multi(root:UOp):
+  # STACK adds a leading axis: srcs are sharded one axis below the output
+  axis = root.axis
+  assert axis is not None
+  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).multi(axis)
+
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   assert multi.axis is not None, "all multi ops have axis"
   if isinstance(device, str):
@@ -151,6 +161,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
+  (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.MULTI])), stack_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.MULTI), UPat(Ops.STORE, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))))), store_after_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"),), name="red"),
