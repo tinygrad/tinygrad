@@ -115,6 +115,7 @@ def _gemm_block_m(g:GemmMatch) -> int:
   return 32 if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) else \
     64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
+  if g.n == 288 and g.old is None and not g.a_kxm and g.b_kxn: return 96
   if g.n == 576 and g.old is None and not g.a_kxm and g.b_kxn: return 192
   if g.old is not None and g.a_kxm and g.b_kxn and g.m == 256 and g.k >= 65536: return 64
   return 64 if g.n == 64 and g.old is None and not g.a_kxm and not g.b_kxn else BLOCK_N
@@ -171,12 +172,13 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
   if g.b_kxn and not g.a_kxm:
     bsegs = bn_size//16
     for q in range(bk//32):
-      lines += [f'    int bkp{q}=tid/{bsegs}+{q*16}, bn0{q}=(tid%{bsegs})*16;',
+      prefix, suffix = (f'    if (tid<{bsegs*16}) {{ ', ' }') if threads != bsegs*16 else ('    ', '')
+      lines += [f'{prefix}int bkp{q}=tid/{bsegs}+{q*16}, bn0{q}=(tid%{bsegs})*16;',
                 f'    half16 bv{q}0=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2)*{g.n})+bn*{bn_size}+bn0{q}));',
                 f'    half16 bv{q}1=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2+1)*{g.n})+bn*{bn_size}+bn0{q}));',
                 f'    ushort16 pb{q}0=__builtin_bit_cast(ushort16,bv{q}0), pb{q}1=__builtin_bit_cast(ushort16,bv{q}1);',
                 f'    *((uint16*)(((unsigned*)Bs)+bkp{q}*{bn_size}+bn0{q}))=__builtin_convertvector(pb{q}0,uint16)|'
-                f'(__builtin_convertvector(pb{q}1,uint16)<<16);']
+                f'(__builtin_convertvector(pb{q}1,uint16)<<16);{suffix}']
   elif g.b_kxn:
     bsegs = bn_size//16
     for q in range(bn_size*bk//(threads*16)):
@@ -184,12 +186,10 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
                 f'    *((half16*)(Bs+bk{q}*{bn_size}+bn{q}))=*((half16*)(p{bslot}+'
                 f'((long)(kt*{bk}+bk{q})*{g.n})+bn*{bn_size}+bn{q}));']
   else:
-    if bn_size == 64:
-      lines += [f'    if (tid<64) {{ long bo=((long)(bn*64+tid)*{g.k})+kt*{bk};']
-    else:
-      lines += [f'    long bo=((long)(bn*128+tid)*{g.k})+kt*{bk};']
+    prefix, suffix = (f'    if (tid<{bn_size}) {{ ', ' }') if threads != bn_size else ('    ', '')
+    lines += [f'{prefix}long bo=((long)(bn*{bn_size}+tid)*{g.k})+kt*{bk};']
     for q in range(bk//16): lines.append(f'      *((half16*)(Bs+tid*{bk}+{q*16}))=*((half16*)(p{bslot}+bo+{q*16}));')
-    if bn_size == 64: lines[-1] += ' }'
+    lines[-1] += suffix
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");']
   lines += ['    #pragma unroll', f'    for (int ki=0; ki<{bk//WMMA_K}; ki++) {{',
