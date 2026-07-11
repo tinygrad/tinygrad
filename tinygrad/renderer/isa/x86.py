@@ -133,8 +133,14 @@ class X86GroupOp:
   All = set(X86Ops)
 
 def is_address(x:UOp) -> bool:
-  # addresses are GLOBAL/LOCAL/REG addrspace values, or uint64 INS values (LEA/MOV/CMOV/DEFINE-RSP from isel)
-  return x.addrspace not in (None, AddrSpace.ALU) or (x.op is Ops.INS and x.dtype is dtypes.uint64)
+  if x.op is Ops.PARAM: return x.arg.addrspace is AddrSpace.GLOBAL
+  if x.op is Ops.BUFFER: return True
+  if x.op is Ops.INS:
+    if x.arg == X86Ops.LEA or (x.arg == X86Ops.DEFINE and x.tag == (RSP,)): return True
+    return x.dtype is dtypes.uint64 and x.arg in {X86Ops.MOV, X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE} and \
+      (x.shape == () or any(is_address(s) for s in x.src[:2]))
+  if x.op in {Ops.INDEX, Ops.SHRINK, Ops.AFTER, Ops.NOOP} and x.src: return is_address(x.src[0])
+  return x.op is Ops.WHERE and is_address(x.src[1])
 
 # ***** X86 legalization *****
 
