@@ -125,8 +125,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return src[1].dtype
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
-      if not all_same([x.dtype for x in src]): raise RuntimeError("stack must have matching dtype")
-      return src[0].dtype
+      if all_same(dts:=[x.dtype for x in src]): return dts[0]
+      return least_upper_dtype(*dts)
     case Ops.BIND:
       assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
       return src[0].dtype
@@ -523,10 +523,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
-  def _stack(self, *srcs):
-    # TODO: this should become the real stack
-    return UOp(Ops.STACK, src=(self,)+srcs)
-  def vectorize(self, *srcs): return self._stack(*srcs)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
@@ -584,7 +580,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
-    return UOp.vectorize(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
+    return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
@@ -606,7 +602,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
       stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
-      ret = UOp.vectorize(*stk)
+      ret = UOp.stack(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
     return ret._mop(Ops.EXPAND, arg=shape) if shape is not None and shape != () and ret.shape != shape else ret
@@ -631,11 +627,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
     assert dtypes.is_int(self.dtype), "Can only call get_idx on index dtype"
-    if self.op is Ops.STACK: return UOp.vectorize(*(x.get_idx() for x in self.src))
+    if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
     assert dtypes.is_int(self.dtype), "Can only call get_valid on index dtype"
-    if self.op is Ops.STACK: return UOp.vectorize(*(x.get_valid() for x in self.src))
+    if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
@@ -682,6 +678,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    # STACK adds a leading axis
+    if self.op is Ops.STACK: return axes[-1]+1 if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
     if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
@@ -758,6 +756,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
+      case Ops.STACK:
+        # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
+        srcs = (self,)+tuple(arg)
+        return UOp(Ops.STACK, src=tuple(u.cast(dtype_from_uop(Ops.STACK, srcs, None)) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)

@@ -58,7 +58,8 @@ spec_shared = PatternMatcher([
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
-  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"), lambda s: all_same([x.shape for x in s.src])),
+  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
+   lambda s: all_same([x.shape for x in s.src]) and all(x.dtype == s.dtype for x in s.src)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
