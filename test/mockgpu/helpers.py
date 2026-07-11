@@ -8,7 +8,7 @@ def ptx_run(source:bytes, n_args:int, args:c.POINTER[ctypes.c_void_p], blck_x:in
             grid_x:int, grid_y:int, grid_z:int, shared_mem_size:int): pass
 
 class PythonRemu:
-  """Python RDNA3/RDNA4 emulator wrapper used by mockgpu."""
+  """Python RDNA2/RDNA3/RDNA4 emulator wrapper used by mockgpu."""
   valid_mem_ranges: set[tuple[int, int]] = set()
   rsrc2: int = 0x19c  # Default: USER_SGPR_COUNT=14, enable X and Y workgroup IDs
   scratch_size: int = 0  # private_segment_fixed_size from kernel descriptor

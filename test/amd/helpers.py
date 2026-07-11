@@ -5,6 +5,7 @@ from tinygrad.runtime.autogen import llvm
 from tinygrad.runtime.support.elf import elf_loader
 
 ARCH_TO_TARGET:dict[str, list[str]] = {
+  "rdna2":["gfx1030"],
   "rdna3":["gfx1100", "gfx1151"],
   "rdna4":["gfx1200", "gfx1201"],
   "cdna":["gfx950", "gfx942"],
@@ -26,7 +27,8 @@ def decode_dpp16(dpp: int) -> tuple[str, int | tuple[int, int, int, int]]:
   return "dpp", dpp
 
 def get_mattr(arch:str) -> str:
-  return {"rdna3":"+real-true16,+wavefrontsize32", "rdna4":"+real-true16,+wavefrontsize32", "cdna":"+wavefrontsize64"}[arch]
+  return {"rdna2":"+wavefrontsize32", "rdna3":"+real-true16,+wavefrontsize32",
+          "rdna4":"+real-true16,+wavefrontsize32", "cdna":"+wavefrontsize64"}[arch]
 
 # LLVM in-process assembler/disassembler (replaces llvm-mc and llvm-objdump subprocesses)
 _SENTINEL = b'\xde\xad\xbe\xef'
