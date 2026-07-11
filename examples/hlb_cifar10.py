@@ -49,14 +49,13 @@ class UnsyncedBatchNorm:
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(1,3,4))
-      y = (x - batch_mean.detach().reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))  # d(var)/d(mean) = 0
-      batch_var = (y*y).mean(axis=(1,3,4))
+      batch_var = (x*x).mean(axis=(1,3,4)) - batch_mean*batch_mean
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
-        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        batch_var_adjust = prod(x.shape[1:])/(prod(x.shape[1:])-x.shape[2])
         self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
@@ -70,10 +69,22 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.is_param_(False)
 
+class MatmulConv2d(nn.Conv2d):
+  def __call__(self, x:Tensor) -> Tensor:
+    if not getenv("MATMUL_CONV", 1): return super().__call__(x)
+    assert self.groups == 1 and self.stride == self.dilation == self.padding == 1 and self.bias is None
+    bs, cin, _, _ = x.shape
+    cout, _, ky, kx = self.weight.shape
+    patches = x.pad((1, 1, 1, 1))._pool((ky, kx), 1, 1)
+    oy, ox = patches.shape[2:4]
+    patches = patches.permute(0, 2, 3, 1, 4, 5).reshape(bs*oy*ox, cin*ky*kx).contiguous().contiguous_backward()
+    out = (patches @ self.weight.reshape(cout, cin*ky*kx).T).contiguous().contiguous_backward()
+    return out.reshape(bs, oy, ox, cout).permute(0, 3, 1, 2)
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
-    self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
-    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv1 = MatmulConv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = MatmulConv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
 
     self.norm1 = BatchNorm(channels_out)
     self.norm2 = BatchNorm(channels_out)

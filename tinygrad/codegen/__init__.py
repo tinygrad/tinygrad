@@ -510,8 +510,9 @@ def do_to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
-  from tinygrad.codegen.opt.gemm import cooperative_gemm_program
+  from tinygrad.codegen.opt.gemm import cooperative_gemm_program, direct_conv_bwd_activation_program
   from tinygrad.codegen.opt.reduce import channel_reduce_program
+  if ast.op is Ops.SINK and (prg:=direct_conv_bwd_activation_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.SINK and (prg:=channel_reduce_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.SINK and (prg:=cooperative_gemm_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.PROGRAM: prg = ast

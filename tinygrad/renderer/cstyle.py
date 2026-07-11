@@ -466,6 +466,8 @@ class NVCCRenderer(CUDARenderer):
 
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
+def _hip_math(op):
+  return lambda x,dtype: _ocml(op)(x, dtype) if dtype.scalar() == dtypes.double else f"__builtin_elementwise_{op}({x})"
 
 def hip_threefry(x:UOp, key:UOp) -> UOp:
   x2 = UOp.vectorize(x.cast(dtypes.uint), (x >> 32).cast(dtypes.uint))
@@ -511,8 +513,8 @@ class HIPRenderer(CStyleLanguage):
                        "i": lambda x: f"(__builtin_amdgcn_workgroup_id_{'xyz'[int(x)]}()*"
                          f"((unsigned short *)__builtin_amdgcn_dispatch_ptr())[2+{x}]+__builtin_amdgcn_workitem_id_{'xyz'[int(x)]}())"}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda x,key,dtype: f"threefry({x},{key})",
-                 Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
-                 Ops.LOG2: _ocml("log2"), Ops.EXP2: _ocml("exp2"), Ops.SQRT: _ocml("sqrt")}
+                 Ops.TRUNC: _hip_math("trunc"), Ops.SIN: _hip_math("sin"),
+                 Ops.LOG2: _hip_math("log2"), Ops.EXP2: _hip_math("exp2"), Ops.SQRT: _hip_math("sqrt")}
   smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
@@ -546,7 +548,7 @@ class HIPRenderer(CStyleLanguage):
     if any(u.op is Ops.SPECIAL for u in uops): prefix.append("typedef long unsigned int size_t;")
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", dt.name, dt.name, ocml_ops[op][1])
-      for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
+      for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt == dtypes.double]
     if any(dt == dtypes.bfloat16 for dt, _ in used_dtypes):
       prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.target.arch) else 'unsigned short'} hip_bfloat16;")
     if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#define half _Float16")

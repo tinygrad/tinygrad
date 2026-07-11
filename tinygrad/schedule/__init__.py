@@ -1,6 +1,7 @@
 import time, inspect
-from collections import deque
+from collections import Counter, deque
 from dataclasses import replace
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
@@ -133,6 +134,54 @@ def _fuse_dependent_reductions(linearized:list[UOp]) -> list[UOp]:
     i += 1
   return ret
 
+def _fuse_direct_conv_bwd_activation(linearized:list[UOp]) -> list[UOp]:
+  from tinygrad.codegen.opt.gemm import DirectConvBwdActivationMatch, _match_gemm
+  cases = {
+    (1572864,288,64): (32, False, [(0,dtypes.float,50331648), (1,dtypes.half,50331648), (2,dtypes.half,452984832)],
+      {Ops.CONST:22, Ops.MUL:18, Ops.ADD:18, Ops.AND:8, Ops.RANGE:6, Ops.CMPLT:4, Ops.PARAM:3, Ops.INDEX:3,
+       Ops.CAST:3, Ops.FLOORMOD:2, Ops.FLOORDIV:2, Ops.WHERE:2, Ops.EXP2:1, Ops.RECIPROCAL:1, Ops.REDUCE:1,
+       Ops.STORE:1, Ops.END:1, Ops.SINK:1}),
+    (393216,576,64): (16, True, [(0,dtypes.float,25165824), (1,dtypes.float,25165824), (2,dtypes.half,25165824),
+                                 (3,dtypes.half,226492416)],
+      {Ops.CONST:23, Ops.ADD:19, Ops.MUL:18, Ops.AND:8, Ops.RANGE:6, Ops.PARAM:4, Ops.INDEX:4, Ops.CAST:4,
+       Ops.CMPLT:4, Ops.FLOORMOD:2, Ops.FLOORDIV:2, Ops.WHERE:2, Ops.EXP2:1, Ops.RECIPROCAL:1, Ops.REDUCE:1,
+       Ops.STORE:1, Ops.END:1, Ops.SINK:1}),
+  }
+  ret = list(linearized)
+  i = 0
+  while i < len(ret):
+    call = ret[i]
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.SINK or \
+       (g:=_match_gemm(call.src[0], "AMD", "gfx11")) is None or \
+       (g.m, g.n, g.k) not in cases or g.old is not None or g.a_kxm or not g.b_kxn:
+      i += 1
+      continue
+    patch_grad = call.src[g.c.arg.slot+1]
+    consumers = [j for j,x in enumerate(ret) if j > i and patch_grad in x.src[1:]]
+    if len(consumers) != 1 or consumers[0] > i+3:
+      i += 1
+      continue
+    j, consumer = consumers[0], ret[consumers[0]]
+    io = _kernel_io(consumer)
+    params = sorted((x.arg.slot, x.dtype, x.max_numel()) for x in consumer.src[0].toposort() if x.op is Ops.PARAM)
+    op_counts = Counter(x.op for x in consumer.src[0].toposort())
+    spatial, residual, expected_params, expected_ops = cases[(g.m,g.n,g.k)]
+    expected_srcs = 5 if residual else 4
+    if io is None or len(io[0]) != 1 or len(io[1]) != expected_srcs-2 or len(consumer.src) != expected_srcs or \
+       consumer.src[-1] is not patch_grad or params != expected_params or op_counts != Counter(expected_ops):
+      i += 1
+      continue
+    reduces = [x for x in consumer.src[0].toposort() if x.op is Ops.REDUCE]
+    if len(reduces) != 1 or reduces[0].arg != (Ops.ADD, 0) or tuple(int(x.vmax)+1 for x in reduces[0].src[1:]) != (4,4):
+      i += 1
+      continue
+    info = DirectConvBwdActivationMatch(g.m, g.n//9, g.k, spatial, residual)
+    ast = call.src[0].replace(tag=info, arg=replace(call.src[0].arg, name="direct_conv_bwd_activation"))
+    extras = (consumer.src[2], consumer.src[3]) if residual else (consumer.src[2],)
+    ret[j] = ast.call(io[0][0], *extras, call.src[g.a.arg.slot+1], call.src[g.b.arg.slot+1])
+    ret.pop(i)
+  return ret
+
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
@@ -184,7 +233,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
-  return UOp(Ops.LINEAR, src=tuple(_fuse_dependent_reductions(_fuse_adjacent_reductions(linearized))))
+  return UOp(Ops.LINEAR, src=tuple(_fuse_direct_conv_bwd_activation(_fuse_dependent_reductions(_fuse_adjacent_reductions(linearized)))))
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear

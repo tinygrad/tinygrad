@@ -32,6 +32,14 @@ class BatchedGemmMatch:
   k:int
   batch:int
 
+@dataclass(frozen=True)
+class DirectConvBwdActivationMatch:
+  m:int
+  cin:int
+  cout:int
+  spatial:int
+  residual:bool = False
+
 def _match_gemm(ast:UOp, device:str, arch:str) -> GemmMatch|None:
   if device != "AMD" or not arch.startswith("gfx11") or len(ast.src) != 1: return None
   end = ast.src[0]
@@ -113,7 +121,7 @@ def _match_batched_gemm(ast:UOp, device:str, arch:str) -> BatchedGemmMatch|None:
 
 def _gemm_block_m(g:GemmMatch) -> int:
   return 32 if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) else \
-    64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
+    64 if g.old is not None else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
   if g.n == 288 and g.old is None and not g.a_kxm and g.b_kxn: return 96
   if g.n == 576 and g.old is None and not g.a_kxm and g.b_kxn: return 192
@@ -122,8 +130,9 @@ def _gemm_block_n(g:GemmMatch) -> int:
 def _gemm_block_k(g:GemmMatch) -> int:
   if g.old is not None and g.a_kxm and g.b_kxn and g.m == 256 and g.k >= 65536: return BLOCK_K
   if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) and g.k % 64 == 0: return 64
-  return 96 if _gemm_block_n(g) == 64 and g.k == 288 else BLOCK_K
+  return 144 if _gemm_block_n(g) == 64 and g.k in (288, 576) else BLOCK_K
 def _batched_block_k(g:BatchedGemmMatch) -> int:
+  if (g.batch, g.m, g.n, g.k) == (96, 64, 576, 4096): return BLOCK_K
   return 128 if g.m == 64 and g.batch >= 96 and g.k % 128 == 0 else BLOCK_K
 def _batched_block_n(g:BatchedGemmMatch) -> int:
   return 192 if g.n == 576 else BLOCK_N
@@ -279,6 +288,86 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
             '      }', '    }', '  }']
   lines += ['}']
   return '\n'.join(lines), bm
+
+def _render_direct_conv_bwd_activation(g:DirectConvBwdActivationMatch, name:str) -> str:
+  bm, bn, bk, threads = 128, g.cin, 32, 128
+  tiles_m = 2
+  tiles_n, aslot, bslot = bn//16, (3 if g.residual else 2), (4 if g.residual else 3)
+  params = 'float* p0, float* p1, half* p2, half* p3, half* p4' if g.residual else 'float* p0, half* p1, half* p2, half* p3'
+  lines = [
+    '#define half _Float16',
+    'typedef half half16 __attribute__((ext_vector_type(16)));',
+    'typedef half half8 __attribute__((ext_vector_type(8)));',
+    'typedef float float8 __attribute__((ext_vector_type(8)));',
+    '#define WMMA __builtin_amdgcn_wmma_f32_16x16x16_f16_w32',
+    f'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size({threads},{threads}))) {name}({params}) {{',
+    f'  __attribute__((shared, aligned(32))) half As[{bm*max(bk,bn)}], Bs[{bn*bk}];',
+    '  int bn=__builtin_amdgcn_workgroup_id_x(), bm=__builtin_amdgcn_workgroup_id_y(), tid=__builtin_amdgcn_workitem_id_x();',
+    '  int wave=tid>>5, lane=tid&31, wm=wave, row=lane&15, halfrow=lane>>4;',
+    f'  float8 total[{tiles_m}][{tiles_n}]={{}};',
+    '  for (int patch=0; patch<9; patch++) {',
+    f'    float8 c[{tiles_m}][{tiles_n}]={{}};',
+    f'    for (int ct=0; ct<{g.cout//bk}; ct++) {{',
+    f'      int co0=ct*{bk}, mi=bm*{bm}+tid, b=mi/{g.spatial*g.spatial}, pos=mi%{g.spatial*g.spatial};',
+    f'      int y=pos/{g.spatial}, x=pos%{g.spatial}, sy=y+1-patch/3, sx=x+1-patch%3;',
+    f'      long ai=((long)b*{g.spatial*g.spatial}+sy*{g.spatial}+sx)*{g.cout}+co0;',
+    '      half16 av0=(half16){0}, av1=(half16){0};',
+    f'      if (sy>=0 && sy<{g.spatial} && sx>=0 && sx<{g.spatial}) {{',
+    f'        av0=*((half16*)(p{aslot}+ai)); av1=*((half16*)(p{aslot}+ai+16));',
+    '      }',
+    f'      *((half16*)(As+tid*{bk}))=av0; *((half16*)(As+tid*{bk}+16))=av1;',
+  ]
+  for q in range(bn*bk//threads):
+    lines += [f'      int be{q}=tid+{q*threads}, ci{q}=be{q}/{bk}, bco{q}=be{q}%{bk};',
+              f'      Bs[bco{q}*{bn}+ci{q}]=p{bslot}[(co0+bco{q})*{g.cin*9}+(bn*{bn}+ci{q})*9+patch];']
+  lines += ['      __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
+            '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");',
+            '      #pragma unroll', '      for (int ki=0; ki<2; ki++) {',
+            f'        half16 av[{tiles_m}], bv[{tiles_n}];', '        #pragma unroll',
+            f'        for (int im=0; im<{tiles_m}; im++) av[im]=*((half16*)(As+(((wm*{tiles_m}+im)*16+row)*{bk}+ki*16)));',
+            '        #pragma unroll', f'        for (int jn=0; jn<{tiles_n}; jn++) {{', '          half16 v;', '          #pragma unroll',
+            f'          for (int e=0; e<16; e++) v[e]=Bs[(ki*16+e)*{bn}+jn*16+row];',
+            '          bv[jn]=v;', '        }', '        #pragma unroll', f'        for (int im=0; im<{tiles_m}; im++) {{',
+            '          #pragma unroll', f'          for (int jn=0; jn<{tiles_n}; jn++) c[im][jn]=WMMA(av[im],bv[jn],c[im][jn]);',
+            '        }', '      }',
+            '      __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
+            '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");', '    }',
+            '    #pragma unroll', f'    for (int im=0; im<{tiles_m}; im++) {{', '      #pragma unroll',
+            f'      for (int jn=0; jn<{tiles_n}; jn++) total[im][jn]+=__builtin_convertvector('
+            '__builtin_convertvector(c[im][jn],half8),float8);', '    }', '  }',
+            '  #pragma unroll', f'  for (int im=0; im<{tiles_m}; im++) {{', '    #pragma unroll',
+            f'    for (int jn=0; jn<{tiles_n}; jn++) {{', '      #pragma unroll', '      for (int e=0; e<8; e++) {',
+            f'        int lm=(wm*{tiles_m}+im)*16+e*2+halfrow, lc=jn*16+row;',
+            f'        As[lc*{bm}+lm]=(half)total[im][jn][e];', '      }', '    }', '  }',
+            '  __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
+            '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");']
+  for q in range(bm*bn//(threads*8)):
+    lines += [f'  int oe{q}=tid*{bm*bn//threads}+{q*8}, lc{q}=oe{q}/{bm}, lm{q}=oe{q}%{bm};',
+              f'  int gm{q}=bm*{bm}+lm{q}, ob{q}=gm{q}/{g.spatial*g.spatial}, pos{q}=gm{q}%{g.spatial*g.spatial};',
+              f'  long oo{q}=((long)ob{q}*{g.cin}+bn*{bn}+lc{q})*{g.spatial*g.spatial}+pos{q};',
+              f'  half8 grad{q}=*((half8*)(As+oe{q}));']
+    if g.residual:
+      lines += [f'  grad{q}+=*((half8*)(p2+oo{q}));',
+                f'  half8 z{q}=__builtin_convertvector(*((float8*)(p1+oo{q})),half8);']
+    else: lines.append(f'  half8 z{q}=*((half8*)(p1+oo{q}));')
+    lines += [
+              f'  half8 sig{q}=(half8)1.0/((half8)1.0+__builtin_elementwise_exp2(z{q}*(half)-2.4554669595930156));',
+              f'  *((float8*)(p0+oo{q}))=__builtin_convertvector(sig{q}*grad{q}+(half)1.702*z{q}*grad{q}*sig{q}*((half)1.0-sig{q}),float8);']
+  lines.append('}')
+  return '\n'.join(lines)
+
+def direct_conv_bwd_activation_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
+  if not isinstance(g:=ast.tag, DirectConvBwdActivationMatch) or renderer.target.device != "AMD" or \
+     not renderer.target.arch.startswith("gfx11"): return None
+  name = f"coop_direct_conv_bwd_activation_{g.m}_{g.cin}_{g.cout}{'_res' if g.residual else ''}"
+  source = _render_direct_conv_bwd_activation(g, name)
+  sink = ast.replace(arg=replace(ast.arg, name=name, estimates=Estimates(2*g.m*g.cin*g.cout*9, 0, 0)))
+  slots = (0,1,2,3,4) if g.residual else (0,1,2,3)
+  info = ProgramInfo(name=name, global_size=(1, g.m//128, 1), local_size=(128,1,1),
+                     globals=slots, outs=(0,), ins=slots[1:])
+  src:tuple[UOp, ...] = (sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=source))
+  if compile_binary: src += (UOp(Ops.BINARY, arg=renderer.compiler.compile_cached(source)),)
+  return UOp(Ops.PROGRAM, src=src, arg=info)
 
 def cooperative_gemm_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
   if (g:=_match_gemm(ast, renderer.target.device, renderer.target.arch)) is not None:
