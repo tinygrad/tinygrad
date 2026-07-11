@@ -66,6 +66,7 @@ def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=wid
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
 # NOTE: call this buildvector like LLVM?
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
+def getsign(u:UOp, nbits): return _aluhint(UOp(Ops.SHR, dtypes.uint32, src=(u, const(dtypes.uint16, nbits-1))), RDNA3Ops.v_ashrrev_i32_e32 if nbits == 32 else RDNA3Ops.v_ashrrev_i64)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -313,8 +314,8 @@ def idiv(ctx, x:UOp):
   dt = dtypes.uint32 if x.dtype.itemsize == 4 else dtypes.uint64
   a, b = x.src[0].cast(dt), x.src[1].cast(dt)
   if signed:
-    def _getsign(u:UOp): return _aluhint(u >> (x.dtype.itemsize*8)-1, RDNA3Ops.v_ashrrev_i32_e32 if x.dtype.itemsize == 4 else RDNA3Ops.v_ashrrev_i64)
-    sa, sb = _getsign(a), _getsign(b)
+    nbits = x.dtype.itemsize*8
+    sa, sb = getsign(a, nbits), getsign(b, nbits)
     a, b = (a + sa) ^ sa, (b + sb) ^ sb
     sign = sa ^ sb
   bs = b.cast(dtypes.float)
@@ -378,44 +379,32 @@ def alu(ctx, x:UOp):
 
 # ---- casting utilities -----
 
-def widenshort(y:UOp, x:UOp):
-  mid = dtypes.int32 if y.dtype is dtypes.int16 else dtypes.uint32
-  y = y.cast(mid)
-  if x.dtype is dtypes.float32: y = y.cast(dtypes.float32)
-  if x.dtype is dtypes.float64: return y.cast(dtypes.float64)
-  return y
-
 # NOTE: make this a pm?
 def intcast(y:UOp, x:UOp):
   if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
   if x.dtype.itemsize > y.dtype.itemsize:
+    if y.dtype.itemsize == 1: return y.bitcast(x.dtype)
     if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFFFFFFFF)).bitcast(x.dtype)
   if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
-    if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
     return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
 
 # TODO: move this into pattern matcher
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def castint64(ctx, y:UOp, x:UOp):
-  # if src (y) is an int just allocate reg buffer and store?
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   if y.dtype in dtypes.ints:
-    lo = y.ins(RDNA3Ops.v_mov_b32_e32, src=(y,))
-    hi = UOp(Ops.INS, hi_dt, arg=RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),))
+    lo = vmov(y)
+    hi = vmov(getsign(lo, 32))
     return multireg(lo, hi, dtype=x.dtype)
-  elif y.dtype is dtypes.float64:
-    # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
+  elif y.dtype is dtypes.float64: # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
     tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
     hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
     hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
     lo_f = hi_f.ins(RDNA3Ops.v_ldexp_f64, src=(hi_f, const(dtypes.int16, 32))) # tr - hi_f * 2 ^ 32
     lo_f = UOp(Ops.ADD, dtypes.float64, src=(tr, UOp(Ops.MUL, dtypes.float64, src=(lo_f, const(dtypes.float64, -1.)))))
     return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=x.dtype)
-  else: # NOTE: wrong? look at LLVM like f64 cast
-    lo = y.float().cast(dtypes.uint32)
-    hi = vmov(const(hi_dt, 0))
-    return multireg(lo, hi, dtype=x.dtype)
   raise NotImplementedError()
 
 # TODO: currently only 53 bit precision (f64 mantissa), could do better
@@ -521,16 +510,16 @@ pre_isel_matcher = PatternMatcher([
   (UPat().cast().named("x").bitcast(), lambda x: x),
   # --- casting rewrites ---
   # float -> int
-  (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
   (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32))),
-  (UPat.var("y", (dtypes.half,dtypes.float32)).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
   (UPat.var("y", dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
   # int -> float
   (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
-  (UPat.var("y", dtypes.int8s).cast((dtypes.half, dtypes.float, dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(x.dtype)),
-  (UPat.var("y", dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  (UPat.var("y", dtypes.int8s).cast(dtypes.half), lambda y: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(dtypes.half)),
+  (UPat.var("y", dtypes.int8s+dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   # other
   (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
   # narrowing long goes through b32
