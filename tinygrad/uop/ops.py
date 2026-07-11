@@ -293,8 +293,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
+
+      # INS shape matches the dtype count (temporary, until vec dtypes are removed)
+      case Ops.INS:
+        if self.dtype is dtypes.void: return None
+        return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:
