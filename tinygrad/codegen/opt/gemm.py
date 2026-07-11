@@ -110,19 +110,22 @@ def _match_batched_gemm(ast:UOp, device:str, arch:str) -> BatchedGemmMatch|None:
   return None
 
 def _gemm_block_m(g:GemmMatch) -> int:
-  return 32 if g.old is not None and g.m < 512 else 64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
+  return 32 if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) else \
+    64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
   return 64 if g.n == 64 and g.old is None and not g.a_kxm and not g.b_kxn else BLOCK_N
 def _gemm_block_k(g:GemmMatch) -> int:
-  return 64 if g.old is not None and g.m < 512 and g.k % 64 == 0 else BLOCK_K
+  if g.old is not None and g.m < 512 and g.k % 64 == 0: return 64
+  return 96 if _gemm_block_n(g) == 64 and g.k == 288 else BLOCK_K
 def _batched_block_k(g:BatchedGemmMatch) -> int:
   return 128 if g.m == 64 and g.batch >= 96 and g.k % 128 == 0 else BLOCK_K
 def _gemm_threads(g:GemmMatch) -> int:
-  return 256 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 512 and g.k >= 65536 else THREADS
+  return 64 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 512 and g.k >= 65536 else THREADS
 def _render_gemm(g:GemmMatch, name:str) -> str:
   bm, bn_size, bk, threads = _gemm_block_m(g), _gemm_block_n(g), _gemm_block_k(g), _gemm_threads(g)
-  waves_m, waves_n = ((1, 8) if bm == 32 else (2, 4) if bm == 64 else (4, 2)) if threads == 256 else \
-                     ((1, 4) if bm <= 64 else (2, 2))
+  waves_m, waves_n = (1, 2) if threads == 64 else \
+                     (((1, 8) if bm == 32 else (2, 4) if bm == 64 else (4, 2)) if threads == 256 else
+                      ((1, 4) if bm <= 64 else (2, 2)))
   tiles_m, tiles_n = bm//(waves_m*WMMA_M), bn_size//(waves_n*WMMA_N)
   cslot, aslot, bslot = g.c.arg.slot, g.a.arg.slot, g.b.arg.slot
   buffers = (g.c, g.a, g.b) + ((g.old,) if g.old is not None else ())
@@ -141,8 +144,7 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
     '  int bn=__builtin_amdgcn_workgroup_id_x(), bm=__builtin_amdgcn_workgroup_id_y(), tid=__builtin_amdgcn_workitem_id_x();',
     f'  int wave=tid>>5, lane=tid&31, wm=wave/{waves_n}, wn=wave%{waves_n}, row=lane&15, halfrow=lane>>4;',
   ]
-  for im in range(tiles_m):
-    for jn in range(tiles_n): lines.append(f'  float8 c{im}{jn}=(float8){{0,0,0,0,0,0,0,0}};')
+  lines.append(f'  float8 c[{tiles_m}][{tiles_n}]={{}};')
   lines += [f'  for (int kt=0; kt<{g.k//bk}; kt++) {{']
   if g.a_kxm:
     aseg_count = bm*bk//16
@@ -179,36 +181,35 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
     if bn_size == 64: lines[-1] += ' }'
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");']
-  for ki in range(bk // WMMA_K):
-    for im in range(tiles_m):
-      if g.a_kxm:
-        a_values = ','.join(f'As[({ki*16+e})*{bm}+(wm*{tiles_m}+{im})*16+row]' for e in range(16))
-        lines.append(f'    half16 a{ki}{im}=(half16){{{a_values}}};')
-      else: lines.append(f'    half16 a{ki}{im}=*((half16*)(As+(((wm*{tiles_m}+{im})*16+row)*{bk}+{ki*16})));')
-    for jn in range(tiles_n):
-      if g.b_kxn and not g.a_kxm:
-        br = f'(wn*{tiles_n}+{jn})*16+row'
-        bp = ','.join(f'((unsigned*)Bs)[({ki*8+e})*128+{br}]' for e in range(8))
-        lines += [f'    uint8 bp{ki}{jn}=(uint8){{{bp}}};',
-                  f'    ushort16 bb{ki}{jn}=(ushort16){{HALF_BITS(bp{ki}{jn}[0]),HALF_BITS(bp{ki}{jn}[1]),'
-                  f'HALF_BITS(bp{ki}{jn}[2]),HALF_BITS(bp{ki}{jn}[3]),HALF_BITS(bp{ki}{jn}[4]),HALF_BITS(bp{ki}{jn}[5]),'
-                  f'HALF_BITS(bp{ki}{jn}[6]),HALF_BITS(bp{ki}{jn}[7])}};',
-                  f'    half16 b{ki}{jn}=__builtin_bit_cast(half16,bb{ki}{jn});']
-      elif g.b_kxn:
-        b_values = ','.join(f'Bs[({ki*16+e})*{bn_size}+(wn*{tiles_n}+{jn})*16+row]' for e in range(16))
-        lines.append(f'    half16 b{ki}{jn}=(half16){{{b_values}}};')
-      else: lines.append(f'    half16 b{ki}{jn}=*((half16*)(Bs+(((wn*{tiles_n}+{jn})*16+row)*{bk}+{ki*16})));')
-    for im in range(tiles_m):
-      for jn in range(tiles_n): lines.append(f'    c{im}{jn}=WMMA(a{ki}{im},b{ki}{jn},c{im}{jn});')
+  lines += ['    #pragma unroll', f'    for (int ki=0; ki<{bk//WMMA_K}; ki++) {{',
+            f'      half16 av[{tiles_m}], bv[{tiles_n}];', '      #pragma unroll', f'      for (int im=0; im<{tiles_m}; im++) {{']
+  if g.a_kxm:
+    lines += ['        half16 v;', '        #pragma unroll',
+              f'        for (int e=0; e<16; e++) v[e]=As[(ki*16+e)*{bm}+(wm*{tiles_m}+im)*16+row];', '        av[im]=v;']
+  else:
+    lines += [f'        av[im]=*((half16*)(As+(((wm*{tiles_m}+im)*16+row)*{bk}+ki*16)));']
+  lines += ['      }', '      #pragma unroll', f'      for (int jn=0; jn<{tiles_n}; jn++) {{']
+  if g.b_kxn and not g.a_kxm:
+    half_bits = ','.join(f'HALF_BITS(bp[{e}])' for e in range(8))
+    lines += ['        uint8 bp;', '        #pragma unroll',
+              f'        for (int e=0; e<8; e++) bp[e]=((unsigned*)Bs)[(ki*8+e)*128+(wn*{tiles_n}+jn)*16+row];',
+              f'        ushort16 bb=(ushort16){{{half_bits}}};', '        bv[jn]=__builtin_bit_cast(half16,bb);']
+  elif g.b_kxn:
+    lines += ['        half16 v;', '        #pragma unroll',
+              f'        for (int e=0; e<16; e++) v[e]=Bs[(ki*16+e)*{bn_size}+(wn*{tiles_n}+jn)*16+row];', '        bv[jn]=v;']
+  else:
+    lines += [f'        bv[jn]=*((half16*)(Bs+(((wn*{tiles_n}+jn)*16+row)*{bk}+ki*16)));']
+  lines += ['      }', '      #pragma unroll', f'      for (int im=0; im<{tiles_m}; im++) {{', '        #pragma unroll',
+            f'        for (int jn=0; jn<{tiles_n}; jn++) c[im][jn]=WMMA(av[im],bv[jn],c[im][jn]);', '      }', '    }']
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");', '  }']
-  for im in range(tiles_m):
-    for jn in range(tiles_n):
-      for e in range(8):
-        out_idx = f'((long)(bm*{bm}+(wm*{tiles_m}+{im})*16+{e*2}+halfrow)*{g.n})+bn*{bn_size}+(wn*{tiles_n}+{jn})*16+row'
-        if g.old is None: lines.append(f'  p{cslot}[{out_idx}]=(half)c{im}{jn}[{e}];')
-        else: lines.append(f'  p{cslot}[{out_idx}]=(float)((half)c{im}{jn}[{e}]+'
-                           f'(half){g.scale}*p{g.old.arg.slot}[{out_idx}]);')
+  lines += ['  #pragma unroll', f'  for (int im=0; im<{tiles_m}; im++) {{', '    #pragma unroll',
+            f'    for (int jn=0; jn<{tiles_n}; jn++) {{', '      #pragma unroll', '      for (int e=0; e<8; e++) {',
+            f'        long oi=((long)(bm*{bm}+(wm*{tiles_m}+im)*16+e*2+halfrow)*{g.n})+'
+            f'bn*{bn_size}+(wn*{tiles_n}+jn)*16+row;']
+  if g.old is None: lines.append(f'        p{cslot}[oi]=(half)c[im][jn][e];')
+  else: lines.append(f'        p{cslot}[oi]=(float)((half)c[im][jn][e]+(half){g.scale}*p{g.old.arg.slot}[oi]);')
+  lines += ['      }', '    }', '  }']
   lines += ['}']
   return '\n'.join(lines)
 
@@ -229,8 +230,7 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
     'batch=__builtin_amdgcn_workgroup_id_z(), tid=__builtin_amdgcn_workitem_id_x();',
     f'  int wave=tid>>5, lane=tid&31, wm=wave/{waves_n}, wn=wave%{waves_n}, row=lane&15, halfrow=lane>>4;',
   ]
-  for im in range(tiles_m):
-    for jn in range(tiles_n): lines.append(f'  float8 c{im}{jn}=(float8){{0,0,0,0,0,0,0,0}};')
+  lines.append(f'  float8 c[{tiles_m}][{tiles_n}]={{}};')
   lines.append(f'  for (int kt=0; kt<{g.k//bk}; kt++) {{')
   for q in range(bm*bk//(THREADS*16)):
     lines += [f'    int aseg{q}=tid+{q*THREADS}, ak{q}=aseg{q}/{bm//16}, am{q}=(aseg{q}%{bm//16})*16;',
@@ -242,22 +242,24 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
               f'*((half16*)(p{bslot}+((long)(batch*{g.k}+kt*{bk}+bk{q})*{g.n})+bn*128+bn{q})) : (half16){{0}};']
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");']
-  for ki in range(bk//WMMA_K):
-    for im in range(tiles_m):
-      av = ','.join(f'As[({ki*16+e})*{bm}+(wm*{tiles_m}+{im})*16+row]' for e in range(16))
-      lines.append(f'    half16 a{ki}{im}=(half16){{{av}}};')
-    for jn in range(tiles_n):
-      bv = ','.join(f'Bs[({ki*16+e})*128+(wn*{tiles_n}+{jn})*16+row]' for e in range(16))
-      lines.append(f'    half16 b{ki}{jn}=(half16){{{bv}}};')
-    for im in range(tiles_m):
-      for jn in range(tiles_n): lines.append(f'    c{im}{jn}=WMMA(a{ki}{im},b{ki}{jn},c{im}{jn});')
+  lines += ['    #pragma unroll', f'    for (int ki=0; ki<{bk//WMMA_K}; ki++) {{',
+            f'      half16 av[{tiles_m}], bv[{tiles_n}];', '      #pragma unroll',
+            f'      for (int im=0; im<{tiles_m}; im++) {{', '        half16 v;', '        #pragma unroll',
+            f'        for (int e=0; e<16; e++) v[e]=As[(ki*16+e)*{bm}+(wm*{tiles_m}+im)*16+row];',
+            '        av[im]=v;', '      }', '      #pragma unroll', f'      for (int jn=0; jn<{tiles_n}; jn++) {{',
+            '        half16 v;', '        #pragma unroll',
+            f'        for (int e=0; e<16; e++) v[e]=Bs[(ki*16+e)*128+(wn*{tiles_n}+jn)*16+row];',
+            '        bv[jn]=v;', '      }', '      #pragma unroll', f'      for (int im=0; im<{tiles_m}; im++) {{',
+            '        #pragma unroll', f'        for (int jn=0; jn<{tiles_n}; jn++) c[im][jn]=WMMA(av[im],bv[jn],c[im][jn]);',
+            '      }', '    }']
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");', '  }']
-  for im in range(tiles_m):
-    for jn in range(tiles_n):
-      for e in range(8):
-        om, on = f'bm*{bm}+(wm*{tiles_m}+{im})*16+{e*2}+halfrow', f'bn*128+(wn*{tiles_n}+{jn})*16+row'
-        lines.append(f'  if ({on}<{g.n}) p{cslot}[((long)({om})*{g.n}+({on}))*{g.batch}+batch]=c{im}{jn}[{e}];')
+  lines += ['  #pragma unroll', f'  for (int im=0; im<{tiles_m}; im++) {{', '    #pragma unroll',
+            f'    for (int jn=0; jn<{tiles_n}; jn++) {{',
+            f'      int om=bm*{bm}+(wm*{tiles_m}+im)*16+halfrow, on=bn*128+(wn*{tiles_n}+jn)*16+row;',
+            f'      if (on<{g.n}) {{', '        #pragma unroll',
+            f'        for (int e=0; e<8; e++) p{cslot}[((long)(om+e*2)*{g.n}+on)*{g.batch}+batch]=c[im][jn][e];',
+            '      }', '    }', '  }']
   lines += ['}']
   return '\n'.join(lines), bm
 

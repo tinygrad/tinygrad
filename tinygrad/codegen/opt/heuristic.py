@@ -213,7 +213,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if four_by_four_reduce and len(global_axes:=k.axes_of(AxisType.GLOBAL, AxisType.LOOP)) >= 3:
         lk, local_rngs = k.copy(), [k.rngs[x] for x in global_axes[-3:]]
         try:
-          for rng, sz in zip(local_rngs, (8, 8, 4)):
+          for rng, sz in zip(local_rngs, (16, 4, 4)):
             lk.apply_opt(Opt(OptOps.LOCAL, lk.rngs.index(rng), sz))
           k, special_local = lk, True
         except KernelOptError: pass
