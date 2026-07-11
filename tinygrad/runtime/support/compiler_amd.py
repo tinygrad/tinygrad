@@ -103,7 +103,7 @@ class HIPCompiler(Compiler):
     except RuntimeError as e: raise CompileError(e) from e
   def compile_cached_batch(self, srcs:list[tuple[str, str]]) -> list[tuple[str, str, bytes]]:
     batch_size = getenv("AMD_COMPILE_BATCH_SIZE", 256)
-    batch_opt = getenv("AMD_COMPILE_OPT", 3)
+    batch_opt = getenv("AMD_COMPILE_OPT", 2)
     generic_opt = getenv("AMD_GENERIC_COMPILE_OPT", 1)
     frontend_opt = getenv("AMD_FRONTEND_OPT", 1)
     if batch_size <= 1 or any(src.split('\n', 1)[0].strip() == '.text' for _,src in srcs): return super().compile_cached_batch(srcs)
