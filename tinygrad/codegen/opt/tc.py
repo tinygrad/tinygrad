@@ -133,7 +133,7 @@ amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
 
 amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
 
-def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
+def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1030": [], "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
 
 # ***** Apple Metal *****
 
