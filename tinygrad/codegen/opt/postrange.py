@@ -55,9 +55,14 @@ class Scheduler:
       special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
-      Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
-      num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
-      name += colored(num, 'BLACK')
+      function_name = to_function_name(name)
+      cache_key = (function_name, self.ast)
+      if (cached_name:=kernel_name_cache.get(cache_key)) is not None: name = cached_name
+      else:
+        Scheduler.kernel_cnt[function_name] += 1
+        num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
+        name += colored(num, 'BLACK')
+        kernel_name_cache[cache_key] = name
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
@@ -352,3 +357,5 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
     if not any(u.op is Ops.STAGE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
+
+kernel_name_cache:dict[tuple[str, UOp], str] = {}

@@ -7,7 +7,7 @@ from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, 
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo, scoped_rewrite_cache
 from tinygrad.device import Device, Buffer, MultiBuffer, Compiler
 from tinygrad.renderer import Estimates
-from tinygrad.codegen import to_program, scoped_apply_opts_cache, scoped_devectorize_cache
+from tinygrad.codegen import to_program, scoped_apply_opts_cache, scoped_devectorize_cache, scoped_postopt_codegen_cache
 from tinygrad.uop.spec import scoped_type_verify_cache
 from tinygrad.codegen.opt.postrange import bufs_from_ast
 
@@ -285,7 +285,8 @@ pm_exec = PatternMatcher([
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  with scoped_rewrite_cache(), scoped_apply_opts_cache(), scoped_devectorize_cache(), scoped_type_verify_cache():
+  with scoped_rewrite_cache(), scoped_apply_opts_cache(), scoped_postopt_codegen_cache(), scoped_devectorize_cache(), \
+       scoped_type_verify_cache():
     linear = graph_rewrite(linear, pm_compile, ctx=True, name="render kernels", walk=True)
   linear = batch_compile(linear)
   if getenv("HCQ2"):

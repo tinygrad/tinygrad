@@ -166,6 +166,11 @@ class scoped_apply_opts_cache:
   def __enter__(self): apply_opts_caches.append({})
   def __exit__(self, *args): apply_opts_caches.pop()
 
+postopt_codegen_caches: list[dict[tuple[UOp, type[Renderer], object], UOp]] = []
+class scoped_postopt_codegen_cache:
+  def __enter__(self): postopt_codegen_caches.append({})
+  def __exit__(self, *args): postopt_codegen_caches.pop()
+
 def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
   key = (x, idxs)
   if (ret:=ctx.lanes.get(key)) is not None: return ret
@@ -342,6 +347,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
       sink = apply_opts(sink, ren, beam=ast.arg.beam)
       if apply_opts_caches: apply_opts_caches[-1][opt_key] = sink
 
+  postopt_key = (sink, type(ren), ren.target)
+  use_postopt_cache = bool(postopt_codegen_caches) and not (VIZ or PROFILE or TRACK_MATCH_STATS)
+  if use_postopt_cache and (cached_sink:=postopt_codegen_caches[-1].get(postopt_key)) is not None: return cached_sink
+
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
@@ -422,6 +431,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(sink, spec_program)
 
   # return the rewritten sink
+  if use_postopt_cache: postopt_codegen_caches[-1][postopt_key] = sink
   return sink
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
