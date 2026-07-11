@@ -117,9 +117,12 @@ def _gemm_block_k(g:GemmMatch) -> int:
   return 64 if g.old is not None and g.m < 512 and g.k % 64 == 0 else BLOCK_K
 def _batched_block_k(g:BatchedGemmMatch) -> int:
   return 128 if g.m == 64 and g.batch >= 96 and g.k % 128 == 0 else BLOCK_K
+def _gemm_threads(g:GemmMatch) -> int:
+  return 256 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 512 and g.k >= 65536 else THREADS
 def _render_gemm(g:GemmMatch, name:str) -> str:
-  bm, bn_size, bk, threads = _gemm_block_m(g), _gemm_block_n(g), _gemm_block_k(g), THREADS
-  waves_m, waves_n = (1, 4) if bm <= 64 else (2, 2)
+  bm, bn_size, bk, threads = _gemm_block_m(g), _gemm_block_n(g), _gemm_block_k(g), _gemm_threads(g)
+  waves_m, waves_n = ((1, 8) if bm == 32 else (2, 4) if bm == 64 else (4, 2)) if threads == 256 else \
+                     ((1, 4) if bm <= 64 else (2, 2))
   tiles_m, tiles_n = bm//(waves_m*WMMA_M), bn_size//(waves_n*WMMA_N)
   cslot, aslot, bslot = g.c.arg.slot, g.a.arg.slot, g.b.arg.slot
   buffers = (g.c, g.a, g.b) + ((g.old,) if g.old is not None else ())
@@ -143,9 +146,9 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
   lines += [f'  for (int kt=0; kt<{g.k//bk}; kt++) {{']
   if g.a_kxm:
     aseg_count = bm*bk//16
-    for q in range((aseg_count+THREADS-1)//THREADS):
-      prefix, suffix = (f'    if (tid+{q*THREADS}<{aseg_count}) {{ ', ' }') if aseg_count % THREADS else ('    ', '')
-      lines += [f'{prefix}int aseg{q}=tid+{q*THREADS}, ak{q}=aseg{q}/{bm//16}, am{q}=(aseg{q}%{bm//16})*16;',
+    for q in range((aseg_count+threads-1)//threads):
+      prefix, suffix = (f'    if (tid+{q*threads}<{aseg_count}) {{ ', ' }') if aseg_count % threads else ('    ', '')
+      lines += [f'{prefix}int aseg{q}=tid+{q*threads}, ak{q}=aseg{q}/{bm//16}, am{q}=(aseg{q}%{bm//16})*16;',
                 f'      *((half16*)(As+ak{q}*{bm}+am{q}))=*((half16*)(p{aslot}+'
                 f'((long)(kt*{bk}+ak{q})*{g.m})+bm*{bm}+am{q}));{suffix}']
   else:
@@ -163,8 +166,8 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
                 f'(__builtin_convertvector(pb{q}1,uint16)<<16);']
   elif g.b_kxn:
     bsegs = bn_size//16
-    for q in range(bn_size*bk//(THREADS*16)):
-      lines += [f'    int bseg{q}=tid+{q*THREADS}, bk{q}=bseg{q}/{bsegs}, bn{q}=(bseg{q}%{bsegs})*16;',
+    for q in range(bn_size*bk//(threads*16)):
+      lines += [f'    int bseg{q}=tid+{q*threads}, bk{q}=bseg{q}/{bsegs}, bn{q}=(bseg{q}%{bsegs})*16;',
                 f'    *((half16*)(Bs+bk{q}*{bn_size}+bn{q}))=*((half16*)(p{bslot}+'
                 f'((long)(kt*{bk}+bk{q})*{g.n})+bn*{bn_size}+bn{q}));']
   else:
@@ -264,7 +267,7 @@ def cooperative_gemm_program(ast:UOp, renderer:Renderer, compile_binary:bool) ->
            f"{'_kxn' if g.b_kxn else ''}{'_acc' if g.old is not None else ''}"
     source = _render_gemm(g, name)
     global_size = (g.n//_gemm_block_n(g), g.m//_gemm_block_m(g), 1)
-    local_size = (THREADS, 1, 1)
+    local_size = (_gemm_threads(g), 1, 1)
     estimates = Estimates(2*g.m*g.n*g.k, 2*(g.m*g.k+g.n*g.k+g.m*g.n), 2*(g.m*g.k+g.n*g.k+g.m*g.n))
     slots = tuple(sorted((g.c.arg.slot, g.a.arg.slot, g.b.arg.slot) + ((g.old.arg.slot,) if g.old is not None else ())))
     out_slot = g.c.arg.slot
