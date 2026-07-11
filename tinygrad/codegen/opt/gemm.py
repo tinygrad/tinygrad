@@ -116,7 +116,7 @@ def _gemm_block_m(g:GemmMatch) -> int:
     64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
   if g.n == 288 and g.old is None and not g.a_kxm and g.b_kxn: return 96
-  if g.n == 576 and g.old is None and not g.a_kxm and g.b_kxn: return 192
+  if g.n in (576, 2304, 4608) and g.old is None and not g.a_kxm and g.b_kxn: return 192
   if g.old is not None and g.a_kxm and g.b_kxn and g.m == 256 and g.k >= 65536: return 64
   return 64 if g.n == 64 and g.old is None and not g.a_kxm and not g.b_kxn else BLOCK_N
 def _gemm_block_k(g:GemmMatch) -> int:
