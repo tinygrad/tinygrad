@@ -2,7 +2,7 @@ import pathlib, hashlib, re, itertools
 from tinygrad.runtime.autogen import load, root
 
 __all__ = ["am", "pm4_soc15", "pm4_nv", "sdma_4_0_0", "sdma_5_0_0", "sdma_6_0_0", "smu_13_0_0", "smu_13_0_6", "smu_13_0_12", "smu_14_0_2",
-           "fw", "navi_offsets", "vega_offsets", "regs", "soc_9", "soc_11", "soc_12", "pmc"]
+           "fw", "navi_offsets", "vega_offsets", "regs", "soc_9", "soc_10", "soc_11", "soc_12", "pmc"]
 
 am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/33970e1351f5e511029602454979f3de7e22260f.tar.gz"
 rocm_src="https://github.com/ROCm/rocm-systems/archive/cccc350dc620e61ae2554978b62ab3532dc10bd9.tar.gz"
@@ -86,8 +86,8 @@ def __getattr__(nm):
         return "\n".join(out)
       return load("am/regs", [AMDINC + "/asic_reg/" + {"osssys":"oss"}.get(pre, pre) + f"/{pre}_{'_'.join(map(str, ver))}"
                               for pre in reg_files for ver in sorted(reg_files[pre])], srcs=am_src, gen=genreg)
-    case "soc_9" | "soc_11" | "soc_12":
-      return load(f"am/{nm}", ["{}/projects/aqlprofile/linux/" + {9: "vega10", 11: "soc21", 12: "soc24"}[int(nm.split('_')[1])] + "_enum.h"],
+    case "soc_9" | "soc_10" | "soc_11" | "soc_12":
+      return load(f"am/{nm}", ["{}/projects/aqlprofile/linux/" + {9: "vega10", 10: "navi10", 11: "soc21", 12: "soc24"}[int(nm.split('_')[1])] + "_enum.h"],
                   srcs=rocm_src, patterns=soc_patterns, macros=False)
     case "pmc":
       def genpmc(_, files, **kwargs):
