@@ -383,10 +383,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  # isa renderers lower loads/stores to Ops.INS during isel, so compute estimates from the pre-isel linearized list
-  if isinstance(ctx, ISARenderer) and sink.arg.estimates is None:
-    sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(tuple(lst), ignore_indexing=True)))
-    prg = prg.replace(src=(sink,))
+  if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
