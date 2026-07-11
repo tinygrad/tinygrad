@@ -68,16 +68,18 @@ def _match_gemm(ast:UOp, device:str, arch:str) -> GemmMatch|None:
     n = ssimplify(out_idx%n_size)
     if ssimplify(out_idx//n_size) is not m or int(n.vmin) != 0 or int(n.vmax) != n_size-1: continue
     n64 = old is None and n_size == 64
-    if m_size % BLOCK_M or k_size % BLOCK_K or (not n64 and n_size % BLOCK_N): continue
-    if (m_size//BLOCK_M)*(n_size//(64 if n64 else BLOCK_N)) < (32 if old is not None else 512): continue
     a_mxk_idx, a_kxm_idx = ssimplify(m*k_size+k), ssimplify(k*m_size+m)
     b_nxk_idx, b_kxn_idx = ssimplify(n*k_size+k), ssimplify(k*n_size+n)
     for a_idx, a_buf, b_idx, b_buf in ((lhs_idx, lhs.src[0], rhs_idx, rhs.src[0]), (rhs_idx, rhs.src[0], lhs_idx, lhs.src[0])):
       if not (a_idx is a_mxk_idx or a_idx is a_kxm_idx): continue
       if not (b_idx is b_nxk_idx or b_idx is b_kxn_idx): continue
       if n64 and (a_idx is not a_mxk_idx or b_idx is not b_nxk_idx): continue
-      return GemmMatch(store.src[0].src[0], a_buf, b_buf, m_size, n_size, k_size, old, scale,
-                       a_idx is a_kxm_idx, b_idx is b_kxn_idx)
+      g = GemmMatch(store.src[0].src[0], a_buf, b_buf, m_size, n_size, k_size, old, scale,
+                    a_idx is a_kxm_idx, b_idx is b_kxn_idx)
+      bm, bn = _gemm_block_m(g), _gemm_block_n(g)
+      if m_size % bm or n_size % bn or k_size % BLOCK_K: continue
+      if (m_size//bm)*(n_size//bn) < (32 if old is not None else 512): continue
+      return g
   return None
 
 def _match_batched_gemm(ast:UOp, device:str, arch:str) -> BatchedGemmMatch|None:
@@ -113,17 +115,23 @@ def _gemm_block_m(g:GemmMatch) -> int:
   return 32 if g.old is not None and (g.m < 512 or (g.a_kxm and g.b_kxn and g.k >= 65536)) else \
     64 if g.old is not None or _gemm_block_n(g) == 64 else BLOCK_M
 def _gemm_block_n(g:GemmMatch) -> int:
+  if g.n == 576 and g.old is None and not g.a_kxm and g.b_kxn: return 192
   return 64 if g.n == 64 and g.old is None and not g.a_kxm and not g.b_kxn else BLOCK_N
 def _gemm_block_k(g:GemmMatch) -> int:
   if g.old is not None and g.m < 512 and g.k % 64 == 0: return 64
   return 96 if _gemm_block_n(g) == 64 and g.k == 288 else BLOCK_K
 def _batched_block_k(g:BatchedGemmMatch) -> int:
   return 128 if g.m == 64 and g.batch >= 96 and g.k % 128 == 0 else BLOCK_K
+def _batched_block_n(g:BatchedGemmMatch) -> int:
+  return 192 if g.n == 576 else BLOCK_N
+def _batched_threads(g:BatchedGemmMatch) -> int:
+  return _batched_block_n(g)
 def _gemm_threads(g:GemmMatch) -> int:
+  if _gemm_block_n(g) == 192: return 192
   return 64 if g.old is not None and g.a_kxm and g.b_kxn and g.m >= 512 and g.k >= 65536 else THREADS
 def _render_gemm(g:GemmMatch, name:str) -> str:
   bm, bn_size, bk, threads = _gemm_block_m(g), _gemm_block_n(g), _gemm_block_k(g), _gemm_threads(g)
-  waves_m, waves_n = (1, 2) if threads == 64 else \
+  waves_m, waves_n = (2, 3) if threads == 192 else (1, 2) if threads == 64 else \
                      (((1, 8) if bm == 32 else (2, 4) if bm == 64 else (4, 2)) if threads == 256 else
                       ((1, 4) if bm <= 64 else (2, 2)))
   tiles_m, tiles_n = bm//(waves_m*WMMA_M), bn_size//(waves_n*WMMA_N)
@@ -154,17 +162,18 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
                 f'      *((half16*)(As+ak{q}*{bm}+am{q}))=*((half16*)(p{aslot}+'
                 f'((long)(kt*{bk}+ak{q})*{g.m})+bm*{bm}+am{q}));{suffix}']
   else:
-    prefix, suffix = ('    if (tid<64) { ', ' }') if bm == 64 else ('    ', '')
+    prefix, suffix = (f'    if (tid<{bm}) {{ ', ' }') if threads != bm else ('    ', '')
     lines += [f'{prefix}long ao=((long)(bm*{bm}+tid)*{g.k})+kt*{bk};']
     for q in range(bk//16): lines.append(f'      *((half16*)(As+tid*{bk}+{q*16}))=*((half16*)(p{aslot}+ao+{q*16}));')
     lines[-1] += suffix
   if g.b_kxn and not g.a_kxm:
+    bsegs = bn_size//16
     for q in range(bk//32):
-      lines += [f'    int bkp{q}=tid/8+{q*16}, bn0{q}=(tid%8)*16;',
-                f'    half16 bv{q}0=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2)*{g.n})+bn*128+bn0{q}));',
-                f'    half16 bv{q}1=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2+1)*{g.n})+bn*128+bn0{q}));',
+      lines += [f'    int bkp{q}=tid/{bsegs}+{q*16}, bn0{q}=(tid%{bsegs})*16;',
+                f'    half16 bv{q}0=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2)*{g.n})+bn*{bn_size}+bn0{q}));',
+                f'    half16 bv{q}1=*((half16*)(p{bslot}+((long)(kt*{bk}+bkp{q}*2+1)*{g.n})+bn*{bn_size}+bn0{q}));',
                 f'    ushort16 pb{q}0=__builtin_bit_cast(ushort16,bv{q}0), pb{q}1=__builtin_bit_cast(ushort16,bv{q}1);',
-                f'    *((uint16*)(((unsigned*)Bs)+bkp{q}*128+bn0{q}))=__builtin_convertvector(pb{q}0,uint16)|'
+                f'    *((uint16*)(((unsigned*)Bs)+bkp{q}*{bn_size}+bn0{q}))=__builtin_convertvector(pb{q}0,uint16)|'
                 f'(__builtin_convertvector(pb{q}1,uint16)<<16);']
   elif g.b_kxn:
     bsegs = bn_size//16
@@ -192,7 +201,7 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
   if g.b_kxn and not g.a_kxm:
     half_bits = ','.join(f'HALF_BITS(bp[{e}])' for e in range(8))
     lines += ['        uint8 bp;', '        #pragma unroll',
-              f'        for (int e=0; e<8; e++) bp[e]=((unsigned*)Bs)[(ki*8+e)*128+(wn*{tiles_n}+jn)*16+row];',
+              f'        for (int e=0; e<8; e++) bp[e]=((unsigned*)Bs)[(ki*8+e)*{bn_size}+(wn*{tiles_n}+jn)*16+row];',
               f'        ushort16 bb=(ushort16){{{half_bits}}};', '        bv[jn]=__builtin_bit_cast(half16,bb);']
   elif g.b_kxn:
     lines += ['        half16 v;', '        #pragma unroll',
@@ -214,8 +223,10 @@ def _render_gemm(g:GemmMatch, name:str) -> str:
   return '\n'.join(lines)
 
 def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
-  bm, bk, threads, waves_m, waves_n = 64, _batched_block_k(g), THREADS, 1, 4
-  tiles_m, tiles_n = bm//(waves_m*WMMA_M), BLOCK_N//(waves_n*WMMA_N)
+  bm, bn_size, bk, threads, waves_m = 64, _batched_block_n(g), _batched_block_k(g), _batched_threads(g), 1
+  waves_n = threads//32
+  exact_n = g.n % bn_size == 0
+  tiles_m, tiles_n = bm//(waves_m*WMMA_M), bn_size//(waves_n*WMMA_N)
   cslot, aslot, bslot = g.c.arg.slot, g.a.arg.slot, g.b.arg.slot
   params = ', '.join(f'{"float" if x.dtype == dtypes.float else "half"}* p{x.arg.slot}'
                      for x in sorted((g.c, g.a, g.b), key=lambda x:x.arg.slot))
@@ -225,21 +236,25 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
     'typedef float float8 __attribute__((ext_vector_type(8)));',
     '#define WMMA __builtin_amdgcn_wmma_f32_16x16x16_f16_w32',
     f'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size({threads}, {threads}))) {name}({params}) {{',
-    f'  __attribute__((shared, aligned(32))) half As[{bm*bk}], Bs[{BLOCK_N*bk}];',
+    f'  __attribute__((shared, aligned(32))) half As[{bm*bk}], Bs[{bn_size*bk}];',
     '  int bn=__builtin_amdgcn_workgroup_id_x(), bm=__builtin_amdgcn_workgroup_id_y(), '
     'batch=__builtin_amdgcn_workgroup_id_z(), tid=__builtin_amdgcn_workitem_id_x();',
     f'  int wave=tid>>5, lane=tid&31, wm=wave/{waves_n}, wn=wave%{waves_n}, row=lane&15, halfrow=lane>>4;',
   ]
   lines.append(f'  float8 c[{tiles_m}][{tiles_n}]={{}};')
   lines.append(f'  for (int kt=0; kt<{g.k//bk}; kt++) {{')
-  for q in range(bm*bk//(THREADS*16)):
-    lines += [f'    int aseg{q}=tid+{q*THREADS}, ak{q}=aseg{q}/{bm//16}, am{q}=(aseg{q}%{bm//16})*16;',
+  aseg_count = bm*bk//16
+  for q in range((aseg_count+threads-1)//threads):
+    prefix, suffix = (f'    if (tid+{q*threads}<{aseg_count}) {{ ', ' }') if aseg_count % threads else ('    ', '')
+    lines += [f'{prefix}int aseg{q}=tid+{q*threads}, ak{q}=aseg{q}/{bm//16}, am{q}=(aseg{q}%{bm//16})*16;',
               f'    *((half16*)(As+ak{q}*{bm}+am{q}))=*((half16*)(p{aslot}+'
-              f'((long)(batch*{g.k}+kt*{bk}+ak{q})*{g.m})+bm*{bm}+am{q}));']
-  for q in range(BLOCK_N*bk//(THREADS*16)):
-    lines += [f'    int bseg{q}=tid+{q*THREADS}, bk{q}=bseg{q}/8, bn{q}=(bseg{q}%8)*16;',
-              f'    *((half16*)(Bs+bk{q}*128+bn{q}))=bn*128+bn{q}<{g.n} ? '
-              f'*((half16*)(p{bslot}+((long)(batch*{g.k}+kt*{bk}+bk{q})*{g.n})+bn*128+bn{q})) : (half16){{0}};']
+              f'((long)(batch*{g.k}+kt*{bk}+ak{q})*{g.m})+bm*{bm}+am{q}));{suffix}']
+  bsegs = bn_size//16
+  for q in range(bn_size*bk//(threads*16)):
+    lines += [f'    int bseg{q}=tid+{q*threads}, bk{q}=bseg{q}/{bsegs}, bn{q}=(bseg{q}%{bsegs})*16;',
+              f'    *((half16*)(Bs+bk{q}*{bn_size}+bn{q}))=' + ('' if exact_n else f'bn*{bn_size}+bn{q}<{g.n} ? ') +
+              f'*((half16*)(p{bslot}+((long)(batch*{g.k}+kt*{bk}+bk{q})*{g.n})+bn*{bn_size}+bn{q}))' +
+              (';' if exact_n else ' : (half16){0};')]
   lines += ['    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier(); '
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");']
   lines += ['    #pragma unroll', f'    for (int ki=0; ki<{bk//WMMA_K}; ki++) {{',
@@ -248,7 +263,7 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
             f'        for (int e=0; e<16; e++) v[e]=As[(ki*16+e)*{bm}+(wm*{tiles_m}+im)*16+row];',
             '        av[im]=v;', '      }', '      #pragma unroll', f'      for (int jn=0; jn<{tiles_n}; jn++) {{',
             '        half16 v;', '        #pragma unroll',
-            f'        for (int e=0; e<16; e++) v[e]=Bs[(ki*16+e)*128+(wn*{tiles_n}+jn)*16+row];',
+            f'        for (int e=0; e<16; e++) v[e]=Bs[(ki*16+e)*{bn_size}+(wn*{tiles_n}+jn)*16+row];',
             '        bv[jn]=v;', '      }', '      #pragma unroll', f'      for (int im=0; im<{tiles_m}; im++) {{',
             '        #pragma unroll', f'        for (int jn=0; jn<{tiles_n}; jn++) c[im][jn]=WMMA(av[im],bv[jn],c[im][jn]);',
             '      }', '    }']
@@ -256,8 +271,8 @@ def _render_batched_gemm(g:BatchedGemmMatch, name:str) -> tuple[str, int]:
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");', '  }']
   lines += ['  #pragma unroll', f'  for (int im=0; im<{tiles_m}; im++) {{', '    #pragma unroll',
             f'    for (int jn=0; jn<{tiles_n}; jn++) {{',
-            f'      int om=bm*{bm}+(wm*{tiles_m}+im)*16+halfrow, on=bn*128+(wn*{tiles_n}+jn)*16+row;',
-            f'      if (on<{g.n}) {{', '        #pragma unroll',
+            f'      int om=bm*{bm}+(wm*{tiles_m}+im)*16+halfrow, on=bn*{bn_size}+(wn*{tiles_n}+jn)*16+row;',
+            ('      {' if exact_n else f'      if (on<{g.n}) {{'), '        #pragma unroll',
             f'        for (int e=0; e<8; e++) p{cslot}[((long)(om+e*2)*{g.n}+on)*{g.batch}+batch]=c[im][jn][e];',
             '      }', '    }', '  }']
   lines += ['}']
@@ -276,8 +291,8 @@ def cooperative_gemm_program(ast:UOp, renderer:Renderer, compile_binary:bool) ->
   elif (bg:=_match_batched_gemm(ast, renderer.target.device, renderer.target.arch)) is not None:
     name = f"coop_bgemm_{bg.batch}_{bg.m}_{bg.n}_{bg.k}"
     source, bm = _render_batched_gemm(bg, name)
-    global_size = ((bg.n+BLOCK_N-1)//BLOCK_N, bg.m//bm, bg.batch)
-    local_size = (THREADS, 1, 1)
+    global_size = ((bg.n+_batched_block_n(bg)-1)//_batched_block_n(bg), bg.m//bm, bg.batch)
+    local_size = (_batched_threads(bg), 1, 1)
     estimates = Estimates(2*bg.batch*bg.m*bg.n*bg.k, 2*bg.batch*(bg.m*bg.k+bg.n*bg.k+2*bg.m*bg.n),
                           2*bg.batch*(bg.m*bg.k+bg.n*bg.k+2*bg.m*bg.n))
     slots, out_slot = tuple(sorted((bg.c.arg.slot, bg.a.arg.slot, bg.b.arg.slot))), bg.c.arg.slot

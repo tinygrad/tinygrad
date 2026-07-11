@@ -161,6 +161,11 @@ class scoped_devectorize_cache:
   def __enter__(self): devectorize_caches.append({})
   def __exit__(self, *args): devectorize_caches.pop()
 
+apply_opts_caches: list[dict[tuple[UOp, type[Renderer], object, int], UOp]] = []
+class scoped_apply_opts_cache:
+  def __enter__(self): apply_opts_caches.append({})
+  def __exit__(self, *args): apply_opts_caches.pop()
+
 def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
   key = (x, idxs)
   if (ret:=ctx.lanes.get(key)) is not None: return ret
@@ -331,7 +336,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
-    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+    opt_key = (sink, type(ren), ren.target, ast.arg.beam)
+    if apply_opts_caches and (optimized:=apply_opts_caches[-1].get(opt_key)) is not None: sink = optimized
+    else:
+      sink = apply_opts(sink, ren, beam=ast.arg.beam)
+      if apply_opts_caches: apply_opts_caches[-1][opt_key] = sink
 
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
