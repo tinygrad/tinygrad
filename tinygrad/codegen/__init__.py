@@ -111,7 +111,7 @@ def broadcast_and_devec_wmma(b:UOp):
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
     idx_c = [UOp.const(dtypes.index, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
-  return UOp.vectorize(*src).reshape(b.shape)
+  return UOp.stack(*src).reshape(b.shape)
 
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
@@ -136,7 +136,7 @@ def do_devectorize(b:UOp):
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.index, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+  return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -144,7 +144,7 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp._stack(*[b.index(UOp.const(dtypes.index, i)) for i in range(b.max_numel())]))
+      src.append(UOp.stack(*[b.index(UOp.const(dtypes.index, i)) for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -163,7 +163,7 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
-   lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
+   lambda b,s: UOp.stack(*[b.index(u) for u in s.src])),
   # INDEX into RESHAPE moves the RESHAPE
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.RESHAPE, name="s"))),
    lambda b,s: b.index(s.src[0]).reshape(s.shape)),
@@ -173,7 +173,7 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.index, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> STACK
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
-   lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
+   lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
   # INDEX on INDEX is INDEX
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
    lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),

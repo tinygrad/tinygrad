@@ -39,8 +39,8 @@ class TestIselX86(unittest.TestCase):
     c = UOp.variable("c", 0, 0, dtypes.float32.vec(4))
     d = UOp.variable("e", 0, 0, dtypes.float32)
 
-    valid = [UOp.vectorize(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
-             UOp.vectorize(lane(a, 3), lane(b, 2), lane(c, 1), d)]
+    valid = [UOp.stack(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
+             UOp.stack(lane(a, 3), lane(b, 2), lane(c, 1), d)]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VINSERTPS)
 
   # complex address is [base + index*scale + displacement]
