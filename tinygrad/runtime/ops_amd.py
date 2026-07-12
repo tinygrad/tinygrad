@@ -326,7 +326,7 @@ class AMDComputeQueue(HWQueue):
     user_regs = []
     if prg.enable_private_segment_sgpr:
       assert self.dev.xccs == 1, "Only architected flat scratch is supported on multi-xcc"
-      scratch_hilo = data64_le(prg.dev.scratch.get_buf(prg.dev.device).va_addr)
+      scratch_hilo = data64_le(prg.dev.scratch._buf.va_addr)
       # sgpr word1 bit31 enables swizzle
       # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
@@ -352,7 +352,7 @@ class AMDComputeQueue(HWQueue):
     # this is what llvm refers to as "architected flat scratch"
     for xcc_id in range(self.dev.xccs):
       with self.pred_exec(xcc_mask=1<<xcc_id):
-        scratch_base = prg.dev.scratch.get_buf(prg.dev.device).va_addr + (prg.dev.scratch.nbytes // self.dev.xccs * xcc_id)
+        scratch_base = prg.dev.scratch._buf.va_addr + (prg.dev.scratch.nbytes // self.dev.xccs * xcc_id)
         self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(scratch_base >> 8))
 
     self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
@@ -406,14 +406,14 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def _submit(self, dev:AMDDevice):
-    ring = dev.compute_queue.ring.get_buf(dev.compute_queue.ring.device).cpu_view().view(fmt='I')
-    put = dev.compute_queue.put_value.get_buf(dev.compute_queue.put_value.device).cpu_view().view(fmt='Q')
+    ring = dev.compute_queue.ring._buf.cpu_view().view(fmt='I')
+    put = dev.compute_queue.put_value._buf.cpu_view().view(fmt='Q')
     cmds = self.indirect_cmd if dev == self.binded_device else self._q
     # WORKAROUND: PACKET3_PRED_EXEC doesn't work in rings, only in IBs, create a fake IB inside a ring to work around that
     if self.dev.xccs > 1 and dev != self.binded_device:
       ib_end = ((put[0] + 5) % len(ring)) + len(cmds)
       ib_pad = len(ring) - (ib_end - len(cmds)) if ib_end > len(ring) else 0
-      ib_ptr = dev.compute_queue.ring.get_buf(dev.compute_queue.ring.device).va_addr + ((put[0] + 5 + ib_pad) % len(ring)) * 4
+      ib_ptr = dev.compute_queue.ring._buf.va_addr + ((put[0] + 5 + ib_pad) % len(ring)) * 4
       cmds = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(ib_ptr), len(cmds) | self.pm4.INDIRECT_BUFFER_VALID,
               self.pm4.PACKET3(self.pm4.PACKET3_NOP, ib_pad + len(cmds) - 1), *((0,) * ib_pad), *cmds]
 
@@ -459,8 +459,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     aql_bytes = b''.join(bytes(c) if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in cmds)
 
     assert len(aql_bytes) < dev.compute_queue.ring.nbytes, "submit is too large for the queue"
-    ring = dev.compute_queue.ring.get_buf(dev.compute_queue.ring.device).cpu_view()
-    put = dev.compute_queue.put_value.get_buf(dev.compute_queue.put_value.device).cpu_view().view(fmt='Q')
+    ring, put = dev.compute_queue.ring._buf.cpu_view(), dev.compute_queue.put_value._buf.cpu_view().view(fmt='Q')
     cp_bytes = min(len(aql_bytes), (dev.compute_queue.ring.nbytes - (put[0] * 64) % dev.compute_queue.ring.nbytes))
     ring.view(offset=(put[0] * 64) % dev.compute_queue.ring.nbytes, fmt='B')[:cp_bytes] = aql_bytes[:cp_bytes]
     if (tail_bytes:=(len(aql_bytes) - cp_bytes)) > 0: ring.view(offset=0, fmt='B')[:tail_bytes] = aql_bytes[cp_bytes:]
@@ -528,9 +527,8 @@ class AMDCopyQueue(HWQueue):
 
   def _submit(self, dev:AMDDevice):
     sdma_queue = dev.sdma_queue(self.queue_idx)
-    ring = sdma_queue.ring.get_buf(sdma_queue.ring.device).cpu_view().view(fmt='I')
-    read_ptr = sdma_queue.read_ptr.get_buf(sdma_queue.read_ptr.device).cpu_view().view(fmt='Q')
-    put = sdma_queue.put_value.get_buf(sdma_queue.put_value.device).cpu_view().view(fmt='Q')
+    ring = sdma_queue.ring._buf.cpu_view().view(fmt='I')
+    read_ptr, put = sdma_queue.read_ptr._buf.cpu_view().view(fmt='Q'), sdma_queue.put_value._buf.cpu_view().view(fmt='Q')
     if self.binded_device == dev:
       # An IB packet must end on a 8 DW boundary.
       add = (8 - (((put[0] % 32) // 4) + len(self.indirect_cmd) % 8)) % 8
@@ -559,7 +557,7 @@ class AMDCopyQueue(HWQueue):
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
       zero_fill = sdma_queue.ring.nbytes - put[0] % sdma_queue.ring.nbytes
-      sdma_queue.ring.get_buf(sdma_queue.ring.device).cpu_view().view(put[0] % sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
+      sdma_queue.ring._buf.cpu_view().view(put[0] % sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
       put[0] += zero_fill
 
       ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
@@ -688,15 +686,15 @@ class AMDQueueDesc:
 
   def signal_doorbell(self, dev, doorbell_value:int|None=None):
     try:
-      put = self.put_value.get_buf(self.put_value.device).cpu_view().view(fmt='Q')[0]
-      self.write_ptr.get_buf(self.write_ptr.device).cpu_view().view(fmt='Q')[0] = put
+      put = self.put_value._buf.cpu_view().view(fmt='Q')[0]
+      self.write_ptr._buf.cpu_view().view(fmt='Q')[0] = put
 
       # Ensure all prior writes are visible to the GPU.
       System.memory_barrier()
 
       # Flush hdp if queue is in dev mem.
       if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-      self.doorbell.get_buf(self.doorbell.device).cpu_view().view(fmt='Q')[0] = put if doorbell_value is None else doorbell_value
+      self.doorbell._buf.cpu_view().view(fmt='Q')[0] = put if doorbell_value is None else doorbell_value
     except Exception as e:
       dev.error_state = e
       raise
@@ -804,11 +802,11 @@ class KFDIface:
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
-    ring_buf, gart_buf = ring.get_buf(ring.device), gart.get_buf(gart.device)
+    ring_buf, gart_buf = ring._buf, gart._buf
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring_buf.va_addr, ring_size=ring.nbytes, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=getenv("AMD_KFD_QUEUE_PRIORITY", 7),
-      eop_buffer_address=eop_buffer.get_buf(eop_buffer.device).va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.nbytes if eop_buffer else 0,
-      ctl_stack_size=ctl_stack_size, ctx_save_restore_address=cwsr_buffer.get_buf(cwsr_buffer.device).va_addr if cwsr_buffer else 0,
+      eop_buffer_address=eop_buffer._buf.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.nbytes if eop_buffer else 0,
+      ctl_stack_size=ctl_stack_size, ctx_save_restore_address=cwsr_buffer._buf.va_addr if cwsr_buffer else 0,
       ctx_save_restore_size=ctx_save_restore_size, write_pointer_address=gart_buf.va_addr+wptr,
       read_pointer_address=gart_buf.va_addr+rptr+8*xcc_id)
 
@@ -816,11 +814,10 @@ class KFDIface:
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
       self.doorbells = cast(FileIOInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
 
-    put_value = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
-    doorbell = Buffer("CPU", 1, dtypes.uint64,
-      options=BufferSpec(external_ptr=self.doorbells + queue.doorbell_offset - self.doorbells_base), preallocate=True)
     return AMDQueueDesc(ring=ring, read_ptr=gart.view(1, dtypes.uint64, rptr+8*xcc_id).ensure_allocated(),
-      write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), doorbell=doorbell, put_value=put_value,
+      write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), doorbell=Buffer("CPU", 1, dtypes.uint64,
+        options=BufferSpec(external_ptr=self.doorbells + queue.doorbell_offset - self.doorbells_base), preallocate=True),
+      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True),
       eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer)
 
   def sleep(self, tm:int):
@@ -892,21 +889,21 @@ class PCIIface(PCIIfaceBase):
                    xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
-    ring_buf, gart_buf = ring.get_buf(ring.device), gart.get_buf(gart.device)
+    ring_buf, gart_buf = ring._buf, gart._buf
     rcvr_params: tuple
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring_buf.va_addr, ring.nbytes, gart_buf.va_addr+rptr,
         gart_buf.va_addr+wptr, idx)))
     else:
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring_buf.va_addr, ring.nbytes, gart_buf.va_addr+rptr,
-        gart_buf.va_addr+wptr, eop_buffer.get_buf(eop_buffer.device).va_addr, eop_buffer.nbytes,
+        gart_buf.va_addr+wptr, eop_buffer._buf.va_addr, eop_buffer.nbytes,
         is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
-    put_value = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
-    doorbell = Buffer("CPU", 1, dtypes.uint64,
-      options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
-    return AMDQueueDesc(ring=ring, doorbell=doorbell, read_ptr=gart.view(1, dtypes.uint64, rptr).ensure_allocated(),
-      write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), put_value=put_value, eop_buffer=eop_buffer,
+    doorbell = self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')
+    return AMDQueueDesc(ring=ring, doorbell=Buffer("CPU", 1, dtypes.uint64,
+      opaque=HCQBuffer(doorbell.addr, doorbell.nbytes, view=doorbell), options=BufferSpec(external_ptr=1)),
+      read_ptr=gart.view(1, dtypes.uint64, rptr).ensure_allocated(), write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(),
+      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), eop_buffer=eop_buffer,
       cwsr_buffer=cwsr_buffer, params=rcvr_params)
 
   def _collect_interrupts(self, reset=False, drain_only=False):
@@ -916,9 +913,7 @@ class PCIIface(PCIIfaceBase):
       else: d.iface.dev_impl.ih.interrupt_handler()
 
       if reset and d.iface.dev_impl.recover(force=d.error_state is not None):
-        d.compute_queue.put_value.get_buf(d.compute_queue.put_value.device).cpu_view().view(fmt='Q')[0] = 0
-        d.compute_queue.read_ptr.get_buf(d.compute_queue.read_ptr.device).cpu_view().view(fmt='Q')[0] = 0
-        d.compute_queue.write_ptr.get_buf(d.compute_queue.write_ptr.device).cpu_view().view(fmt='Q')[0] = 0
+        for b in (d.compute_queue.put_value, d.compute_queue.read_ptr, d.compute_queue.write_ptr): b._buf.cpu_view().view(fmt='Q')[0] = 0
         d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
         d.timeline_signal.value = d.timeline_value - 1
         d.error_state = None
@@ -964,8 +959,7 @@ class USBIface(PCIIface):
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE:
-      self.pci_dev.usb._pci_cacheable += [(ring.get_buf(ring.device).cpu_view().addr, ring.nbytes)]
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring._buf.cpu_view().addr, ring.nbytes)]
     return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
   def sleep(self, timeout): pass
@@ -1068,7 +1062,7 @@ class AMDDevice(HCQCompiled):
       self.aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
         max_cu_id=(self.cu_cnt * self.xccs) - 1, max_wave_id=self.waves_per_cu - 1)
-      self.aql_gart.get_buf(self.aql_gart.device).cpu_view().view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
+      self.aql_gart._buf.cpu_view().view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.xccs, mmap.PAGESIZE)
     cwsr_buffer = Buffer(self.device, cwsr_buffer_size, dtypes.uint8, preallocate=True) if ctx_save_restore_size else None
@@ -1121,14 +1115,14 @@ class AMDDevice(HCQCompiled):
         rsrc1_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD1{"_GFX11" if self.target[0] != 9 else ""}_bitfields')
         rsrc3_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD3{"_GFX"+str(self.target[0]) if self.target[0] != 9 else ""}_bitfields')
 
-        scratch_buf = self.scratch.get_buf(self.device)
+        scratch_buf = self.scratch._buf
         self.aql_desc.scratch_backing_memory_location = int(scratch_buf.va_addr)
         self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * lanes_per_wave // 64
         self.aql_desc.scratch_resource_descriptor[:] = [lo32(scratch_buf.va_addr),
           int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(scratch_buf.va_addr), SWIZZLE_ENABLE=1), 'little'),
           lo32(size_per_xcc), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
         self.aql_desc.compute_tmpring_size = self.tmpring_size
-        self.aql_gart.get_buf(self.aql_gart.device).cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
+        self.aql_gart._buf.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def invalidate_caches(self):
     unwrap(self.hw_compute_queue_t)().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
