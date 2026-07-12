@@ -78,7 +78,7 @@ __device__ inline static void load_st_to_rt(RT &dst, const ST &src) {
 constexpr int NUM_WARPS = 8;
 using G = kittens::group<NUM_WARPS>;
 
-// SCALE_MODE bits: 1=x_scale, 2=w_scale, 4=g_scale
+// SCALE_MODE bits: 1=x_scale, 2=w_scale, 4=g_amax
 #ifndef SCALE_MODE
 #define SCALE_MODE 5
 #endif
@@ -91,7 +91,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     , float *w_scale_ptr
 #endif
 #if SCALE_MODE & 4
-    , float *g_scale_ptr
+    , float *g_amax_ptr
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
@@ -335,7 +335,8 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     scale *= *w_scale_ptr;
 #endif
 #if SCALE_MODE & 4
-    scale *= *g_scale_ptr;
+    float g_scale = (*g_amax_ptr + 1e-08f) * (1.0f / 448.0f);
+    scale *= g_scale;
 #endif
 
     mul(cA, cA, scale);
