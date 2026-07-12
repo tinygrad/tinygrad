@@ -253,7 +253,7 @@ class TestTinygrad(unittest.TestCase):
   def test_randperm(self):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()
-    np.testing.assert_equal(a.numpy(), [2, 1, 0, 9, 8, 7, 6, 5, 4, 3])
+    np.testing.assert_equal(a.numpy(), [1, 2, 3, 6, 7, 4, 9, 0, 5, 8])
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 

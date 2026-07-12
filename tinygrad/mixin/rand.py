@@ -245,26 +245,22 @@ class RandMixin(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    if n == 0: return cls.empty(0, dtype=dtype, device=device)
-
-    # An affine map is a permutation iff its stride is coprime to n. Select a valid stride in one step instead of
-    # adjusting it once per factor, since a later adjustment can reintroduce divisibility by an earlier factor.
-    m, factors, p = n, [], 2
-    while p*p <= m:
-      if m % p == 0:
-        factors.append(p)
-        while m % p == 0: m //= p
-      p = 3 if p == 2 else p+2
-    if m > 1: factors.append(m)
-
-    scores = cls.rand(n, device=device, **kwargs)
-    candidates = cls.arange(1, n+1, dtype=dtypes.int64)
-    valid = candidates > 0
-    for p in factors: valid = valid & (candidates % p).ne(0)
-    selected = valid.where(scores, 2).argmin()
-    stride = cls.arange(n).eq(selected).where(candidates, 0).sum()
-    offset = cls.randint(1, low=0, high=n, device=device, dtype=dtypes.int64)
-    return ((cls.arange(n, dtype=dtypes.int64) * stride + offset) % n).cast(dtype)
+    mod, idx = max(n, 1), cls.arange(n, dtype=dtypes.int64)
+    stride = max(1, round(mod / ((1 + math.sqrt(5)) / 2)))
+    while math.gcd(stride, mod) != 1: stride += 1
+    offset = cls.randint(1, low=0, high=mod, device=device, dtype=dtypes.int64, **kwargs)
+    bits = max(1, n.bit_length())
+    stages = tuple(dict.fromkeys((0, bits//3, bits*2//3, bits-1)))
+    keys = cls.randint(len(stages), low=0, high=1 << 23, device=device, dtype=dtypes.int64)
+    ret = (idx * stride + offset) % mod
+    for stage, shift in enumerate(stages):
+      partner = ret ^ (1 << shift)
+      partner = (partner < n).where(partner, ret)
+      h = ret.minimum(partner).cast(dtypes.uint32) + keys[stage].cast(dtypes.uint32)
+      h = ((h ^ (h >> 16)) * 0x7feb352d).cast(dtypes.uint32)
+      h = ((h ^ (h >> 15)) * 0x846ca68b).cast(dtypes.uint32)
+      ret = ((h ^ (h >> 16)) & 1).bool().where(partner, ret)
+    return ret.cast(dtype)
 
   def multinomial(self, num_samples:int = 1, replacement:bool = False) -> Self:
     """
