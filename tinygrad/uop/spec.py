@@ -55,9 +55,6 @@ class scoped_type_verify_cache:
 
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
-  # no vec dtypes allowed
-  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.count > 1 else None),
-
   # NOTE: for testing, we let sinks be anything
   (UPat(Ops.SINK, dtypes.void), lambda: True),
 

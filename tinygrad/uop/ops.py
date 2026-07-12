@@ -327,10 +327,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
-      # INS shape matches the dtype count (temporary, until vec dtypes are removed)
+      # INS shape is always scalar, vector width is in the instruction encoding
       case Ops.INS:
         if self.dtype is dtypes.void: return None
-        return (self.dtype.count,) if self.dtype.count > 1 else ()
+        return ()
 
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:

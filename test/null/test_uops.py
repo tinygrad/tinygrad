@@ -289,6 +289,12 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
+  def test_cmp_self_folding_multidim(self):
+    for shape in ((), (3,), (2, 3), (2, 3, 4)):
+      x = Tensor.empty(*shape, dtype=dtypes.int).uop
+      self.assertIs((x < x).simplify(), x.const_like(False, dtypes.bool))
+      self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
+
   def test_replace(self):
     x = UOp.param(0, dtypes.int, (1,))
     self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, (1,)).arg).arg.slot, 1)
