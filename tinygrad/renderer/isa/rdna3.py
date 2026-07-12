@@ -264,17 +264,11 @@ def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
 def cmp(ctx, x:UOp):
   _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
   scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
-  if scmp:
-    ins = _mask_cmp[x.op]
-    if x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
-  else:
-    dt = x.src[0].dtype
-    if dt in dtypes.int8s: dt = dtypes.uint16 if dtypes.is_unsigned(x.dtype) else dtypes.int16
-    ins = OP_INS[x.op][64][dt]
+  ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][x.src[0].dtype]
+  if scmp and x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(ctx, x)
 
-# TODO: sub64?
 def arith64(ctx, x:UOp, add:bool):
   if dtypes.is_float(x.dtype):
     assert add
@@ -372,16 +366,13 @@ def alu(ctx, x:UOp):
     else: ins = _lshr[max(2,x.dtype.itemsize)]
     return _vop2(ctx, x.replace(src=x.src[::-1]).ins(ins))
 
-  dt = x.dtype
-  if dt in dtypes.int8s: dt = dtypes.uint16 if dtypes.is_unsigned(x.dtype) else dtypes.int16
   if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
-  elif x.op in OP_INS and dt in OP_INS[x.op]:
-    ins = OP_INS[x.op][dt]
+  elif x.op in OP_INS and x.dtype in OP_INS[x.op]:
+    ins = OP_INS[x.op][x.dtype]
   else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
-
 # NOTE: make this a pm?
 def intcast(y:UOp, x:UOp):
   # NOTE: use v_bfe instead of hand rolled masking
@@ -497,6 +488,7 @@ from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.dtype import to_storage_scalar
 extra_matcher = PatternMatcher([
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(dtypes.uint16, to_storage_scalar(x.arg, dtypes.bfloat16)).bitcast(dtypes.bfloat16)),
+  (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
@@ -506,6 +498,9 @@ extra_matcher = PatternMatcher([
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 # cast i8 -> i16/i32 = bfe
 pre_isel_matcher = PatternMatcher([
+  # NOTE: does this not work for int8 alu? Do we need to sign extend or something..
+  (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
+  (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"), lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
   (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat(Ops.CDIV, name="x"), idiv),
   # TODO: handle gated bool load/store
