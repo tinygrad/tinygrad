@@ -239,6 +239,22 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.weakint, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.weakint, dtypes.float64) == dtypes.float64
 
+  def test_weakfloat_promo(self):
+    # weakfloat is a float, but like weakint it is not one of dtypes.floats
+    assert dtypes.is_float(dtypes.weakfloat) and dtypes.weakfloat not in dtypes.floats
+    # weakfloat with itself is weakfloat
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.weakfloat) == dtypes.weakfloat
+    # weakfloat is above bool, weakint and any concrete int (they defer up to it)
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.bool) == dtypes.weakfloat
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.weakint) == dtypes.weakfloat
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.int32) == dtypes.weakfloat
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.uint64) == dtypes.weakfloat
+    # weakfloat defers to any concrete float type
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.fp8e4m3) == dtypes.fp8e4m3
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.float16) == dtypes.float16
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.weakfloat, dtypes.float64) == dtypes.float64
+
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float

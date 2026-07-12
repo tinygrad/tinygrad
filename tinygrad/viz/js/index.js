@@ -1053,13 +1053,13 @@ async function main() {
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
-  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (!cache[ckey].done && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "[DONE]") return eventSource.close();
+      if (e.data === "[DONE]") { ret.done = true; eventSource.close(); return; }
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph

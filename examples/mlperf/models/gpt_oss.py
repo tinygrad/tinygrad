@@ -12,21 +12,11 @@ from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, quantize_mxfp8
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
 INIT_STD = 0.008
-
-def quantize_mx(x:Tensor) -> tuple[Tensor, Tensor]:
-  *batch, K = x.shape
-  scale_K = K // 32
-  amax = x.detach().float().reshape(*batch, scale_K, 32).abs().max(axis=-1)
-  e8 = (amax.maximum(1e-38).log2().floor() + 127).clamp(0, 254).cast(dtypes.uint8)
-  qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(*batch, scale_K, 1).expand(*batch, scale_K, 32).reshape(*batch, K)
-  x_scaled = x.float() * qscale
-  x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
-  return x_clamped.cast(FP8_DTYPE), e8
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
   # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
@@ -116,7 +106,7 @@ class GPTOSS:
 
   def _quant_weight(self, *shape:int, std:float=INIT_STD):
     w = Tensor.zeros(*shape) if getenv("ZEROS") else Tensor.normal(*shape, mean=0.0, std=std)
-    w_q, w_e8 = quantize_mx(w)
+    w_q, w_e8, _ = quantize_mxfp8(w)
     return w_q, w_e8.is_param_(False)
 
   def _attn_mask(self, seqlen:int, sliding:bool, dtype) -> Tensor:
@@ -138,11 +128,11 @@ class GPTOSS:
     xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
     xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
     xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    scores = ((xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask).contiguous()
+    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
     sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
     m = scores.max(-1, keepdim=True).maximum(sink)
     e = (scores - m).exp()
-    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16).contiguous()
+    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
     attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
@@ -160,9 +150,9 @@ class GPTOSS:
 
     out = None
     for e in range(self.n_experts):
-      gate_up = (matmul_mx(inp.contiguous_backward(), w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]).contiguous()
+      gate_up = matmul_mx(inp, w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]
       y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]).contiguous()
-      contrib = (weights[..., e:e+1].cast(y.dtype) * y).contiguous()
+      contrib = weights[..., e:e+1].cast(y.dtype) * y
       out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 

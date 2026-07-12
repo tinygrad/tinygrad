@@ -69,7 +69,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      self.assertFalse(idx_val.overflows(idx_val.dtype.base.scalar()))
+      self.assertFalse(idx_val.overflows(idx_val.dtype.scalar()))
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):

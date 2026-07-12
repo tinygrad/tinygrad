@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
-from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.isa import ISARenderer
@@ -211,14 +211,14 @@ class TestLinearizer(unittest.TestCase):
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
         local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
-        assert local[0].dtype.base == acc_dtype
+        assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
       local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
-      self.assertEqual(local[0].dtype.base, expected_dtype)
+      self.assertEqual(local[0].dtype, expected_dtype)
 
     tests = (
       (dtypes.float16, None, dtypes.float),
@@ -249,7 +249,7 @@ class TestLinearizer(unittest.TestCase):
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
     for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
-      if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace is AddrSpace.REG:
+      if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
           assert u.src[1].op is Ops.CONST
         else:
@@ -276,7 +276,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in t.schedule_linear().src if si.src[0].op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
-    assert not any(u.op is Ops.REDUCE and len(u.arg[1]) > 0 for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
+    assert not any(u.op is Ops.REDUCE and u.arg[1] > 0 for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
@@ -307,7 +307,7 @@ class TestLinearizer(unittest.TestCase):
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      reg_stores = [u for u in uops if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace == AddrSpace.REG]
+      reg_stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace == AddrSpace.REG]
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 

@@ -38,7 +38,7 @@ def _custom_quantize_mxfp8(fp8_out:UOp, e8_out:UOp, si_out:UOp, x:UOp) -> UOp:
   scaled = (x_f * qscale).maximum(-FP8_MAX).minimum(FP8_MAX)
   e8u8 = e8f.cast(dtypes.uint8)
 
-  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
+  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype)).end(lane)
   e8_store = e8_out.after(fp8_store)[super_idx * PACK + sb].store(e8u8)
 
   # pack the 4 e8 of this super-block into one uint32 (little-endian: byte sb), write transposed (sk4, row)

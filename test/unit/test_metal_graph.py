@@ -17,7 +17,7 @@ class TestMetalGraph(unittest.TestCase):
       buf.op = Ops.SLICE
       src = MagicMock()
       src.dtype = dtypes.uint8
-      buf.src = (src, UOp.const(dtypes.weakint, offset))
+      buf.src = (src, UOp.const(dtypes.index, offset))
       buf.dtype = dtypes.uint8
     else:
       buf.op = Ops.BUFFER

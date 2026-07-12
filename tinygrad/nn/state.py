@@ -102,7 +102,8 @@ def fs_store(t:Tensor) -> Tensor:
 
   level_chunks = base_chunks
   for _ in range(tree_depth + 1):
-    data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
+    # assign data into tinyfs:store and read back hashes
+    data = Tensor.empty(data.shape[0], dtype=dtypes.uint8, device="tinyfs:store").assign(data)[:level_chunks * 16].to(to_device)
     if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
     level_chunks = math.ceil(data.shape[0] / CHUNK_SIZE)
 
@@ -123,18 +124,16 @@ def fs_load(t:Tensor, size:int) -> Tensor:
   tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
   data, level_chunks = h, 0
   for i in reversed(range(tree_depth + 1)):
-    data = data.to("tinyfs:load")
-
     # if not last level, its still hashes
     if i > 0 or tree_depth == 0:
       level_chunks = max(1, math.ceil(base_chunks / (CHUNK_SIZE // 16)**(i-1)))
-      pad_amt = 16 * level_chunks
-    else: pad_amt = CHUNK_SIZE * level_chunks
-    if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
-    data = data[:pad_amt].contiguous()
-    if i != 0: data = data.to(t.device)
+      out_sz = 16 * level_chunks
+    else: out_sz = CHUNK_SIZE * level_chunks
+    # assign hash into tinyfs:load and read back data
+    (load:=Tensor.empty(out_sz, dtype=dtypes.uint8, device="tinyfs:load"))[:data.shape[0]].assign(data)
+    data = load
 
-  return data[:size]
+  return data.to(t.device)[:size]
 
 # state dict
 

@@ -79,7 +79,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # this is the big accumulator
   acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float.vec(4), 0, AddrSpace.REG)
   assert acc.size*WARP_SIZE*WARPGROUP_SIZE*4 == BLOCK_M*BLOCK_N
-  acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float.vec(4), 0.0), end=init_l)
+  acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float, (0.0,)*4), end=init_l)
 
   # create locals (note A is permuted, and the stride is changed to avoid bank conflicts)
   def make_locals(slot) -> tuple[UOp, UOp]:
@@ -180,7 +180,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # store the acc into gmem
   cp_i, cp_j = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 10004), UOp.range(BLOCK_N//TC_N, 10005)
   c_load = lambda i: C[gx, cp_i*TC_M*WARPGROUP_SIZE + warpgroup*TC_M + (warp//16)*4+i, gy, cp_j*TC_N + warp%16]
-  store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].gep(i)) for i in range(4)])
+  store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].index(i)) for i in range(4)])
   store = store.end(cp_i, cp_j)
 
   return store.sink(arg=KernelInfo(name="custom_gemm", opts_to_apply=())).simplify()
@@ -192,12 +192,12 @@ acc = UOp.placeholder((4,), dtypes.float, 0, AddrSpace.REG)
 acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
 
 # do the wmma
-acc_load = UOp.vectorize(*[acc.after(K_loop)[i] for i in range(4)])
+acc_load = UOp.stack(*[acc.after(K_loop)[i] for i in range(4)])
 wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
 out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
 
 # store back the acc
-acc = acc.after(UOp.group(*[acc[i].store(out.gep(i)) for i in range(4)]).end(K_loop))
+acc = acc.after(UOp.group(*[acc[i].store(out.index(i)) for i in range(4)]).end(K_loop))
 
 # store the acc into gmem
 store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(acc[i]) for i in range(4)])

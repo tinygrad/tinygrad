@@ -20,8 +20,8 @@ def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
 @functools.cache
-def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch):
-  def grad(dou:UOp, ker:UOp) -> tuple[None, None, UOp, UOp, UOp]:
+def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink):
+  def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
     l_vec = Tensor(ker.src[2].after(ker), device=ker.src[2].device)
@@ -40,25 +40,33 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
 
-    # unshuffle dq: atomic_pk_add_bf16_with_warpid creates a shuffled layout within each 16x128 tile
-    # decompose each tile into (j=4, a=2, b=2, d=4, e=4, k=4, c=2) and permute to (e, k, j, a, d, b, c) = standard row-major
-    dq = dq.reshape(B, H, N//16, 4, 2, 2, 4, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
+    if D == 64:
+      dq = dq.reshape(B, H, N//16, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2).permute(0, 1, 2, 8, 9, 10, 11, 3, 4, 6, 7, 5, 12).reshape(B, H, N, D).transpose(1, 2)
+    else:
+      dq = dq.reshape(B, H, N//16, 4, 2, 2, D//32, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
 
     # reduce partial dK/dV across GROUP_SIZE query heads
     dk = dk_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
     dv = dv_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
 
-    return None, None, dq.uop, dk.uop, dv.uop
+    if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
+    sinks = Tensor(ker.src[6], device=ker.src[6].device)
+    p_sink = (sinks.reshape(1, H, 1, 1) - l_vec).exp()
+    dsink = -(delta_vec.float() * p_sink).sum(axis=(0, 2, 3))
+
+    return None, None, dq.uop, dk.uop, dv.uop, dsink.uop
   return grad
 
 # TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_simple_reshape
-def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
-  assert D == 128, "only D=128 supported"
+  assert D in (64, 128), "only D=64 or D=128 supported"
+  has_sink = sinks is not None
+  if has_sink: sinks = sinks.float()
 
   num_devices = len(xq.device) if isinstance(xq.device, tuple) else 1
   is_dp = xq.uop.axis == 0
@@ -77,17 +85,18 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = _sharded_empty((B, N, H * D), xq, axis=shard_axis) if write_flat else _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
 
-  grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch)
+  grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink)
 
-  attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D), grad_fxn=grad)[:2]
+  fwd_inputs = (attn, l_vec, xq, xk, xv) + ((sinks,) if has_sink else ())
+  attn, l_vec = Tensor.custom_kernel(*fwd_inputs, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, has_sink=has_sink), grad_fxn=grad)[:2]
 
   return attn, attn, l_vec
 
 @functools.cache
-def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True):
   code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DATTN_SINK={int(has_sink)}"]
 
   Q_BLOCK_SIZE = 32
   NUM_WARPS = 8
@@ -100,7 +109,8 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
   el = q.dtype.itemsize
   mem = (2*B*N*H*D + 2*B*N*H_KV*D) * el + B*H*N * l_vec.dtype.itemsize
   estimates = Estimates(ops=2*B*H*N*N*D, lds=mem, mem=mem)
-  sink = UOp.sink(o.base, l_vec.base, q.base, k.base, v.base,
+  buf_inputs = (o.base, l_vec.base, q.base, k.base, v.base) + ((sinks.base,) if has_sink else ())
+  sink = UOp.sink(*buf_inputs,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
 
@@ -117,7 +127,7 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
   code = (pathlib.Path(__file__).parent / "fa_bwd_pre.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_D={D}"]
 
   DOT_SLICE_QO = 16
   NUM_WARPS = 4
@@ -147,7 +157,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
 def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
   code = (pathlib.Path(__file__).parent / "fa_bwd_causal.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}"]
 
   BLOCK_SIZE_KV = 256
   NUM_WARPS = 4
@@ -177,7 +187,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
 def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
   code = (pathlib.Path(__file__).parent / "fa_bwd_post.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_D={D}"]
 
   DOT_SLICE_QO = 16
   NUM_WARPS = 4

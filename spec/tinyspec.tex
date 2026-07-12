@@ -73,7 +73,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \op{Permute} & $(T,)$ & axis order $\pi$ & Reorder axes. $\pi = (1,0)$ is transpose. \\
 \op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
-\op{Expand} & $(T, \mathbf{s'})$ & --- & Broadcast size-1 axes. $s_k \in \{1, s'_k\}$. \\
+\op{Expand} & $(T, \mathbf{n})$ & --- & Prepend axes $\mathbf{n}$ on the left. Output shape is $\mathbf{n} + T.\mathrm{shape}$. \\
 \op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in an invalid-filled output of shape $s'_k$. \\
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
@@ -83,13 +83,13 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- collapse axes to size $1$}
+\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- remove axes}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, axes & Reduce $T$ along axes or ranges. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
+\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, $n$ & Reduce the first $n$ axes of $T$. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
 \bottomrule
 \end{tabular}
 
@@ -258,7 +258,7 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
 \op{Param} & from arg & from $\mathrm{src}[0]$ & from arg & from src or dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
-\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & collapse axes to $1$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
+\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
 \op{Cast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & clamped to dtype \\
 \op{Bitcast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{Copy} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ & from arg & $\mathrm{src}[0]$ \\
@@ -284,8 +284,8 @@ Default \emph{dtype range}: $[\mathrm{dtype\_min},\, \mathrm{dtype\_max}]$.
 
 \medskip
 \textbf{axis} tracks the multi-device sharding dimension. \op{Buffer} with $n$-tuple device: axis $= 0$ (device dim).
-\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation.
-\op{Reduce} on the shard axis $\to$ \textsc{null}. \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
+\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts axis right by $|\mathbf{n}|$.
+\op{Reduce} on the shard axis $\to$ \textsc{null} (shard axis is among the first $n$ axes). \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
 
 %% ============================================================
 \subsection*{Kernel Optimizations (OptOps) \normalfont\small--- schedule-level transforms on kernel ranges}

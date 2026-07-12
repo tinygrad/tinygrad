@@ -1,7 +1,8 @@
+from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate
-from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
+from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, ParamArg
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 
@@ -112,15 +113,15 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
-  return UOp(Ops.STACK, to, tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
+  return UOp(Ops.STACK, src=tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   x.replace(dtype=l2i_dt[x.dtype], src=(sz*2,)) if x.dtype in l2i_dt else None),
+   x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag(0), val.rtag(0))).group(st.replace(src=(idx.rtag(1), val.rtag(1)))) if val.tag is None else None),
@@ -144,7 +145,7 @@ pm_long_decomp = PatternMatcher([
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
-   x.replace(dtype=f2f_dt[ctx[0]], tag=ctx[0])
+   x.replace(dtype=f2f_dt[ctx[0]], arg=replace(x.arg, dtype=f2f_dt[ctx[0]]) if isinstance(x.arg, ParamArg) else x.arg, tag=ctx[0])
    if x.dtype == ctx[0] and (x.op is not Ops.INDEX or x.src[0].op not in {Ops.LOAD, Ops.STACK}) else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
   # bitcasted load should just replace load
@@ -169,10 +170,13 @@ pm_float_decomp = PatternMatcher([
 
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
-  for fr in sorted(filter(_should_emulate, ctx[0])):
-    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
-    if DEBUG >= 2: print(f"emulating {fr} as {to}")
-    sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+  # NOTE: dtype decomp creates intermediate UOps that don't follow the spec (e.g. half LOAD on ushort BUFFER)
+  with Context(SPEC=min(SPEC.value, 1)):
+    for fr in sorted(filter(_should_emulate, ctx[0])):
+      to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+      if DEBUG >= 2: print(f"emulating {fr} as {to}")
+      pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
+      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
   ctx[0].clear()
   return sink
 

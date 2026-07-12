@@ -110,12 +110,12 @@ class TestExecALU(unittest.TestCase):
 
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
-    gmem = UOp.param(0, dtypes.float.ptr(8))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
-    gate = gidx0<UOp.const(dtypes.int, 1)
-    idx = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
+    gmem = UOp.param(0, dtypes.float, (8,))
+    gidx0 = UOp.special(4, 'gidx0')
+    gate = gidx0<UOp.const(dtypes.index, 1)
+    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.index, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
-    store = UOp(Ops.STORE, dtypes.void, (idx, val))
+    store = UOp(Ops.STORE, src=(idx, val))
     uops = to_uops_list([store])
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
@@ -126,12 +126,12 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertEqual(len(gated_uops[-1].src), 2)
 
   def test_gate_some_stores(self):
-    gmem0 = UOp.param(0, dtypes.float.ptr(8))
-    gmem1 = UOp.param(1, dtypes.float.ptr(8))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
-    idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem1, idx))
+    gmem0 = UOp.param(0, dtypes.float, (8,))
+    gmem1 = UOp.param(1, dtypes.float, (8,))
+    gidx0 = UOp.special(4, 'gidx0')
+    idx = gidx0 * UOp.const(dtypes.index, 2)
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.index, 1))))
+    idx1 = UOp(Ops.INDEX, src=(gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -146,13 +146,13 @@ class TestGatedStoreRewrite(unittest.TestCase):
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.skip("we don't merge ifs anymore")
   def test_merge_ifs_alt(self):
-    gmem0 = UOp.param(0, dtypes.float.ptr(8))
-    gmem1 = UOp.param(1, dtypes.float.ptr(8))
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
-    idx = gidx0*UOp.const(dtypes.int, 2)
-    gate = gidx0<UOp.const(dtypes.int, 1)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem0, idx.valid(gate)))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(8), (gmem1, idx.valid(gate)))
+    gmem0 = UOp.param(0, dtypes.float, (8,))
+    gmem1 = UOp.param(1, dtypes.float, (8,))
+    gidx0 = UOp.special(4, 'gidx0')
+    idx = gidx0*UOp.const(dtypes.index, 2)
+    gate = gidx0<UOp.const(dtypes.index, 1)
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
+    idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -170,7 +170,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp.param(0, dt.ptr(3))
+      g = UOp.param(0, dt, (3,))
       c = UOp.const(dt, 2)
       l = g.index(c)
       a = UOp(Ops.CDIV, dt, (l, c))
@@ -183,7 +183,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_floormod_power_of_two(self):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
-      g = UOp.param(0, dt.ptr(9))
+      g = UOp.param(0, dt, (9,))
       c = UOp.const(dt, 8)
       a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -195,7 +195,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_floordiv_power_of_two_uint(self):
     # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
     for dt in (dtypes.uint32, dtypes.uint64):
-      g = UOp.param(0, dt.ptr(3))
+      g = UOp.param(0, dt, (3,))
       c = UOp.const(dt, 2)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -207,17 +207,17 @@ class TestFastIdiv(unittest.TestCase):
   @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
-    g = UOp.param(0, dtypes.uint32.ptr(4))
+    g = UOp.param(0, dtypes.uint32, (4,))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CDIV, ops)
 
-    b = UOp(Ops.CMOD, dtypes.uint, (l, c))
+    b = UOp(Ops.CMOD, src=(l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -242,10 +242,10 @@ class TestFastIdiv(unittest.TestCase):
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
-    g = UOp.param(0, dtypes.uint32.ptr(8))
+    g = UOp.param(0, dtypes.uint32, (8,))
     c = UOp.const(dtypes.uint, 7)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    l = UOp(Ops.LOAD, src=(g.index(c),))
+    a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -253,10 +253,10 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.CDIV, ops)
 
   def test_disable_fast_idiv(self):
-    g = UOp.param(0, dtypes.uint32.ptr(4))
+    g = UOp.param(0, dtypes.uint32, (4,))
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
@@ -269,8 +269,8 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp.const(dtypes.float, 2.0)
     b = UOp.const(dtypes.float, 3.0)
 
-    add = UOp(Ops.ADD, dtypes.float, (a, b))
-    mul = UOp(Ops.MUL, dtypes.float, (a, b))
+    add = UOp(Ops.ADD, src=(a, b))
+    mul = UOp(Ops.MUL, src=(a, b))
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
@@ -282,7 +282,7 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 8),), arg='gidx0')
     self.assertEqual(UOp.const(dtypes.int, 17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
@@ -290,8 +290,8 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
   def test_replace(self):
-    x = UOp.param(0, dtypes.int.ptr())
-    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int.ptr()).arg).arg.slot, 1)
+    x = UOp.param(0, dtypes.int, (1,))
+    self.assertEqual(x.replace(arg=UOp.param(1, dtypes.int, (1,)).arg).arg.slot, 1)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
   def test_const_zero_neg_zero_different(self):
@@ -315,7 +315,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(a))) == str(a)
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.STACK, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    vec = UOp(Ops.STACK, src=tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
   def test_reduceop_arg(self):
@@ -344,22 +344,22 @@ class TestUopsObject(unittest.TestCase):
 
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_empty(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(simplify=False), "{}")
   def test_render_vectorize_empty_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(simplify=False), "{0,0,0}")
   def test_render_vectorize_different(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(simplify=False), "{0,1,2}")
   def test_render_vectorize_same_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(), "{0,0,0}")
   def test_render_vectorize_different_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "{0,1,2}")
 
 if __name__ == '__main__':

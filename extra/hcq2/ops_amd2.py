@@ -4,6 +4,7 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_getaddr, make_ins, make_cmdbuf, make_placeholder
+from extra.hcq2.hcq2 import make_binary_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -158,14 +159,13 @@ def pm4_submit(cmdbuf, devs):
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, ptr=True).store(
-    cmdbuf.index(i*4, ptr=True).cast(dtypes.uint32.ptr()).load()).end(i)
-  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put)
-  bump_wptr = wptr.index(zero, ptr=True).store(next_put)
+  copy_to_ring = ring.index(ring_idx).store(cmdbuf.index(i).load()).end(i)
+  bump_put_ptr = put_ptr.index(zero).store(next_put)
+  bump_wptr = wptr.index(zero).store(next_put)
 
   # ring the doorbell once the copy and pointer bumps have landed
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, ptr=True).store(next_put)
+  return doorbell.after(flush).index(zero).store(next_put)
 
 pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
   lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
@@ -177,7 +177,7 @@ class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TR
 
 def sdma_copy(ctx, call):
   dst, src = call.src[1], call.src[2]
-  sz = src.max_numel() * src.dtype.base.itemsize
+  sz = src.max_numel() * src.dtype.itemsize
   src_addr, dst_addr = make_getaddr(src, ctx.devs), make_getaddr(dst, ctx.devs)
   return UOp(Ops.LINEAR, dtypes.void, tuple([make_ins(SDMAOps.COPY,
      ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
@@ -226,19 +226,18 @@ def sdma_submit(cmdbuf, devs):
 
   # zero the wrapped tail, then copy the cmdbuf into the ring
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
-  zero_tail = ring.index(tail_off_dw + zi, ptr=True).store(UOp.const(dtypes.uint32, 0)).end(zi)
+  zero_tail = ring.index(tail_off_dw + zi).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
-  copy_to_ring = ring.index(start_dw + i, ptr=True).store(
-    cmdbuf.index(i*4, ptr=True).cast(dtypes.uint32.ptr()).load()).end(i)
+  copy_to_ring = ring.index(start_dw + i).store(cmdbuf.index(i).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
-  bump_put_ptr = put_ptr.index(zero, ptr=True).store(next_put_b)
-  bump_wptr = wptr.index(zero, ptr=True).store(next_put_b)
+  bump_put_ptr = put_ptr.index(zero).store(next_put_b)
+  bump_wptr = wptr.index(zero).store(next_put_b)
 
   # ring the doorbell once the writes have landed
   flush = UOp.barrier(zero_tail, copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero, ptr=True).store(next_put_b)
+  return doorbell.after(flush).index(zero).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
   lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
@@ -280,9 +279,8 @@ def amd_build_program(prg:UOp) -> UOp:
       wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
-    buf = make_placeholder(dev.device, len(image), dtypes.uint8, "program")
-    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=bytes(image)))),), arg=(data, prg.arg))
-    # cached = prg.replace(src=(buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, arg=bytes(image)))),), arg=data)
+    buf = make_placeholder(prg.device, len(image), dtypes.uint8, "program")
+    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, bytes(image))),), arg=(data, prg.arg))
   return cached
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -582,7 +580,7 @@ class AMDDevice(HCQ2Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx.scratch_buffer(b.max_numel()))]) + self.pm_bufferize
+    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx[0].scratch_buffer(b.max_numel()))]) + self.pm_bufferize
 
     self.pmc_enabled:bool = PROFILE > 0 and PMC > 0
     if self.pmc_enabled:
@@ -632,8 +630,8 @@ class AMDDevice(HCQ2Compiled):
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
     ] + [
-      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.timeline_signal(q)),
-      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.timeline_value(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx[0].timeline_signal(q)),
+      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx[0].timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue
