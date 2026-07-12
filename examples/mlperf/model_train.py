@@ -1434,10 +1434,10 @@ def train_llama3():
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
-  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
-  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts] if hasattr(model, "_fp8_next_amax") else []
-  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts] if hasattr(model, "_fp8_next_grad_amax") else []
+  fp8_amax = list(model._fp8_amax.values())
+  fp8_next_amax = list(model._fp8_next_amax.values()) if hasattr(model, "_fp8_next_amax") else []
+  fp8_grad_amax = list(model._fp8_grad_amax.values()) if hasattr(model, "_fp8_grad_amax") else []
+  fp8_next_grad_amax = list(model._fp8_next_grad_amax.values()) if hasattr(model, "_fp8_next_grad_amax") else []
   fp8_inv_scales = [x for v in list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
                     for x in (v if isinstance(v, list) else [v])]
   layer_nums = getattr(model, "_layer_num", [])
@@ -1471,6 +1471,7 @@ def train_llama3():
   @TinyJit
   def minibatch(tokens:Tensor):
     for nxt in fp8_next_amax: nxt.assign(nxt.zeros_like())
+    for nxt in fp8_next_grad_amax: nxt.assign(nxt.zeros_like())
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)

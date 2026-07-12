@@ -21,7 +21,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
 
   idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
 
-  layer = UOp.const(dtypes.weakint, 0) if layer_num is None else layer_num[0]
+  layer = UOp.const(dtypes.weakint, 0) if layer_num is None else layer_num.index(UOp.const(dtypes.weakint, 0)).load()
   scale = FP8_MAX / (amax_state[layer].cast(dtypes.float) + 1e-8)
   x_f = x[idx].cast(dtypes.float)
   abs_x = (x_f < 0.0).where(-x_f, x_f)
@@ -66,7 +66,7 @@ def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp, layer_num:UO
   i = UOp.range(n_elems, 0)
 
   x_f = x.reshape(n_elems)[i].cast(dtypes.float)
-  layer = UOp.const(dtypes.weakint, 0) if layer_num is None else layer_num[0]
+  layer = UOp.const(dtypes.weakint, 0) if layer_num is None else layer_num.index(UOp.const(dtypes.weakint, 0)).load()
   scale = FP8_MAX / (amax_state[layer].cast(dtypes.float) + 1e-8)
   store = fp8_out.reshape(n_elems)[i].store((x_f * scale).cast(fp8_out.dtype))
 
@@ -85,7 +85,8 @@ def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   grad_x = (Tensor(gradient, device=device).float() * scale).cast(dtypes.bfloat16)
   return (None, None, grad_x.uop, None) + ((None,) if layer_num is not None else ())
 
-def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3, amax_out:Tensor|None=None, layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, UOp|None]:
+def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3, amax_out:Tensor|None=None,
+                         layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, UOp|None]:
   # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling. Returns (fp8, inv_scale, new_amax, store_effect).
   # Fused kernel reads x once and writes fp8 + scalar amax via global atomic max.
   # store_effect writes new_amax into amax_state's buffer — the caller must thread it into a realized
