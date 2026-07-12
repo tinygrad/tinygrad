@@ -26,8 +26,9 @@ class Estimates:
     mult_stack: list[sint] = []
     excluded: set[UOp] = set()
     if ignore_indexing:
-      indexing_srcs = [s for u in uops if u.op in {Ops.INDEX, Ops.SHRINK} for s in u.src[1:]]
-      if indexing_srcs: excluded.update(UOp.sink(*indexing_srcs).toposort(lambda x: x.op is not Ops.END))
+      for u in uops:
+        if u.op in {Ops.INDEX, Ops.SHRINK}:
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -75,8 +76,6 @@ class Renderer:
   compiler: Compiler = Compiler()
 
   def __init__(self, target:Target): self.target = target
-  @property
-  def rewrite_cache_key(self): return (type(self), self.target)
   def __reduce__(self): return self.__class__, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def asm(self, prg:UOp, lin:UOp) -> bytes: raise NotImplementedError("needs an assembler")

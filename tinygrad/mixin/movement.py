@@ -85,8 +85,6 @@ class MovementMixin:
         b = index if resolve(index >= 0, False) else index + size
         return {"size":size, "boundary":(b, b+1), "stride":1, "collapse_dim":True}
       case slice():
-        if index.start is None and index.stop is None and index.step is None:
-          return {"size":size, "boundary":(0,size), "stride":1, "collapse_dim":False}
         if not all(s is None or isinstance(s, sint) for s in (index.start, index.stop, index.step)):
           raise TypeError(f"slice {index=} is not supported")
         if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
@@ -109,8 +107,7 @@ class MovementMixin:
   def _apply_view_ops(self, mops:list) -> Self:
     # applies shrink + flip + stride from a list of parsed view indices
     # flip negative strides
-    x = self.shrink(tuple(m["boundary"] for m in mops))
-    if flip_dims := tuple(i for i, m in enumerate(mops) if m["stride"] < 0): x = x.flip(flip_dims)
+    x = self.shrink(tuple(m["boundary"] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m["stride"] < 0))
     strides = tuple(abs(m["stride"]) for m in mops)
     # apply stride
     if any(st != 1 for st in strides):
@@ -203,9 +200,7 @@ class MovementMixin:
     """
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    mop_arg = [(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)]
-    ret = self._mop(Ops.SHRINK, arg=mop_arg)
-    if any(isinstance(ns, int) and isinstance(s, int) and ns != s for (_,ns),s in zip(mop_arg, self.shape)): return ret
+    ret = self._mop(Ops.SHRINK, arg=[(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)])
     return self if ret.shape == self.shape else ret
 
   def permute(self, order, *args) -> Self:

@@ -1,5 +1,5 @@
 import heapq
-from typing import Any, Iterable
+from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
@@ -51,7 +51,7 @@ def linearize(sink:UOp) -> list[UOp]:
   return newlst
 
 class CFGContext:
-  def __init__(self, sink:UOp, topo:Iterable[UOp]|None=None):
+  def __init__(self, sink:UOp):
     # there are 3 relationships between ranges:
     # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
@@ -59,7 +59,7 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort() if topo is None else topo:
+    for u in sink.toposort():
       # get the deps from the src
       deps[u] = {}
       for s in u.src: deps[u] |= deps[s]

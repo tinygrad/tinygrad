@@ -241,7 +241,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
     if x.dtype == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = [r for u in consumer_map[x] for r in ending_ranges.get(u, ())]
+    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
 
     # *** the ranges on the output are
     #  1. new if this op is realized

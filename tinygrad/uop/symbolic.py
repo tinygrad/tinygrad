@@ -359,7 +359,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=False) -> UOp:
 
 def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.backward_slice_with_self else 0 for other in valids)
+  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX

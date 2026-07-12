@@ -572,7 +572,6 @@ class tqdm(Generic[T]):
 def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
-  def _recreate_cm(self): return type(self)()
   def __enter__(self):
     self._was_enabled = gc.isenabled()
     if self._was_enabled: gc.disable()

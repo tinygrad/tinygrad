@@ -99,7 +99,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # apply view ops then dim injection (None) and collapse (int)
     x = self._apply_view_ops(mops := [p for p in indices_parsed if p["index"] is not None])
     x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
-    if any(p["index"] is None or p["collapse_dim"] for p in indices_parsed): x = x.reshape(tuple(p["size"] for p in x_dims))
+    x = x.reshape(tuple(p["size"] for p in x_dims))
 
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if is_adv(p['index'])]:
@@ -918,35 +918,35 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if (orig_len := int(x.shape[dim])) <= 1: return x, x.const_like(0).cast(dtypes.default_int)
     # pad to power of 2
     n_stages = (orig_len-1).bit_length()
-    padded_len = 2**n_stages
-    pads = tuple((0, padded_len - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x._pad_constant(pads, x.dtype.min if descending else x.dtype.max)
-    idx = (x.const_like(1).cast(dtypes.default_int)._cumalu(dim, Ops.ADD) - 1).unflatten(dim, (2,)*n_stages)
-    x = x.unflatten(dim, (2,)*n_stages)
+    pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
+    x = x._pad_constant(pads, x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
         # flip so arrows of green boxes point the same way as blue boxes
         crossover_dim = dim + n_stages - stage - 1
         blue_box, green_box = x.split(1, crossover_dim)
-        idx_blue_box, idx_green_box = idx.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
         x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
-        idx = (idx_blue_box.cat(idx_green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
-        idx_top, idx_bottom = idx.split(1, partner_dim)
-        top_first = ((x_top > x_bottom) if descending else (x_top < x_bottom)) | (x_top.eq(x_bottom) & (idx_top < idx_bottom))
-        x = top_first.where(x_top, x_bottom).cat(top_first.where(x_bottom, x_top), dim=partner_dim).contiguous()
-        idx = top_first.where(idx_top, idx_bottom).cat(top_first.where(idx_bottom, idx_top), dim=partner_dim).contiguous()
+        x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
+        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
       if stage != n_stages:
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
-        idx_blue_box, idx_flipped_green_box = idx.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-        idx = idx_blue_box.cat(idx_flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    return x.flatten(dim, dim+n_stages-1).shrink_to(self.shape), idx.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
+    x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
+    # compute indices for sorted values
+    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, buffer=False).tril()
+    mask = mask.reshape((None, None) + (1,)*(self.ndim-dim-1))
+    def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
+    count_orig, count_sorted = compute_counts(self), compute_counts(x)
+    cond = self.unsqueeze(dim+1).eq(x.unsqueeze(dim)) & count_orig.unsqueeze(dim+1).eq(count_sorted.unsqueeze(dim))
+    idx = type(self).arange(orig_len).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
+    idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
+    return x, idx
 
   def argsort(self, dim:int=-1, descending:bool=False) -> Self:
     """

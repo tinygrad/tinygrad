@@ -156,21 +156,6 @@ class DevectorizeContext:
   @property
   def rewrite_cache_key(self): return (type(self.ren), self.ren.target)
 
-devectorize_caches: list[dict[tuple[UOp, tuple[UOp, ...]], UOp]] = []
-class scoped_devectorize_cache:
-  def __enter__(self): devectorize_caches.append({})
-  def __exit__(self, *args): devectorize_caches.pop()
-
-apply_opts_caches: list[dict[tuple[UOp, type[Renderer], object, int], UOp]] = []
-class scoped_apply_opts_cache:
-  def __enter__(self): apply_opts_caches.append({})
-  def __exit__(self, *args): apply_opts_caches.pop()
-
-postopt_codegen_caches: list[dict[tuple[UOp, type[Renderer], object], UOp]] = []
-class scoped_postopt_codegen_cache:
-  def __enter__(self): postopt_codegen_caches.append({})
-  def __exit__(self, *args): postopt_codegen_caches.pop()
-
 def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
   key = (x, idxs)
   if (ret:=ctx.lanes.get(key)) is not None: return ret
@@ -341,15 +326,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
-    opt_key = (sink, type(ren), ren.target, ast.arg.beam)
-    if apply_opts_caches and (optimized:=apply_opts_caches[-1].get(opt_key)) is not None: sink = optimized
-    else:
-      sink = apply_opts(sink, ren, beam=ast.arg.beam)
-      if apply_opts_caches: apply_opts_caches[-1][opt_key] = sink
-
-  postopt_key = (sink, type(ren), ren.target)
-  use_postopt_cache = bool(postopt_codegen_caches) and not (VIZ or PROFILE or TRACK_MATCH_STATS)
-  if use_postopt_cache and (cached_sink:=postopt_codegen_caches[-1].get(postopt_key)) is not None: return cached_sink
+    sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
@@ -372,8 +349,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2,
-                       ctx=DevectorizeContext(ren, devectorize_caches[-1] if devectorize_caches else {}), name="devectorize2")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=DevectorizeContext(ren, {}), name="devectorize2")
 
   # some coalesing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
@@ -416,22 +392,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer
-  final_topo = sink.backward_slice_with_self
-  if any(x.op is Ops.RANGE for x in final_topo):
-    sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink, itertools.chain(sink.backward_slice, (sink,))),
-                         name="add control flow", bottom_up=True)
-    final_topo = sink.backward_slice_with_self
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
-  params = [x for x in final_topo if x.op is Ops.PARAM]
-  if any(x.arg.slot == -1 for x in params):
-    sink = graph_rewrite(sink, pm_number_params, ctx=[sum(x.arg.slot != -1 for x in params)], name="number params with -1", walk=True)
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
 
   # return the rewritten sink
-  if use_postopt_cache: postopt_codegen_caches[-1][postopt_key] = sink
   return sink
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
@@ -542,7 +512,7 @@ def do_to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   # PROGRAM lowering is a linear root-only pipeline. Driving it through graph_rewrite
   # needlessly walks the full SINK and LINEAR graphs between each stage.
   if len(prg.src) == 1: prg = do_linearize(renderer, prg, prg.src[0])
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], uops=prg.src[1].src))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
   if prg.src[0].arg.estimates is None and (estimated:=do_estimates(prg, prg.src[0], prg.src[1])) is not None: prg = estimated
   if len(prg.src) == 2:
     prg = do_assemble(renderer, prg, prg.src[1]) if isinstance(renderer, ISARenderer) else do_render(renderer, prg, prg.src[1])

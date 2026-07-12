@@ -168,8 +168,7 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    spec = SPEC.value
-    if spec == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -178,12 +177,12 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    if spec > 1:
+    if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
-      if spec > 2:
+      if SPEC > 2:
         # SPEC=3 checks the shape
         _ = created._shape
-        if spec > 3:
+        if SPEC > 3:
           test_pyrender(created)
       with Context(CHECK_OOB=0): fret = cast(bool|None, spec_full.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
@@ -1209,14 +1208,14 @@ class ProgramInfo:
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
-  def from_sink(sink:UOp, aux:tuple=(), uops:Iterable[UOp]|None=None) -> ProgramInfo:
+  def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
     _vars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in sink.toposort() if uops is None else uops:
+    for u in sink.toposort():
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -1429,7 +1428,6 @@ def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
   return lazy_compile
 
 class PatternMatcher:
-  __slots__ = ("patterns", "pdict")
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -1624,7 +1622,6 @@ class scoped_rewrite_cache:
   def __exit__(self, *args): rewrite_caches.pop()
 
 class RewriteContext:
-  __slots__ = ("pm", "bpm", "bpm_cache", "ctx", "replace", "enter_calls", "shared_cache")
   def __init__(self, pm, bpm, ctx=None, enter_calls=False, shared_cache=None):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
