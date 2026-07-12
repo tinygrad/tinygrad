@@ -572,6 +572,8 @@ class tqdm(Generic[T]):
 def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
+  # ContextDecorator otherwise reuses self, so recursive calls overwrite _was_enabled.
+  def _recreate_cm(self): return type(self)()
   def __enter__(self):
     self._was_enabled = gc.isenabled()
     if self._was_enabled: gc.disable()
