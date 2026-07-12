@@ -1138,6 +1138,7 @@ class ProgramInfo:
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
   vars: tuple[UOp, ...] = ()
+  runtimevars: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
@@ -1146,28 +1147,26 @@ class ProgramInfo:
   @property
   def function_name(self): return to_function_name(self.name)
 
-  @property
-  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
-
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]|None]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size]) if self.local_size is not None else None
     return global_size, local_size
 
   def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
-    try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+    try: return tuple(var_vals[k.expr] for k in self.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
   def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
     _vars: list[UOp] = []
+    _rtvars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
-      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
+      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: (_rtvars if u.expr == 'core_id' else _vars).append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
@@ -1176,10 +1175,10 @@ class ProgramInfo:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+      if u.op is Ops.PARAM and u in _rtvars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+                       tuple(dedup(_rtvars)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
 
 @dataclass(frozen=True)
 class CallInfo:

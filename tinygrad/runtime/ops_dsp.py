@@ -27,6 +27,7 @@ dsp_string = PatternMatcher([
 class DSPRenderer(ClangRenderer):
   supports_float4 = True
   has_threads = False
+  args_buf = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
   extra_args = []

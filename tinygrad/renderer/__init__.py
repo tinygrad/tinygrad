@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Callable, cast
 from dataclasses import dataclass
+from itertools import accumulate
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
@@ -83,3 +84,9 @@ class Renderer:
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
     return set(dtypes.all) - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())
+
+  @staticmethod
+  def param_layout(uops:list[UOp]) -> tuple[list[tuple[UOp, int]], int]:
+    ps = [u for u in uops if u.op is Ops.PARAM]
+    offs = [*accumulate((u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8 for u in ps), initial=0)]
+    return [*zip(ps, offs)], offs[-1]
