@@ -246,20 +246,16 @@ class RandMixin(OpMixin):
     ```
     """
     mod, idx = max(n, 1), cls.arange(n, dtype=dtypes.int64)
-    stride = max(1, round(mod / ((1 + math.sqrt(5)) / 2)))
-    while math.gcd(stride, mod) != 1: stride += 1
     offset = cls.randint(1, low=0, high=mod, device=device, dtype=dtypes.int64, **kwargs)
     bits = max(1, n.bit_length())
     stages = tuple(dict.fromkeys((0, bits//3, bits*2//3, bits-1)))
     keys = cls.randint(len(stages), low=0, high=1 << 23, device=device, dtype=dtypes.int64)
-    ret = (idx * stride + offset) % mod
+    ret = (idx + offset) % mod
     for stage, shift in enumerate(stages):
       partner = ret ^ (1 << shift)
       partner = (partner < n).where(partner, ret)
-      h = ret.minimum(partner).cast(dtypes.uint32) + keys[stage].cast(dtypes.uint32)
-      h = ((h ^ (h >> 16)) * 0x7feb352d).cast(dtypes.uint32)
-      h = ((h ^ (h >> 15)) * 0x846ca68b).cast(dtypes.uint32)
-      ret = ((h ^ (h >> 16)) & 1).bool().where(partner, ret)
+      swap = (ret.minimum(partner).cast(dtypes.uint64).threefry(keys[stage].cast(dtypes.uint64)) & 1).bool()
+      ret = swap.where(partner, ret)
     return ret.cast(dtype)
 
   def multinomial(self, num_samples:int = 1, replacement:bool = False) -> Self:
