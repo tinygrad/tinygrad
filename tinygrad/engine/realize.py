@@ -251,11 +251,9 @@ pm_compile = PatternMatcher([
 
 batch_compiled_cache: dict[tuple[Compiler, str], tuple[str, str, bytes]] = {}
 def _batch_spec_key(name:str, src:str) -> str:
-  marker = f" {name}("
-  if marker not in src: return f"{name}\n{src}"
-  key = src.replace(marker, " __batch_cached_kernel__(", 1)
-  key = re.sub(r"\b(data\d+)_\d+\b", r"\1", key)
-  return re.sub(r"/\* \d+ \*/", "", key)
+  if f" {name}(" not in src: return f"{name}\n{src}"
+  src = src.replace(f" {name}(", " __batch_cached_kernel__(", 1)
+  return re.sub(r"\b(data\d+)_\d+\b|/\* \d+ \*/", lambda x: x[1] or "", src)
 
 def batch_compile(linear:UOp) -> UOp:
   groups:dict[Compiler, list[UOp]] = {}
@@ -270,14 +268,14 @@ def batch_compile(linear:UOp) -> UOp:
   for compiler,prgs in groups.items():
     prgs = list(dict.fromkeys(prgs))
     specs = [(p.arg.function_name, p.src[2].arg) for p in prgs]
-    spec_keys = [_batch_spec_key(*spec) for spec in specs]
-    unique_keys = list(dict.fromkeys(spec_keys))
+    keys = [_batch_spec_key(*spec) for spec in specs]
+    unique_keys = list(dict.fromkeys(keys))
     missing_keys = [key for key in unique_keys if (compiler, key) not in batch_compiled_cache]
-    missing_specs = [specs[spec_keys.index(key)] for key in missing_keys]
+    missing_specs = [specs[keys.index(key)] for key in missing_keys]
     if missing_specs:
       batch_compiled_cache.update({(compiler, key):compiled for key,compiled in
                                    zip(missing_keys, compiler.compile_cached_batch(missing_specs))})
-    for prg,key in zip(prgs, spec_keys):
+    for prg,key in zip(prgs, keys):
       name,src,lib = batch_compiled_cache[(compiler, key)]
       replacements[prg] = compiled_prg = prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
                                                       arg=replace(prg.arg, name=name))

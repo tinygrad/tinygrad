@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system, getenv, diskcache_get, diskcache_get_batch, diskcache_put_batch
+from tinygrad.helpers import system, getenv
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -105,7 +105,6 @@ class HIPCompiler(Compiler):
     batch_size = getenv("AMD_COMPILE_BATCH_SIZE", 256)
     batch_opt = getenv("AMD_COMPILE_OPT", 2)
     generic_opt = getenv("AMD_GENERIC_COMPILE_OPT", 1)
-    frontend_opt = getenv("AMD_FRONTEND_OPT", 1)
     if batch_size <= 1 or any(src.split('\n', 1)[0].strip() == '.text' for _,src in srcs): return super().compile_cached_batch(srcs)
 
     renamed = []
@@ -114,25 +113,10 @@ class HIPCompiler(Compiler):
       renamed.append((new_name, src.replace(f" {name}(", f" {new_name}(", 1)))
 
     ret:list[tuple[str, str, bytes]|None] = [None] * len(srcs)
-    missing:dict[tuple[int, bool], list[int]] = {}
-    cache_writes:list[tuple[str, tuple[str, str]]] = []
-    module_writes:list[tuple[str, bytes]] = []
+    groups:dict[tuple[int, bool], list[int]] = {}
     opts = [batch_opt if name.startswith("coop_") else generic_opt for name,_ in renamed]
-    cache_srcs = [f"batchF{frontend_opt}O{opts[i]}\n{src}" for i,(_,src) in enumerate(renamed)]
-    cached_sources = diskcache_get_batch(self.cachekey, cache_srcs) if self.cachekey is not None else {}
-    refs = {v[1] for v in cached_sources.values() if isinstance(v, tuple) and v[0] == "batch"}
-    module_keys = {key:f"__batch__{key}" for key in refs}
-    same_table_modules = diskcache_get_batch(self.cachekey, list(module_keys.values())) if self.cachekey is not None else {}
-    cached_modules = {key:same_table_modules[module_keys[key]] for key in refs if module_keys[key] in same_table_modules}
-    if self.cachekey is not None and (old_refs:=refs-cached_modules.keys()):
-      cached_modules.update(diskcache_get_batch(f"{self.cachekey}_batch", list(old_refs)))
-    for i,(name,src) in enumerate(renamed):
-      opt = opts[i]
-      cached = cached_sources.get(cache_srcs[i])
-      if isinstance(cached, tuple) and cached[0] == "batch": cached = cached_modules.get(cached[1])
-      if cached is not None: ret[i] = (name, src, cached)
-      else: missing.setdefault((opt, "__ocml_" in src), []).append(i)
-    for (opt,use_device_libs),indices in missing.items():
+    for i,(_,src) in enumerate(renamed): groups.setdefault((opts[i], "__ocml_" in src), []).append(i)
+    for (opt,use_device_libs),indices in groups.items():
       for start in range(0, len(indices), batch_size):
         batch = indices[start:start+batch_size]
         preamble = dict.fromkeys(line for i in batch for line in
@@ -142,19 +126,11 @@ class HIPCompiler(Compiler):
           _, kernel = renamed[i][1].split('extern "C" __attribute__((global))', 1)
           kernels.append('extern "C" __attribute__((global))'+kernel)
         combined = '\n'.join((*preamble, *kernels))
-        module_key = hashlib.sha256(f"F{frontend_opt}O{opt}\n{combined}".encode()).hexdigest()
-        lib = diskcache_get(self.cachekey, f"__batch__{module_key}") if self.cachekey is not None else None
-        if lib is None and self.cachekey is not None: lib = diskcache_get(f"{self.cachekey}_batch", module_key)
-        if lib is None:
-          try: lib = compile_hip(combined, self.arch, use_device_libs=use_device_libs, backend_opt=opt)
-          except RuntimeError as e: raise CompileError(e) from e
-          if self.cachekey is not None: module_writes.append((f"__batch__{module_key}", lib))
+        try: lib = compile_hip(combined, self.arch, use_device_libs=use_device_libs, backend_opt=opt)
+        except RuntimeError as e: raise CompileError(e) from e
         for i in batch:
           name,src = renamed[i]
-          if self.cachekey is not None: cache_writes.append((f"batchF{frontend_opt}O{opt}\n{src}", ("batch", module_key)))
           ret[i] = (name, src, lib)
-    if self.cachekey is not None:
-      diskcache_put_batch(self.cachekey, module_writes+cache_writes)
     assert all(x is not None for x in ret)
     return [x for x in ret if x is not None]
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)

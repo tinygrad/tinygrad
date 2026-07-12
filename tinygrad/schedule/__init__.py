@@ -255,10 +255,8 @@ def _fuse_gemm_output_transpose(linearized:list[UOp]) -> list[UOp]:
   return ret
 
 def _fuse_channel_reductions(linearized:list[UOp]) -> list[UOp]:
-  from tinygrad.codegen.opt.reduce import ActivationVarGradElementwiseMatch, ActivationVarGradElementwiseSumDMeanMatch
-  from tinygrad.codegen.opt.reduce import ActivationVarGradElementwiseSumMatch
-  from tinygrad.codegen.opt.reduce import DualActivationReduceElementwiseMatch, DualActivationReduceMatch
-  from tinygrad.codegen.opt.reduce import DualBNGrad512Match, DualBNGradDMean512Match, DualChannelReduceMatch, DualMoments512Match
+  from tinygrad.codegen.opt.reduce import ActivationVarGradElementwiseSumDMeanMatch, DualActivationReduceElementwiseMatch
+  from tinygrad.codegen.opt.reduce import DualBNGradDMean512Match, DualChannelReduceMatch, DualMoments512Match
   from tinygrad.codegen.opt.reduce import _match_activation_elementwise, _match_activation_elementwise_512, _match_activation_sum
   from tinygrad.codegen.opt.reduce import _match_activation_sum_512
   from tinygrad.codegen.opt.reduce import _match_activation_dmean_512, _match_activation_var_grad, _match_channel_reduce
@@ -298,14 +296,13 @@ def _fuse_channel_reductions(linearized:list[UOp]) -> list[UOp]:
     dmean_idx = next((j for j in range(i+2,min(i+6,len(ret))) if ret[j].op is Ops.CALL and ret[j].src[0].op is Ops.SINK and
       _match_bn_dmean_512(ret[j].src[0],target.device,target.arch) == var_batch and ret[j].src[2] is a.src[1] and
       ret[j].src[3] is a.src[4] and ret[j].src[4] is a.src[5] and ret[j].src[5] is a.src[2] and ret[j].src[6] is a.src[6]),None)
-    if dmean_idx is not None:
-      d = ret[dmean_idx]
-      ret[i] = a.src[0].replace(tag=DualBNGradDMean512Match(var_batch)).call(
-        a.src[1],b.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],b.src[3])
-      ret.pop(dmean_idx)
-    else:
-      ret[i] = a.src[0].replace(tag=DualBNGrad512Match(var_batch)).call(
-        a.src[1],b.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],b.src[3])
+    if dmean_idx is None:
+      i += 1
+      continue
+    d = ret[dmean_idx]
+    ret[i] = a.src[0].replace(tag=DualBNGradDMean512Match(var_batch)).call(
+      a.src[1],b.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],b.src[3])
+    ret.pop(dmean_idx)
     ret.pop(i+1)
     i += 1
   i = 0
@@ -325,23 +322,21 @@ def _fuse_channel_reductions(linearized:list[UOp]) -> list[UOp]:
     c = ret[i+2] if i+2 < len(ret) else None
     fuse_sum = c is not None and c.op is Ops.CALL and c.src[0].op is Ops.SINK and \
       _match_activation_sum_512(c.src[0],target.device,target.arch) == var_batch and a.src[6] is c.src[2] and a.src[7] is c.src[3]
-    if fuse_sum:
-      assert c is not None
-      dmean_idx = next((j for j in range(i+3,min(i+7,len(ret))) if ret[j].op is Ops.CALL and ret[j].src[0].op is Ops.SINK and
-        _match_activation_dmean_512(ret[j].src[0],target.device,target.arch) == var_batch and ret[j].src[2] is a.src[1] and
-        ret[j].src[3] is a.src[4] and ret[j].src[4] is b.src[1]),None)
-      if dmean_idx is not None:
-        d = ret[dmean_idx]
-        ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseSumDMeanMatch(var_batch)).call(
-          a.src[1],b.src[1],c.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7],c.src[4])
-        ret.pop(dmean_idx)
-      else:
-        ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseSumMatch(var_batch)).call(
-          a.src[1],b.src[1],c.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7],c.src[4])
-      ret.pop(i+2)
-    else:
-      ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseMatch(var_batch)).call(
-        a.src[1],b.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7])
+    if not fuse_sum:
+      i += 1
+      continue
+    assert c is not None
+    dmean_idx = next((j for j in range(i+3,min(i+7,len(ret))) if ret[j].op is Ops.CALL and ret[j].src[0].op is Ops.SINK and
+      _match_activation_dmean_512(ret[j].src[0],target.device,target.arch) == var_batch and ret[j].src[2] is a.src[1] and
+      ret[j].src[3] is a.src[4] and ret[j].src[4] is b.src[1]),None)
+    if dmean_idx is None:
+      i += 1
+      continue
+    d = ret[dmean_idx]
+    ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseSumDMeanMatch(var_batch)).call(
+      a.src[1],b.src[1],c.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7],c.src[4])
+    ret.pop(dmean_idx)
+    ret.pop(i+2)
     ret.pop(i+1)
     i += 1
   i = 0
@@ -364,15 +359,11 @@ def _fuse_channel_reductions(linearized:list[UOp]) -> list[UOp]:
       elem_idx = next((k for k in range(i+1,min(i+5,len(ret))) if k != j and ret[k].op is Ops.CALL and ret[k].src[0].op is Ops.SINK and
         _match_activation_elementwise(ret[k].src[0],target.device,target.arch) == (am.channels,am.spatial,am.groups) and
         a.src[4] is ret[k].src[2] and a.src[5] is ret[k].src[4] and a.src[6] is ret[k].src[5]),None)
-      if elem_idx is not None:
-        elem = ret[elem_idx]
-        ret[i] = a.src[0].replace(tag=DualActivationReduceElementwiseMatch(am.groups,am.channels,am.spatial)).call(
-          a.src[1],bout,elem.src[1],a.src[2],a.src[3],a.src[4],elem.src[3],a.src[5],a.src[6])
-        for k in sorted((j,elem_idx),reverse=True): ret.pop(k)
-      else:
-        ret[i] = a.src[0].replace(tag=DualActivationReduceMatch(am.groups,am.channels,am.spatial)).call(
-          a.src[1],bout,a.src[2],a.src[3],a.src[4],a.src[5],a.src[6])
-        ret.pop(j)
+      if elem_idx is None: continue
+      elem = ret[elem_idx]
+      ret[i] = a.src[0].replace(tag=DualActivationReduceElementwiseMatch(am.groups,am.channels,am.spatial)).call(
+        a.src[1],bout,elem.src[1],a.src[2],a.src[3],a.src[4],elem.src[3],a.src[5],a.src[6])
+      for k in sorted((j,elem_idx),reverse=True): ret.pop(k)
       break
     i += 1
   i = 0

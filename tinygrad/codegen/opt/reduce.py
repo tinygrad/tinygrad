@@ -21,24 +21,10 @@ class DualChannelReduceMatch:
   spatial:int
 
 @dataclass(frozen=True)
-class DualActivationReduceMatch:
-  groups:int
-  channels:int
-  spatial:int
-
-@dataclass(frozen=True)
 class DualActivationReduceElementwiseMatch:
   groups:int
   channels:int
   spatial:int
-
-@dataclass(frozen=True)
-class ActivationVarGradElementwiseMatch:
-  batch:int
-
-@dataclass(frozen=True)
-class ActivationVarGradElementwiseSumMatch:
-  batch:int
 
 @dataclass(frozen=True)
 class ActivationVarGradElementwiseSumDMeanMatch:
@@ -46,10 +32,6 @@ class ActivationVarGradElementwiseSumDMeanMatch:
 
 @dataclass(frozen=True)
 class DualMoments512Match:
-  batch:int
-
-@dataclass(frozen=True)
-class DualBNGrad512Match:
   batch:int
 
 @dataclass(frozen=True)
@@ -168,23 +150,19 @@ def _match_bn_dmean_512(ast:UOp, device:str, arch:str) -> int|None:
   return batch if Counter(u.op for u in ast.toposort()) == Counter(expected) else None
 
 def bn_grad_512_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
-  fused_dmean = isinstance(ast.tag,DualBNGradDMean512Match)
-  if not (fused_dmean or isinstance(ast.tag,DualBNGrad512Match)) or renderer.target.device != "AMD" or \
+  if not isinstance(ast.tag,DualBNGradDMean512Match) or renderer.target.device != "AMD" or \
      not renderer.target.arch.startswith("gfx11"): return None
   batch = ast.tag.batch
-  name = f"channel_bn_grad_{batch}_512_4{'_dmean' if fused_dmean else ''}_{ast.key.hex()[:8]}"
-  declarations = ("float* p0, float* p1, float* p2, float* p3, half* p4, float* p5, float* p6, float* p7, float* p8" if fused_dmean else
-                  "float* p0, float* p1, float* p2, half* p3, float* p4, float* p5, float* p6, float* p7")
-  var_slot, x_slot, mean_slot, weight_slot, grad_slot, reg_slot = (3,4,5,6,7,8) if fused_dmean else (2,3,4,5,6,7)
+  name = f"channel_bn_grad_{batch}_512_4_dmean_{ast.key.hex()[:8]}"
   source = f'''#define half _Float16
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(128,128))) {name}(
-    {declarations}) {{
+    float* p0, float* p1, float* p2, float* p3, half* p4, float* p5, float* p6, float* p7, float* p8) {{
   __attribute__((shared, aligned(32))) float partial_cov[128], partial_sum[128];
   int c=__builtin_amdgcn_workgroup_id_x(), tid=__builtin_amdgcn_workitem_id_x();
-  float cov=0.0f, sum=0.0f, mean=p{mean_slot}[c], weight=p{weight_slot}[c];
+  float cov=0.0f, sum=0.0f, mean=p5[c], weight=p6[c];
   for (int q=0; q<{batch//8}; q++) {{
-    int r=tid+q*128, idx=(r>>4)*8192+c*16+(r&15); float grad=p{grad_slot}[idx];
-    cov+=((float)p{x_slot}[idx]-mean)*weight*grad; sum+=grad;
+    int r=tid+q*128, idx=(r>>4)*8192+c*16+(r&15); float grad=p7[idx];
+    cov+=((float)p4[idx]-mean)*weight*grad; sum+=grad;
   }}
   partial_cov[tid]=cov; partial_sum[tid]=sum;
   __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
@@ -194,14 +172,12 @@ extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_si
     __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");
   }}
-  if (tid==0) {{ float inv=1.0f/p{var_slot}[c], vg=inv*__builtin_elementwise_sqrt(inv)*partial_cov[0]*-0.5f; p0[c]=vg;
-    p1[c]=partial_sum[0]+0.018447889655172415f*p{reg_slot}[c];
-    {'p2[c]=(vg*mean*-2.0f-weight*__builtin_elementwise_sqrt(inv)*partial_sum[0])*'+repr(1/(batch*16))+'f;' if fused_dmean else ''} }}
+  if (tid==0) {{ float inv=1.0f/p3[c], vg=inv*__builtin_elementwise_sqrt(inv)*partial_cov[0]*-0.5f; p0[c]=vg;
+    p1[c]=partial_sum[0]+0.018447889655172415f*p8[c];
+    p2[c]=(vg*mean*-2.0f-weight*__builtin_elementwise_sqrt(inv)*partial_sum[0])*{1/(batch*16)!r}f; }}
 }}'''
   sink = ast.replace(arg=replace(ast.arg,name=name,estimates=Estimates(512*batch*16*5,batch*8192*6,512*128*8)))
-  slots = tuple(range(9 if fused_dmean else 8))
-  info = ProgramInfo(name=name,global_size=(512,1,1),local_size=(128,1,1),globals=slots,
-                     outs=(0,1,2) if fused_dmean else (0,1),ins=slots[3:] if fused_dmean else slots[2:])
+  info = ProgramInfo(name=name,global_size=(512,1,1),local_size=(128,1,1),globals=tuple(range(9)),outs=(0,1,2),ins=tuple(range(3,9)))
   src:tuple[UOp, ...] = (sink,UOp(Ops.LINEAR),UOp(Ops.SOURCE,arg=source))
   if compile_binary: src += (UOp(Ops.BINARY,arg=renderer.compiler.compile_cached(source)),)
   return UOp(Ops.PROGRAM,src=src,arg=info)
@@ -274,56 +250,39 @@ def _match_activation_dmean_512(ast:UOp, device:str, arch:str) -> int|None:
   return batch if Counter(u.op for u in ast.toposort()) == Counter(expected) else None
 
 def activation_var_grad_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
-  if (batch:=_match_activation_var_grad(ast,renderer.target.device,renderer.target.arch)) is None: return None
-  fused_dmean = isinstance(ast.tag,ActivationVarGradElementwiseSumDMeanMatch)
-  fused_sum = fused_dmean or isinstance(ast.tag,ActivationVarGradElementwiseSumMatch)
-  fused = fused_sum or isinstance(ast.tag,ActivationVarGradElementwiseMatch)
-  out_slot, elem_slot, sum_slot, dmean_slot, var_slot, x_slot, mean_slot, weight_slot, z_slot, grad_slot, reg_slot = \
-    ((0,1,2,3,4,5,6,7,8,9,10) if fused_dmean else (0,1,2,-1,3,4,5,6,7,8,9) if fused_sum else
-     (0,1,-1,-1,2,3,4,5,6,7,-1)) if fused else (0,-1,-1,-1,1,2,3,4,5,6,-1)
-
-  suffix = '_elementwise_sum_dmean' if fused_dmean else '_elementwise_sum' if fused_sum else '_elementwise' if fused else ''
-  name = f"direct_activation_var_grad_{batch}_512_4{suffix}"
-  declarations = ("float* p0, float* p1, float* p2, float* p3, float* p4, half* p5, float* p6, float* p7, "
-                  "float* p8, half* p9, float* p10" if fused_dmean else
-                  "float* p0, float* p1, float* p2, float* p3, half* p4, float* p5, float* p6, float* p7, "
-                  "half* p8, float* p9" if fused_sum else
-                  "float* p0, float* p1, float* p2, half* p3, float* p4, float* p5, float* p6, half* p7" if fused else
-                  "float* p0, float* p1, half* p2, float* p3, float* p4, float* p5, half* p6")
+  if not isinstance(ast.tag,ActivationVarGradElementwiseSumDMeanMatch) or \
+     (batch:=_match_activation_var_grad(ast,renderer.target.device,renderer.target.arch)) is None: return None
+  name = f"direct_activation_var_grad_{batch}_512_4_elementwise_sum_dmean"
   source = f'''#define half _Float16
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(128,128))) {name}(
-    {declarations}) {{
-  __attribute__((shared, aligned(32))) float partial[128]{', partial_sum[128]' if fused_sum else ''}{', partial_elem[128]' if fused_dmean else ''};
+    float* p0, float* p1, float* p2, float* p3, float* p4, half* p5, float* p6, float* p7,
+    float* p8, half* p9, float* p10) {{
+  __attribute__((shared, aligned(32))) float partial[128], partial_sum[128], partial_elem[128];
   int c=__builtin_amdgcn_workgroup_id_x(), tid=__builtin_amdgcn_workitem_id_x();
-  float mean=p{mean_slot}[c], norm=p{weight_slot}[c]*__builtin_elementwise_sqrt(1.0f/p{var_slot}[c]),
-    acc=0.0f{', sum=0.0f' if fused_sum else ''}{', elem_sum=0.0f' if fused_dmean else ''};
+  float mean=p6[c], norm=p7[c]*__builtin_elementwise_sqrt(1.0f/p4[c]), acc=0.0f, sum=0.0f, elem_sum=0.0f;
   for (int q=0; q<{batch//8}; q++) {{
     int r=tid+q*128, idx=(r>>4)*8192+c*16+(r&15);
-    half z=(half)p{z_slot}[idx], sig=(half)1.0/((half)1.0+__builtin_elementwise_exp2(z*(half)-2.4554669595930156));
-    half grad=sig*p{grad_slot}[idx]+(half)1.702*z*p{grad_slot}[idx]*sig*((half)1.0-sig);
-    acc+=((float)p{x_slot}[idx]-mean)*(float)grad;
-    {f'float elem=norm*(float)grad; p{elem_slot}[idx]=elem;' if fused_dmean else f'p{elem_slot}[idx]=norm*(float)grad;' if fused else ''}
-    {'sum+=(float)grad;' if fused_sum else ''}
-    {'elem_sum+=elem;' if fused_dmean else ''}
+    half z=(half)p8[idx], sig=(half)1.0/((half)1.0+__builtin_elementwise_exp2(z*(half)-2.4554669595930156));
+    half grad=sig*p9[idx]+(half)1.702*z*p9[idx]*sig*((half)1.0-sig);
+    acc+=((float)p5[idx]-mean)*(float)grad;
+    float elem=norm*(float)grad; p1[idx]=elem; sum+=(float)grad; elem_sum+=elem;
   }}
-  partial[tid]=acc; {'partial_sum[tid]=sum;' if fused_sum else ''} {'partial_elem[tid]=elem_sum;' if fused_dmean else ''}
+  partial[tid]=acc; partial_sum[tid]=sum; partial_elem[tid]=elem_sum;
   __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");
   for (int stride=64; stride; stride>>=1) {{
-    if (tid<stride) {{ partial[tid]+=partial[tid+stride]; {'partial_sum[tid]+=partial_sum[tid+stride];' if fused_sum else ''}
-      {'partial_elem[tid]+=partial_elem[tid+stride];' if fused_dmean else ''} }}
+    if (tid<stride) {{ partial[tid]+=partial[tid+stride]; partial_sum[tid]+=partial_sum[tid+stride];
+      partial_elem[tid]+=partial_elem[tid+stride]; }}
     __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");
   }}
-  if (tid==0) {{ float inv=1.0f/p{var_slot}[c]; float vg=inv*__builtin_elementwise_sqrt(inv)*partial[0]*p{weight_slot}[c]*-0.5f; p{out_slot}[c]=vg;
-    {f'p{sum_slot}[c]=partial_sum[0]+0.018447889655172415f*p{reg_slot}[c];' if fused_sum else ''}
-    {f'p{dmean_slot}[c]=(vg*p{mean_slot}[c]*-2.0f-partial_elem[0])*{1/(batch*16)!r}f;' if fused_dmean else ''} }}
+  if (tid==0) {{ float inv=1.0f/p4[c]; float vg=inv*__builtin_elementwise_sqrt(inv)*partial[0]*p7[c]*-0.5f; p0[c]=vg;
+    p2[c]=partial_sum[0]+0.018447889655172415f*p10[c];
+    p3[c]=(vg*p6[c]*-2.0f-partial_elem[0])*{1/(batch*16)!r}f; }}
 }}'''
-  sink = ast.replace(arg=replace(ast.arg,name=name,estimates=Estimates(512*batch*16*20,512*batch*16*(12 if fused else 8),512*128*4)))
-  slots = tuple(range(11 if fused_dmean else 10 if fused_sum else 8 if fused else 7))
-  info = ProgramInfo(name=name,global_size=(512,1,1),local_size=(128,1,1),globals=slots,
-                     outs=(0,1,2,3) if fused_dmean else (0,1,2) if fused_sum else (0,1) if fused else (0,),
-                     ins=slots[4:] if fused_dmean else slots[3:] if fused_sum else slots[2:] if fused else slots[1:])
+  sink = ast.replace(arg=replace(ast.arg,name=name,estimates=Estimates(512*batch*16*20,512*batch*16*12,512*128*4)))
+  info = ProgramInfo(name=name,global_size=(512,1,1),local_size=(128,1,1),globals=tuple(range(11)),
+                     outs=(0,1,2,3),ins=tuple(range(4,11)))
   src:tuple[UOp, ...] = (sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=source))
   if compile_binary: src += (UOp(Ops.BINARY, arg=renderer.compiler.compile_cached(source)),)
   return UOp(Ops.PROGRAM, src=src, arg=info)
@@ -672,118 +631,24 @@ def _match_activation_elementwise(ast:UOp, device:str, arch:str) -> tuple[int, i
   return (channels,sy,batch_size//256) if store.src[0].op is Ops.INDEX and ssimplify(store.src[0].src[1].get_idx()) is flat else None
 
 
-def _sum16(term:str) -> str:
-  lanes = tuple(f"v{i}.{lane}" for i in range(4) for lane in "xyzw")
-  return "+".join(term.format(v=x) for x in lanes)
-
-def _use_wave_reduce(m:ChannelReduceMatch) -> bool:
-  return m.kind != "scale" or m.channels == 64
-
-def _wave_group_size(m:ChannelReduceMatch) -> int:
-  return 256 if m.kind == "scale" else 1024
-
-def _render_wave_reduce(m:ChannelReduceMatch, name:str) -> str:
-  group_size = _wave_group_size(m)
-  param_decls = ", ".join(f'{"half" if x.dtype == dtypes.half else "float"}* p{x.arg.slot}' for x in m.params)
-  if m.kind == "activation":
-    value = """half z=(half)p4[base], g=p5[base];
-      half sig=(half)1.0/((half)1.0+__builtin_elementwise_exp2(z*(half)-2.4554669595930156));
-      half ag=sig*g+(half)1.702*z*g*sig*((half)1.0-sig);
-      v=((float)p1[base]-p2[channel])*(float)ag;"""
-    out = "acc*p3[channel]"
-  elif m.kind == "centered": value, out = "v=((float)p1[base]-p2[channel])*p4[base];", "acc*p3[channel]"
-  else: value, out = "v=p3[base];", "-(acc*p1[channel]*__builtin_elementwise_sqrt(1.0f/p2[channel]))"
-  return f'''#define half _Float16
-extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size({group_size},{group_size}))) {name}({param_decls}) {{
-  int tid=__builtin_amdgcn_workitem_id_x(), lane=tid&31, wave=tid>>5;
-  int oi=__builtin_amdgcn_workgroup_id_x()*{group_size//32}+wave, channel=oi/256, feature=oi%256;
-  float acc=0.0f;
-  for (int r=lane; r<{m.groups*m.spatial*m.spatial}; r+=32) {{
-    float v=0.0f;
-    int base=(feature*{m.groups}+r/{m.spatial*m.spatial})*16384+channel*{m.spatial*m.spatial}+r%{m.spatial*m.spatial};
-    {value}
-    acc+=v;
-  }}
-  unsigned acc_bits=__builtin_bit_cast(unsigned, acc);
-  if (lane==0) {{
-    float total=acc;
-    #pragma unroll
-    for (int i=1; i<32; i++) total+=__builtin_bit_cast(float, __builtin_amdgcn_readlane(acc_bits, i));
-    p0[channel*256+feature]={out.replace("acc", "total")};
-  }}
-}}'''
-
-def _render_channel_reduce(m:ChannelReduceMatch, name:str) -> str:
-  if _use_wave_reduce(m): return _render_wave_reduce(m, name)
-  param_decls = ", ".join(f'{"half" if x.dtype == dtypes.half else "float"}* p{x.arg.slot}' for x in m.params)
-  lines = [
-    "#define half _Float16",
-    "typedef half half4 __attribute__((ext_vector_type(4)));",
-    "typedef float float4 __attribute__((ext_vector_type(4)));",
-  ]
-  lines += [
-    f'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(128, 128))) {name}({param_decls}) {{',
-    "  int feature=__builtin_amdgcn_workgroup_id_x()*16+__builtin_amdgcn_workitem_id_y();",
-    "  int channel=(__builtin_amdgcn_workgroup_id_y()*8+__builtin_amdgcn_workitem_id_x())*4;",
-    "  float acc0=0.0f, acc1=0.0f, acc2=0.0f, acc3=0.0f;",
-  ]
-  if m.kind in ("activation", "centered"): lines.append("  float4 mean=*((float4*)(p2+channel));")
-  lines += [f"  for (int batch=0; batch<{m.groups}; batch++) {{", f"    for (int chunk=0; chunk<{m.spatial*m.spatial//16}; chunk++) {{"]
-  for q in range(4):
-    lines.append("      {")
-    lines.append(f"      int base{q}=(feature*{m.groups}+batch)*16384+(channel+{q})*{m.spatial*m.spatial}+chunk*16;")
-    data_slot = 3 if m.kind == "scale" else 1
-    data_type = "float4" if m.kind == "scale" else "half4"
-    for i in range(4): lines.append(f"      {data_type} v{i}=*((({data_type}*)(p{data_slot}+base{q}+{i*4})));" )
-    if m.kind == "activation":
-      for i in range(4): lines.append(f"      float4 z{i}=*((float4*)(p4+base{q}+{i*4})); half4 g{i}=*((half4*)(p5+base{q}+{i*4}));")
-      for i in range(4):
-        lines.append(f"      half4 zh{i}=__builtin_convertvector(z{i},half4);")
-        lines.append(f"      half4 sig{i}=(half4)1.0/((half4)1.0+__builtin_elementwise_exp2(zh{i}*(half)-2.4554669595930156));")
-        lines.append(f"      half4 ag{i}=sig{i}*g{i}+(half)1.702*zh{i}*g{i}*sig{i}*((half)1.0-sig{i});")
-      term = f"(((float){{v}}-mean.{ 'xyzw'[q]})*(float)ag{{i}}.{{lane}})"
-      terms = []
-      for i in range(4):
-        for lane in "xyzw": terms.append(term.format(v=f"v{i}.{lane}", i=i, lane=lane))
-      lines.append(f"      acc{q} += "+"+".join(terms)+";")
-    elif m.kind == "centered":
-      for i in range(4): lines.append(f"      float4 g{i}=*((float4*)(p4+base{q}+{i*4}));")
-      terms = [f"(((float)v{i}.{lane}-mean.{'xyzw'[q]})*g{i}.{lane})" for i in range(4) for lane in "xyzw"]
-      lines.append(f"      acc{q} += "+"+".join(terms)+";")
-    else: lines.append(f"      acc{q} += "+_sum16("{v}")+";")
-    lines.append("      }")
-  lines += ["    }", "  }"]
-  for q in range(4):
-    out = f"p0[(channel+{q})*256+feature]"
-    if m.kind in ("activation", "centered"): rhs = f"acc{q}*p3[channel+{q}]"
-    else: rhs = f"-(acc{q}*p1[channel+{q}]*__builtin_elementwise_sqrt(1.0f/p2[channel+{q}]))"
-    lines.append(f"  {out}={rhs};")
-  lines.append("}")
-  return "\n".join(lines)
-
-
 def channel_reduce_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
-  if isinstance(am:=ast.tag,(DualActivationReduceMatch,DualActivationReduceElementwiseMatch)) and renderer.target.device == "AMD" and \
+  if isinstance(am:=ast.tag,DualActivationReduceElementwiseMatch) and renderer.target.device == "AMD" and \
      renderer.target.arch.startswith("gfx11"):
-    fused_elem = isinstance(am,DualActivationReduceElementwiseMatch)
-    name = f"channel_reduce_activation_sum_{am.groups}_{am.channels}_{am.spatial}{'_elementwise' if fused_elem else ''}"
-    declarations = ("float* p0, float* p1, float* p2, half* p3, float* p4, float* p5, float* p6, float* p7, half* p8" if fused_elem else
-                    "float* p0, float* p1, half* p2, float* p3, float* p4, float* p5, half* p6")
-    x_slot, mean_slot, weight_slot, var_slot, z_slot, grad_slot = (3,4,5,6,7,8) if fused_elem else (2,3,4,-1,5,6)
+    name = f"channel_reduce_activation_sum_{am.groups}_{am.channels}_{am.spatial}_elementwise"
     source = f'''#define half _Float16
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1024,1024))) {name}(
-    {declarations}) {{
+    float* p0, float* p1, float* p2, half* p3, float* p4, float* p5, float* p6, float* p7, half* p8) {{
   int tid=__builtin_amdgcn_workitem_id_x(), lane=tid&31, wave=tid>>5;
   int oi=__builtin_amdgcn_workgroup_id_x()*32+wave, channel=oi/256, feature=oi%256;
-  float centered=0.0f, plain=0.0f, mean=p{mean_slot}[channel];
+  float centered=0.0f, plain=0.0f, mean=p4[channel];
   for (int r=lane; r<{am.groups*am.spatial*am.spatial}; r+=32) {{
     int base=(feature*{am.groups}+r/{am.spatial*am.spatial})*16384+channel*{am.spatial*am.spatial}+r%{am.spatial*am.spatial};
-    half z=(half)p{z_slot}[base], grad=p{grad_slot}[base];
+    half z=(half)p7[base], grad=p8[base];
     half sig=(half)1.0/((half)1.0+__builtin_elementwise_exp2(z*(half)-2.4554669595930156));
     float ag=(float)(sig*grad+(half)1.702*z*grad*sig*((half)1.0-sig));
-    centered+=((float)p{x_slot}[base]-mean)*ag;
+    centered+=((float)p3[base]-mean)*ag;
     plain+=ag;
-    {f'p2[base]=p{weight_slot}[channel]*(__builtin_elementwise_sqrt(1.0f/p{var_slot}[channel])*ag);' if fused_elem else ''}
+    p2[base]=p5[channel]*(__builtin_elementwise_sqrt(1.0f/p6[channel])*ag);
   }}
   unsigned centered_bits=__builtin_bit_cast(unsigned,centered), plain_bits=__builtin_bit_cast(unsigned,plain);
   if (lane==0) {{
@@ -792,15 +657,14 @@ extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_si
       centered+=__builtin_bit_cast(float,__builtin_amdgcn_readlane(centered_bits,i));
       plain+=__builtin_bit_cast(float,__builtin_amdgcn_readlane(plain_bits,i));
     }}
-    p0[oi]=centered*p{weight_slot}[channel];
+    p0[oi]=centered*p5[channel];
     p1[oi]=plain;
   }}
 }}'''
     elements, reduce_size = am.channels*256, am.groups*am.spatial*am.spatial
     sink = ast.replace(arg=replace(ast.arg, name=name, estimates=Estimates(elements*reduce_size*18, elements*reduce_size*8, 0)))
-    slots = tuple(range(9 if fused_elem else 7))
-    info = ProgramInfo(name=name, global_size=(elements//32,1,1), local_size=(1024,1,1), globals=slots,
-                       outs=(0,1,2) if fused_elem else (0,1),ins=slots[3:] if fused_elem else slots[2:])
+    slots = tuple(range(9))
+    info = ProgramInfo(name=name, global_size=(elements//32,1,1), local_size=(1024,1,1), globals=slots,outs=(0,1,2),ins=slots[3:])
     src:tuple[UOp, ...] = (sink,UOp(Ops.LINEAR),UOp(Ops.SOURCE,arg=source))
     if compile_binary: src += (UOp(Ops.BINARY,arg=renderer.compiler.compile_cached(source)),)
     return UOp(Ops.PROGRAM,src=src,arg=info)
@@ -836,19 +700,4 @@ extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_si
     src = (sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=source))
     if compile_binary: src += (UOp(Ops.BINARY, arg=renderer.compiler.compile_cached(source)),)
     return UOp(Ops.PROGRAM, src=src, arg=info)
-  if (m:=_match_channel_reduce(ast, renderer.target.device, renderer.target.arch)) is None: return None
-  name = f"channel_reduce_{m.kind}_{m.groups}_{m.channels}_{m.spatial}"
-  source = _render_channel_reduce(m, name)
-  slots = tuple(x.arg.slot for x in m.params)
-  elements, reduce_size = m.channels*256, m.groups*m.spatial*m.spatial
-  estimates = Estimates(elements*reduce_size*(18 if m.kind == "activation" else 3),
-                        elements*(reduce_size*(8 if m.kind == "activation" else 6)+4), sum(int(x.src[0].arg)*x.dtype.itemsize for x in m.params))
-  sink = ast.replace(arg=replace(ast.arg, name=name, estimates=estimates))
-  if _use_wave_reduce(m):
-    group_size = _wave_group_size(m)
-    global_size, local_size = (m.channels*256//(group_size//32), 1, 1), (group_size, 1, 1)
-  else: global_size, local_size = (16, m.channels//32, 1), (8, 16, 1)
-  info = ProgramInfo(name=name, global_size=global_size, local_size=local_size, globals=slots, outs=(0,), ins=slots[1:])
-  src = (sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=source))
-  if compile_binary: src += (UOp(Ops.BINARY, arg=renderer.compiler.compile_cached(source)),)
-  return UOp(Ops.PROGRAM, src=src, arg=info)
+  return None

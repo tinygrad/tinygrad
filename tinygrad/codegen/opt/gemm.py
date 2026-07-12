@@ -1,4 +1,3 @@
-from collections import Counter
 from dataclasses import dataclass, replace
 from math import prod
 from tinygrad.dtype import dtypes
@@ -44,82 +43,6 @@ class DirectConvBwdActivationMatch:
 @dataclass(frozen=True)
 class GemmOutputNCHW:
   spatial:int
-
-@dataclass(frozen=True)
-class PartialWeightGradMatch:
-  c:UOp
-  a:UOp
-  b:UOp
-
-def _match_partial_weight_grad(ast:UOp, device:str, arch:str) -> PartialWeightGradMatch|None:
-  if device != "AMD" or not arch.startswith("gfx11") or len(ast.src) != 1: return None
-  end = ast.src[0]
-  if end.op is not Ops.END or len(end.src) != 4 or end.src[0].op is not Ops.STORE: return None
-  store, m, n, batch = end.src
-  if any(x.op is not Ops.RANGE or x.arg[1] is not AxisType.LOOP for x in (m, n, batch)) or \
-     tuple(int(x.vmax)+1 for x in (m, n, batch)) != (32, 12, 256): return None
-  params = tuple(sorted((u for u in ast.toposort() if u.op is Ops.PARAM), key=lambda u:u.arg.slot))
-  if any(not u.src or u.src[0].op is not Ops.CONST or not isinstance(u.src[0].arg, int) for u in params): return None
-  if tuple((u.arg.slot, u.dtype, int(u.src[0].arg)) for u in params) != \
-     ((0, dtypes.float, 98304), (1, dtypes.half, 18874368), (2, dtypes.float, 50331648)): return None
-  expected_ops = {Ops.CONST:14, Ops.ADD:14, Ops.MUL:13, Ops.RANGE:6, Ops.PARAM:3, Ops.INDEX:3,
-                  Ops.CAST:2, Ops.REDUCE:1, Ops.STORE:1, Ops.END:1, Ops.SINK:1}
-  if Counter(u.op for u in ast.toposort()) != Counter(expected_ops): return None
-  reduce = next((u for u in ast.toposort() if u.op is Ops.REDUCE), None)
-  if reduce is None or reduce.arg != (Ops.ADD, 0) or tuple(int(r.vmax)+1 for r in reduce.src[1:]) != (6, 32, 32): return None
-  if store.src[0].src[0] is not params[0] or ssimplify(store.src[0].src[1].get_idx()) is not ssimplify(m*3072+n*256+batch): return None
-  return PartialWeightGradMatch(params[0], params[1], params[2])
-
-def partial_weight_grad_program(ast:UOp, renderer:Renderer, compile_binary:bool) -> UOp|None:
-  if _match_partial_weight_grad(ast, renderer.target.device, renderer.target.arch) is None: return None
-  name = "coop_partial_weight_grad_32_12_6144_256"
-  source = f'''#define half _Float16
-typedef half half16 __attribute__((ext_vector_type(16)));
-typedef float float8 __attribute__((ext_vector_type(8)));
-typedef float float16 __attribute__((ext_vector_type(16)));
-#define WMMA __builtin_amdgcn_wmma_f32_16x16x16_f16_w32
-extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(64,64))) {name}(
-    float* p0, half* p1, float* p2) {{
-  __attribute__((shared, aligned(32))) half As[32*48], Bs[16*48];
-  int batch=__builtin_amdgcn_workgroup_id_x(), tid=__builtin_amdgcn_workitem_id_x();
-  int wave=tid>>5, lane=tid&31, row=lane&15, halfrow=lane>>4;
-  float8 c={{}};
-  for (int kt=0; kt<192; kt++) {{
-    int kk=kt*32, rb=kk>>10, sp=kk&1023;
-    if (tid<32) {{
-      long ai=((long)(batch*6+rb)*32+tid)*1024+sp;
-      *((half16*)(As+tid*48))=__builtin_convertvector(*((float16*)(p2+ai)),half16);
-      *((half16*)(As+tid*48+16))=__builtin_convertvector(*((float16*)(p2+ai+16)),half16);
-    }}
-    if (tid<16) {{
-      half16 v0=(half16){{0}}, v1=(half16){{0}};
-      if (tid<12) {{
-        long bi=((long)(batch*6+rb)*12+tid)*1024+sp;
-        v0=*((half16*)(p1+bi)); v1=*((half16*)(p1+bi+16));
-      }}
-      *((half16*)(Bs+tid*48))=v0; *((half16*)(Bs+tid*48+16))=v1;
-    }}
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");
-    #pragma unroll
-    for (int ki=0; ki<2; ki++) {{
-      half16 av=*((half16*)(As+(wave*16+row)*48+ki*16));
-      half16 bv=*((half16*)(Bs+row*48+ki*16));
-      c=WMMA(av,bv,c);
-    }}
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE,"workgroup"); __builtin_amdgcn_s_barrier();
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE,"workgroup");
-  }}
-  if (row<12) {{
-    #pragma unroll
-    for (int e=0; e<8; e++) p0[((wave*16+e*2+halfrow)*12+row)*256+batch]=c[e];
-  }}
-}}'''
-  sink = ast.replace(arg=replace(ast.arg, name=name, estimates=Estimates(2*256*32*12*6144, 0, 0)))
-  info = ProgramInfo(name=name, global_size=(256, 1, 1), local_size=(64, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2))
-  src:tuple[UOp, ...] = (sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=source))
-  if compile_binary: src += (UOp(Ops.BINARY, arg=renderer.compiler.compile_cached(source)),)
-  return UOp(Ops.PROGRAM, src=src, arg=info)
 
 def _match_gemm(ast:UOp, device:str, arch:str) -> GemmMatch|None:
   if device != "AMD" or not arch.startswith("gfx11") or len(ast.src) != 1: return None
@@ -231,8 +154,6 @@ def _batched_family_name(g:BatchedGemmMatch) -> str:
     f"{'_partial_n' if g.n % _batched_block_n(g) else ''}"
 def _gemm_threads(g:GemmMatch) -> int:
   if _gemm_block_n(g) == 192: return 192
-  if g.old is not None and g.a_kxm and g.b_kxn and (g.m,g.n,g.k) == (256,2304,65536): return 128
-  if g.old is not None and g.a_kxm and g.b_kxn and (g.m,g.n,g.k) == (256,2304,98304): return 128
   return THREADS
 
 def _gemm_family_name(g:GemmMatch, output_nchw:GemmOutputNCHW|None) -> str:

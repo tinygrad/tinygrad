@@ -406,20 +406,18 @@ def train_cifar():
         # Using Context(TRAINING=0) here actually bricks batchnorm, even with track_running_stats=True
         correct_sum = correct_sum_ema = None
         correct_len = correct_len_ema = 0
-        ema_only = bool(model_ema and getenv("EMA_EVAL_ONLY"))
-        eval_model, eval_jit = (model_ema.net_ema, eval_forward_ema_jitted) if ema_only else (model, eval_forward_jitted)
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
           if len(GPUS) > 1:
             Xt.shard_(GPUS, axis=0)
             Yt.shard_(GPUS, axis=0)
 
           Xt_contiguous = Xt.contiguous().realize()
-          out = eval_jit(eval_model, Xt_contiguous).clone().realize()
-          out_flipped = eval_jit(eval_model, Xt_contiguous[..., ::-1].contiguous().realize())
+          out = eval_forward_jitted(model, Xt_contiguous).clone().realize()
+          out_flipped = eval_forward_jitted(model, Xt_contiguous[..., ::-1].contiguous().realize())
           batch_correct = eval_step_jitted(out, out_flipped, Yt)
           correct_sum = batch_correct if correct_sum is None else correct_sum + batch_correct
           correct_len += Yt.shape[0]
-          if model_ema and not ema_only:
+          if model_ema:
             out_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous).clone().realize()
             out_flipped_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous[..., ::-1].contiguous().realize())
             batch_correct_ema = eval_step_ema_jitted(out_ema, out_flipped_ema, Yt)
@@ -429,14 +427,14 @@ def train_cifar():
         # collect accuracy across ranks
         assert correct_sum is not None
         correct_count = correct_sum.item()
-        if model_ema and not ema_only:
+        if model_ema:
           assert correct_sum_ema is not None
           correct_count_ema = correct_sum_ema.item()
 
         eval_acc_pct = correct_count/correct_len*100.0
-        if model_ema and not ema_only: acc_ema = correct_count_ema/correct_len_ema*100.0
+        if model_ema: acc_ema = correct_count_ema/correct_len_ema*100.0
         print(f"eval     {correct_count}/{correct_len} {eval_acc_pct:.2f}% STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-        if model_ema and not ema_only: print(f"eval ema {correct_count_ema}/{correct_len_ema} {acc_ema:.2f}% STEP={i}")
+        if model_ema: print(f"eval ema {correct_count_ema}/{correct_len_ema} {acc_ema:.2f}% STEP={i}")
 
       if STEPS == 0 or i == STEPS: break
 
@@ -453,7 +451,7 @@ def train_cifar():
           et = time.monotonic()
           loss_cpu = loss.numpy()
         # EMA for network weights
-        if getenv("EMA") and i > getenv("EMA_START", hyp['ema']['steps']) and (i+1) % hyp['ema']['every_n_steps'] == 0:
+        if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
           if model_ema is None:
             model_ema = modelEMA(W, model)
           model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
