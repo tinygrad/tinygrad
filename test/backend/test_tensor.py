@@ -253,12 +253,18 @@ class TestTinygrad(unittest.TestCase):
   def test_randperm(self):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()
-    np.testing.assert_equal(a.numpy(), [5, 8, 1, 4, 7, 0, 3, 6, 9, 2])
+    np.testing.assert_equal(a.numpy(), [2, 1, 0, 9, 8, 7, 6, 5, 4, 3])
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
+  def test_randperm_composite(self):
+    for n in (15, 21, 35, 105):
+      Tensor.manual_seed(14)
+      np.testing.assert_equal(set(Tensor.randperm(n).numpy()), set(range(n)))
+
   def test_rand_rejects_unknown_kwargs(self):
     with self.assertRaises(TypeError): Tensor.rand(5, generator="foo")
+    with self.assertRaises(TypeError): Tensor.randperm(5, generator="foo")
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
