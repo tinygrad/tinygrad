@@ -3,62 +3,62 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, dname_of, compile_hip
+from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, zero_scalar, dname_of, compile_hip
 
 def _src() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8.cpp").read_text()
 def _src_bwd() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8_bwd.cpp").read_text()
 
 @functools.cache
-def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
-                x:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
+def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
+                x:UOp, weight:UOp, amax_state:UOp, layer_num:UOp|None=None, dname:str=None, eps_val:float=0.0) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 + n_elems + MBS * SEQ * 4 + n_elems + HIDDEN * 2 + NUM_WG * 4 + 4
-  sink = UOp.sink(fp8_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
-                  x.base, weight.base, amax_state.base, threads, workgroups,
+  mem = n_elems * 2 + n_elems + MBS * SEQ * 4 + n_elems + HIDDEN * 2 + 4 + 4
+  sink = UOp.sink(fp8_out.base, x_normed_out.base, rrms_out.base, amax_out.base,
+                  x.base, weight.base, amax_state.base, *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
                   arg=KernelInfo(f"fused_rmsnorm_mul_quantize_fp8_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}",
                                  estimates=Estimates(ops=6*n_elems, mem=mem)))
   defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}",
-             f"-DEPS_LITERAL={eps_val}f"]
+             f"-DEPS_LITERAL={eps_val}f"] + (["-DLAYER_SCALE=1"] if layer_num is not None else [])
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 @functools.cache
-def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_buf:UOp,
-                    x:UOp, residual:UOp, weight:UOp, amax_state:UOp, dname:str, eps_val:float) -> UOp:
+def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
+                    x:UOp, residual:UOp, weight:UOp, amax_state:UOp, layer_num:UOp|None=None, dname:str=None, eps_val:float=0.0) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 * 4 + MBS * SEQ * 4 + HIDDEN * 2 + NUM_WG * 4 + 4
-  sink = UOp.sink(fp8_out.base, h_out.base, x_normed_out.base, rrms_out.base, amax_buf.base,
-                  x.base, residual.base, weight.base, amax_state.base, threads, workgroups,
+  mem = n_elems * 2 * 4 + MBS * SEQ * 4 + HIDDEN * 2 + 4 + 4
+  sink = UOp.sink(fp8_out.base, h_out.base, x_normed_out.base, rrms_out.base, amax_out.base,
+                  x.base, residual.base, weight.base, amax_state.base, *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
                   arg=KernelInfo(f"fused_add_rmsnorm_mul_quantize_fp8_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}",
                                  estimates=Estimates(ops=7*n_elems, mem=mem)))
   defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}",
-             f"-DEPS_LITERAL={eps_val}f", f"-DHAS_RESIDUAL=1"]
+             f"-DEPS_LITERAL={eps_val}f", "-DHAS_RESIDUAL=1"] + (["-DLAYER_SCALE=1"] if layer_num is not None else [])
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 @functools.cache
 def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,
-                grad_fp8:UOp, x_normed:UOp, rrms:UOp, weight:UOp, amax_state:UOp, dname:str) -> UOp:
+                grad_fp8:UOp, x_normed:UOp, rrms:UOp, weight:UOp, amax_state:UOp, layer_num:UOp|None=None, dname:str=None) -> UOp:
   MBS, SEQ, HIDDEN = x_normed.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   mem = n_elems * 2 * 3 + NUM_WG * HIDDEN * 4 + MBS * SEQ * 4 + HIDDEN * 2 + 4
   sink = UOp.sink(grad_x.base, grad_weight_partial.base,
-                  grad_fp8.base, x_normed.base, rrms.base, weight.base, amax_state.base, threads, workgroups,
+                  grad_fp8.base, x_normed.base, rrms.base, weight.base, amax_state.base, *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
                   arg=KernelInfo(f"fused_rmsnorm_mul_quantize_fp8_bwd_{n_elems}_h{HIDDEN}",
                                  estimates=Estimates(ops=8*n_elems, mem=mem)))
-  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
+  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"] + (["-DLAYER_SCALE=1"] if layer_num is not None else [])
   src = _src_bwd()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
-def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel:UOp):
+def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, layer_num_u, kernel:UOp):
   device = x_u.device
   MBS, SEQ, HIDDEN = x_normed_u.shape
   axis = x_normed_u.axis if isinstance(device, tuple) else None
@@ -74,9 +74,20 @@ def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_st
       Tensor(x_normed_u.after(kernel), device=device),
       Tensor(rrms_u.after(kernel), device=device),
       Tensor(weight_u, device=device),
-      Tensor(amax_state_u, device=device), fxn=fxn)
+      Tensor(amax_state_u, device=device), *((Tensor(layer_num_u, device=device),) if layer_num_u is not None else ()), fxn=fxn)
     grad_h_from_fp8 = grad_x_t
-    grad_weight_uop = grad_weight_partial_t.sum(axis=0).cast(dtypes.bfloat16).uop
+    if isinstance(device, tuple):
+      def strip_multi_axis0(u:UOp) -> UOp:
+        if u.op is Ops.MULTI:
+          assert u.axis == 0, f"expected local norm grad MULTI on axis 0, got {u.axis}"
+          return u.src[0]
+        if u.op is Ops.AFTER: return strip_multi_axis0(u.src[0]).after(*u.src[1:])
+        if u.op is Ops.CONTIGUOUS: return strip_multi_axis0(u.src[0]).contiguous()
+        raise AssertionError(f"expected local norm grad MULTI on axis 0, got {u.op} {u.axis}")
+      local_sum = strip_multi_axis0(grad_weight_partial_t.uop)._rop(Ops.ADD, (0,)).reshape((HIDDEN,))
+      grad_weight_uop = local_sum.cast(dtypes.bfloat16)
+    else:
+      grad_weight_uop = grad_weight_partial_t.sum(axis=0).cast(dtypes.bfloat16).uop
   if h_grad_u is not None:
     h_grad_t = Tensor(h_grad_u, device=device).cast(dtypes.bfloat16)
     grad_total = (grad_h_from_fp8 + h_grad_t) if grad_h_from_fp8 is not None else h_grad_t
@@ -85,10 +96,12 @@ def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_st
   return grad_total.uop, grad_weight_uop
 
 def _fused_bwd(gradient:UOp, kernel:UOp):
-  # NOTE: fwd inputs (fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state)
-  _, x_normed_u, rrms_u, _, x_u, weight_u, amax_state_u = kernel.src[1:]
-  grad_x, grad_w = _bwd_common(gradient, None, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
-  return (None, None, None, None, grad_x, grad_w, None)
+  # NOTE: fwd inputs (fp8_out, x_normed_out, rrms_out, amax_out, x, weight, amax_state)
+  src = kernel.src[1:]
+  _, x_normed_u, rrms_u, _, x_u, weight_u, amax_state_u = src[:7]
+  layer_num_u = src[7] if len(src) > 7 else None
+  grad_x, grad_w = _bwd_common(gradient, None, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, layer_num_u, kernel)
+  return (None, None, None, None, grad_x, grad_w, None) + ((None,) if layer_num_u is not None else ())
 
 def _fused_add_bwd(*args, **kwargs):
   # Two invocation modes: 1 grad => positional; >1 grads => kwarg `call=`.
@@ -108,11 +121,14 @@ def _fused_add_bwd(*args, **kwargs):
     g = all_grads[0]
     if g.dtype == dtypes.bfloat16: h_grad_u = g
     else: fp8_grad_u = g
-  _, _, x_normed_u, rrms_u, _, x_u, _, weight_u, amax_state_u = kernel.src[1:]
-  grad_h, grad_w = _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
-  return (None, None, None, None, None, grad_h, grad_h, grad_w, None)
+  src = kernel.src[1:]
+  _, _, x_normed_u, rrms_u, _, x_u, _, weight_u, amax_state_u = src[:9]
+  layer_num_u = src[9] if len(src) > 9 else None
+  grad_h, grad_w = _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, layer_num_u, kernel)
+  return (None, None, None, None, None, grad_h, grad_h, grad_w, None) + ((None,) if layer_num_u is not None else ())
 
-def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype,
+                                   amax_out:Tensor|None=None, layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, new_amax, x_normed, rrms).
   # x_normed + rrms are saved for the rmsnorm backward (also recomputed here from x regs).
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
@@ -123,14 +139,14 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   fp8_out      = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,       x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
+  amax_out     = zero_scalar(x.device) if amax_out is None else amax_out
   fxn = functools.partial(_custom_fwd, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
-    fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_bwd)
-  return fp8_out, scalar_amax(amax_buf), x_normed_out, rrms_out
+  fp8_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
+    fp8_out, x_normed_out, rrms_out, amax_out, x, weight, amax_state, *((layer_num,) if layer_num is not None else ()), fxn=fxn, grad_fxn=_fused_bwd)
+  return fp8_out, amax_out, x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
-                                       eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+                                       eps:float, fp8_dtype, amax_out:Tensor|None=None, layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
   # NOTE: h = x + residual; y_normed = rmsnorm(h); fp8 = quantize(y_normed * weight).
   # Returns (fp8, new_amax, h, x_normed, rrms). h is also written so downstream can
   # reuse it without recomputing x+residual — eliminates the separate residual-add kernel.
@@ -143,9 +159,9 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
   h_out        = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
+  amax_out     = zero_scalar(x.device) if amax_out is None else amax_out
   fxn = functools.partial(_custom_fwd_add, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, h_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
-    fp8_out, h_out, x_normed_out, rrms_out, amax_buf, x, residual, weight, amax_state,
+  fp8_out, h_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
+    fp8_out, h_out, x_normed_out, rrms_out, amax_out, x, residual, weight, amax_state, *((layer_num,) if layer_num is not None else ()),
     fxn=fxn, grad_fxn=_fused_add_bwd)
-  return fp8_out, scalar_amax(amax_buf), h_out, x_normed_out, rrms_out
+  return fp8_out, amax_out, h_out, x_normed_out, rrms_out

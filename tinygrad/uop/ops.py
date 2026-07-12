@@ -820,7 +820,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.SLICE}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
@@ -833,9 +833,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
+    if self.op is Ops.SLICE and self.src[0].op is not Ops.INDEX: return self
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and (s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK, Ops.SLICE} or
+                          (s.op is Ops.SLICE and s.src[0].op is Ops.INDEX)): s = s.src[0]
     return s
 
   def contiguous_view_offset(self) -> int|None:

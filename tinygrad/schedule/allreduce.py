@@ -1,10 +1,10 @@
 import functools, itertools
 from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import Invalid
 
 # *** allreduce implementation ***
-def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
+def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
@@ -30,10 +30,18 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
   # reduce-scatter
   reduced_chunks:list[UOp] = []
+  reduced_deps:list[UOp|None] = []
   for i,(s,e) in enumerate(chunks):
     if use_all2all:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
-      reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
+      reduced = functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i)
+      dep = None
+      if not isinstance(device, str):
+        tmp = reduced.empty_like()
+        dep = tmp.after(tmp.store(reduced))
+        reduced = dep if output is None else tmp
+      reduced_chunks.append(reduced)
+      reduced_deps.append(dep)
     else:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
       for step in range(ndev-1):
@@ -41,12 +49,16 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
         cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
         reduced = cp.alu(op, chunk.copy_to_device(buf.device[dest], dest))
       reduced_chunks.append(reduced)
+      reduced_deps.append(None)
 
   # allgather
   copied_chunks:list[UOp] = []
   for i,rc in enumerate(reduced_chunks):
     if isinstance(device, str): copied_chunks.append(rc.copy_to_device(device))
-    elif use_all2all: copied_chunks.append(UOp.mstack(*(rc.copy_to_device(buf.device[j]) for j in range(ndev))))
+    elif use_all2all:
+      dep = reduced_deps[i]
+      copy_src = dep if dep is not None else rc
+      copied_chunks.append(UOp.mstack(*(rc if j == i else copy_src.copy_to_device(buf.device[j]) for j in range(ndev))))
     else:
       chain:list[UOp] = [rc]
       for step in range(ndev-1):
@@ -54,6 +66,10 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       copied_chunks.append(UOp.mstack(*(chain[(j-i+1)%ndev] for j in range(ndev))))
 
   # reassemble
+  if output is not None and use_all2all:
+    flat_out = output.reshape((numel,))
+    deps = [d for d in reduced_deps if d is not None]
+    return output.after(*deps, *[flat_out.shrink(((s,e),)).store(c) for (s,e),c in zip(chunks, copied_chunks)])
   return UOp.usum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
@@ -61,4 +77,7 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
+  ret = handle_allreduce(src, red, to)
+  assert ret is not None
+  body = ret if ret.op is Ops.AFTER and ret.src[0] is to else to.after(to.store(ret))
+  return output.after(body.sink().call(output, buf.contiguous(), name="allreduce", precompile=True))

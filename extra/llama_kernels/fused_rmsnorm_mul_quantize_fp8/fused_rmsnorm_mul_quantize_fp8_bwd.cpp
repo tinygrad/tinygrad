@@ -29,6 +29,9 @@
 #ifndef THREADS_PER_WG
 #define THREADS_PER_WG 256
 #endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
@@ -48,14 +51,23 @@ fused_rmsnorm_mul_quantize_fp8_bwd(
     const __hip_bfloat16* __restrict__ x_normed,            // in:  bf16, ROWS*HIDDEN
     const float*          __restrict__ rrms,                // in:  fp32, ROWS
     const __hip_bfloat16* __restrict__ weight,              // in:  bf16, HIDDEN
-    const float*          __restrict__ amax_state)          // in:  fp32 scalar
+    const float*          __restrict__ amax_state           // in:  fp32 scalar or n_layers
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
   __shared__ float sdata[THREADS_PER_WG];
 
   const int tid = threadIdx.x;
   const int wg  = blockIdx.x;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+#if LAYER_SCALE
+  const int layer = layer_num[0];
+#else
+  const int layer = 0;
+#endif
+  const float scale = FP8_MAX / (static_cast<float>(amax_state[layer]) + 1e-8f);
   const float inv_hidden = 1.0f / static_cast<float>(HIDDEN);
 
   // Per-thread accumulator for grad_weight (across all rows this WG touches).

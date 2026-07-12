@@ -7,7 +7,7 @@
 //   fp8 = fp8_sat(y * (FP8_MAX / amax_state))
 // Also writes:
 //   rrms[row]        — saved for the rmsnorm backward
-//   amax_buf[wg]     — per-WG |y| partials, reduced later to update amax_state
+//   amax_out         — scalar |y| via global atomic max
 //
 // Layout: one WG per row, ROWS_PER_WG rows per WG via grid-stride (ROWS = N_ELEMS / HIDDEN).
 // Each thread handles HIDDEN / THREADS_PER_WG elements per row.
@@ -30,9 +30,16 @@
 #ifndef HAS_RESIDUAL
 #define HAS_RESIDUAL 0
 #endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
+
+__forceinline__ __device__ float atomicMaxOfNonNegative(float* addr, float value) {
+  return __int_as_float(atomicMax(reinterpret_cast<int32_t*>(addr), __float_as_int(value)));
+}
 
 static_assert(N_ELEMS % HIDDEN == 0, "N_ELEMS must be a multiple of HIDDEN");
 static_assert(HIDDEN % (THREADS_PER_WG * VEC) == 0, "HIDDEN must be divisible by THREADS_PER_WG*VEC");
@@ -48,11 +55,15 @@ fused_add_rmsnorm_mul_quantize_fp8(
     __hip_bfloat16*       __restrict__ h_out,           // bf16, ROWS*HIDDEN — x + residual (saved for downstream)
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN
     float*                __restrict__ rrms_out,        // fp32, ROWS
-    float*                __restrict__ amax_buf,        // fp32, NUM_WG
+    float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ residual,        // bf16, ROWS*HIDDEN — added into x before rmsnorm
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state       // fp32 scalar or n_layers
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
 #else
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
@@ -60,10 +71,14 @@ fused_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN (saved for rmsnorm bwd)
     float*                __restrict__ rrms_out,        // fp32, ROWS (fp32 to match rmsnorm_bwd.cpp expectation)
-    float*                __restrict__ amax_buf,        // fp32, NUM_WG per-WG partials
+    float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN (per-hidden scale)
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state       // fp32 scalar or n_layers
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
 #endif
   __shared__ float sdata[THREADS_PER_WG];
@@ -71,7 +86,13 @@ fused_rmsnorm_mul_quantize_fp8(
   const int tid = threadIdx.x;
   const int wg  = blockIdx.x;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+#if LAYER_SCALE
+  const int layer = layer_num[0];
+#else
+  const int layer = 0;
+#endif
+  float* amax_out_layer = amax_out + layer;
+  const float scale = FP8_MAX / (static_cast<float>(amax_state[layer]) + 1e-8f);
   const float inv_hidden = 1.0f / static_cast<float>(HIDDEN);
   float local_max = 0.0f;
 
@@ -144,12 +165,12 @@ fused_rmsnorm_mul_quantize_fp8(
     __syncthreads();  // before next row's sum_sq reduce reuses sdata
   }
 
-  // Final per-WG amax reduce.
+  // Final per-WG amax reduce, then global atomic into the scalar.
   sdata[tid] = local_max;
   __syncthreads();
   for (int s = THREADS_PER_WG / 2; s > 0; s >>= 1) {
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0) amax_buf[wg] = sdata[0];
+  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMaxOfNonNegative(amax_out_layer, sdata[0]);
 }

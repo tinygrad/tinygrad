@@ -6,6 +6,7 @@ from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes, Context
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker, DEBUG
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
+from tinygrad.uop.ops import Ops
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -1437,10 +1438,16 @@ def train_llama3():
   fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts] if hasattr(model, "_fp8_next_amax") else []
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
   fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts] if hasattr(model, "_fp8_next_grad_amax") else []
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
+  fp8_inv_scales = [x for v in list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
+                    for x in (v if isinstance(v, list) else [v])]
+  layer_nums = getattr(model, "_layer_num", [])
 
   from tinygrad.nn.state import get_state_dict
   model_state = get_state_dict(model)
+  deferred_wgrad_params = {model_state[name] for name in ("wqkv", "wo", "w13", "w1", "w3", "w2", "attention_norm", "ffn_norm")
+                           if name in model_state}
+  deferred_wgrad_grads = [grads[i] for i,p in enumerate(optim.params) if p in deferred_wgrad_params]
+  overlap_sdma = is_dp and getenv("OVERLAP_SDMA", 0)
   for wname in model._fp8_inv_scale:
     w = model_state[wname]
     w._inv_scale = model._fp8_inv_scale[wname]
@@ -1448,7 +1455,8 @@ def train_llama3():
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       master = optim.master_params[idx]
-      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
+      inv = Tensor.stack(*w._inv_scale) if isinstance(w._inv_scale, list) else w._inv_scale
+      inv = inv if inv.device == master.device else inv.to(master.device)
       if MXFP8:
         from extra.gemm.cdna_asm_gemm import _mx_block_scale
         bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
@@ -1458,10 +1466,11 @@ def train_llama3():
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
-  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax, *layer_nums)
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    for nxt in fp8_next_amax: nxt.assign(nxt.zeros_like())
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
@@ -1472,14 +1481,17 @@ def train_llama3():
     else:
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
-    for g, new_g in zip(grads, loss.gradient(*optim.params)):
-      apply_grad(g, new_g.uop)
+    for g, p, new_g in zip(grads, optim.params, loss.gradient(*optim.params)):
+      apply_grad(g, new_g.uop, allreduce=overlap_sdma and p in deferred_wgrad_params)
 
     loss_cpu = loss.flatten().float().to("CPU")
     return loss_cpu.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
   def optim_step():
+    if not overlap_sdma:
+      for g in deferred_wgrad_grads:
+        g.assign(Tensor(g.uop.buf_uop.reshape(g.shape).allreduce(Ops.ADD, g.device)))
     grad_norm = optim.fstep(grads)
     scheduler.step()
 

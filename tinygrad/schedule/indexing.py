@@ -186,6 +186,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
+    # shape arguments can be shared by SLICE-backed copies, but never carry iteration ranges
+    if x.op is Ops.STACK and x.dtype is dtypes.void: continue
+
     if x.dtype == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
 

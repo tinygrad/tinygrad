@@ -52,8 +52,10 @@ class GradAccClipAdamW(Optimizer):
       updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
     # collect inv_scale tensors attached to fp8 params (set by _apply_update)
-    fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
+    fp8_inv_scales = [x for tt in self.params if hasattr(tt, '_inv_scale')
+                      for x in (tt._inv_scale if isinstance(tt._inv_scale, list) else [tt._inv_scale])]
+    fp8_next_inv_scales = [x for tt in self.params if hasattr(tt, '_next_inv_scale')
+                           for x in (tt._next_inv_scale if isinstance(tt._next_inv_scale, list) else [tt._next_inv_scale])]
     to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales
 
     Tensor.realize(*to_realize)
@@ -111,23 +113,36 @@ class GradAccClipAdamW(Optimizer):
         ret = w_q.reshape(new_w.shape)
         return ret.shard_like(t) if offloaded else ret
       from examples.mlperf.models.flat_llama import FP8_MAX
+      list_scales = isinstance(t._inv_scale, list)
+      inv_scale = Tensor.stack(*t._inv_scale) if list_scales else t._inv_scale
+      next_inv_scale = Tensor.stack(*t._next_inv_scale) if list_scales else t._next_inv_scale
       if IMMEDIATE_SCALE:
-        amax_axis = tuple(range(t._inv_scale.ndim, new_w.ndim))
-        new_inv = ((new_w.float().abs().max(axis=amax_axis).detach() + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-        t._inv_scale.assign(new_inv.shard_like(t._inv_scale) if offloaded else new_inv)
+        amax_axis = tuple(range(inv_scale.ndim, new_w.ndim))
+        new_inv = ((new_w.float().abs().max(axis=amax_axis).detach() + 1e-8) / FP8_MAX).cast(inv_scale.dtype)
+        if list_scales:
+          for i, inv in enumerate(t._inv_scale):
+            val = new_inv[i]
+            inv.assign(val.to(inv.device) if val.device != inv.device else val)
+        else: t._inv_scale.assign(new_inv.shard_like(t._inv_scale) if offloaded else new_inv)
         scale = new_inv.reciprocal().reshape(*new_inv.shape, *([1]*(new_w.ndim-new_inv.ndim)))
         ret = (new_w * scale).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
         return ret.shard_like(t) if offloaded else ret
       # delayed scaling: reuse previous step's inv_scale
-      t._inv_scale.assign(t._next_inv_scale)
-      inv_scale = t._inv_scale.to(new_w.device) if offloaded else t._inv_scale
-      scale = inv_scale.reciprocal().reshape(*inv_scale.shape, *([1]*(new_w.ndim-inv_scale.ndim)))
+      if list_scales:
+        for inv, nxt in zip(t._inv_scale, t._next_inv_scale): inv.assign(nxt)
+      else: t._inv_scale.assign(t._next_inv_scale)
+      inv_for_compute = next_inv_scale.to(new_w.device) if offloaded else next_inv_scale
+      scale = inv_for_compute.reciprocal().reshape(*inv_for_compute.shape, *([1]*(new_w.ndim-inv_for_compute.ndim)))
       scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
       ret = scaled.cast(t.dtype)
       # update inv_scale for next step from quantized result
-      new_amax = (ret.float().abs().max(axis=tuple(range(inv_scale.ndim, ret.ndim))) * inv_scale * FP8_AMAX_MARGIN).detach()
-      new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-      t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
+      new_amax = (ret.float().abs().max(axis=tuple(range(inv_for_compute.ndim, ret.ndim))) * inv_for_compute * FP8_AMAX_MARGIN).detach()
+      new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(next_inv_scale.dtype)
+      if list_scales:
+        for i, nxt in enumerate(t._next_inv_scale):
+          val = new_inv[i]
+          nxt.assign(val.to(nxt.device) if val.device != nxt.device else val)
+      else: t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
       return ret.shard_like(t) if offloaded else ret
     out = new_w.cast(t.dtype)
     return out.shard_like(t) if offloaded else out

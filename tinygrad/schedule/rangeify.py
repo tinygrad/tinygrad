@@ -68,6 +68,16 @@ def fix_store_hazard(target:UOp, src:UOp):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
 
+def view_to_slice(r:UOp) -> UOp|None:
+  if r.op is not Ops.SHRINK or r.src[0].op is not Ops.RESHAPE or len(r.marg) != 1: return None
+  src, (offset, size) = r.src[0].src[0], r.marg[0]
+  if src.op is not Ops.MSELECT or src.shape == () or not isinstance(offset, int) or not isinstance(size, int): return None
+  if prod(r.src[0].shape) != prod(src.shape) or size != r.numel(): return None
+  return UOp(Ops.SLICE, r.dtype, (src, UOp.const(dtypes.index, offset)), size)
+
+def copy_view_or_contiguous(r:UOp) -> UOp:
+  return s if (s:=view_to_slice(r)) is not None else r.contiguous()
+
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -93,6 +103,22 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
+def remove_noop_param_contiguous(c:UOp) -> UOp|None:
+  src, changed = [], False
+  for x in c.src:
+    if x.op is Ops.CONTIGUOUS and (param:=x.src[0]).op is Ops.PARAM:
+      src.append(param); changed = True
+    elif (x.op is Ops.CONTIGUOUS and (p1:=x.src[0]).op is Ops.PERMUTE and (p0:=p1.src[0]).op is Ops.PERMUTE and
+          (param:=p0.src[0]).op is Ops.PARAM and len(p0.marg) == len(p1.marg) and
+          tuple(p0.marg[i] for i in p1.marg) == tuple(range(len(p0.marg)))):
+      src.append(param); changed = True
+    elif (x.op is Ops.CONTIGUOUS and (p2:=x.src[0]).op is Ops.PERMUTE and (inner:=p2.src[0]).op is Ops.CONTIGUOUS and
+          (p1:=inner.src[0]).op is Ops.PERMUTE and (p0:=p1.src[0]).op is Ops.PERMUTE and (param:=p0.src[0]).op is Ops.PARAM and
+          len(p0.marg) == len(p1.marg) and tuple(p0.marg[i] for i in p1.marg) == tuple(range(len(p0.marg)))):
+      src.append(param.permute(p2.marg).contiguous()); changed = True
+    else: src.append(x)
+  return c.replace(src=tuple(src)) if changed else None
+
 def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if c.arg.precompile: return None
   params: list[UOp] = []
@@ -125,6 +151,8 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  (UPat(Ops.CALL, name="c"), remove_noop_param_contiguous),
+
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
@@ -147,7 +175,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
-   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
+   lambda c,r: c.replace(src=(copy_view_or_contiguous(r),)) if resolve(r.numel() != r.base.numel(), False) else
+               c.replace(src=(r.contiguous(),)) if r.contiguous_view_offset() is None else None),
 
   # copying mselect to same device is just mselect (no NOOP kernel)
   (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
@@ -282,8 +311,18 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
-  if idx.src[1:] != b2.src[1:]: return None
+  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
+
+def remove_noop_mselect_bufferize(m:UOp):
+  if len(m.src) != 1 or (b:=m.src[0]).op is not Ops.STAGE or len(b.src) < 2: return None
+  if (c:=b.src[0]).op is not Ops.CONTIGUOUS or len(c.src) != 1 or (idx:=c.src[0]).op is not Ops.INDEX: return None
+  if idx.src[0].op is not Ops.AFTER or idx.src[1:] != b.src[1:] or idx.dtype != b.dtype: return None
+  return m.replace(src=(idx.src[0],))
+
+def normalize_slice_source(x:UOp) -> UOp|None:
+  if x.src[0].op is not Ops.INDEX or x.src[1].op is not Ops.CONST: return None
+  return UOp(Ops.SLICE, x.dtype, (x.src[0].src[0], x.src[1]), x.arg)
 
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
@@ -293,6 +332,7 @@ def after_all_invalid(after:UOp):
     and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
+  (UPat(Ops.SLICE, name="x"), normalize_slice_source),
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
@@ -307,6 +347,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"),), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  (UPat(Ops.MSELECT, name="m"), remove_noop_mselect_bufferize),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST
@@ -378,7 +419,10 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
-    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
+    if x.src[0].op is Ops.SLICE:
+      do_store = buf.store(x.src[0]).end(*rngs)
+    else:
+      do_store = buf.index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
@@ -469,7 +513,7 @@ def find_bufs(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
-  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.SLICE), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
@@ -507,6 +551,24 @@ pm_add_param_range_tags = PatternMatcher([
   (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
 ])
 
+def _copy_slice_src(x:UOp) -> UOp|None:
+  if x.op is Ops.INDEX and x.src[0].op is Ops.SLICE: x = x.src[0]
+  if x.op is not Ops.SLICE or x.src[1].op is not Ops.CONST: return None
+  src = x.src[0].src[0] if x.src[0].op is Ops.INDEX else x.src[0]
+  return x if src is x.src[0] else UOp(Ops.SLICE, x.dtype, (src, x.src[1]), x.arg)
+
+def split_copy_slice(x:UOp) -> UOp|None:
+  if x.ranges: return None
+  store = x.src[0] if x.op is Ops.END else x
+  if store.op is not Ops.STORE or store.src[1].op is not Ops.COPY or (src:=_copy_slice_src(store.src[1].src[0])) is None: return None
+  copy = store.src[1]
+  rngs = sorted(x.ended_ranges if x.op is Ops.END else (), key=lambda r: r.arg)
+  psrc = UOp(Ops.PARAM, src=(UOp.const(dtypes.int, prod(src.max_shape)),),
+             arg=ParamArg(1, src.dtype, addrspace=src.addrspace)).reshape(src.max_shape)
+  if src.max_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
+  target = store.src[0].src[0] if store.src[0].op is Ops.INDEX else store.src[0]
+  return copy.replace(src=(psrc.index(*rngs), *rngs)).call(target, src)
+
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
@@ -515,11 +577,11 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
-  # SINK requires all buffers on the same device, but COPY is cross-device
+  # SINK requires all buffers on the same device, but COPY/SLICE are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
-  if stored.op is Ops.COPY: ret = stored.replace(src=stored.src + ret.ended_ranges)
+  if stored.op in {Ops.COPY, Ops.SLICE}: ret = stored.replace(src=stored.src + ret.ended_ranges)
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
@@ -528,6 +590,7 @@ def split_store(x:UOp) -> UOp|None:
   return kernel
 
 split_kernels = PatternMatcher([
+  (UPat((Ops.STORE, Ops.END), name="x"), split_copy_slice),
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 

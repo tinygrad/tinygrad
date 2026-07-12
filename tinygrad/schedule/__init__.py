@@ -8,13 +8,15 @@ from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SC
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+  while len(s.src) and (s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.SLICE, Ops.BIND} or
+                        (s.op is Ops.SLICE and s.src[0].op is Ops.INDEX)): s = s.src[0]
   return s
 
 # a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.SLICE: return _states(s.src[0])
   if s.op is Ops.BIND: return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
