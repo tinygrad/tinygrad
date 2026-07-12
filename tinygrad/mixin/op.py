@@ -99,7 +99,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # apply view ops then dim injection (None) and collapse (int)
     x = self._apply_view_ops(mops := [p for p in indices_parsed if p["index"] is not None])
     x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
-    x = x.reshape(tuple(p["size"] for p in x_dims))
+    if any(p["index"] is None or p["collapse_dim"] for p in indices_parsed): x = x.reshape(tuple(p["size"] for p in x_dims))
 
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if is_adv(p['index'])]:

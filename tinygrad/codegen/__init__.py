@@ -510,11 +510,21 @@ def do_to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
-  from tinygrad.codegen.opt.gemm import cooperative_gemm_program, direct_conv_bwd_activation_program
-  from tinygrad.codegen.opt.reduce import channel_reduce_program
+  from tinygrad.codegen.opt.gemm import cooperative_gemm_program, direct_conv_bwd_activation_program, partial_weight_grad_program
+  from tinygrad.codegen.opt.reduce import activation_var_grad_program, bn_grad_512_program, channel_reduce_program, col2im_program
+  from tinygrad.codegen.opt.reduce import im2col_program, moments_512_program
+  from tinygrad.codegen.opt.reduce import maxpool_backward_program, maxpool_program
   if ast.op is Ops.SINK and (prg:=direct_conv_bwd_activation_program(ast, renderer, compile_binary)) is not None: return prg
-  if ast.op is Ops.SINK and (prg:=channel_reduce_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.SINK and (prg:=cooperative_gemm_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=partial_weight_grad_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=activation_var_grad_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=moments_512_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=bn_grad_512_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=channel_reduce_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=col2im_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=im2col_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=maxpool_backward_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=maxpool_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"

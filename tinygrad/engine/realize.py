@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, contextlib, weakref, array
+import time, random, itertools, math, contextlib, weakref, array, re
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
@@ -249,6 +249,14 @@ pm_compile = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), compile_call),
 ])
 
+batch_compiled_cache: dict[tuple[Compiler, str], tuple[str, str, bytes]] = {}
+def _batch_spec_key(name:str, src:str) -> str:
+  marker = f" {name}("
+  if marker not in src: return f"{name}\n{src}"
+  key = src.replace(marker, " __batch_cached_kernel__(", 1)
+  key = re.sub(r"\b(data\d+)_\d+\b", r"\1", key)
+  return re.sub(r"/\* \d+ \*/", "", key)
+
 def batch_compile(linear:UOp) -> UOp:
   groups:dict[Compiler, list[UOp]] = {}
   replacements = {}
@@ -261,8 +269,16 @@ def batch_compile(linear:UOp) -> UOp:
     else: groups.setdefault(compiler, []).append(call.src[0])
   for compiler,prgs in groups.items():
     prgs = list(dict.fromkeys(prgs))
-    compiled = compiler.compile_cached_batch([(p.arg.function_name, p.src[2].arg) for p in prgs])
-    for prg,(name,src,lib) in zip(prgs, compiled):
+    specs = [(p.arg.function_name, p.src[2].arg) for p in prgs]
+    spec_keys = [_batch_spec_key(*spec) for spec in specs]
+    unique_keys = list(dict.fromkeys(spec_keys))
+    missing_keys = [key for key in unique_keys if (compiler, key) not in batch_compiled_cache]
+    missing_specs = [specs[spec_keys.index(key)] for key in missing_keys]
+    if missing_specs:
+      batch_compiled_cache.update({(compiler, key):compiled for key,compiled in
+                                   zip(missing_keys, compiler.compile_cached_batch(missing_specs))})
+    for prg,key in zip(prgs, spec_keys):
+      name,src,lib = batch_compiled_cache[(compiler, key)]
       replacements[prg] = compiled_prg = prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
                                                       arg=replace(prg.arg, name=name))
       prg.__dict__['_compiled_programs'][compiler] = compiled_prg

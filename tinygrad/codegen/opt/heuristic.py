@@ -123,7 +123,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
-    for axis, sz in itertools.product((0, 1, 2), (16,)):
+    group_sizes = (8, 16) if len(k.bufs) >= 7 else (16,)
+    for axis, sz in itertools.product((0, 1, 2), group_sizes):
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
         break
@@ -192,7 +193,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        for splits in [4]:
+        bn_spatial_reduce = len(k.unrollable_dims) >= 2 and resolve(k.full_shape[k.unrollable_dims[-2]] == 6, False)
+        for splits in ([8, 4] if bn_spatial_reduce else [4]):
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
@@ -244,7 +246,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if len(global_axes) >= 4 and k.full_shape[global_axes[2]] == 4: k.apply_opt(Opt(OptOps.LOCAL, 2, 4))
 
       remaining_reduces = [k.full_shape[x] for x in k.unrollable_dims]
-      if len(remaining_reduces) == 2 and remaining_reduces[0] == 6 and remaining_reduces[1] >= 16 and \
+      if len(remaining_reduces) == 2 and remaining_reduces[0] == 6 and remaining_reduces[1] >= 8 and \
          remaining_reduces[1] % 4 == 0 and k.upcast_size() <= 16:
         k.apply_opt(Opt(OptOps.UNROLL, 1, 4))
 

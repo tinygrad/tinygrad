@@ -6,7 +6,6 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, Device, MultiBuffer, P
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
-from tinygrad.runtime.ops_rdma import RDMACopyQueue
 
 class HCQGraph(MultiGraphRunner):
   def __init__(self, *args, **kwargs):
@@ -50,7 +49,7 @@ class HCQGraph(MultiGraphRunner):
 
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: unwrap(dev.hw_compute_queue_t)() for dev in self.devices}
     self.copy_queues: dict[tuple[HCQCompiled, int], HWQueue] = {} # lazy allocation, keyed by (device, queue_idx)
-    self.rdma_queues: dict[tuple[HCQCompiled, HCQCompiled], RDMACopyQueue] = {} # lazy allocation, keyed by device pair
+    self.rdma_queues: dict[tuple[HCQCompiled, HCQCompiled], Any] = {} # lazy allocation, keyed by device pair
     self.num_copy_queues: int = getenv("HCQ_NUM_SDMA", min(len(self.devices), 8) if ALL2ALL >= 1 else 1)
     self.num_rdma_ops: dict[tuple[HCQCompiled, HCQCompiled], int] = collections.defaultdict(int)
 
@@ -102,6 +101,7 @@ class HCQGraph(MultiGraphRunner):
       if runtime is not None:
         enqueue_queue = self.comp_queues[enqueue_dev]
       elif is_rdma:
+        from tinygrad.runtime.ops_rdma import RDMACopyQueue
         enqueue_queue = self.comp_queues[enqueue_dev]
         rdma_key = (cast(HCQCompiled, Device[bufs[0].device]).rdma_dev(), enqueue_dev.rdma_dev())
         self.rdma_queues.setdefault(rdma_key, RDMACopyQueue(enqueue_dev.rdma_dev()))
@@ -272,7 +272,7 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
-    hcq_var_vals = {self.kickoff_var.expr: self.kickoff_value, **var_vals,
+    hcq_var_vals = {self.kickoff_var.expr: self.kickoff_value, **self.fixedvars, **var_vals,
                     **{var.expr: dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
                     **{sig.base_buf.va_addr.expr: dev.timeline_signal.base_buf.va_addr for dev, sig in self.virt_timeline_signals.items()}}
 

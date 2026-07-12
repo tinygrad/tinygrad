@@ -470,8 +470,8 @@ def _hip_math(op):
   return lambda x,dtype: _ocml(op)(x, dtype) if dtype.scalar() == dtypes.double else f"__builtin_elementwise_{op}({x})"
 
 def hip_threefry(x:UOp, key:UOp) -> UOp:
-  x2 = UOp.vectorize(x.cast(dtypes.uint), (x >> 32).cast(dtypes.uint))
-  key2 = UOp.vectorize(key.cast(dtypes.uint), (key >> 32).cast(dtypes.uint))
+  x2 = x.cast(dtypes.uint).stack((x >> 32).cast(dtypes.uint))
+  key2 = key.cast(dtypes.uint).stack((key >> 32).cast(dtypes.uint))
   ret = UOp(Ops.THREEFRY, dtypes.uint, src=(x2, key2))
   return (ret.index(1).cast(dtypes.ulong) << 32) | ret.index(0).cast(dtypes.ulong)
 

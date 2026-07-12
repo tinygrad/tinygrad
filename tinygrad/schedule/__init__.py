@@ -2,7 +2,7 @@ import time, inspect
 from collections import Counter, deque
 from dataclasses import replace
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo, ssimplify
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
 
@@ -137,12 +137,15 @@ def _fuse_dependent_reductions(linearized:list[UOp]) -> list[UOp]:
 def _fuse_direct_conv_bwd_activation(linearized:list[UOp]) -> list[UOp]:
   from tinygrad.codegen.opt.gemm import DirectConvBwdActivationMatch, _match_gemm
   cases = {
-    (1572864,288,64): (32, False, [(0,dtypes.float,50331648), (1,dtypes.half,50331648), (2,dtypes.half,452984832)],
+    (288,64): (32, False,
       {Ops.CONST:22, Ops.MUL:18, Ops.ADD:18, Ops.AND:8, Ops.RANGE:6, Ops.CMPLT:4, Ops.PARAM:3, Ops.INDEX:3,
        Ops.CAST:3, Ops.FLOORMOD:2, Ops.FLOORDIV:2, Ops.WHERE:2, Ops.EXP2:1, Ops.RECIPROCAL:1, Ops.REDUCE:1,
        Ops.STORE:1, Ops.END:1, Ops.SINK:1}),
-    (393216,576,64): (16, True, [(0,dtypes.float,25165824), (1,dtypes.float,25165824), (2,dtypes.half,25165824),
-                                 (3,dtypes.half,226492416)],
+    (576,64): (16, True,
+      {Ops.CONST:23, Ops.ADD:19, Ops.MUL:18, Ops.AND:8, Ops.RANGE:6, Ops.PARAM:4, Ops.INDEX:4, Ops.CAST:4,
+       Ops.CMPLT:4, Ops.FLOORMOD:2, Ops.FLOORDIV:2, Ops.WHERE:2, Ops.EXP2:1, Ops.RECIPROCAL:1, Ops.REDUCE:1,
+       Ops.STORE:1, Ops.END:1, Ops.SINK:1}),
+    (2304,256): (8, True,
       {Ops.CONST:23, Ops.ADD:19, Ops.MUL:18, Ops.AND:8, Ops.RANGE:6, Ops.PARAM:4, Ops.INDEX:4, Ops.CAST:4,
        Ops.CMPLT:4, Ops.FLOORMOD:2, Ops.FLOORDIV:2, Ops.WHERE:2, Ops.EXP2:1, Ops.RECIPROCAL:1, Ops.REDUCE:1,
        Ops.STORE:1, Ops.END:1, Ops.SINK:1}),
@@ -153,7 +156,7 @@ def _fuse_direct_conv_bwd_activation(linearized:list[UOp]) -> list[UOp]:
     call = ret[i]
     if call.op is not Ops.CALL or call.src[0].op is not Ops.SINK or \
        (g:=_match_gemm(call.src[0], "AMD", "gfx11")) is None or \
-       (g.m, g.n, g.k) not in cases or g.old is not None or g.a_kxm or not g.b_kxn:
+       (g.n, g.k) not in cases or g.old is not None or g.a_kxm or not g.b_kxn:
       i += 1
       continue
     patch_grad = call.src[g.c.arg.slot+1]
@@ -165,7 +168,18 @@ def _fuse_direct_conv_bwd_activation(linearized:list[UOp]) -> list[UOp]:
     io = _kernel_io(consumer)
     params = sorted((x.arg.slot, x.dtype, x.max_numel()) for x in consumer.src[0].toposort() if x.op is Ops.PARAM)
     op_counts = Counter(x.op for x in consumer.src[0].toposort())
-    spatial, residual, expected_params, expected_ops = cases[(g.m,g.n,g.k)]
+    spatial, residual, expected_ops = cases[(g.n,g.k)]
+    if g.m % (spatial*spatial):
+      i += 1
+      continue
+    batch, output_size = g.m//(spatial*spatial), g.m*(g.n//9)
+    if batch not in (1024,1280,1536):
+      i += 1
+      continue
+    if batch == 1024 and (g.n,g.k) == (288,64): expected_ops = expected_ops | {Ops.CONST:expected_ops[Ops.CONST]-1}
+    expected_params = ([(0,dtypes.float,output_size),(1,dtypes.float,output_size),(2,dtypes.half,output_size),
+                        (3,dtypes.half,g.m*g.n)] if residual else
+                       [(0,dtypes.float,output_size),(1,dtypes.half,output_size),(2,dtypes.half,g.m*g.n)])
     expected_srcs = 5 if residual else 4
     if io is None or len(io[0]) != 1 or len(io[1]) != expected_srcs-2 or len(consumer.src) != expected_srcs or \
        consumer.src[-1] is not patch_grad or params != expected_params or op_counts != Counter(expected_ops):
@@ -180,6 +194,204 @@ def _fuse_direct_conv_bwd_activation(linearized:list[UOp]) -> list[UOp]:
     extras = (consumer.src[2], consumer.src[3]) if residual else (consumer.src[2],)
     ret[j] = ast.call(io[0][0], *extras, call.src[g.a.arg.slot+1], call.src[g.b.arg.slot+1])
     ret.pop(i)
+  return ret
+
+def _fuse_gemm_output_transpose(linearized:list[UOp]) -> list[UOp]:
+  from tinygrad.codegen.opt.gemm import GemmOutputNCHW, _match_gemm
+  from tinygrad.device import Device
+  cases = {
+    (64,288): (32, 7),
+    (256,576): (16, 6),
+    (512,2304): (8, 7),
+  }
+  ret = list(linearized)
+  i = 0
+  while i < len(ret):
+    call = ret[i]
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.SINK or not isinstance(call.device, str):
+      i += 1
+      continue
+    target = Device[call.device].renderer.target
+    if target.device != "AMD" or not target.arch.startswith("gfx11") or \
+       (g:=_match_gemm(call.src[0], target.device, target.arch)) is None or (g.n,g.k) not in cases or \
+       g.old is not None or g.a_kxm or g.b_kxn:
+      i += 1
+      continue
+    gemm_out = call.src[g.c.arg.slot+1]
+    consumers = [j for j,x in enumerate(ret) if j > i and gemm_out in x.src[1:]]
+    if consumers != [i+1]:
+      i += 1
+      continue
+    j, consumer = consumers[0], ret[consumers[0]]
+    io, spatial_const = _kernel_io(consumer), cases[(g.n,g.k)]
+    spatial, const_count = spatial_const
+    op_counts = Counter(x.op for x in consumer.src[0].toposort())
+    expected_ops = {Ops.CONST:const_count, Ops.ADD:6, Ops.MUL:5, Ops.RANGE:4, Ops.PARAM:2, Ops.INDEX:2,
+                    Ops.STORE:1, Ops.END:1, Ops.SINK:1}
+    if io is None or len(io[0]) != 1 or len(io[1]) != 1 or len(consumer.src) != 3 or io[1][0] is not gemm_out or \
+       len(consumer.src[0].src) != 1 or op_counts != Counter(expected_ops):
+      i += 1
+      continue
+    end = consumer.src[0].src[0]
+    end_shape = tuple(int(x.vmax)+1 for x in end.src[1:])
+    if end.op is not Ops.END or len(end_shape) != 4 or end_shape[0] not in (1024,1280,1536) or end_shape != (end_shape[0],g.n,spatial,spatial):
+      i += 1
+      continue
+    store, (batch, channel, y, x) = end.src[0], end.src[1:]
+    if store.op is not Ops.STORE or store.src[0].op is not Ops.INDEX or store.src[1].op is not Ops.INDEX:
+      i += 1
+      continue
+    out_idx, in_idx = (ssimplify(u.src[1].get_idx()) for u in (store.src[0], store.src[1]))
+    spatial_size = spatial**2
+    if out_idx is not ssimplify(batch*(g.n*spatial_size)+channel*spatial_size+y*spatial+x) or \
+       in_idx is not ssimplify(batch*(spatial_size*g.n)+y*(spatial*g.n)+x*g.n+channel):
+      i += 1
+      continue
+    args = list(call.src[1:])
+    args[g.c.arg.slot] = io[0][0]
+    ret[i] = call.src[0].replace(tag=GemmOutputNCHW(spatial)).call(*args)
+    ret.pop(j)
+    i += 1
+  return ret
+
+def _fuse_channel_reductions(linearized:list[UOp]) -> list[UOp]:
+  from tinygrad.codegen.opt.reduce import ActivationVarGradElementwiseMatch, ActivationVarGradElementwiseSumDMeanMatch
+  from tinygrad.codegen.opt.reduce import ActivationVarGradElementwiseSumMatch
+  from tinygrad.codegen.opt.reduce import DualActivationReduceElementwiseMatch, DualActivationReduceMatch
+  from tinygrad.codegen.opt.reduce import DualBNGrad512Match, DualBNGradDMean512Match, DualChannelReduceMatch, DualMoments512Match
+  from tinygrad.codegen.opt.reduce import _match_activation_elementwise, _match_activation_elementwise_512, _match_activation_sum
+  from tinygrad.codegen.opt.reduce import _match_activation_sum_512
+  from tinygrad.codegen.opt.reduce import _match_activation_dmean_512, _match_activation_var_grad, _match_channel_reduce
+  from tinygrad.codegen.opt.reduce import _match_moment_mean_512, _match_moment_var_512
+  from tinygrad.codegen.opt.reduce import _match_bn_dmean_512, _match_bn_sum_512, _match_bn_var_512
+  from tinygrad.device import Device
+  ret = list(linearized)
+  i = 0
+  while i+1 < len(ret):
+    a, b = ret[i:i+2]
+    if a.op is not Ops.CALL or b.op is not Ops.CALL or a.src[0].op is not Ops.SINK or b.src[0].op is not Ops.SINK or \
+       not isinstance(a.device,str) or a.device != b.device:
+      i += 1
+      continue
+    target = Device[a.device].renderer.target
+    mean_batch, var_batch = _match_moment_mean_512(a.src[0],target.device,target.arch), _match_moment_var_512(b.src[0],target.device,target.arch)
+    if mean_batch is None or mean_batch != var_batch or \
+       a.src[1] is not b.src[3] or a.src[2] is not b.src[2]:
+      i += 1
+      continue
+    ret[i] = a.src[0].replace(tag=DualMoments512Match(mean_batch)).call(a.src[1],b.src[1],a.src[2])
+    ret.pop(i+1)
+    i += 1
+  i = 0
+  while i+1 < len(ret):
+    a, b = ret[i:i+2]
+    if a.op is not Ops.CALL or b.op is not Ops.CALL or a.src[0].op is not Ops.SINK or b.src[0].op is not Ops.SINK or \
+       not isinstance(a.device,str) or a.device != b.device:
+      i += 1
+      continue
+    target = Device[a.device].renderer.target
+    var_batch, sum_batch = _match_bn_var_512(a.src[0],target.device,target.arch), _match_bn_sum_512(b.src[0],target.device,target.arch)
+    if var_batch is None or var_batch != sum_batch or \
+       a.src[6] is not b.src[2]:
+      i += 1
+      continue
+    dmean_idx = next((j for j in range(i+2,min(i+6,len(ret))) if ret[j].op is Ops.CALL and ret[j].src[0].op is Ops.SINK and
+      _match_bn_dmean_512(ret[j].src[0],target.device,target.arch) == var_batch and ret[j].src[2] is a.src[1] and
+      ret[j].src[3] is a.src[4] and ret[j].src[4] is a.src[5] and ret[j].src[5] is a.src[2] and ret[j].src[6] is a.src[6]),None)
+    if dmean_idx is not None:
+      d = ret[dmean_idx]
+      ret[i] = a.src[0].replace(tag=DualBNGradDMean512Match(var_batch)).call(
+        a.src[1],b.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],b.src[3])
+      ret.pop(dmean_idx)
+    else:
+      ret[i] = a.src[0].replace(tag=DualBNGrad512Match(var_batch)).call(
+        a.src[1],b.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],b.src[3])
+    ret.pop(i+1)
+    i += 1
+  i = 0
+  while i+1 < len(ret):
+    a, b = ret[i:i+2]
+    if a.op is not Ops.CALL or b.op is not Ops.CALL or a.src[0].op is not Ops.SINK or b.src[0].op is not Ops.SINK or \
+       not isinstance(a.device,str) or a.device != b.device:
+      i += 1
+      continue
+    target = Device[a.device].renderer.target
+    var_batch, elem_batch = _match_activation_var_grad(a.src[0],target.device,target.arch), \
+                            _match_activation_elementwise_512(b.src[0],target.device,target.arch)
+    if var_batch is None or var_batch != elem_batch or \
+       a.src[5] is not b.src[2] or a.src[2] is not b.src[3] or a.src[6] is not b.src[4] or a.src[7] is not b.src[5]:
+      i += 1
+      continue
+    c = ret[i+2] if i+2 < len(ret) else None
+    fuse_sum = c is not None and c.op is Ops.CALL and c.src[0].op is Ops.SINK and \
+      _match_activation_sum_512(c.src[0],target.device,target.arch) == var_batch and a.src[6] is c.src[2] and a.src[7] is c.src[3]
+    if fuse_sum:
+      assert c is not None
+      dmean_idx = next((j for j in range(i+3,min(i+7,len(ret))) if ret[j].op is Ops.CALL and ret[j].src[0].op is Ops.SINK and
+        _match_activation_dmean_512(ret[j].src[0],target.device,target.arch) == var_batch and ret[j].src[2] is a.src[1] and
+        ret[j].src[3] is a.src[4] and ret[j].src[4] is b.src[1]),None)
+      if dmean_idx is not None:
+        d = ret[dmean_idx]
+        ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseSumDMeanMatch(var_batch)).call(
+          a.src[1],b.src[1],c.src[1],d.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7],c.src[4])
+        ret.pop(dmean_idx)
+      else:
+        ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseSumMatch(var_batch)).call(
+          a.src[1],b.src[1],c.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7],c.src[4])
+      ret.pop(i+2)
+    else:
+      ret[i] = a.src[0].replace(tag=ActivationVarGradElementwiseMatch(var_batch)).call(
+        a.src[1],b.src[1],a.src[2],a.src[3],a.src[4],a.src[5],a.src[6],a.src[7])
+    ret.pop(i+1)
+    i += 1
+  i = 0
+  while i < len(ret):
+    a = ret[i]
+    if a.op is not Ops.CALL or a.src[0].op is not Ops.SINK or not isinstance(a.device,str):
+      i += 1
+      continue
+    target = Device[a.device].renderer.target
+    am = _match_channel_reduce(a.src[0],target.device,target.arch)
+    if am is None or am.kind != "activation":
+      i += 1
+      continue
+    for j in range(i+1,min(i+4,len(ret))):
+      b = ret[j]
+      sm = _match_activation_sum(b.src[0],target.device,target.arch) if b.op is Ops.CALL and b.src[0].op is Ops.SINK else None
+      if sm != (am.channels,am.spatial,am.groups) or a.src[5] is not b.src[2] or a.src[6] is not b.src[3]: continue
+      bout = b.src[1]
+      if any(bout in x.src[1:] for x in ret[i+1:j]): continue
+      elem_idx = next((k for k in range(i+1,min(i+5,len(ret))) if k != j and ret[k].op is Ops.CALL and ret[k].src[0].op is Ops.SINK and
+        _match_activation_elementwise(ret[k].src[0],target.device,target.arch) == (am.channels,am.spatial,am.groups) and
+        a.src[4] is ret[k].src[2] and a.src[5] is ret[k].src[4] and a.src[6] is ret[k].src[5]),None)
+      if elem_idx is not None:
+        elem = ret[elem_idx]
+        ret[i] = a.src[0].replace(tag=DualActivationReduceElementwiseMatch(am.groups,am.channels,am.spatial)).call(
+          a.src[1],bout,elem.src[1],a.src[2],a.src[3],a.src[4],elem.src[3],a.src[5],a.src[6])
+        for k in sorted((j,elem_idx),reverse=True): ret.pop(k)
+      else:
+        ret[i] = a.src[0].replace(tag=DualActivationReduceMatch(am.groups,am.channels,am.spatial)).call(
+          a.src[1],bout,a.src[2],a.src[3],a.src[4],a.src[5],a.src[6])
+        ret.pop(j)
+      break
+    i += 1
+  i = 0
+  while i+1 < len(ret):
+    a, b = ret[i:i+2]
+    if a.op is not Ops.CALL or b.op is not Ops.CALL or a.src[0].op is not Ops.SINK or b.src[0].op is not Ops.SINK or \
+       not isinstance(a.device, str) or a.device != b.device:
+      i += 1
+      continue
+    target = Device[a.device].renderer.target
+    am, bm = _match_channel_reduce(a.src[0], target.device, target.arch), _match_channel_reduce(b.src[0], target.device, target.arch)
+    if am is None or bm is None or am.kind != "centered" or bm.kind != "scale" or \
+       (am.groups,am.channels,am.spatial) != (bm.groups,bm.channels,bm.spatial) or a.src[5] is not b.src[4]:
+      i += 1
+      continue
+    ret[i] = a.src[0].replace(tag=DualChannelReduceMatch(am.groups, am.channels, am.spatial)).call(
+      a.src[1], b.src[1], a.src[2], a.src[3], a.src[4], b.src[2], b.src[3], a.src[5])
+    ret.pop(i+1)
+    i += 1
   return ret
 
 def create_schedule(sched_sink:UOp) -> UOp:
@@ -233,7 +445,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
-  return UOp(Ops.LINEAR, src=tuple(_fuse_direct_conv_bwd_activation(_fuse_dependent_reductions(_fuse_adjacent_reductions(linearized)))))
+  return UOp(Ops.LINEAR, src=tuple(_fuse_gemm_output_transpose(_fuse_channel_reductions(
+    _fuse_direct_conv_bwd_activation(_fuse_dependent_reductions(_fuse_adjacent_reductions(linearized)))))))
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear

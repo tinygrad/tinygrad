@@ -10,7 +10,7 @@ from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLI
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op, pm_fix_deviceless
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -541,7 +541,9 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  # Device attachment is valid only after rangeify, but can share this fixed-point traversal.
+  tsink = graph_rewrite(tsink, pm_fix_deviceless+symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
+                        ctx=tsink.device, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")

@@ -1209,7 +1209,12 @@ class ProgramInfo:
     return global_size, local_size
 
   def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
-    try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+    def _val(k:UOp) -> int|None:
+      if k.expr in self.runtimevars: return None
+      if k.expr in var_vals: return var_vals[k.expr]
+      if k.vmin == k.vmax: return int(k.vmin)
+      raise KeyError(k.expr)
+    try: return tuple(_val(k) for k in self.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
@@ -1678,12 +1683,14 @@ class RewriteContext:
     replace, ctx, stack_limit, enter_calls, shared_cache = self.replace, self.ctx, REWRITE_STACK_LIMIT.value, self.enter_calls, self.shared_cache
     bpm, cached_bpm_rewrite = self.bpm, self.cached_bpm_rewrite
     pm_rewrite = self.pm.rewrite if self.pm is not None else None
+    stack_pop, stack_append, stack_extend = stack.pop, stack.append, stack.extend
+    replace_get, waitlist_pop, waitlist_setdefault = replace.get, waitlist.pop, waitlist.setdefault
     while stack:
-      n, stage, new_n = stack.pop()
+      n, stage, new_n = stack_pop()
       if stage == 0:
         if shared_cache is not None and (cached:=shared_cache.get(n, SENTINEL)) is not SENTINEL:
           replace[n] = cached
-          if n in waitlist: stack.extend(waitlist.pop(n))
+          if (waiting:=waitlist_pop(n,None)) is not None: stack_extend(waiting)
           continue
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if bpm is not None:
@@ -1700,9 +1707,9 @@ class RewriteContext:
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             replace[n] = unwrap(test_n)
-            if n in waitlist: stack.extend(waitlist.pop(n))
+            if (waiting:=waitlist_pop(n,None)) is not None: stack_extend(waiting)
             continue
-        stack.append((n, 1, new_n))
+        stack_append((n, 1, new_n))
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
@@ -1710,14 +1717,14 @@ class RewriteContext:
         for x in reversed(new_n.src):
           if x in replace: continue
           replace[x] = SENTINEL
-          stack.append((x, 0, x))
+          stack_append((x, 0, x))
         if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       elif stage == 1:
         new_src = None
         for i,x in enumerate(new_n.src):
-          if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
+          if (rx:=replace_get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
-            waitlist.setdefault(x, []).append((n, 1, new_n))
+            waitlist_setdefault(x, []).append((n, 1, new_n))
             break
           if rx is not x:
             if new_src is None: new_src = list(new_n.src)
@@ -1729,27 +1736,27 @@ class RewriteContext:
             if pm_rewrite is None or (new_src_n:=pm_rewrite(new_n, ctx)) is None:
               replace[n] = new_n
               if shared_cache is not None: shared_cache[n] = new_n
-              if n in waitlist: stack.extend(waitlist.pop(n))
+              if (waiting:=waitlist_pop(n,None)) is not None: stack_extend(waiting)
               continue
           else:
             # if srcs changed from rewrites, construct a new UOp with the new srcs
             new_src_n = UOp(new_n.op, new_n.dtype, tuple(new_src), new_n.arg, new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
-          stack.append((n, 2, new_src_n))
+          stack_append((n, 2, new_src_n))
           if new_src_n not in replace:
             replace[new_src_n] = SENTINEL
-            stack.append((new_src_n, 0, new_src_n))
+            stack_append((new_src_n, 0, new_src_n))
           if len(stack) > stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       else:
         # in stage 2, we link the result of new_n to the result of n
-        if (replaced_new_n:=replace.get(new_n, SENTINEL)) is SENTINEL:
+        if (replaced_new_n:=replace_get(new_n, SENTINEL)) is SENTINEL:
           # not ready: register in waitlist instead of spinning
-          waitlist.setdefault(new_n, []).append((n, 2, new_n))
+          waitlist_setdefault(new_n, []).append((n, 2, new_n))
         else:
           # otherwise we are done
           replace[n] = replaced_new_n
           if shared_cache is not None: shared_cache[n] = replaced_new_n
-          if n in waitlist: stack.extend(waitlist.pop(n))
+          if (waiting:=waitlist_pop(n,None)) is not None: stack_extend(waiting)
     if (ret:=replace[root]) is SENTINEL: raise RuntimeError("infinite loop in graph_rewrite")
     return ret
 

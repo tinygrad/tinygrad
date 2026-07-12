@@ -69,15 +69,16 @@ pm_simplify_ranges = PatternMatcher([
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+def do_substitute(ctx:dict, x:UOp, sub_fxn:Callable[[UOp, UOp], UOp], simplify:bool=True) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
-  return None if ret is x else ret.simplify()
+  return None if ret is x else ret.simplify() if simplify else ret
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])),
+    simplify=False)),
 ])
 
 # **** reduce simplification ****

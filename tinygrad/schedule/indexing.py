@@ -241,7 +241,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
     if x.dtype == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    ending_ranges[x] = [r for u in consumer_map[x] for r in ending_ranges.get(u, ())]
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -340,8 +340,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # NOTE: SPEC=3 is broken here with shape
   with Context(SPEC=min(SPEC.value, 2)):
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
-  # if a deviceless value must materialize, place it on the sink device
-  tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
   return tsink, rctx
 
 def render_ranges(*rngs_list, realized) -> str:

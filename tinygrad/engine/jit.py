@@ -137,6 +137,7 @@ class GraphRunner:
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
     crs = [(j, self.calls[j][1].arg, self.calls[j][3]) for j in range(len(self.calls)) if self.calls[j][1].op is Ops.PROGRAM]
+    self.fixedvars = {v.expr:int(v.vmin) for _,p,_ in crs for v in p.vars if v.vmin == v.vmax}
     self.vars = sorted({v.expr for _,p,dv in crs for v in p.vars if v.expr not in dv | p.runtimevars})
     self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.local_size, p.global_size) if d and is_sym_dim(d))
 
@@ -161,7 +162,7 @@ class GraphRunner:
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
 
   def updated_vars(self, var_vals: dict[str, int]):
-    vals = [var_vals[v] for v in self.vars]
+    vals = [(var_vals | self.fixedvars)[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
       for i, v in vidxs: yield j, i, vals[v]
 
