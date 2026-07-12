@@ -339,7 +339,7 @@ class TestLinearizer(unittest.TestCase):
     # check that the float4 cast collapses
     store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
     for val in store_vals:
-      assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
+      assert val.dtype == dtypes.float # and val.op is not Ops.VECTORIZE
 
   @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -348,7 +348,7 @@ class TestLinearizer(unittest.TestCase):
     out = x.flip((0,1)).contiguous()
     ast = helper_linearizer_opt(out)
     store_val = [u.src[1] for u in tuple(to_program(ast, renderer=Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.STACK
+    assert store_val.dtype == dtypes.float and store_val.op is not Ops.STACK
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -386,7 +386,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
     # the float4 value stores directly in lds and we skip upcast
-    self.assertEqual(stores[0].src[1].dtype, dtypes.float.vec(4))
+    self.assertEqual(stores[0].src[1].dtype, dtypes.float)
     #assert stores[0].src[-1].op is not Ops.VECTORIZE
 
     # the global store doesn't change

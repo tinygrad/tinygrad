@@ -77,7 +77,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   B = B.reshape((K//BLOCK_K, BLOCK_K, N//BLOCK_N, BLOCK_N))
 
   # this is the big accumulator
-  acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float.vec(4), 0, AddrSpace.REG)
+  acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float, 0, AddrSpace.REG)
   assert acc.size*WARP_SIZE*WARPGROUP_SIZE*4 == BLOCK_M*BLOCK_N
   acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float, (0.0,)*4), end=init_l)
 
@@ -114,8 +114,8 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
 
     # load from locals into registers
-    Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
-    Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
+    Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half, slot=1, addrspace=AddrSpace.REG)
+    Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half, slot=2, addrspace=AddrSpace.REG)
 
     M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+10)
     Asl = Asl.reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M))
@@ -138,7 +138,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
     # do WMMA
     wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-    out = UOp(Ops.WMMA, dtypes.float.vec(4), (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
+    out = UOp(Ops.WMMA, dtypes.float, (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
 
     # store back the acc
     acc_store = acc[N_inner_loop, M_inner_loop].store(out)
@@ -194,7 +194,7 @@ acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
 # do the wmma
 acc_load = UOp.stack(*[acc.after(K_loop)[i] for i in range(4)])
 wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
+out = UOp(Ops.WMMA, dtypes.float, (A_in, B_in, acc_load), arg=wmma_arg)
 
 # store back the acc
 acc = acc.after(UOp.group(*[acc[i].store(out.index(i)) for i in range(4)]).end(K_loop))
