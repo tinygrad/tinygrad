@@ -119,7 +119,6 @@ def _vop2(ctx, x:UOp):
   non_commutative = x.arg in (RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
   if not non_commutative and not is_const(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
-  # return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
@@ -307,7 +306,7 @@ def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
 # https://arxiv.org/pdf/2207.08420
 def idiv(ctx, x:UOp):
   signed = not dtypes.is_unsigned(x.dtype)
-  dt = dtypes.uint32 if x.dtype.itemsize == 4 else dtypes.uint64
+  dt = dtypes.uint32 if x.dtype.itemsize <= 4 else dtypes.uint64
   a, b = x.src[0].cast(dt), x.src[1].cast(dt)
   if signed:
     nbits = x.dtype.itemsize*8
@@ -323,7 +322,7 @@ def idiv(ctx, x:UOp):
   qd = ad * invbd
   q1 = _aluhint(qd.trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtype=dtypes.uint64) # todo: this is hacky, not trunc
   r1 = UOp(Ops.SUB, dtypes.int64, src=(a.cast(dtypes.int64), b.cast(dtypes.int64) * q1.cast(dtypes.int64)))
-  if x.dtype.itemsize == 4:
+  if x.dtype.itemsize <= 4:
     q = (r1 < const(dtypes.int64, 0)).where(UOp(Ops.SUB, dtypes.ulong, src=(q1, const(dtypes.ulong, 1))), q1).cast(dtypes.uint32)
   else:
     q3d = r1.cast(dtypes.double) * invbd
@@ -590,11 +589,10 @@ post_regalloc_matcher = PatternMatcher([
 ])
 
 def encode(ctx, x:UOp):
-  if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   import tinygrad.renderer.amd.dsl as dsl
-  def _route(r:Register):
-    dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
-    return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
+  if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
+  dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
+  def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
   def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
@@ -603,8 +601,8 @@ def encode(ctx, x:UOp):
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
-  if group is RDNA3Ops.SMEM:
-    kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
+  if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
+  elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(rdefs(oprs[1])), offset=_immorreg(oprs[2]))
     if reg(x) is None: kw["data"]=_fuse(rdefs(oprs[3]))
@@ -613,11 +611,7 @@ def encode(ctx, x:UOp):
     kw = dict(addr=_immorreg(oprs[0]), offset1=_immorreg(oprs[1]))
     if reg(x) is None: kw["data0"]=_fuse(rdefs(oprs[3]))
     else: kw["vdst"]=_fuse(rdefs(x))
-  elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
-  elif group is RDNA3Ops.VOP3SD:
-    oprs = oprs[:3]
-    kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)))
-    for i,u in enumerate(oprs): kw[f"src{i}"]=_immorreg(u)
+  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
   elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
