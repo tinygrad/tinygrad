@@ -98,8 +98,8 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
-def to_vgpr(ctx, x:UOp) -> UOp:
-  return vmov(x) if x.op is Ops.CONST or (len(x.src) and x.src[0].op is Ops.CONST) else x # NOTE: wrong, recursion?
+def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
+def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 
 # ---- operand legalization wrappers ----
@@ -114,11 +114,10 @@ def _vop3(ctx, x:UOp):
 # TODO: pass in original op to use GroupOp.COMMUTATIVE?
 def _vop2(ctx, x:UOp):
   # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
-  def _isconst(u:UOp): return u.op is Ops.CONST or (u.op is Ops.CAST and u.src[0].op is Ops.CONST) # TODO: fix?
-  if not _isconst(x.src[1]): return x
+  if not is_const(x.src[1]): return x
   rest = x.src[2:] if len(x.src) > 2 else ()
   non_commutative = x.arg in (RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshrrev_b32_e32) # NOTE: add more
-  if not non_commutative and not _isconst(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
+  if not non_commutative and not is_const(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
   # return x.replace(src=(x.src[0], to_vgpr(ctx, x.src[1])) + rest)
 
@@ -199,7 +198,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
     # is that it will interpret it as accessing a subreg??
     if base.dtype.itemsize <= 4: return vmov(base.index(idx))
     else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
-  # NOTE: handle signed
+  # NOTE: load_i* automatically sign extends, this messes up some of the tests currently ex. i8 bitcast_alt
   imap = {
     1 : [(RDNA3Ops.global_load_u8,RDNA3Ops.ds_load_u8), (RDNA3Ops.global_load_i8,RDNA3Ops.ds_load_i8)],
     2 : [(RDNA3Ops.global_load_u16,RDNA3Ops.ds_load_u16), (RDNA3Ops.global_load_i16,RDNA3Ops.ds_load_i16)],
@@ -498,6 +497,7 @@ extra_matcher = PatternMatcher([
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 # cast i8 -> i16/i32 = bfe
 pre_isel_matcher = PatternMatcher([
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
   # NOTE: does this not work for int8 alu? Do we need to sign extend or something..
   (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"), lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
