@@ -107,15 +107,18 @@ def remove_noop_param_contiguous(c:UOp) -> UOp|None:
   src, changed = [], False
   for x in c.src:
     if x.op is Ops.CONTIGUOUS and (param:=x.src[0]).op is Ops.PARAM:
-      src.append(param); changed = True
+      src.append(param)
+      changed = True
     elif (x.op is Ops.CONTIGUOUS and (p1:=x.src[0]).op is Ops.PERMUTE and (p0:=p1.src[0]).op is Ops.PERMUTE and
           (param:=p0.src[0]).op is Ops.PARAM and len(p0.marg) == len(p1.marg) and
           tuple(p0.marg[i] for i in p1.marg) == tuple(range(len(p0.marg)))):
-      src.append(param); changed = True
+      src.append(param)
+      changed = True
     elif (x.op is Ops.CONTIGUOUS and (p2:=x.src[0]).op is Ops.PERMUTE and (inner:=p2.src[0]).op is Ops.CONTIGUOUS and
           (p1:=inner.src[0]).op is Ops.PERMUTE and (p0:=p1.src[0]).op is Ops.PERMUTE and (param:=p0.src[0]).op is Ops.PARAM and
           len(p0.marg) == len(p1.marg) and tuple(p0.marg[i] for i in p1.marg) == tuple(range(len(p0.marg)))):
-      src.append(param.permute(p2.marg).contiguous()); changed = True
+      src.append(param.permute(p2.marg).contiguous())
+      changed = True
     else: src.append(x)
   return c.replace(src=tuple(src)) if changed else None
 
