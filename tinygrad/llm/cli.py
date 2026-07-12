@@ -5,6 +5,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
+from tinygrad.llm.tools import format_tools, parse_tool_calls
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -113,7 +114,7 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0, tools:list|None=None):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
@@ -128,11 +129,19 @@ class Handler(HTTPRequestHandler):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
+      # tool-enabled replies are buffered and parsed once at the end
+      if not tools and (content:=dec(next_id)): yield {"choices": [{"index":0, "delta":{"content":content}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    # tool-enabled replies are parsed from the final decoded text
+    text = tok.decode(out) if tools else dec()
+    # emit tool_calls instead of assistant text when the model chose a tool
+    if tools and (calls:=parse_tool_calls(text)):
+      print(calls)
+      yield {"choices": [{"index":0, "delta":{"tool_calls":[{"index":i, **tc} for i,tc in enumerate(calls)]}, "finish_reason":None}], **tmpl}
+      finish_reason = "tool_calls"
+    elif text: yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -146,33 +155,43 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens, last assistant message is treated as prefill
+      messages, last = body["messages"], len(body["messages"]) - 1
+      tools = body.get("tools")
       ids: list[int] = tok.prefix()
-      for i, msg in enumerate(body["messages"]):
+      if tools and (tool_text:=format_tools(tools)):
+        print(tool_text)
+        role = "system" if tok.preset != 'tekken' else "user"
+        ids += tok.role(role) + tok.encode(tool_text) + tok.end_turn()
+      for i, msg in enumerate(messages):
+        if msg["role"] == "tool": continue  # tool results aren't fed back into this minimal prompt
         ids += tok.role(msg["role"])
-        content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
+        content = msg.get("content")  # assistant tool calls can have null content
+        if content is None: pass
+        elif isinstance(content, str): ids += tok.encode(content)
         elif isinstance(content, list):
           for c in content:
             if c["type"] == "text": ids += tok.encode(c["text"])
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
+        if msg["role"] == "assistant" and i == last: break
         ids += tok.end_turn()
       else: ids += tok.role("assistant")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), tools=tools)
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out, finish_reason = [], "stop"
+        out, finish_reason, tool_calls = [], "stop", []
         for c in chunks:
           if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and c["choices"][0].get("delta", {}).get("tool_calls"): tool_calls.extend(c["choices"][0]["delta"]["tool_calls"])
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
+        msg = {"role":"assistant","content":"".join(out) or None}
+        if tool_calls: msg["tool_calls"] = tool_calls
         self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+          "choices":[{"index":0, "message":msg, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
