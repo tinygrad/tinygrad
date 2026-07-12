@@ -70,8 +70,10 @@ class TestQuantizeFP8(unittest.TestCase):
     if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
 
   def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
+  @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD atomic max")
   def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
 
+  @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD atomic max")
   @needs_second_gpu
   def test_multi(self):
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
