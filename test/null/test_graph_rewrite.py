@@ -15,7 +15,7 @@ def apply_rewrite(expr):
 def apply_rewrite_values(expr):
   srcs = full_rewrite(expr.sink()).src
   if len(srcs) == 1:
-    if srcs[0].op is Ops.CONST: return (srcs[0].arg,)*srcs[0].dtype.count
+    if srcs[0].op is Ops.CONST: return (srcs[0].arg,) if not isinstance(srcs[0].arg, tuple) else srcs[0].arg
     if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
   return tuple(s.arg for s in srcs)
 

@@ -618,8 +618,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), src=srcs, **kwargs)
-  def wait(self, src:UOp|ConstType, **kwargs):
-    return UOp(Ops.WAIT, src=(self, self.const_like(src) if not isinstance(src, UOp) else src), **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, dtypes.void, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, kwargs.pop("dtype", self.dtype), src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -628,13 +626,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
-  @staticmethod
-  def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
-    dims, device, threads = arg
-    dtype_in, dtype_out = a.dtype, acc.dtype
-    tc_upcast_axes = tuple(((i, s.shape[-1]),) for i,s in enumerate((a, b, acc)))
-    name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
-    return UOp(Ops.WMMA, dtype_out, src=(a, b, acc), arg=(name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ()))
   def alu(self, op, *src:UOp, **kwargs):
     all_srcs = (self, *src)
     # broadcast shaped operands to a common shape (None and () are falsy, so only real shapes participate)
@@ -1461,7 +1452,7 @@ class PatternMatcher:
     if pats:=self.pdict.get(uop.op):
       ler = None
       for _,match,single_reject,multi_reject,match_dtype in pats:
-        if match_dtype is not None and uop.dtype not in match_dtype and uop.dtype._scalar not in match_dtype: continue
+        if match_dtype is not None and uop.dtype not in match_dtype: continue
         if single_reject is not None or multi_reject is not None:
           if ler is None and (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
           if single_reject is not None:
@@ -1565,7 +1556,7 @@ class TrackedPatternMatcher(PatternMatcher):
       for p,match,single_reject,multi_reject,match_dtype in pats:
         if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
         st = time.perf_counter()
-        if match_dtype is not None and uop.dtype not in match_dtype and uop.dtype._scalar not in match_dtype:
+        if match_dtype is not None and uop.dtype not in match_dtype:
           match_stats[p][2] += time.perf_counter()-st
           continue
         if (single_reject is not None and single_reject not in ler) or (multi_reject is not None and not multi_reject.issubset(ler)):

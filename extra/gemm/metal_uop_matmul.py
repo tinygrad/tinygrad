@@ -31,7 +31,7 @@ def hand_spec_tc_cores():
   wmma_arg = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, 'METAL', 32, (((3, 2),), ((3, 2),), ((3, 2),)), ())
 
   acc_load = UOp.stack(acc.after(gk)[0], acc.after(gk)[1])
-  out = UOp(Ops.WMMA, dtypes.float.vec(2), (a_tc, b_tc, acc_load), arg=wmma_arg)
+  out = UOp(Ops.WMMA, dtypes.float, (a_tc, b_tc, acc_load), arg=wmma_arg)
 
   end_loop = UOp.group(*[acc[i].store(out.index(i)) for i in range(2)]).end(gk)
 
