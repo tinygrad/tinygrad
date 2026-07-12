@@ -25,7 +25,8 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_buf:UOp, grad_amax:UOp,
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
-def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp, dname:str) -> UOp:
+def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp,
+                                next_grad_amax_state:UOp, dname:str) -> UOp:
   # NOTE: grad_amax_state is plumbed through as an unused fwd input so the bwd kernel can read it via kernel.src
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
@@ -38,28 +39,29 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
-  _, _, xw13, amax_state, grad_amax_state = kernel.src[1:]
+  _, _, xw13, amax_state, grad_amax_state, next_grad_amax_state = kernel.src[1:]
   device = xw13.device
   axis = xw13.axis if isinstance(device, tuple) else None
   grad_xw13_fp8 = alloc_like(xw13.shape, dtypes.fp8e4m3,  device, axis)
   grad_amax_buf = alloc_local((NUM_WG,), dtypes.float32,  device, axis)
   grad_amax_state_t = Tensor(grad_amax_state, device=device)
-  grad_amax = grad_amax_state_t.empty_like()
   fxn = functools.partial(_custom_fused_bwd_w13, dname=dname_of(device))
+  grad_amax = grad_amax_state_t.empty_like()
   grad_xw13_fp8, grad_amax_buf, grad_amax, *_ = Tensor.custom_kernel(
     grad_xw13_fp8, grad_amax_buf, grad_amax,
     Tensor(xw13, device=device), Tensor(gradient, device=device).cast(dtypes.bfloat16),
     Tensor(amax_state, device=device), grad_amax_state_t, fxn=fxn)
   grad_xw13_uop = grad_xw13_fp8.uop.cast(dtypes.bfloat16)
   new_grad_amax = scalar_amax(grad_amax_buf)
-  store_effect = grad_amax_state_t.uop.store(new_grad_amax.uop)
+  store_effect = next_grad_amax_state.store(new_grad_amax.uop)
   assert grad_xw13_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {grad_xw13_fp8.uop.op}"
   grad_xw13_fp8_uop = grad_xw13_fp8.uop.replace(src=grad_xw13_fp8.uop.src + (store_effect,))
   # Stash fp8 companion for cdna_asm_gemm's bwd to attach to grad_a.
-  _grad_fp8_mailbox[grad_xw13_uop] = (grad_xw13_fp8_uop, grad_amax.uop)
-  return (None, None, grad_xw13_uop, None, None)
+  _grad_fp8_mailbox[grad_xw13_uop] = (grad_xw13_fp8_uop, grad_amax_state_t.uop)
+  return (None, None, grad_xw13_uop, None, None, None)
 
-def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor]:
+def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor,
+                           next_grad_amax_state:Tensor) -> tuple[Tensor, Tensor]:
   # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, new_amax)
   # grad_amax_state: delayed amax for grad_xw13 fp8 quantization in the backward.
   assert xw13.dtype == dtypes.bfloat16, f"expected bf16, got {xw13.dtype}"
@@ -70,6 +72,6 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   fp8_out  = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,      xw13.device, axis)
   amax_buf = alloc_local((NUM_WG,),         dtypes.float32, xw13.device, axis)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
-  fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, grad_amax_state,
+  fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, grad_amax_state, next_grad_amax_state,
                                                 fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
   return fp8_out, scalar_amax(amax_buf)

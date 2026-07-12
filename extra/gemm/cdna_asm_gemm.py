@@ -252,6 +252,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     s_w = inputs[i] if has_w else None; i += has_w
     s_g_amax = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
     grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
+    next_grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
     w_post = inputs[i] if has_w_post else None
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t = Tensor(s_x, device=a.device)
@@ -273,18 +274,16 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
         g_fp8, _, g_amax = quantize_fp8(g_t, amax_state=None)
       elif getenv("FUSED_GRAD_QUANTIZE", 0):
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
-        # Snapshot delayed amax before updating state; GEMM must use the same scale as quantize.
-        g_amax = grad_amax_t.empty_like().assign(grad_amax_t)
+        g_amax = grad_amax_t
         g_fp8, _, new_grad_amax, _ = quantize_fp8_delayed(g_t, g_amax)
-        store_effect = grad_amax_state.store(new_grad_amax.uop)
+        store_effect = next_grad_amax_state.store(new_grad_amax.uop)
         assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
         g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
       else:
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
-        # Snapshot delayed amax before updating state; GEMM must use the same scale as quantize.
-        g_amax = grad_amax_t.empty_like().assign(grad_amax_t)
+        g_amax = grad_amax_t
         g_fp8, _, new_grad_amax = quantize_fp8(g_t, amax_state=g_amax)
-        store_effect = grad_amax_state.store(new_grad_amax.uop)
+        store_effect = next_grad_amax_state.store(new_grad_amax.uop)
         g_fp8 = Tensor(g_fp8.contiguous().uop.after(store_effect), device=a.device)
     # dgrad: applies grad/activation amax scales in the GEMM epilogue; w_scale is already inverse.
     assert s_g_amax_t is None, "fp8 GEMM bwd through g_amax scaling is unsupported"
@@ -343,6 +342,7 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
+             next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
@@ -398,7 +398,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     elif a.dtype == FP8_DTYPE:
       scales = tuple(s for s in (x_scale, w_scale, g_amax) if s is not None)
       scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0) | (4 if g_amax is not None else 0)
-      extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
+      assert (grad_amax_state is None) == (next_grad_amax_state is None)
+      extra = ([grad_amax_state, next_grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
