@@ -14,7 +14,7 @@ simple_pm = PatternMatcher([
 ])
 
 def const_values(u:UOp):
-  if u.op is Ops.CONST: return (u.arg,)*u.dtype.count
+  if u.op is Ops.CONST: return (u.arg,) if not isinstance(u.arg, tuple) else u.arg
   if u.op is Ops.STACK: return tuple(x.arg for x in u.src)
   raise AssertionError(f"expected const-like UOp, got {u.op}")
 
@@ -252,8 +252,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_noop_vectorize_fold(self):
     d0 = UOp.param(0, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
-    ld = d0.load(idx, dtype=dtypes.float.vec(2))
-    vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
+    ld = d0.load(idx, dtype=dtypes.float)
+    vec = UOp(Ops.STACK, dtypes.float, (ld,))
     x = vec.index(0)
     alu = UOp(Ops.SQRT, src=(x, ))
     out = UOp(Ops.STORE, src=(d0, idx, alu))
@@ -267,7 +267,7 @@ class TestUOpGraph(unittest.TestCase):
     d2 = UOp.param(2, dtypes.float, (1,))
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
-      vec = UOp(Ops.STACK, dtypes.float.vec(count), geps)
+      vec = UOp(Ops.STACK, dtypes.float, geps)
       out = d0.index(idx).store(vec)
       uops = to_uops_list([out])
       if DEBUG >= 4:
@@ -276,26 +276,26 @@ class TestUOpGraph(unittest.TestCase):
       return uops[-2].src[-1]  # -2 to skip SINK
 
     # possible
-    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    val = d1.index(idx).load(dtype=dtypes.float)
     xyzw = tuple(val.index(i) for i in range(4))
     self.assertIs(_test_vec(xyzw).op, Ops.LOAD)
 
     # unaligned
-    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    val = d1.index(idx).load(dtype=dtypes.float)
     wzyx = tuple(val.index(i) for i in reversed(range(4)))
     self.assertIs(_test_vec(wzyx).op, Ops.STACK)
 
     # different_size
-    val = d1.index(idx).load(dtype=dtypes.float.vec(2))
+    val = d1.index(idx).load(dtype=dtypes.float)
     xy = tuple(val.index(i) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, Ops.STACK)
-    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    val = d1.index(idx).load(dtype=dtypes.float)
     xy = tuple(val.index(i) for i in range(2))
     self.assertIs(_test_vec(xy, count=2).op, Ops.STACK)
 
     # different vals
-    val1 = d1.index(idx).load(dtype=dtypes.float.vec(2))
-    val2 = d2.index(idx).load(dtype=dtypes.float.vec(2))
+    val1 = d1.index(idx).load(dtype=dtypes.float)
+    val2 = d2.index(idx).load(dtype=dtypes.float)
     xy1 = tuple(val1.index(i) for i in range(2))
     xy2 = tuple(val2.index(i) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, Ops.STACK)
@@ -312,18 +312,18 @@ class TestUOpGraph(unittest.TestCase):
   @unittest.skip("no longer testable standalone")
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      vec = UOp(Ops.STACK, dtypes.half, tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      var = UOp.variable("var", 0, 1, dtypes.half)
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[0], acc)
       self.assertEqual(len(uops), 2)  # +1 for SINK
 
     for i in [2, 4, 8]:
-      var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
-      vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      var = UOp.variable("var", 0, 1, dtypes.half)
+      vec = UOp(Ops.STACK, dtypes.half, tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[0], acc)
@@ -332,39 +332,39 @@ class TestUOpGraph(unittest.TestCase):
   @unittest.skip("wmma is wrong here, it needs an arg")
   def test_wmma_vectorize_no_fold(self):
     for i in [4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half.vec(i),
+      vec = UOp(Ops.STACK, dtypes.half,
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
                 tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
     for i in [4, 8]:
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
-      vec = UOp(Ops.STACK, dtypes.half.vec(i),
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
+      vec = UOp(Ops.STACK, dtypes.half,
                 tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
                 tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
     for i in [2, 4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half.vec(i),
+      vec = UOp(Ops.STACK, dtypes.half,
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(vec, var, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
 
     for i in [2, 4, 8]:
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half.vec(i))
-      vec = UOp(Ops.STACK, dtypes.half.vec(i),
+      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
+      vec = UOp(Ops.STACK, dtypes.half,
                 tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
+      acc = UOp.variable('acc', 0, 1, dtypes.half)
       wmma = UOp(Ops.WMMA, src=(var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-2], wmma)  # -2 to skip SINK

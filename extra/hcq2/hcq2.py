@@ -431,7 +431,7 @@ pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 # *****************
 # 7. resolve patches
 
-def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
+def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar(),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
@@ -450,7 +450,7 @@ def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
   addrs = tuple(UOp.const(dtypes.uint64, x.get_buf(d).va_addr) for x, d in zip(bufs, devs))
-  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64.vec(len(addrs)), addrs)
+  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64), addrs)
 
 pm_resolve_patches = PatternMatcher([
   # multi
