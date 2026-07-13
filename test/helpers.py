@@ -63,6 +63,8 @@ def assert_jit_cache_len(fxn, expected_len):
   else:
     assert len(linear.src) == expected_len, f"expected {expected_len}, got {len(linear.src)}"
 
+def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
+
 def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   if dtypes.is_unsigned(dt):
     return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
@@ -71,9 +73,7 @@ def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   ret = np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
-  if not allow_subnormal:
-    min_normal = 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
-    ret = np.where(np.abs(ret) < min_normal, 0, ret)
+  if not allow_subnormal: ret = np.where(np.abs(ret) < min_normal(dt), 0, ret)
   return ret
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
