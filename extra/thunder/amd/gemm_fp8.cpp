@@ -161,8 +161,14 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         block_row = first_block_row + ((wgid % num_wgid_in_group) % group_size_m);
         block_col = (wgid % num_wgid_in_group) / group_size_m;
     } else {
-        block_row = int(blockIdx.x) / blocks_per_col;
-        block_col = int(blockIdx.x) % blocks_per_col;
+        int wgid = chiplet_transform_chunked(int(blockIdx.x), total_blocks_needed, NUM_XCDS, 64);
+        constexpr int WGM = 8;
+        const int num_wgid_in_group = WGM * blocks_per_col;
+        const int group_id = wgid / num_wgid_in_group;
+        const int first_block_row = group_id * WGM;
+        const int group_size_m = min(blocks_per_row - first_block_row, WGM);
+        block_row = first_block_row + ((wgid % num_wgid_in_group) % group_size_m);
+        block_col = (wgid % num_wgid_in_group) / group_size_m;
     }
     int block_m = block_row * BLOCK_SIZE_ROW;
     int block_n = block_col * BLOCK_SIZE_COL;

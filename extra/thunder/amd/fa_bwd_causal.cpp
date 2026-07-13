@@ -71,11 +71,15 @@ template<int D> struct attn_bwd_combined_globals {
 template<int D> __launch_bounds__(NUM_THREADS, 1)
 __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
 
-  const int q_head_idx_fixed = blockIdx.x;  // This is the query head index [0, ATTN_H)
+  constexpr int SEQ_TILES = ATTN_N / BLOCK_SIZE_KV;
+  constexpr int TOTAL_WORKGROUPS = ATTN_B * SEQ_TILES * ATTN_H;
+  const int physical_wgid = (int(blockIdx.z) * SEQ_TILES + int(blockIdx.y)) * ATTN_H + int(blockIdx.x);
+  const int logical_wgid = chiplet_transform_chunked(physical_wgid, TOTAL_WORKGROUPS, NUM_XCDS, 32);
+  const int q_head_idx_fixed = logical_wgid % ATTN_H;  // query head index [0, ATTN_H)
   const int kv_head_idx = q_head_idx_fixed / GROUP_SIZE;
   const int q_head_in_group = q_head_idx_fixed % GROUP_SIZE;
-  const int seq_idx = blockIdx.y;
-  const int batch_idx = blockIdx.z;
+  const int seq_idx = (logical_wgid / ATTN_H) % SEQ_TILES;
+  const int batch_idx = logical_wgid / (ATTN_H * SEQ_TILES);
   const int first_q_head = q_head_idx_fixed;
 
   const int warpid = kittens::warpid();
@@ -3422,6 +3426,5 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
 }
 
 template __global__ void attend_bwd_combined_ker<ATTN_D>(bf16*, bf16*, bf16*, bf16*, bf16*, bf16*, bf16*, float*, float*);
-
 
 
