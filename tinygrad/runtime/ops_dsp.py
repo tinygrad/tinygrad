@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MMIOInterface
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target
@@ -107,7 +107,7 @@ class DSPAllocator(Allocator['DSPDevice']):
       os.close(opaque.share_info.fd)
       qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
-  def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
+  def _as_mmio(self, src:DSPBuffer) -> MMIOInterface: return MMIOInterface(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
   def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(mv_address(dest), src.va_addr, dest.nbytes)
   def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)

@@ -2,11 +2,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
-from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, ctypes, struct
+try: import fcntl
+except ImportError: fcntl = None  # type: ignore[assignment]
+from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, to_mv, mv_address
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize
 from tinygrad.dtype import DType, _to_np_dtype
+from tinygrad.runtime.autogen import libc
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -73,6 +76,55 @@ class ProfileGraphEntry: device:str; name:str|TracingKey; st_id:int; en_id:int #
 
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
+
+# **************** Interfaces ****************
+
+class MMIOInterface:
+  def __init__(self, addr:int, nbytes:int, fmt='B', owner:Any=None):
+    self.mv, self.addr, self.nbytes, self.fmt, self.owner = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt, owner
+  @classmethod
+  def from_memoryview(cls, mv:memoryview) -> MMIOInterface:
+    mv = flat_mv(mv)
+    return cls(mv_address(mv), mv.nbytes, owner=mv)
+  def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
+  def __getitem__(self, k): return (self.mv[k] if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k, v): self.mv[k] = v
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    return MMIOInterface(self.addr+offset, (self.nbytes - offset) if size is None else size, fmt=fmt or self.fmt, owner=self.owner)
+
+class FileIOInterface:
+  def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
+    self.path:str = path
+    self.fd:int = fd or os.open(path, flags)
+  def __del__(self):
+    if hasattr(self, 'fd'): os.close(self.fd)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def mmap(self, start, sz, prot, flags, offset): return FileIOInterface._mmap(start, sz, prot, flags, self.fd, offset)
+  def read(self, size=None, binary=False, offset=None):
+    if offset is not None: self.seek(offset)
+    with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
+  def write(self, content, binary=False, offset=None):
+    if offset is not None: self.seek(offset)
+    with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
+  def listdir(self): return os.listdir(self.path)
+  def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
+  @staticmethod
+  def _mmap(start, sz, prot, flags, fd, offset):
+    x = libc.mmap(start, sz, prot, flags, fd, offset)
+    if x == 0xffffffffffffffff: raise OSError(f"Failed to mmap {sz} bytes at {hex(start)}: {os.strerror(ctypes.get_errno())}")
+    return x
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset): return FileIOInterface._mmap(start, sz, prot, flags, -1, offset)
+  @staticmethod
+  def munmap(buf, sz): return libc.munmap(buf, sz)
+  @staticmethod
+  def exists(path): return os.path.exists(path)
+  @staticmethod
+  def readlink(path): return os.readlink(path)
+  @staticmethod
+  def eventfd(initval, flags=None): return FileIOInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
+
+if DEV.interface.startswith("MOCK"): from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** Buffer + Allocators ****************
 
@@ -194,11 +246,13 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
-  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+  def as_mmio(self) -> MMIOInterface:
+    if not hasattr(self.allocator, '_as_mmio'): raise RuntimeError(f"{self.device} has no _as_mmio")
+    return self.allocator._as_mmio(self.ensure_allocated()._buf)
+  def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and self.options is None:
-      return self.allocator._as_buffer(self._buf)
-    assert not force_zero_copy, "force zero copy was passed, but copy is required"
+    if allow_zero_copy:
+      with contextlib.suppress(RuntimeError, AttributeError): return self.as_mmio().mv
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
@@ -244,7 +298,7 @@ class Allocator(Generic[DeviceType]):
   def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
   def _map(self, buf): raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
-  # def _as_buffer(self, src) -> memoryview:
+  # def _as_mmio(self, src) -> MMIOInterface:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional

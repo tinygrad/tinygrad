@@ -45,7 +45,7 @@ class MetalGraph(GraphRunner):
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
-    if len(self.vars): self.int_buf_view = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.int_buf).cast('i')
+    if len(self.vars): self.int_buf_view = cast(MetalAllocator, self.dev.allocator)._as_mmio(self.int_buf).view(fmt='i')
     self.range = metal.NSRange(0, len(self.calls))
     self.updatable = sorted({j for j,r in enumerate(self.uop_replace) if r} | self.var_vals_replace.keys() | self.launch_dims_replace.keys())
 

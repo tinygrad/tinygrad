@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, to_dtype, truncate, least_upper_dtype, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
+from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, MMIOInterface
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten
@@ -782,7 +782,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     # fake realize. if target device is PYTHON it needs bytearray to be writable
-    ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
+    ret.buffer.allocate(memoryview(data) if device != "PYTHON" else MMIOInterface.from_memoryview(memoryview(bytearray(data))))
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret if ret.device == device else ret.copy_to_device(device)
   def clone(self, device=None) -> UOp:
