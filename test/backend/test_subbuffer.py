@@ -4,7 +4,7 @@ from tinygrad.device import Buffer
 from tinygrad.helpers import Context, DEV
 from test.helpers import needs_second_gpu
 
-@unittest.skipUnless(hasattr(Device[Device.DEFAULT].allocator, "_offset"), "subbuffer not supported")
+@unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
   def setUp(self):
     self.buf = Buffer(Device.DEFAULT, 10, dtypes.uint8).ensure_allocated()
