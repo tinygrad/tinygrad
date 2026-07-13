@@ -8,7 +8,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
-from test.helpers import rand_for_dtype
+from test.helpers import rand_for_dtype, min_normal
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
@@ -46,6 +46,9 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
+  if a.is_floating_point() and dtypes.is_float(target_dtype) and (mn:=min_normal(target_dtype)) >= min_normal(a.dtype):
+    # subnormals are zero, so an input below the target's min normal casts to 0
+    a = (a.abs() < mn).where(0, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
