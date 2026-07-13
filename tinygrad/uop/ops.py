@@ -446,9 +446,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
 
   @property
-  def max_shard_shape(self) -> tuple[int, ...]:
-    if not isinstance(self.device, tuple) or self.axis is None: return self.max_shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
+  def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
 
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
@@ -622,11 +620,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(arg, Ops): arg = (arg, 0)
     return UOp(Ops.REDUCE, src=(self,)+src, arg=arg, **kwargs)
 
-  def contiguous(self, *args, **kwargs):
-    if self.op is Ops.CONTIGUOUS: return self
-    if self.device is None: return self
-    if self.has_buffer_identity(): return self
-    return UOp(Ops.CONTIGUOUS, src=(self,)+args, **kwargs)
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
