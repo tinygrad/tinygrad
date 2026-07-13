@@ -536,7 +536,7 @@ class AMDDevice(HCQ2Compiled):
 
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
 
-  ifaces = [KFDIface, PCIIface]
+  ifaces = [KFDIface, PCIIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface)]
 
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False

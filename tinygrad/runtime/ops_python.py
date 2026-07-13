@@ -225,6 +225,8 @@ class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src
   def _copyout(self, dest:memoryview, src): dest[:] = src
+  def _map(self, buf): return buf.cpu_view().mv
+  def _offset(self, buf, size, offset): return buf[offset:offset+size]
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

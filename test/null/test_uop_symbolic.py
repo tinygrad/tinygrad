@@ -1144,6 +1144,14 @@ class TestSymInfer(unittest.TestCase):
 
     assert sym_infer(UOp.const(dtypes.float, 1.5).bitcast(dtypes.uint), {}) == 1069547520
 
+  def test_sym_infer_stack_index_and_cast(self):
+    dnum = UOp.variable("_device_num", 0, 1, dtype=dtypes.int)
+    addrs = UOp.const(dtypes.uint64, (0x100000001, 0x200000003)).index(dnum)
+    assert sym_infer(addrs, {dnum.expr: 0}) == 0x100000001
+    assert sym_infer(addrs, {dnum.expr: 1}) == 0x200000003
+    assert sym_infer(addrs.cast(dtypes.uint32), {dnum.expr: 0}) == 1
+    assert sym_infer(addrs.cast(dtypes.uint32), {dnum.expr: 1}) == 3
+
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
     # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds

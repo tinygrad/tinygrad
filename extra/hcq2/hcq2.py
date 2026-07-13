@@ -3,9 +3,9 @@ from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, sym_infer
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -18,6 +18,8 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 # *****************
 # 0. helpers
+
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 HCQ_DEVS = frozenset(("AMD",))
 HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
@@ -383,7 +385,7 @@ pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNC
 # 8. callify hcq programs
 
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
-  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
+  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer),)))])
 
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
@@ -425,38 +427,33 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
 
 def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), "CPU") for dev in to_tuple(buf.device)))
+  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value) for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
 # *****************
 # 7. resolve patches
-
-def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar(),
-  tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)): b.ensure_allocated()._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
-  for b, v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.itemsize, truncate[v.dtype](v.arg))
+  for i,b in enumerate(mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)):
+    data = struct.pack(f'<{val.dtype.fmt}', truncate[val.dtype](sym_infer(val, {"_device_num": i})))
+    view, byte_off = b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.itemsize
+    view[byte_off:byte_off+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
-  assert buf.op in (Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), f"{buf.op}"
+  bufs = mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else [mb] * len(g.arg)
+  if len(addrs:=tuple(x.get_buf(d).va_addr for x,d in zip(bufs, g.arg, strict=True))) == 1: return UOp.const(dtypes.uint64, addrs[0])
+  return UOp.const(dtypes.uint64, addrs).index(UOp.variable("_device_num", 0, len(addrs)-1, dtype=dtypes.int))
 
-  devs, b = g.arg, buf.buffer
-  bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
-  assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
-  addrs = tuple(UOp.const(dtypes.uint64, x.get_buf(d).va_addr) for x, d in zip(bufs, devs))
-  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64, addrs)
+def remove_noop_afters(a:UOp) -> UOp|None:
+  src = (a.src[0], *(x for x in a.src[1:] if x.op is not Ops.NOOP))
+  return (src[0] if len(src) == 1 else a.replace(src=src)) if len(src) != len(a.src) else None
 
 pm_resolve_patches = PatternMatcher([
-  # multi
-  (UPat(GroupOp.ALU, src=[UPat(Ops.STACK, name="s"), UPat(Ops.CONST)], name="op"), push_stack),
-  (UPat(Ops.CAST, src=(UPat(Ops.STACK, name="s"),), name="op"), push_stack),
-
   # getaddr
   (UPat(Ops.GETADDR, src=(UPat(name="buf"),), name="g"), resolve_getaddr),
 
@@ -464,8 +461,8 @@ pm_resolve_patches = PatternMatcher([
   (UPat(name="buf").index(UPat(Ops.RANGE), allow_any_len=True)
     .store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast()).index(UPat(Ops.RANGE), allow_any_len=True).load())
     .end(UPat(Ops.RANGE)), fold_binary),
-  (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").index(UPat.cvar("off"))
-    .store(UPat.any(UPat.cvar("val"), UPat(Ops.STACK, name="val"))), fold_const_store),
+  (UPat({Ops.BUFFER, Ops.SLICE, Ops.MSTACK}, name="buf").index(UPat.cvar("off")).store(UPat.var("val")), fold_const_store),
+  (UPat(Ops.AFTER, name="a"), remove_noop_afters),
 ])
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
@@ -482,7 +479,7 @@ def hcq_link(linear:UOp, jit=False) -> UOp:
   hits = {a.src[0]:hcq_link_cache[key] for a in cacheable.values() if (key:=link_cache_key(a)) in hcq_link_cache}
   linear = graph_rewrite(linear, pm_link_cache, name="apply link cache").substitute(hits, walk=True)
   linear = graph_rewrite(linear, pm_bufferize, ctx=jit, bottom_up=True, walk=True, name="bufferize placeholders")
-  linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
+  linear = graph_rewrite(linear, pm_resolve_patches, bottom_up=False, name="resolve patches")
   linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
   for (j,i),a in cacheable.items(): hcq_link_cache.setdefault(link_cache_key(a), linear.src[j].src[i])
   return linear
