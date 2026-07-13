@@ -200,7 +200,7 @@ class HCQGraph(MultiGraphRunner):
         uop_replace_j = dict(self.uop_replace[j])
         for bufid in range(len(bufs)):
           if (replace_iidx:=uop_replace_j.get(bufid)) is not None: self.input_replace_map[enqueue_dev].add((replace_iidx, dev_idx))
-          else: cast(HCQAllocator, enqueue_dev.allocator).map(self.hcq_bufs[j][bufid])
+          else: cast(HCQAllocator, enqueue_dev.allocator)._map(self.hcq_bufs[j][bufid])
         enqueue_queue.copy(self.hcq_bufs[j][0], self.hcq_bufs[j][1], dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
@@ -265,7 +265,7 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices:
       for iidx, dev_idx in self.input_replace_map[dev]:
         buf = b.bufs[dev_idx] if isinstance(b:=input_uops[iidx].buffer, MultiBuffer) else b
-        cast(HCQAllocator, dev.allocator).map(buf._buf)
+        cast(HCQAllocator, dev.allocator)._map(buf._buf)
 
     # Wait and restore signals
     self.kickoff_value += 1
