@@ -409,7 +409,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     if signal_t is not None:
       # Map signals if any
-      for sig_page in HCQCompiled.signal_pages[self.peer_group]: cast(HCQAllocator, self.allocator).map(sig_page)
+      for sig_page in HCQCompiled.signal_pages[self.peer_group]: cast(HCQAllocator, self.allocator)._map(sig_page)
 
       self.sigalloc_size = sigalloc_size
       self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
@@ -453,7 +453,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     if not HCQCompiled.signal_pool[pg:=self.peer_group]:
       HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True)))
       HCQCompiled.signal_pool[pg] += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
-      for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator).map(alc)
+      for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator)._map(alc)
     return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
@@ -551,14 +551,14 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
 
-  def map(self, buf:HCQBuffer):
+  def _map(self, buf:HCQBuffer):
     if self.dev in buf.mapped_devs: return
     if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
-    if not hasattr(self, '_map'): raise NotImplementedError("map failed: no method implemented")
+    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
 
     # Since it's unified memory space, any buffer mapping is valid for all devices after successful map.
     # Devices can save mappings and internal metadata as a new buffer.
-    if (mb:=self._map(buf)) is not None: buf.mappings[self.dev] = mb
+    if (mb:=self._do_map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
 
   @suppress_finalizing
@@ -627,7 +627,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):
     if src_dev.peer_group != dest_dev.peer_group: return src_dev.rdma_dev().allocator._transfer(dest, src, sz, src_dev, dest_dev)
 
-    cast(HCQAllocator, src_dev.allocator).map(dest)
+    cast(HCQAllocator, src_dev.allocator)._map(dest)
 
     assert src_dev.hw_copy_queue_t is not None
     with hcq_profile(src_dev, queue_type=src_dev.hw_copy_queue_t, desc=TracingKey(f"{src_dev.device} -> {dest_dev.device}", ret=sz), enabled=PROFILE,
