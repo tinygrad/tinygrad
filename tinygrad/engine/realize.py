@@ -216,10 +216,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
 
+  st = time.perf_counter()
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
-  return None
+  return time.perf_counter() - st
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
