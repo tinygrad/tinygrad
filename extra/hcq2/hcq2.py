@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic
@@ -18,6 +18,8 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 # *****************
 # 0. helpers
+
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 HCQ_DEVS = frozenset(("AMD",))
 HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
@@ -56,7 +58,7 @@ def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype))
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
-  data = UOp(Ops.BITCAST, buf.dtype, (UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob),))
+  data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
   r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
   return buf.index(r).store(data.index(r).load()).end(r)
 
@@ -383,7 +385,7 @@ pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNC
 # 8. callify hcq programs
 
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
-  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
+  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer),)))])
 
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
@@ -425,7 +427,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
 
 def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), "CPU") for dev in to_tuple(buf.device)))
+  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value) for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
 # *****************

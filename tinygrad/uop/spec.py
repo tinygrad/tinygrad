@@ -135,6 +135,11 @@ spec_tensor = PatternMatcher([
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
+  (UPat(Ops.WAIT, dtypes.void, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype == y.dtype),
+
+  # HCQ command encoding
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.AFTER)),), name="x"),
+   lambda x: is_device(x.arg)),
 
   # CALL
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
@@ -181,11 +186,12 @@ spec_tensor = PatternMatcher([
   # codegen: PROGRAM with progressive sources through the pipeline (SINK, LINEAR?, SOURCE?, BINARY?)
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK),)), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.AFTER),)), lambda: True),
 
 ])+spec_shared
 

@@ -102,7 +102,7 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
-    case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | \
+    case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
@@ -145,6 +145,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
       return arg.dtype
+    case Ops.BINARY:
+      return dtypes.uint8
     case Ops.SLICE:
       # TODO: slice just shouldn't exist
       return None
@@ -569,6 +571,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, src=srcs, **kwargs)
+  def wait(self, src:UOp|ConstType, **kwargs):
+    return UOp(Ops.WAIT, src=(self, self.const_like(src) if not isinstance(src, UOp) else src), **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
