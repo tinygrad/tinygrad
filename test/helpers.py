@@ -86,7 +86,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = PythonProgram("run", PythonCompiler().compile(prg.src[2].arg))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs, vals=vals)
-  return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
+  return out_buf.view(fmt=uop.dtype.fmt or "B")[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)

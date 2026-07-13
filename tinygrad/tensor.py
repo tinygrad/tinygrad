@@ -37,7 +37,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
 def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
-  ret.buffer.allocate(x)
+  ret.buffer.allocate(x if x.flags.c_contiguous else x.copy())
   return ret.reshape(x.shape)
 
 class Tensor(RandMixin):

@@ -1,7 +1,7 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, MMIOInterface
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -184,9 +184,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
-  def _as_buffer(self, src:MetalBuffer) -> memoryview:
+  def _as_mmio(self, src:MetalBuffer) -> MMIOInterface:
     self.dev.synchronize()
-    return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
-  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
+    return MMIOInterface(src.buf.contents()+src.offset, src.size)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_mmio(dest), src, "TINY -> METAL")
+  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_mmio(src).mv, "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
