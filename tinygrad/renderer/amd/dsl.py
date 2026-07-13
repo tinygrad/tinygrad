@@ -66,6 +66,8 @@ class Reg:
 src = Reg(0, 512)
 
 # Slices for each region (inclusive end)
+FLAT_SCRATCH_LO = src[102]
+FLAT_SCRATCH_HI = src[103]
 s = src[0:105]           # SGPR0-105
 VCC_LO = src[106]
 VCC_HI = src[107]

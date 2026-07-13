@@ -57,33 +57,35 @@ def _cvt_ins(dtin, dtout):
   assert dtin in _valid_casts and dtout in _valid_casts[dtin], f"cannot natively cast from {dtin} -> {dtout}"
   return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
 
-# ---- everything else ----
-
+# ---- helpers ----
 def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
+def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
+def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
+def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
 # NOTE: call this buildvector like LLVM?
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(dtypes.uint16, 32 - nbits)))
   return _aluhint(UOp(Ops.SHR, dtypes.uint32 if nbits <= 32 else dtypes.uint64, src=(u, const(dtypes.uint16, 31 if nbits <= 32 else 63))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
 
-VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
-SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
+# ---- register classes/kernel init state ----
+VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
+SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
-VCC, EXEC = Register("vcc", 0), Register("exec_lo", 0)
+VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
+FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
 lane_ctr = itertools.count()
 
 kernarg_ptr = (def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]))
-execop = def_reg(dtypes.uint32, EXEC)
-lidop = def_reg(dtypes.uint32, WIIDS[0])
-vccop = def_reg(dtypes.uint32, VCC)
+execop, lidop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, WIIDS[0]), def_reg(dtypes.uint32, VCC)
+flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
 
 # ---- register movement helpers ----
-
 def packb16(ctx, lo:UOp, hi:UOp):
   if dtypes.is_float(lo.dtype): return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(lo,hi))
   lo = lo & const(dtypes.uint32, 0xFFFF) # mask off upper half
@@ -100,12 +102,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
-def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
-def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
-def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
-
 # ---- operand legalization wrappers ----
-
 def _vop3(ctx, x:UOp):
   lits = [i for i,s in enumerate(x.src) if s.op is Ops.CONST]
   if len(lits) <= 1: return x
@@ -164,9 +161,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
   return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2),))
 
-
 # ----- memory access ----
-
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
@@ -342,8 +337,6 @@ def idiv(ctx, x:UOp):
     q = (is_one | is_big).where(special, q0)
   return (q ^ sign) + -sign if signed else q
 
-# NOTE: booleans should be natively represented as vcc/scc
-# TODO: handle 16/64 bit semantics
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
   if dpreciz and x.op is Ops.ADD: return arith64(ctx, x, add=True)
@@ -689,6 +682,19 @@ class RDNA3Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
+  # NOTE; FLAT_SCRATCH base implicit, since this is only used for spill/fill just fold ioffs
+  def fill(self, spill_offset:int, x:UOp) -> UOp:
+    print(rdefs(x))
+    bufsz = sum([r.size for r in rdefs(x)])
+    _insmap = {4:RDNA3Ops.scratch_load_b32,8:RDNA3Ops.scratch_load_b64,16:RDNA3Ops.scratch_load_b128}
+    return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),), tag=rdefs(x))
+
+  def spill(self, spill_offset:int, x:UOp) -> UOp:
+    print(rdefs(x))
+    bufsz = sum([r.size for r in rdefs(x)])
+    _insmap = {4:RDNA3Ops.scratch_store_b32,8:RDNA3Ops.scratch_store_b64,16:RDNA3Ops.scratch_store_b128}
+    return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),x))
+
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     nuops = lin.src
     # nuops = insertwaitcnts(lin.src)
@@ -714,6 +720,6 @@ class RDNA3Renderer(ISARenderer):
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
     from tinygrad.renderer.amd.elf import assemble_linear
-    return assemble_linear(prg, lin, self.target.arch)
+    return assemble_linear(prg, lin, self.target.arch, scratch_size=256)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
