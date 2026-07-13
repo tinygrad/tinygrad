@@ -46,6 +46,10 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
+  if a.is_floating_point() and dtypes.is_float(target_dtype):
+    # subnormals are zero
+    fe, _ = dtypes.finfo(target_dtype)
+    a = (a.abs() < 2 ** (2 - (1 << (fe - 1)))).where(0, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
