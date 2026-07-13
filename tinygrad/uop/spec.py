@@ -101,6 +101,9 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
+  # WAIT until a condition evaluates to true.
+  (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
+
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
@@ -181,12 +184,11 @@ spec_tensor = PatternMatcher([
   # codegen: PROGRAM with progressive sources through the pipeline (SINK, LINEAR?, SOURCE?, BINARY?)
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK),)), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
@@ -214,6 +216,11 @@ spec_program = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 ])+spec_shared
 
+spec_hcq = PatternMatcher([
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"), lambda x: is_device(x.arg)),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
+])+spec_shared
+
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
   # SLICE on BUFFER is allowed if BUFFER is
@@ -234,7 +241,7 @@ spec_full = PatternMatcher([
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.index), (UPat(), UPat()), arg=None), lambda: True),
-])+spec_tensor+spec_program
+])+spec_tensor+spec_program+spec_hcq
 
 # **** pyrender (move this) ****
 
