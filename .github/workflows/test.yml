@@ -500,6 +500,29 @@ jobs:
       - name: Run LLVM test
         run: DEV=MOCKKFD+AMD:LLVM python test/device/test_amd_llvm.py
 
+  hcq2:
+    name: hcq2
+    runs-on: *linux
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: hcq2
+          deps: testing_unit
+          amd: 'true'
+      - name: Run HCQ2 tests
+        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/test_tiny.py
+      - name: Run HCQ2 multi-device tests
+        run: |
+          HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_multitensor.py \
+            TestMultiTensor.test_simple_add TestMultiTensor.test_shard_reduce \
+            TestMultiTensor.test_backward_sum TestMultiTensor.test_matmul_shard_0_0
+      - name: Run HCQ2 JIT tests
+        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_jit.py
+
   testmockam:
     name: Linux (am)
     runs-on: *linux

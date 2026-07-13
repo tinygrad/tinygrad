@@ -38,6 +38,10 @@ def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
+def call_is_hcq(call:UOp) -> bool:
+  ast = call.src[0]
+  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+
 def jit_cache_count(linear:UOp) -> int:
   n = 0
   for call in linear.src:
@@ -51,6 +55,7 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     assert expected_len == 0, expected_len
     return
+  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 2 # HCQ2 merges calls on the same queue
   if call_is_graph(linear.src[0]):
     assert len(linear.src) == 1, len(linear.src)
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION

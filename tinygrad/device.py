@@ -138,7 +138,7 @@ class Buffer:
       elif self._base is not None:
         assert hasattr(allocator, "_offset"), "offset function required for view"
         self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
-      else: self._bufs[device] = allocator._map(self.ensure_allocated()._buf)
+      else: self._bufs[device] = allocator.map(self.ensure_allocated())
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
@@ -196,8 +196,7 @@ class Buffer:
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and self.options is None:
-      return self.allocator._as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
@@ -236,6 +235,8 @@ class Allocator(Generic[DeviceType]):
                                                                f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
+
+  def map(self, buf:Buffer): return self._map(buf.ensure_allocated()._buf)
 
   # implemented by the runtime
   def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
