@@ -293,7 +293,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION | Ops.WAIT:
         return None
 
       # special (terrible) case for RESHAPE on NOOP
@@ -573,6 +573,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.STORE, src=srcs, **kwargs)
   def wait(self, src:UOp|ConstType, **kwargs):
     return UOp(Ops.WAIT, src=(self, self.const_like(src) if not isinstance(src, UOp) else src), **kwargs)
+  def wait_until(self, **kwargs):
+    """Spin until `self` (a bool condition) becomes true."""
+    return UOp(Ops.WAIT, src=(self,), **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)

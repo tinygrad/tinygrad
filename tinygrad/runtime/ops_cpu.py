@@ -1,7 +1,7 @@
 from __future__ import annotations
-import platform, sys, ctypes, functools, time, mmap, threading, queue
+import platform, sys, ctypes, enum, functools, mmap, threading, array
 from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferSpec
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -9,57 +9,92 @@ from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
-from tinygrad.uop.ops import sint
+from tinygrad.runtime.autogen import libc
+from extra.hcq2.hcq2 import make_ext_call, make_placeholder, sym_addr, hcq_compile_program, hcq_link, unwrap_after
+from tinygrad import UOp, dtypes
+from tinygrad.dtype import AddrSpace
+from tinygrad.uop.ops import sint, Ops, AxisType, KernelInfo, PatternMatcher, UPat
 
-class CPUSignal(HCQSignal):
-  def _sleep(self, time_spent_since_last_sleep_ms:int):
-    if self.is_timeline and self.owner is not None:
-      self.owner.tasks.join()
-      if self.owner.error_state is not None: raise self.owner.error_state
+class CpuOp(enum.IntEnum): SIGNAL, WAIT, TIMESTAMP, EXEC, QUIT = range(1, 6)
 
-class CPUWorker(threading.Thread):
-  def __init__(self, dev, tasks, thread_id):
-    super().__init__()
-    self.dev, self.tasks, self.thread_id, self.pool, self.daemon = dev, tasks, thread_id, [], True
+def read_next(ring, head): return ring.index(head).load(), head + UOp.const(dtypes.uint64, 1)
 
-  def push_task(self, tid, cmd, args):
-    if len(self.pool) <= tid:
-      self.pool.append(queue.Queue())
-      CPUWorker(self, self.pool[tid], thread_id=tid+1).start()
-    self.pool[tid].put([cmd, 1, len(args)] + args)
+def make_null_buf(dtype): return make_placeholder("CPU", 1<<30, dtype, name="null_buf", unique=False)
 
-  def run(self):
-    while True:
-      cmd_iter = iter(self.tasks.get())
-      try:
-        for cmd in cmd_iter:
-          threads, args_cnt = next(cmd_iter), next(cmd_iter)
-          args = [next(cmd_iter) for _ in range(args_cnt)]
-          for th in range(threads - 1): self.push_task(th, cmd, args)
-          cmd(self.thread_id, *args)
-          for th in range(threads - 1): self.pool[th].join()
-      except Exception as e: self.dev.error_state = e
-      finally: self.tasks.task_done()
+def op_signal(gate, a):
+  return make_null_buf(dtypes.uint32).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).store(a[1].cast(dtypes.uint32)).barrier()
+
+def op_wait(gate, a):
+  cond = UOp(Ops.CUSTOMI, dtypes.bool, (a[0], a[1]), arg="(__atomic_load_n((unsigned int*)({0}), __ATOMIC_ACQUIRE) >= (unsigned int)({1}))")
+  return UOp(Ops.WAIT, dtypes.void, (cond, gate))
+
+def op_timestamp(gate, a):
+  ts = UOp.placeholder((2,), dtypes.uint64, slot=4, addrspace=AddrSpace.REG)  # struct timespec { long s; long ns; }
+  call = make_ext_call(libc.dll.clock_gettime, UOp.const(dtypes.int32, 1), ts.index(UOp.const(dtypes.int, 0)), deps=(gate,))
+  val = ts.after(call)[0].load() * UOp.const(dtypes.uint64, 1_000_000_000) + ts.after(call)[1].load()
+  return make_null_buf(dtypes.uint64).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 3)).cast(dtypes.index)).store(val)
+
+def op_exec(gate, a):
+  n = len(a) - 1
+  types = ",".join(["unsigned long"] * n)
+  call  = ",".join(f"{{{k+1}}}" for k in range(n))
+  return UOp(Ops.CUSTOM, dtypes.void, (*a, gate), arg=f"((void(*)({types}))({{0}}))({call});")
+
+def op_quit(gate, a): return UOp(Ops.CUSTOM, dtypes.void, (gate,), arg="return;")
+
+handlers = {CpuOp.SIGNAL: op_signal, CpuOp.WAIT: op_wait, CpuOp.TIMESTAMP: op_timestamp, CpuOp.EXEC: op_exec, CpuOp.QUIT: op_quit}
+
+def cpu_worker(ring_size=32768, args_cnt=3):
+  tail = make_placeholder("CPU", 1, dtypes.uint64, name="sys", unique=False)
+  ring = make_placeholder("CPU", ring_size, dtypes.uint64, name="ring", unique=False)
+  head = UOp.placeholder((1,), dtypes.uint64, slot=3, addrspace=AddrSpace.REG)[0].set(0)
+
+  label = UOp(Ops.CUSTOM, dtypes.void, (head,), arg="loop_top:").barrier()
+  head_i, tail_i = head.after(label), tail.after(label)
+
+  head_val = head_i[0].load()
+  tail_ld = UOp(Ops.CUSTOMI, dtypes.uint64, (tail_i.index(UOp.const(dtypes.int, 0)),), arg="__atomic_load_n(({0}), __ATOMIC_ACQUIRE)")
+  barrier = (tail_ld > head_val).wait_until().barrier()
+
+  ring_b = ring.after(barrier)
+  op, head_val = read_next(ring_b, head_val)
+  args = [None] * args_cnt
+  for i in range(args_cnt): args[i], head_val = read_next(ring_b, head_val)
+
+  arms = [fn(gate:=UOp.range(op.eq(cmd).cast(dtypes.int), 0, AxisType.LOOP), args).end(gate) for cmd, fn in handlers.items()]
+
+  advance = head.after(*(x.barrier() for x in arms))[0].store(head_val)
+  back = UOp(Ops.CUSTOM, dtypes.void, (advance.barrier(),), arg="goto loop_top;")
+  return back.sink(arg=KernelInfo(name="cpu_worker"), tag=1)
+
+def build_worker(ring_size:int, renderer) -> tuple[UOp, UOp]:
+  return hcq_compile_program(cpu_worker(ring_size), ClangRenderer(renderer.target), "cpu_worker")
+
+def cpu_ext_buf(addr:int) -> Buffer: return Buffer("CPU", 1, dtypes.uint8, options=BufferSpec(external_ptr=addr), preallocate=True)
+def cpu_sym_buf(b:UOp) -> Buffer|None:
+  if isinstance(b.tag, tuple) and b.tag[0] == "sym": return cpu_ext_buf(sym_addr(b.tag[1]))  # dlsym'd C symbol address
+  return None if b.tag is None else Buffer("CPU", b.max_numel(), b.dtype, preallocate=True)
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, tid, prg, args_buf_addr): prg.fxn(*(ctypes.c_uint64(args_buf_addr),) + ((ctypes.c_int(tid),) if prg.runtimevars else ()))
-  def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, tid, tmpl_sig, signal_addr, value):
-    tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
-    tmpl_sig.wait(value)
-  def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
-  def cmd(self, cmd, *args, threads=1):
-    self.q(cmd, threads, len(args), *args)
+  def _cmd(self, *entry):
+    self._q.append(entry)
     return self
-
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     self.bind_args_state(args_state)
-    return self.cmd(self._exec, prg, args_state.buf.va_addr, threads=(global_size or (1,))[0])
-  def wait(self, signal, value=0): return self.cmd(self._wait, type(signal)(signal.base_buf, owner=signal.owner, virt=True), signal.value_addr, value)
-  def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
-  def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
-  def _submit(self, dev): dev.tasks.put(self._q[:])
+    fn_ptr = ctypes.cast(prg.fxn, ctypes.c_void_p).value
+    # kernels split by core_id: one entry per tid so the worker calls fn N times with tid injected
+    for tid in range((global_size or (1,))[0]): self._cmd(CpuOp.EXEC, fn_ptr, args_state.buf.va_addr, tid)
+    return self
+  def wait(self, signal, value=0): return self._cmd(CpuOp.WAIT, signal.value_addr, value)
+  def timestamp(self, signal): return self._cmd(CpuOp.TIMESTAMP, signal.timestamp_addr)
+  def signal(self, signal, value:sint=0): return self._cmd(CpuOp.SIGNAL, signal.value_addr, value)
+  def _submit(self, dev):
+    dev._ensureworkers(1)
+    for op, *args in self._q:  # append each fixed 4-u64 entry, then release-publish the new tail via sys[0]
+      base = dev.sys_view[0] % dev.RING_SZ
+      dev.ring_view[base:base+4] = array.array('Q', (op, *args, 0, 0, 0)[:4])
+      dev.sys_view[0] += 4
 
 class LVPArgsState(CLikeArgsState):
   def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
@@ -130,8 +165,38 @@ class CPUAllocator(HCQAllocator):
   def _unmap(self, mb): pass  # CPU _map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQCompiled):
+  RING_SZ = 32768
+
   def __init__(self, device:str=""):
-    self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
-                     CPUSignal, CPUComputeQueue, arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
+                     HCQSignal, CPUComputeQueue, arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
+
+    self.pm_bufferize = PatternMatcher([
+      (UPat(Ops.PARAM, tag="null_buf"), lambda: cpu_ext_buf(0)),  # base 0: byte-indexes absolute memory
+      (UPat(Ops.PARAM, name="b"), cpu_sym_buf),
+    ])
+    self.worker_rt, self.workers = None, []
+
+  # no worker spawned yet ⇒ nothing running ⇒ nothing to wait on. guards the re-entrant sync a buffer __del__ fires mid-build (the SIGNAL
+  # that would satisfy it is queued behind this very build in _submit, so waiting here would deadlock).
+  def synchronize(self, timeout:int|None=None): return super().synchronize(timeout) if self.workers else None
+
+  def _ensureworkers(self, cnt:int):
+    if self.worker_rt is None:
+      call, prg = build_worker(self.RING_SZ, self.renderer)
+      self._worker_bufs = [s.buffer for s in hcq_link(UOp(Ops.LINEAR, src=(call,))).src[0].src[1:]]
+      bufs = dict(zip((unwrap_after(s).tag for s in call.src[1:]), self._worker_bufs))  # tag -> resolved buffer
+      self.sys_view, self.ring_view = bufs["sys"]._buf.cpu_view().view(fmt='Q'), bufs["ring"]._buf.cpu_view().view(fmt='Q')
+      self.sys_view[0] = 0  # tail starts empty (worker's head also starts at 0)
+
+      self.worker_args = self.allocator.alloc(len(self._worker_bufs) * 8, BufferSpec())  # each arg's address, in PARAM slot order
+      self.worker_args.cpu_view().view(fmt='Q')[:] = array.array('Q', [b._buf.va_addr for b in self._worker_bufs])
+      self.worker_rt = self.runtime(prg.arg.function_name, next(s.arg for s in prg.src if s.op is Ops.BINARY))
+
+    while len(self.workers) < cnt:
+      self.workers.append(t:=threading.Thread(target=self.worker_rt.fxn, args=(ctypes.c_uint64(self.worker_args.va_addr),), daemon=True))
+      t.start()
+
+  def finalize(self):
+    for _ in self.workers: CPUComputeQueue()._cmd(CpuOp.QUIT).submit(self)
+    for t in self.workers: t.join(timeout=2.0)

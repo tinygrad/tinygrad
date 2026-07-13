@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
-import struct, functools, time, collections, itertools
+import struct, functools, time, collections, itertools, ctypes
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, CallInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.dtype import dtypes, truncate
+from tinygrad.dtype import dtypes, truncate, DType
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
@@ -59,6 +59,20 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype.itemsize
   r = UOp.range(len(blob) // isz, next(UOp.unique_num))
   return buf.index(r).store(UOp(Ops.BITCAST, buf.dtype, (data,)).index(r).load()).end(r)
+
+# *****************
+# 0.1. external C calls
+
+def sym_addr(sym:str) -> int:
+  assert (addr:=ctypes.cast(getattr(ctypes.CDLL(None), sym), ctypes.c_void_p).value) is not None, f"can't resolve symbol {sym}"
+  return addr
+
+def make_ext_call(fn, *args:UOp, ret:DType=dtypes.void, deps:tuple[UOp, ...]=()) -> UOp:
+  addr = make_getaddr(make_placeholder("CPU", 1, dtypes.uint8, name=("sym", fn.__name__), unique=False), ("CPU",))
+  call = f"(({ret.name}(*)({', '.join(a.dtype.name for a in args)}))({{0}}))" + \
+         f"({', '.join(f'({a.dtype.name})({{{i+1}}})' for i,a in enumerate(args))})"
+  if ret is dtypes.void: return UOp(Ops.CUSTOM, dtypes.void, (addr, *args, *deps), arg=call+";")
+  return UOp(Ops.CUSTOMI, ret, (addr, *args, *deps), arg=call)
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []
@@ -419,6 +433,12 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
     final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
 
   return final_linear
+
+def hcq_compile_program(sink:UOp, renderer:Renderer, name:str, devs:str|tuple[str, ...]=("CPU",)) -> tuple[UOp, UOp]:
+  call = UOp(Ops.CALL, src=(UOp.custom_function("hcq", sink),), arg=CallInfo(name=name, aux=HCQInfo(name, Estimates(), to_tuple(devs), "")))
+  call = graph_rewrite(call, pm_rm_rt_getaddrs, walk=True, name="rt getaddrs")
+  call = graph_rewrite(call, pm_replace_params, walk=True, name="replace params")
+  return call, to_program(call.src[0].src[0], renderer)
 
 # *****************
 # 6. bufferize placeholders: replace placeholders with real buffers.

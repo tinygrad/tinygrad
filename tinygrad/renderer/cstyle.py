@@ -27,6 +27,9 @@ base_rewrite = PatternMatcher([
 
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
+  # WAIT(cond, [scope_deps...]) — spin until the boolean condition becomes true.  Extra srcs are ordering-only.
+  (UPat(Ops.WAIT, name="x", src=(UPat(dtype=dtypes.bool),), allow_any_len=True),
+   lambda ctx,x: f"while (!({ctx[x.src[0]]}));"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
 
   # const
