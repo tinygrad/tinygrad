@@ -33,7 +33,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
   if (dtype := _GGML_NATIVE.get(ggml_type)) is not None:
-    return t[:dtype.itemsize * n].contiguous().bitcast(dtype)
+    return t[:dtype.itemsize * n].contiguous().reshape(-1, dtype.itemsize).bitcast(dtype)
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
     # TODO: rewrite with arange?
@@ -43,21 +43,22 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
-    if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+    if ggml_type == 2:
+      return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1)
     if ggml_type == 3:
-      d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
+      d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for s in [ 0, 2 ])
       return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
     if ggml_type in (6, 7):
-      d = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+      d = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1)
       qh_off = 2 if ggml_type == 6 else 4
       qh = q_to_uint8(blocks[:,qh_off:qh_off+4], 1).reshape((-1, 8, 4)).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
       q = q_to_uint8(blocks[:,qh_off+4:], 4).bitcast(dtypes.int8) + qh * 16
-      return q * d + (blocks[:,2:4].bitcast(dtypes.float16).cast(dtypes.float32) if ggml_type == 7 else -16 * d)
-    if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+      return q * d + (blocks[:,2:4].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) if ggml_type == 7 else -16 * d)
+    if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) * blocks[:,2:].bitcast(dtypes.int8)
      # Q4_K: 256 elements per 144-byte block (d:2, dmin:2, scales:12, qs:128)
      # Q5_K: 256 elements per 176-byte block (d:2, dmin:2, scales:12, qh:32, qs:128)
     if ggml_type in (12, 13):
-      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for i in [0, 2])
+      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).reshape(-1, 1, 1) for i in [0, 2])
       s = blocks[:,4:16]  # 12 bytes: 6-bit scales[0-3], 6-bit mins[0-3], high bits[4-7]
       sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
       mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
@@ -68,11 +69,11 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
       scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
-      d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
+      d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1).expand((-1, 256))
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
     if ggml_type == 18:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1, 1))
-      scale_words = blocks[:, 66:98].bitcast(dtypes.uint32)
+      scale_words = blocks[:, 66:98].reshape(-1, 8, 4).bitcast(dtypes.uint32)
       db = d * (scale_words.rshift(28).cast(dtypes.float32) + 0.5).reshape((-1, 8, 1, 1)) * 0.5
       sign_idx = scale_words.unsqueeze(-1).rshift(
         Tensor([0, 7, 14, 21], device=t.device, dtype=dtypes.uint32)).bitwise_and(0x7F).reshape((-1, 32)).cast(dtypes.int32)

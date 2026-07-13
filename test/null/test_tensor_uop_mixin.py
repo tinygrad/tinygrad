@@ -224,8 +224,12 @@ class TestTensorUOpBitcast(unittest.TestCase):
     self.assertIs(t.uop.bitcast("uint32").dtype, dtypes.uint32)
   def test_bitcast_same_and_diff_size(self):
     _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.uint32))              # same size
-    _check(self, _t(4).cast(dtypes.uint8), lambda x: x.bitcast(dtypes.uint16))   # widen: uint8[4] -> uint16[2]
-    _check(self, _t(4).cast(dtypes.uint16), lambda x: x.bitcast(dtypes.uint8))   # narrow: uint16[4] -> uint8[8]
+    _check(self, _t(2,2).cast(dtypes.uint8), lambda x: x.bitcast(dtypes.uint16)) # widen: uint8[2,2] -> uint16[2]
+    _check(self, _t(4).cast(dtypes.uint16), lambda x: x.bitcast(dtypes.uint8))   # narrow: uint16[4] -> uint8[4,2]
+
+  def test_widening_bitcast_exceptions(self):
+    # rightmost dim should be exactly out_dt.itemsize // in_dt.itemsize
+    with self.assertRaises(AssertionError): _t(4).cast('uint8').bitcast('uint16')
 
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):

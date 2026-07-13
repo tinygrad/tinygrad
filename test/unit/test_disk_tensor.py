@@ -52,7 +52,7 @@ test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.
 test_size = 1024*1024*1024*2
 
 def _test_bitcasted(t: Tensor, dt: DType, expected):
-  np.testing.assert_allclose(t.bitcast(dt).numpy(), expected)
+  np.testing.assert_allclose(t.reshape(-1, dt.itemsize).bitcast(dt).numpy(), expected)
 
 # sudo su -c 'sync; echo 1 > /proc/sys/vm/drop_caches' && python3 test/unit/test_disk_tensor.py TestRawDiskBuffer.test_readinto_read_speed
 class TestRawDiskBuffer(unittest.TestCase):
@@ -72,13 +72,13 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 0.0)
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
-    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
+    t.reshape(128, 64, 2).bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
     _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
     # pi in float32 stored via float32
-    t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
+    t.reshape(128, 32, 4).bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
@@ -86,7 +86,7 @@ class TestRawDiskBuffer(unittest.TestCase):
       Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).to(None).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(AssertionError):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
       Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16).shape
 
@@ -247,7 +247,7 @@ class TestDiskTensor(TempDirTestCase):
   def test_simple_read_bitcast(self):
     fn = pathlib.Path(self.tmp("dt_simple_read_bitcast"))
     fn.write_bytes(bytes(range(256))*2)
-    t = Tensor.empty(16, 16*2, device=f"disk:{self.tmp('dt_simple_read_bitcast')}", dtype=dtypes.uint8)
+    t = Tensor.empty(16, 16, 2, device=f"disk:{self.tmp('dt_simple_read_bitcast')}", dtype=dtypes.uint8)
     out = t[1].bitcast(dtypes.uint16).to(Device.DEFAULT).tolist()
     tout = [(x//256, x%256) for x in out]
     assert tout == list([(x+1,x) for x in range(32,64,2)])
@@ -255,7 +255,7 @@ class TestDiskTensor(TempDirTestCase):
   def test_simple_read_bitcast_alt(self):
     fn = pathlib.Path(self.tmp("dt_simple_read_bitcast_alt"))
     fn.write_bytes(bytes(range(256))*2)
-    t = Tensor.empty(16, 16*2, device=f"disk:{self.tmp('dt_simple_read_bitcast_alt')}", dtype=dtypes.uint8)
+    t = Tensor.empty(16, 16, 2, device=f"disk:{self.tmp('dt_simple_read_bitcast_alt')}", dtype=dtypes.uint8)
     out = t.bitcast(dtypes.uint16)[1].to(Device.DEFAULT).tolist()
     tout = [(x//256, x%256) for x in out]
     assert tout == list([(x+1,x) for x in range(32,64,2)])
@@ -348,7 +348,7 @@ class TestDiskTensor(TempDirTestCase):
   def test_assign_with_bitcast(self):
     # bitcast assign is used in safe_save for writing header length
     t = Tensor.empty(16, device=f"disk:{self.tmp('dt_assign_bitcast')}", dtype=dtypes.uint8)
-    t[0:8].bitcast(dtypes.int64).assign([12345])
+    t[0:8].bitcast(dtypes.int64).assign(12345)
     val = int.from_bytes(t[0:8].data(), 'little')
     self.assertEqual(val, 12345)
 
@@ -356,7 +356,7 @@ class TestDiskTensor(TempDirTestCase):
     # assign float values to a float32 view of a uint8 disk buffer (used by safe_save)
     t = Tensor.empty(32, device=f"disk:{self.tmp('dt_bitcast_view_assign')}", dtype=dtypes.uint8)
     # create float32 view of bytes 8-24 (4 floats)
-    float_view = t[8:24].bitcast(dtypes.float32)
+    float_view = t[8:24].reshape(-1, 4).bitcast(dtypes.float32)
     float_view.assign(Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32, device="CPU"))
     np.testing.assert_array_equal(float_view.numpy(), [1.0, 2.0, 3.0, 4.0])
 
@@ -376,7 +376,7 @@ class TestDiskTensor(TempDirTestCase):
   def test_bitcast_view(self):
     with open(self.tmp('dt_bitcast_view'), "wb") as f: f.write(bytes(range(10, 24)))
     t = Tensor.empty(3, dtype=dtypes.uint, device=f"disk:{self.tmp('dt_bitcast_view')}").shrink([(0, 2)])
-    ret = t.bitcast(dtypes.uint16).to("CPU") + 1
+    ret = t.bitcast(dtypes.uint16).flatten().to("CPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, DEV=CL gives the wrong output")

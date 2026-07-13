@@ -1917,7 +1917,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
     pad_mask = type(self).cat(*(type(self).const(dtypes.uint8, v).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
-    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
+    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 25, 8).bitcast(dtypes.uint64)
 
     state = type(self).zeros(bs, 25, dtype=dtypes.uint64, buffer=False)
     for k in range(int(data.shape[1])):
@@ -1934,7 +1934,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
       # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
-    return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
+    return state.bitcast(dtypes.uint8).reshape(-1, 200)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _hash_1mb(self) -> Self:
     assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
@@ -1971,3 +1971,28 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return int(self.numel()) * self.element_size()
+
+  # ***** bitcast *****
+
+  def bitcast(self, dtype:DTypeLike) -> Self:
+    """
+    Bitcasts `self` to the given `dtype`. The shape behavior matches JAX:
+
+      - if the dtype sizes match, the shape is preserved
+      - if the new dtype is larger than the input dtype, the final dimension of the input tensor must be `dtype.itemsize // input_dtype.itemsize`
+      - if the new dtype is smaller that the input dtype, a new final dimension is added of size `input_dtype.itemsize // dtype.itemsize`
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.bitcast(dtypes.uint32)
+    print(t.dtype, t.numpy())
+    ```
+    """
+    if (out_sz:=(dt:=to_dtype(dtype)).itemsize) > (in_sz:=self.dtype.itemsize): assert self.shape[-1] == out_sz // in_sz, \
+        f"widening bitcast from {self.dtype} to {dt} must have final dimension {out_sz // in_sz = }, but got shape {self.shape}"
+    if self.dtype == dt: return self
+    wrapped = self._wrap_uop(self._uop.bitcast(dt))
+    return wrapped if out_sz == in_sz else wrapped.squeeze(-1) if out_sz > in_sz else wrapped.reshape(*self.shape, in_sz // out_sz)

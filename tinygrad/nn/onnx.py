@@ -242,7 +242,7 @@ class OnnxPBParser:
       obj["parsed_tensor"] = Tensor(data, dtype=dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype == dtypes.uint8, data
-    data = data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
+    data = data.reshape(-1, dtype.itemsize).bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     # const folding
     if shape == ():
       if data.dtype == dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)

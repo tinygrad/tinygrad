@@ -313,27 +313,21 @@ class TestSymbolicOps(unittest.TestCase):
           np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_bitcast_down(self):
-    a = Tensor.rand(10, 3)
+    a = Tensor.rand(30)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       expected = a[:i].bitcast(dtypes.uint8).numpy()
       symbolic_result = a[:vi].bitcast(dtypes.uint8)
-      if len(expected.shape) == 2:
-        symbolic = symbolic_result[:expected.shape[0], :expected.shape[1]].numpy()
-      else:
-        symbolic = symbolic_result[:].numpy()
+      symbolic = symbolic_result[:expected.shape[0], :expected.shape[1]].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
   def test_bitcast_up(self):
-    a = Tensor.rand(10, 4)
+    a = Tensor.rand(10, 2, 2)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       expected = a[:i].bitcast(dtypes.uint64).numpy()
       symbolic_result = a[:vi].bitcast(dtypes.uint64)
-      if len(expected.shape) == 2:
-        symbolic = symbolic_result[:expected.shape[0], :expected.shape[1]].numpy()
-      else:
-        symbolic = symbolic_result[:].numpy()
+      symbolic = symbolic_result[:expected.shape[0], :expected.shape[1]].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
   def test_conv2d_ceildiv_edge_case(self):

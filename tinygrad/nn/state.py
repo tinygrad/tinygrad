@@ -57,7 +57,7 @@ def safe_load(fn:Tensor|str|pathlib.Path) -> dict[str, Tensor]:
   """
   t, data_start, metadata = safe_load_metadata(fn)
   data = t[data_start:]
-  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].reshape(-1, (dt:=safe_dtypes[v['dtype']]).itemsize).bitcast(dt).reshape(v['shape'])
           for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=None):
@@ -78,7 +78,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   j += "\x20"*(round_up(len(j),8)-len(j))
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
-  t[0:8].bitcast(dtypes.int64).assign([len(j)])
+  t[0:8].bitcast(dtypes.int64).assign(len(j))
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
@@ -89,7 +89,7 @@ def fs_store(t:Tensor) -> Tensor:
   Store a tensor to storage.
   """
   # TODO: this should work locally as well
-  data = t.contiguous().flatten().bitcast(dtypes.uint8)
+  data = t.contiguous().bitcast(dtypes.uint8).flatten()
 
   # pad to a multiple of 1mb
   if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
@@ -221,7 +221,7 @@ def zip_extract(t: Tensor) -> dict[str, Tensor]:
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
     # sadly, the extra length needs to be read from the local header of each file.
     # this is a limitation of the zip file format
-    header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
+    header_contents = [t[zi.header_offset+26:zi.header_offset+30].reshape(-1, 2).bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
     Tensor.realize(*header_contents)
     for zi, header_content in zip(myzip.filelist, header_contents):
       # header_offset + sizeFileHeader + File name length + Extra field length
@@ -276,7 +276,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in storage_source: return None
     byte_start, byte_end = storage_offset*storage[1].itemsize, (storage_offset + prod(size))*storage[1].itemsize
-    ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
+    ret = storage_source[storage[2]][byte_start:byte_end].reshape(-1, storage[1].itemsize).bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
