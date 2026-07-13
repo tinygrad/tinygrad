@@ -10,23 +10,23 @@ PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK, Ops.INDEX}
 class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = uops, ren, itertools.count()
-    prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-
+    self.prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.uops = [u for u in uops if u.op not in PSEUDO_OPS]
     self.live_intervals: dict[VRegister, list[int]] = {}
-    self.pmap: dict[VRegister, tuple[Register|int,...]] = {}
 
     # TODO: handle alignment
     lis = self.live_intervals
     range_vars: list[VRegister] = []
+    master: dict[VRegister, UOp] = {}
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       if u.op is Ops.INDEX: return _live_units(u.src[0])
       return tuple(r.parent if isinstance(r, VSubRegister) else r for r in rdefs(u) if isinstance(r, (VRegister, VSubRegister)))
     for u in reversed(self.uops):
-      pt, defs, uses = prgpts[u], _live_units(u), []
+      pt, defs, uses = self.prgpts[u], _live_units(u), []
       for s in dedup(u.src): uses.extend(_live_units(s))
       for v in defs + tuple(uses): lis.setdefault(v, []).insert(0, pt)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
+        master[v] = u
         if (n := max((lis[rv][-1] for rv in range_vars if lis[rv][0] <= lis[v][-1] < lis[rv][-1]), default=None)): lis[v].append(n)
       if u.op is Ops.RANGE: range_vars.extend(defs)
 
@@ -35,36 +35,51 @@ class LinearScanRegallocContext:
     for u in uops: vregs.update(_live_units(u))
     vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons), lis[v][0], lis[v][-1]))
 
+    # evicted vregs, spill/fill code should be inserted at rewrite time at any prg point past a, with stack slot b
+    self.spills: dict[UOp, tuple[int,int]] = {} # v : (a,b)
+    self.pmap: dict[VRegister, tuple[Register,...]] = {}
+    ipmap: dict[Register, VRegister] = {}
     live_ranges: dict[Vregister, tuple[int,int]] = { v: (iv[0], iv[-1]) for v,iv in lis.items() }
     physical_slots: dict[Register, list[tuple[int, int], ...]] = {}
+    spill_offset = 0
+
+    # greedy allocate, pick first block of width w in constraints that is free for whole live range
+    def _isfree(pregs:list[Register], v_start:int, v_end:int): return all(not (a < v_end and v_start < b) for r in pregs if r in physical_slots for a,b in physical_slots[r])
     for v in vregs:
-      v_start, v_end = live_ranges[v]
-      def _isfree(pregs:list[Register]):
-        return all(not (a < v_end and v_start < b) for r in pregs if r in physical_slots for a,b in physical_slots[r])
-      # greedy allocate, pick first block of width w in constraints that is free for whole live range
-      if (block := next((v._cons[i:i+v.width] for i in range(len(v._cons)) if _isfree(v._cons[i:i+v.width])), None)):
+      if (block := next((v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1) if _isfree(v._cons[i:i+v.width], *live_ranges[v])), None)):
         self.pmap[v] = block
-        for r in block: physical_slots.setdefault(r, []).append(live_ranges[v])
-      else: # spill
-        # spilling requires a few things:
-        # - pass offset into spill space of spilled register to load/store in rewrite
-        # - identify...
-        raise NotImplementedError("spilling not implemented")
+        for r in block:
+          ipmap[r] = v
+          physical_slots.setdefault(r, []).append(live_ranges[v])
+      else:
+        # MIN: when there are not enough free physical registers we evict the set of registers whos next use is
+        # the farthest in the future (dead vregs are at inf distance)
+        def _cost(block:tuple[Register,...]): return min(next((a for a in lis[ipmap[r]] if a > live_ranges[v][0]), float('inf')) for r in block)
+        i,_ = max(((i,_cost(v._cons[i:i+v.width])) for i in range(len(v._cons) - v.width + 1)), key=lambda ic:ic[1])
+        victim = v._cons[i:i+v.width]
+        for r in victim:
+          self.spills[master[ipmap[r]]] = (live_ranges[v][0], spill_offset)
+          ipmap[r] = v
+          spill_offset += r.size
+        self.pmap[v] = victim
+        raise NotImplementedError(f"spilling not implemented, should evict: {victim}")
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i = next(ctx.idx)
   if x.op in PSEUDO_OPS: return None
   nsrc, ndefs, before, after = [], [], [], []
+  i = next(ctx.idx)# ctx.prgpts[x]
 
   for s in x.src: # handle spills?
     if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
 
+  before.extend([ctx.ren.fill(ctx.spills[s][1], s) for s in nsrc if s in ctx.spills and i > ctx.spills[s][0]])
+  if x in ctx.spills: after.append(ctx.ren.spill(ctx.spills[s][1], x))
+
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.pmap[v])
     if isinstance(v, VSubRegister): ndefs.append(ctx.pmap[v.parent][v.pos])
 
-  # nx = x.replace(tag=tuple(ndefs))
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
   return nx, before + [nx] + after
 

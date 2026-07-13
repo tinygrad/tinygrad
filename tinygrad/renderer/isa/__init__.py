@@ -8,6 +8,7 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposor
 class Register:
   name: str
   index: int
+  size: int = 8
   def __repr__(self): return self.name
 
 # TODO: iter over subregisters
@@ -26,8 +27,9 @@ class VSubRegister: # should this inherit?
   def __repr__(self): return f"{self.parent.name}.{self.pos}"
 
 def rdefs(u:UOp) -> tuple[VRegister|Register|VSubRegister,...]:
-  if u.op in {Ops.AFTER, Ops.END}: return rdefs(u.src[0])
+  if u.op in {Ops.NOOP, Ops.AFTER, Ops.END}: return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister,VSubRegister)))
+def rdef(u:UOp) -> tuple[VRegister|Register|VSubRegister,...]: return rdefs(u)[0]
 
 class IselContext:
   def __init__(self, sink:UOp):
@@ -40,11 +42,6 @@ class IselContext:
 
   def vreg(self, cons:tuple[Register, ...], width:int=1) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", width, cons if isinstance(cons, tuple) else (cons,))
-
-def greg(u:UOp):
-  if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return greg(u.src[0])
-  if isinstance(u.tag, tuple): return u.tag[0]
-  return u.tag
 
 @dataclass
 class PreRegAllocContext:
@@ -61,6 +58,6 @@ class ISARenderer(Renderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
