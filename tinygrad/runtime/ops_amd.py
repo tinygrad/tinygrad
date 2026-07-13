@@ -814,11 +814,11 @@ class KFDIface:
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
       self.doorbells = cast(FileIOInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
 
+    (put_value := Buffer("CPU", 1, dtypes.uint64, preallocate=True))._buf.cpu_view().view(fmt='Q')[0] = 0
     return AMDQueueDesc(ring=ring, read_ptr=gart.view(1, dtypes.uint64, rptr+8*xcc_id).ensure_allocated(),
       write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), doorbell=Buffer("CPU", 1, dtypes.uint64,
         options=BufferSpec(external_ptr=self.doorbells + queue.doorbell_offset - self.doorbells_base), preallocate=True),
-      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True),
-      eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer)
+      put_value=put_value, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer)
 
   def sleep(self, tm:int):
     kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=3, wait_for_all=0, timeout=tm)
@@ -900,11 +900,11 @@ class PCIIface(PCIIfaceBase):
         is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
     doorbell = self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')
+    (put_value := Buffer("CPU", 1, dtypes.uint64, preallocate=True))._buf.cpu_view().view(fmt='Q')[0] = 0
     return AMDQueueDesc(ring=ring, doorbell=Buffer("CPU", 1, dtypes.uint64,
       opaque=HCQBuffer(doorbell.addr, doorbell.nbytes, view=doorbell), options=BufferSpec(external_ptr=1)),
       read_ptr=gart.view(1, dtypes.uint64, rptr).ensure_allocated(), write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(),
-      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), eop_buffer=eop_buffer,
-      cwsr_buffer=cwsr_buffer, params=rcvr_params)
+      put_value=put_value, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, params=rcvr_params)
 
   def _collect_interrupts(self, reset=False, drain_only=False):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
