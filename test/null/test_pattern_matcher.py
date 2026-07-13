@@ -51,8 +51,8 @@ class TestPatternMatcher(unittest.TestCase):
       ctx.append(True)
       assert len(x.src) == 0
       return x.replace(src=(UOp(Ops.NOOP),))
-    matcher = PatternMatcher([(UPat(Ops.CONST, src=(), name="x"), fxn)])
-    c1 = UOp.const(dtypes.float, 1.0)
+    matcher = PatternMatcher([(UPat(Ops.NOOP, src=(), name="x"), fxn)])
+    c1 = UOp(Ops.NOOP)
     # second rewrite shouldn't match anything
     ctx = []
     c1 = matcher.rewrite(c1, ctx)

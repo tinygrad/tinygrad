@@ -223,6 +223,8 @@ spec_hcq = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
+  (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
+
   # SLICE on BUFFER is allowed if BUFFER is
   (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER})),
                         UPat(Ops.CONST, dtype=dtypes.index)), allow_any_len=True, name="bv"),

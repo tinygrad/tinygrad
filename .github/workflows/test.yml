@@ -171,7 +171,7 @@ jobs:
         llvm: 'true'
         amd: 'true'
     - name: Run NULL backend tests
-      run: DEV=NULL python -m pytest -n=auto test/null/ --durations=20
+      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run targeted tests on NULL backend
       run: |
         DEV=NULL python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
@@ -643,7 +643,7 @@ jobs:
     - name: Run unit tests
       run: DEV=METAL python -m pytest -n=auto test/unit/ --durations=20
     - name: Run NULL backend tests
-      run: DEV=NULL python -m pytest -n=auto test/null/ --durations=20
+      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/backend/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
