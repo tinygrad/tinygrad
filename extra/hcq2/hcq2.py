@@ -568,9 +568,9 @@ class HCQ2Buffer:
   def base(self) -> HCQ2Buffer: return self._base or self
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_mmio(self, src:Buffer) -> MMIOInterface:
+  def _as_mmio(self, src:HCQ2Buffer) -> MMIOInterface:
     self.dev.synchronize()
-    return src._buf.cpu_view()
+    return src.cpu_view()
 
   def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")

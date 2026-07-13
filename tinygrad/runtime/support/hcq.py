@@ -528,9 +528,9 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
 
 class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
-  def _as_mmio(self, src:Buffer) -> MMIOInterface:
+  def _as_mmio(self, src:HCQBuffer) -> MMIOInterface:
     self.dev.synchronize()
-    return src._buf.cpu_view()
+    return src.cpu_view()
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     if self.dev.hw_copy_queue_t is None:

@@ -248,7 +248,7 @@ class Buffer:
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_mmio(self) -> MMIOInterface:
     if not hasattr(self.allocator, '_as_mmio'): raise RuntimeError(f"{self.device} has no _as_mmio")
-    return self.allocator._as_mmio(self.ensure_allocated())
+    return self.allocator._as_mmio(self.ensure_allocated()._buf)
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
     if force_zero_copy or allow_zero_copy:
@@ -301,7 +301,7 @@ class Allocator(Generic[DeviceType]):
   def map(self, buf:Buffer): return self._map(buf._buf)
   def _map(self, buf): raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
-  # def _as_mmio(self, src:Buffer) -> MMIOInterface:
+  # def _as_mmio(self, src) -> MMIOInterface:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional

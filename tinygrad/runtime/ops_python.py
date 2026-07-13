@@ -225,7 +225,7 @@ class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return MMIOInterface.from_memoryview(memoryview(bytearray(size)))
   def _copyin(self, dest, src:memoryview): dest[:] = src
   def _copyout(self, dest:memoryview, src): dest[:] = src[:]
-  def _as_mmio(self, src:Buffer) -> MMIOInterface: return src._buf
+  def _as_mmio(self, src:MMIOInterface) -> MMIOInterface: return src
   def map(self, buf:Buffer): return buf.as_mmio()
   def _offset(self, buf:MMIOInterface, size, offset): return buf.view(offset=offset, size=size)
 

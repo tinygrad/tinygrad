@@ -184,10 +184,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
-  def _mmio(self, src:MetalBuffer) -> MMIOInterface:
+  def _as_mmio(self, src:MetalBuffer) -> MMIOInterface:
     self.dev.synchronize()
     return MMIOInterface(src.buf.contents()+src.offset, src.size)
-  def _as_mmio(self, src) -> MMIOInterface: return self._mmio(src._buf)
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._mmio(dest), src, "TINY -> METAL")
-  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._mmio(src)[:], "METAL -> TINY")
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_mmio(dest), src, "TINY -> METAL")
+  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_mmio(src)[:], "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

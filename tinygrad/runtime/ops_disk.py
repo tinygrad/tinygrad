@@ -1,6 +1,6 @@
 import os, sys, mmap, io, ctypes, contextlib, pathlib
 from typing import Generator, Callable
-from tinygrad.helpers import OSX, round_up, mv_address
+from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator, MMIOInterface
 with contextlib.suppress(ImportError):
   import _posixshmem
@@ -83,7 +83,7 @@ class DiskAllocator(Allocator):
     self.dev._might_open(size)
     return DiskBuffer(self.dev, size)
   def _free(self, opaque, options): self.dev._might_close()
-  def _as_buffer(self, src:DiskBuffer): return src._buf()
+  def _as_mmio(self, src:DiskBuffer) -> MMIOInterface: return MMIOInterface.from_memoryview(src._buf())
   def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):
     if OSX and self.dev.fd is not None:
