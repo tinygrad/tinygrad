@@ -68,7 +68,7 @@ def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize 
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(dtypes.uint16, 32 - nbits)))
-  return _aluhint(UOp(Ops.SHR, dtypes.uint32, src=(u, const(dtypes.uint16, 31 if nbits <= 32 else 63))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
+  return _aluhint(UOp(Ops.SHR, dtypes.uint32 if nbits <= 32 else dtypes.uint64, src=(u, const(dtypes.uint16, 31 if nbits <= 32 else 63))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
 
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
@@ -92,7 +92,9 @@ def packb16(ctx, lo:UOp, hi:UOp):
 def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
   for i in range(nregs):
-    if x.dtype.itemsize == 2: mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
+    if x.dtype.itemsize == 2:
+      if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
+      else: mvs.append(vmov(x.src[i*2]))
     else: mvs.append(vmov(x.src[i]))
   nx = multireg(*mvs, dtype=x.dtype)
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
@@ -177,6 +179,9 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
+  print(base.op, base.arg)
+  # TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is and
+  # the size of the other ones. Use isel ctx?
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
@@ -433,7 +438,10 @@ def lower_gated(ctx, x:UOp):
   skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".EXIT_{skip_label}")
   save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
   nsrc = x.src[:-2] if gated_store else x.src[1:-2]
-  line = [] if gated_store else [x.src[0]]
+  line = []
+  if not gated_store:
+    if x.src[0].op is Ops.GROUP: line.extend(x.src[0].src)
+    else: line = [x.src[0]]
   line.extend([save, skip, x.replace(src=nsrc), lbl, restoreexec(x.src[-1])])
   return line[0], line
 
@@ -495,8 +503,10 @@ extra_matcher = PatternMatcher([
 
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 # cast i8 -> i16/i32 = bfe
+# NOTE: down casting float to int should round first then reduce precision
 pre_isel_matcher = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const(dtypes.uint16, (1 << 16) - 1)).replace(dtype=dtypes.uint16)),
   # NOTE: does this not work for int8 alu? Do we need to sign extend or something..
   (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"), lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
