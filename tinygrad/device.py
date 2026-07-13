@@ -135,9 +135,7 @@ class Buffer:
     if device not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
-      elif self._base is not None:
-        assert hasattr(allocator, "_offset"), "offset function required for view"
-        self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
+      elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
       else: self._bufs[device] = allocator.map(self.ensure_allocated())
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
@@ -152,7 +150,6 @@ class Buffer:
     if self._base is not None:
       self._base.ensure_allocated()
       self._base.allocated_views += 1
-      assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._bufs[self.device] = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._bufs[self.device] = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
@@ -246,7 +243,7 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf): raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   # def _as_buffer(self, src) -> memoryview:
-  # def _offset(self, buf, size:int, offset:int):
+  def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 

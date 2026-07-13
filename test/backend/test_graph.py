@@ -63,7 +63,7 @@ def zero_bufs(bufs):
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
   def skip_if_no_offset(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, "_offset"): self.skipTest("device does not support _offset")
+    if Device.DEFAULT in {"WEBGPU", "CL"}: self.skipTest("device does not support _offset")
 
   def skip_if_not_multigraph(self):
     graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
@@ -213,8 +213,8 @@ class TestGraph(unittest.TestCase):
 
   def test_graph_offset_bufs(self):
     self.skip_if_not_multigraph()
+    self.skip_if_no_offset()
     d0 = Device.DEFAULT
-    if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
 
     b0 = make_buffer(d0, fill=True)
     b1 = make_view(b0, 0, b0.size)
