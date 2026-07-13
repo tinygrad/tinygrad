@@ -95,6 +95,10 @@ class MovementMixin:
           *bound, stride = index.indices(int(size.vmax) if isinstance(size, UOp) else size)
           bound = [0, 0] if stride * (bound[1] - bound[0]) < 0 else ([bound[1]+1, bound[0]+1] if stride < 0 else bound)
           return {"size":ceildiv(bound[1]-bound[0], abs(stride)), "boundary":tuple(bound), "stride":stride, "collapse_dim":False}
+        if step == 1 and isinstance(start, UOp) and isinstance(stop, UOp) and stop.op is Ops.ADD:
+          base, delta = (stop.src[1], stop.src[0]) if stop.src[1] is start else (stop.src[0], stop.src[1])
+          if base is start and delta.op is Ops.CONST and isinstance(delta.arg, int) and delta.arg >= 0:
+            return {"size":delta.arg, "boundary":(start, stop), "stride":1, "collapse_dim":False}
         if resolve(step == 1, False) and resolve((stop-start) >= 0, False):
           return {"size":stop-start, "boundary":(start, stop), "stride":step, "collapse_dim":False}
         raise TypeError(f"slice {index=} is not supported")

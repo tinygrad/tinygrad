@@ -1,7 +1,7 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, range_start, AxisType
+from tinygrad.uop.symbolic import symbolic, symbolic_simple, commutative
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
@@ -16,25 +16,35 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.END), name="r"), flatten_range),
 ])
 
+pm_merge_ranges = symbolic_simple+commutative+PatternMatcher([
+  ((UPat.var("x", dtype=dtypes.index)//UPat.cvar("d"))<UPat.cvar("c"),
+   lambda x,d,c: x<(c.arg*d.arg) if d.arg > 0 else None),
+])+pm_flatten_range
+
 # index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
+  if len(u.ended_ranges) < 2: return None
+  pairs = zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.combinations(u.ended_ranges, 2)
+  candidates = [(r0, r1) for r0,r1 in pairs if r0.arg[-1] == r1.arg[-1]]
+  if not candidates: return None
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
+  divmod_count = count_divmod(u)
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
-  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type
-    if r0.arg[-1] == r1.arg[-1]:
-      # check if the ranges to merge are in the same reduces
-      if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+  for r0, r1 in candidates:
+    # An earlier accepted merge can remove either original range from u, making this substitution a no-op.
+    if r0 not in u.backward_slice or r1 not in u.backward_slice: continue
+    # check if the ranges to merge are in the same reduces
+    if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
+      s0, s1 = r0.src[0], r1.src[0]
+      # do the merge
+      new_range = r0.replace(src=(s0*s1,))
+      nidx = u.substitute({r0:new_range//s1, r1:new_range%s1})
+      nidx = graph_rewrite(nidx, pm_merge_ranges, name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
-          u = nidx
+      # check if it simplifies
+      if (new_divmod_count:=count_divmod(nidx)) <= divmod_count:
+        u, divmod_count = nidx, new_divmod_count
   return u
 
 def mark_gated(ctx, idx):
@@ -59,15 +69,16 @@ pm_simplify_ranges = PatternMatcher([
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+def do_substitute(ctx:dict, x:UOp, sub_fxn:Callable[[UOp, UOp], UOp], simplify:bool=True) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
-  return None if ret is x else ret.simplify()
+  return None if ret is x else ret.simplify() if simplify else ret
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])),
+    simplify=False)),
 ])
 
 # **** reduce simplification ****

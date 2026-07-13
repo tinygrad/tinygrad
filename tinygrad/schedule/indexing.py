@@ -1,11 +1,11 @@
-from typing import Iterator
+from typing import Iterator, cast
 import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC, prod
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
                       Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
@@ -135,12 +135,52 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_in.append(acc*src)
     acc *= s
   combined_axes = UOp.const(dtypes.index, 0).usum(axes_in)
+  # Devectorization indexes reshapes with concrete lane numbers. Avoid running the
+  # full symbolic-validity pipeline for each lane when the flat index is constant.
+  if all(isinstance(s, int) and s > 0 for s in in_shape) and combined_axes.vmin == combined_axes.vmax and isinstance(combined_axes.vmin, int):
+    flat_idx = int(combined_axes.vmin)
+    const_axes = []
+    for s in cast(tuple[int, ...], in_shape)[::-1]:
+      const_axes.append(UOp.const(dtypes.index, flat_idx % s))
+      flat_idx //= s
+    return UOp.sink(*const_axes[::-1])
+  if len(in_shape) == 1:
+    return graph_rewrite(UOp.sink(combined_axes), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
   return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+
+def _apply_int_reshape(in_shape:tuple[int, ...], out_shape:tuple[int, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
+  """Index pure contiguous splits/merges without flattening and symbolically rebuilding the entire shape."""
+  ret:list[UOp] = []
+  i = j = 0
+  while i < len(in_shape) or j < len(out_shape):
+    while i < len(in_shape) and in_shape[i] == 1:
+      ret.append(UOp.const(dtypes.index, 0))
+      i += 1
+    while j < len(out_shape) and out_shape[j] == 1: j += 1
+    if i == len(in_shape) or j == len(out_shape): break
+    ni, nj, in_sz, out_sz = i+1, j+1, in_shape[i], out_shape[j]
+    while in_sz != out_sz:
+      if in_sz < out_sz and ni < len(in_shape): in_sz, ni = in_sz*in_shape[ni], ni+1
+      elif out_sz < in_sz and nj < len(out_shape): out_sz, nj = out_sz*out_shape[nj], nj+1
+      else: return None
+    in_group, out_group, out_idxs = in_shape[i:ni], out_shape[j:nj], rngs[j:nj]
+    if in_group == out_group: ret.extend(out_idxs)
+    elif len(in_group) == 1:
+      ret.append(UOp.const(dtypes.index, 0).usum([r*prod(out_group[k+1:]) for k,r in enumerate(out_idxs)]))
+    elif len(out_group) == 1:
+      flat, rev = out_idxs[0], []
+      for sz in in_group[:0:-1]:
+        rev.append(flat % sz)
+        flat //= sz
+      ret.extend((flat, *rev[::-1]))
+    else: return None
+    i, j = ni, nj
+  return tuple(ret) if i == len(in_shape) and j == len(out_shape) else None
 
 # this is the definition of the movement ops
 @functools.cache
@@ -156,6 +196,20 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
+      if all(isinstance(s, int) for s in in_shape+arg) and tuple(s for s in in_shape if s != 1) == tuple(s for s in arg if s != 1):
+        out_rngs = iter(r for s,r in zip(arg, rngs) if s != 1)
+        return tuple(UOp.const(dtypes.index, 0) if s == 1 else next(out_rngs) for s in in_shape)
+      if all(isinstance(s, int) and s > 0 for s in in_shape+arg) and all(r.op is Ops.CONST and isinstance(r.arg, int) for r in rngs):
+        flat_idx = sum(int(r.arg)*prod(arg[i+1:]) for i,r in enumerate(rngs))
+        ret = []
+        for s in cast(tuple[int, ...], in_shape)[::-1]:
+          ret.append(UOp.const(dtypes.index, flat_idx % s))
+          flat_idx //= s
+        return tuple(ret[::-1])
+      if len(in_shape) == 1:
+        return (UOp.const(dtypes.index, 0).usum([r*prod(arg[i+1:]) for i,r in enumerate(rngs)]),)
+      if all(isinstance(s, int) and s > 0 for s in in_shape+arg) and \
+         (reshaped:=_apply_int_reshape(cast(tuple[int, ...], in_shape), cast(tuple[int, ...], arg), rngs)) is not None: return reshaped
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER, dtype=r.dtype) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
@@ -286,8 +340,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # NOTE: SPEC=3 is broken here with shape
   with Context(SPEC=min(SPEC.value, 2)):
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
-  # if a deviceless value must materialize, place it on the sink device
-  tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
   return tsink, rctx
 
 def render_ranges(*rngs_list, realized) -> str:

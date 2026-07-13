@@ -66,7 +66,7 @@ class MetalGraph(GraphRunner):
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       self.icb.indirectComputeCommandAtIndex(j).concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_dims),
                                                                                                      metal.MTLSize(*local_dims))
-    for i, var in enumerate(self.vars): self.int_buf_view[i] = var_vals[var]
+    for i, var in enumerate(self.vars): self.int_buf_view[i] = (var_vals | self.fixedvars)[var]
 
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()

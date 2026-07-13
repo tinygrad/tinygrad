@@ -3,7 +3,7 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
-import random, time
+import random, time, math
 import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
@@ -49,14 +49,13 @@ class UnsyncedBatchNorm:
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
       batch_mean = x.mean(axis=(1,3,4))
-      y = (x - batch_mean.detach().reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))  # d(var)/d(mean) = 0
-      batch_var = (y*y).mean(axis=(1,3,4))
+      batch_var = (x*x).mean(axis=(1,3,4)) - batch_mean*batch_mean
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
-        batch_var_adjust = prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2])
+        batch_var_adjust = prod(x.shape[1:])/(prod(x.shape[1:])-x.shape[2])
         self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().cast(self.running_var.dtype))
         self.num_batches_tracked += 1
     else:
@@ -70,25 +69,37 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.is_param_(False)
 
+class MatmulConv2d(nn.Conv2d):
+  def __call__(self, x:Tensor) -> Tensor:
+    if not getenv("MATMUL_CONV", 1): return super().__call__(x)
+    assert self.groups == 1 and self.stride == self.dilation == self.padding == 1 and self.bias is None
+    bs, cin, _, _ = x.shape
+    cout, _, ky, kx = self.weight.shape
+    patches = x.pad((1, 1, 1, 1))._pool((ky, kx), 1, 1)
+    oy, ox = patches.shape[2:4]
+    patches = patches.permute(0, 2, 3, 1, 4, 5).reshape(bs*oy*ox, cin*ky*kx).contiguous().contiguous_backward()
+    out = (patches @ self.weight.reshape(cout, cin*ky*kx).T).contiguous().contiguous_backward()
+    return out.reshape(bs, oy, ox, cout).permute(0, 3, 1, 2)
+
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
-    self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
-    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv1 = MatmulConv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = MatmulConv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
 
     self.norm1 = BatchNorm(channels_out)
     self.norm2 = BatchNorm(channels_out)
 
   def __call__(self, x):
-    x = self.conv1(x)
+    x = self.conv1(x).contiguous()
     x = x.max_pool2d(2)
     x = x.float()
-    x = self.norm1(x)
+    x = self.norm1(x).contiguous()
     x = x.cast(dtypes.default_float)
-    x = x.quick_gelu()
+    x = x.quick_gelu().contiguous()
     residual = x
-    x = self.conv2(x)
+    x = self.conv2(x).contiguous()
     x = x.float()
-    x = self.norm2(x)
+    x = self.norm2(x).contiguous()
     x = x.cast(dtypes.default_float)
     x = x.quick_gelu()
 
@@ -111,7 +122,10 @@ class SpeedyResNet:
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
-    forward = lambda x: x.conv2d(self.whitening).pad((1,0,0,1)).sequential(self.net)
+    def forward(x):
+      x = x.conv2d(self.whitening).pad((1,0,0,1)).contiguous()
+      for layer in self.net: x = layer(x).contiguous()
+      return x
     return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
@@ -216,15 +230,31 @@ def train_cifar():
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
-  @TinyJit
-  def augmentations(X:Tensor, Y:Tensor):
-    perms = Tensor.randperm(X.shape[0], device=X.device) # We reuse perms for cutmix, because they are expensive to generate
+  def random_permutation(rows:int, cols:int) -> Tensor:
+    size = rows * cols
+    # An affine map is a permutation when its stride is coprime to the domain size.
+    while math.gcd(stride:=random.randrange(1, size), size) != 1: pass
+    return (Tensor.arange(size) * stride + random.randrange(size)) % size
+
+  def shuffled_augmentations(X:Tensor, Y:Tensor):
+    perms = random_permutation(X.shape[0] // BS, BS)
+    X, Y = X[:perms.shape[0]], Y[:perms.shape[0]]
     if getenv("RANDOM_CROP", 1):
       X = random_crop(X, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
       # NOTE: RANGEIFY=1 needs this contiguous or the X[perms] is very slow
       X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X).contiguous() # flip LR
     X, Y = X[perms], Y[perms]
+    return X, Y, perms
+
+  @TinyJit
+  def augmentations(X:Tensor, Y:Tensor):
+    X, Y, _ = shuffled_augmentations(X, Y)
+    return X, Y
+
+  @TinyJit
+  def augmentations_cutmix(X:Tensor, Y:Tensor):
+    X, Y, perms = shuffled_augmentations(X, Y)
     return X, Y, *cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
@@ -234,8 +264,10 @@ def train_cifar():
       st = time.monotonic()
       X, Y = X_in, Y_in
       if is_train:
-        X, Y, X_cm, Y_cm = augmentations(X, Y)
-        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']: X, Y = X_cm, Y_cm
+        if getenv("CUTMIX", 1) and step >= hyp['net']['cutmix_steps']:
+          _, _, X, Y = augmentations_cutmix(X, Y)
+        else:
+          X, Y = augmentations(X, Y)
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
 
@@ -255,7 +287,6 @@ def train_cifar():
 
   class modelEMA():
     def __init__(self, w, net):
-      # self.model_ema = copy.deepcopy(net) # won't work for opencl due to unpickeable pyopencl._cl.Buffer
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
         net_ema_param.assign(net_param.numpy())
@@ -280,6 +311,15 @@ def train_cifar():
 
   # initialize model weights
   model = SpeedyResNet(W)
+  model_state = get_state_dict(model)
+  random_params = [x for name, x in model_state.items() if x.is_param and "bias" not in name]
+  Tensor.manual_seed(getenv('SEED', hyp['seed']))
+  random_values = Tensor.rand(sum(x.numel() for x in random_params))
+  offset = 0
+  for param in random_params:
+    bound = prod(param.shape[1:]) ** -0.5
+    param.replace(((random_values[offset:offset+param.numel()] * (2 * bound)) - bound).reshape(param.shape).cast(param.dtype))
+    offset += param.numel()
 
   # padding is not timed in the original repo since it can be done all at once
   X_train = pad_reflect(X_train, size=hyp['net']['pad_amount'])
@@ -296,7 +336,7 @@ def train_cifar():
         x.to_(GPUS)
 
   # parse the training params into bias and non-bias
-  params_dict = get_state_dict(model)
+  params_dict = model_state
   params_bias = []
   params_non_bias = []
   for params in params_dict:
@@ -320,7 +360,7 @@ def train_cifar():
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   def train_step(model, optimizer, lr_scheduler, X, Y):
-    out = model(X)
+    out = model(X).contiguous()
     loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -331,15 +371,19 @@ def train_cifar():
       return loss.realize(*optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
     return loss.realize()
 
-  train_step_jitted = TinyJit(train_step)
+  train_step_jitted = TinyJit(train_step, warmup=False)
 
-  def eval_step(model, X, Y):
-    out = model(X, training=False)
-    loss = cross_entropy(out, Y, reduction='mean')
+  def eval_forward(model, X):
+    return model(X).realize()
+
+  def eval_step(out, out_flipped, Y):
+    out = (out + out_flipped) / 2.
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
-    return correct.realize(), loss.realize()
-  eval_step_jitted     = TinyJit(eval_step)
-  eval_step_ema_jitted = TinyJit(eval_step)
+    return correct.sum().realize()
+  eval_forward_jitted = TinyJit(eval_forward, warmup=False)
+  eval_forward_ema_jitted = TinyJit(eval_forward, warmup=False)
+  eval_step_jitted = TinyJit(eval_step, warmup=False)
+  eval_step_ema_jitted = TinyJit(eval_step, warmup=False)
 
   # 97 steps in 2 seconds = 20ms / step
   # step is 1163.42 GOPS = 56 TFLOPS!!!, 41% of max 136
@@ -360,31 +404,37 @@ def train_cifar():
     while i <= STEPS:
       if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Using Context(TRAINING=0) here actually bricks batchnorm, even with track_running_stats=True
-        corrects = []
-        corrects_ema = []
-        losses = []
-        losses_ema = []
+        correct_sum = correct_sum_ema = None
+        correct_len = correct_len_ema = 0
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
           if len(GPUS) > 1:
             Xt.shard_(GPUS, axis=0)
             Yt.shard_(GPUS, axis=0)
 
-          correct, loss = eval_step_jitted(model, Xt, Yt)
-          losses.append(loss.numpy().tolist())
-          corrects.extend(correct.numpy().tolist())
+          Xt_contiguous = Xt.contiguous().realize()
+          out = eval_forward_jitted(model, Xt_contiguous).clone().realize()
+          out_flipped = eval_forward_jitted(model, Xt_contiguous[..., ::-1].contiguous().realize())
+          batch_correct = eval_step_jitted(out, out_flipped, Yt)
+          correct_sum = batch_correct if correct_sum is None else correct_sum + batch_correct
+          correct_len += Yt.shape[0]
           if model_ema:
-            correct_ema, loss_ema = eval_step_ema_jitted(model_ema.net_ema, Xt, Yt)
-            losses_ema.append(loss_ema.numpy().tolist())
-            corrects_ema.extend(correct_ema.numpy().tolist())
+            out_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous).clone().realize()
+            out_flipped_ema = eval_forward_ema_jitted(model_ema.net_ema, Xt_contiguous[..., ::-1].contiguous().realize())
+            batch_correct_ema = eval_step_ema_jitted(out_ema, out_flipped_ema, Yt)
+            correct_sum_ema = batch_correct_ema if correct_sum_ema is None else correct_sum_ema + batch_correct_ema
+            correct_len_ema += Yt.shape[0]
 
         # collect accuracy across ranks
-        correct_sum, correct_len = sum(corrects), len(corrects)
-        if model_ema: correct_sum_ema, correct_len_ema = sum(corrects_ema), len(corrects_ema)
+        assert correct_sum is not None
+        correct_count = correct_sum.item()
+        if model_ema:
+          assert correct_sum_ema is not None
+          correct_count_ema = correct_sum_ema.item()
 
-        eval_acc_pct = correct_sum/correct_len*100.0
-        if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-        print(f"eval     {correct_sum}/{correct_len} {eval_acc_pct:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-        if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+        eval_acc_pct = correct_count/correct_len*100.0
+        if model_ema: acc_ema = correct_count_ema/correct_len_ema*100.0
+        print(f"eval     {correct_count}/{correct_len} {eval_acc_pct:.2f}% STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+        if model_ema: print(f"eval ema {correct_count_ema}/{correct_len_ema} {acc_ema:.2f}% STEP={i}")
 
       if STEPS == 0 or i == STEPS: break
 

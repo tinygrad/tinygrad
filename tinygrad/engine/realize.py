@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, contextlib, weakref, array
+import time, random, itertools, math, contextlib, weakref, array, re
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
-from tinygrad.device import Device, Buffer, MultiBuffer
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo, scoped_rewrite_cache
+from tinygrad.device import Device, Buffer, MultiBuffer, Compiler
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import bufs_from_ast
@@ -240,10 +240,46 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
+def compile_call(ctx, call:UOp, ast:UOp):
+  dev = call.device if isinstance(call.device, str) else call.device[0]
+  return call.replace(src=(to_program(ast, Device[dev].renderer, compile_binary=not ctx), *call.src[1:]))
+
 pm_compile = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
-    call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), compile_call),
 ])
+
+batch_compiled_cache: dict[tuple[Compiler, str], tuple[str, str, bytes]] = {}
+def _batch_spec_key(name:str, src:str) -> str:
+  if f" {name}(" not in src: return f"{name}\n{src}"
+  src = src.replace(f" {name}(", " __batch_cached_kernel__(", 1)
+  return re.sub(r"\b(data\d+)_\d+\b|/\* \d+ \*/", lambda x: x[1] or "", src)
+
+def batch_compile(linear:UOp) -> UOp:
+  groups:dict[Compiler, list[UOp]] = {}
+  replacements = {}
+  for call in linear.toposort():
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.PROGRAM or len(call.src[0].src) != 3: continue
+    dev = call.device if isinstance(call.device, str) else call.device[0]
+    compiler = Device[dev].compiler
+    cache = call.src[0].__dict__.setdefault('_compiled_programs', {})
+    if (cached:=cache.get(compiler)) is not None: replacements[call.src[0]] = cached
+    else: groups.setdefault(compiler, []).append(call.src[0])
+  for compiler,prgs in groups.items():
+    prgs = list(dict.fromkeys(prgs))
+    specs = [(p.arg.function_name, p.src[2].arg) for p in prgs]
+    keys = [_batch_spec_key(*spec) for spec in specs]
+    unique_keys = list(dict.fromkeys(keys))
+    missing_keys = [key for key in unique_keys if (compiler, key) not in batch_compiled_cache]
+    missing_specs = [specs[keys.index(key)] for key in missing_keys]
+    if missing_specs:
+      batch_compiled_cache.update({(compiler, key):compiled for key,compiled in
+                                   zip(missing_keys, compiler.compile_cached_batch(missing_specs))})
+    for prg,key in zip(prgs, keys):
+      name,src,lib = batch_compiled_cache[(compiler, key)]
+      replacements[prg] = compiled_prg = prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
+                                                      arg=replace(prg.arg, name=name))
+      prg.__dict__['_compiled_programs'][compiler] = compiled_prg
+  return linear.substitute(replacements, walk=True, enter_calls=True) if replacements else linear
 
 pm_optimize_local_size = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
@@ -262,7 +298,9 @@ pm_exec = PatternMatcher([
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  with scoped_rewrite_cache():
+    linear = graph_rewrite(linear, pm_compile, ctx=True, name="render kernels", walk=True)
+  linear = batch_compile(linear)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_compile
     linear = hcq_compile(linear, input_uops, jit=jit)

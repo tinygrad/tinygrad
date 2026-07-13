@@ -72,7 +72,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), jit=True)
-  if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
+  amd_graph = len(linear.src) > 128 and bool(input_uops) and all(isinstance(u.device, str) and u.device.split(":")[0] == "AMD" for u in input_uops)
+  if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=getenv("JIT_BATCH_SIZE", 0 if amd_graph else JIT_BATCH_SIZE.value))
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
 
@@ -136,6 +137,7 @@ class GraphRunner:
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
     crs = [(j, self.calls[j][1].arg, self.calls[j][3]) for j in range(len(self.calls)) if self.calls[j][1].op is Ops.PROGRAM]
+    self.fixedvars = {v.expr:int(v.vmin) for _,p,_ in crs for v in p.vars if v.vmin == v.vmax}
     self.vars = sorted({v.expr for _,p,dv in crs for v in p.vars if v.expr not in dv | p.runtimevars})
     self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.local_size, p.global_size) if d and is_sym_dim(d))
 
@@ -160,7 +162,7 @@ class GraphRunner:
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
 
   def updated_vars(self, var_vals: dict[str, int]):
-    vals = [var_vals[v] for v in self.vars]
+    vals = [(var_vals | self.fixedvars)[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
       for i, v in vidxs: yield j, i, vals[v]
 
@@ -248,18 +250,19 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buf_uops, var_vals, names, expected_input_info
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, warmup=True):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
-    self.cnt: int = 2 if self.fxn is None else 0
+    self.warmup = warmup
+    self.cnt: int = 2 if self.fxn is None else 0 if warmup else 1
     self.prune = prune
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
-    self.cnt = 0
+    self.cnt = 0 if self.warmup else 1
     self.captured = None
 
   def __reduce__(self):

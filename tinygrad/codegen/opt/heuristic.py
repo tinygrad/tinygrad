@@ -35,13 +35,54 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       pass
     if good_tc_opt:
       if rngs is not None:
+        tc_sizes = [r.src[0] for r in rngs]
+        skinny_output = any(resolve(sz < 2, False) for sz in tc_sizes[:2])
+        very_long_reduce = resolve(tc_sizes[2] >= 4096, False)
+        long_reduce = resolve(tc_sizes[2] >= 1024, False)
+        small_m = resolve(tc_sizes[0] <= 32, False)
+        tiny_m = resolve(tc_sizes[0] <= 16, False)
+        if resolve(tc_sizes[0] >= 32, False) and resolve(tc_sizes[0] < 33, False) and resolve(tc_sizes[1] >= 1536, False) and \
+           resolve(tc_sizes[2] >= 128, False) and resolve(tc_sizes[2] <= 512, False):
+          upcast_n = 8 if resolve(tc_sizes[1] >= 4096, False) else 6
+          rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), upcast_n))[0]
+          rngs[0] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[0]), 2))[0]
+          rngs[0] = tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), 8))[0]
+          rngs[1] = tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[1]), 2))[0]
+          return tk
         for tc_dim in [1,0]: # attempt to upcast M and N
-          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+          if skinny_output or resolve(tc_sizes[tc_dim] >= 32768, False): continue
+          short_conv_n = tc_dim == 1 and resolve(tc_sizes[0] >= 65536, False) and resolve(tc_sizes[1] == 18, False) and \
+                         resolve(tc_sizes[2] <= 4, False)
+          upcast_sizes = [2] if short_conv_n or (very_long_reduce and (tiny_m or (tc_dim == 0 and small_m))) else [5,4,3,2]
+          szs = [sz for sz in upcast_sizes if rngs[tc_dim].src[0].divides(sz) is not None]
           if szs:
             # set it to the replaced range
             rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-          tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+        if skinny_output:
+          outer_rngs = [r for r in tk.rngs if r.arg[-1] is AxisType.GLOBAL and r not in rngs[:2]]
+          if outer_rngs and outer_rngs[0].src[0].divides(2) is not None:
+            tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(outer_rngs[0]), 2))
+          if very_long_reduce:
+            outer_rngs = [r for r in tk.rngs if r.arg[-1] is AxisType.GLOBAL and r not in rngs[:2]]
+            if outer_rngs and (outer_local:=next((x for x in (16, 4, 2) if outer_rngs[0].src[0].divides(x) is not None), None)):
+              tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(outer_rngs[0]), outer_local))
+          return tk
+        local_sizes = [2] if long_reduce and small_m else [4,2]
+        if (szs := [sz for sz in local_sizes if rngs[0].src[0].divides(sz) is not None]):
+          rngs[0] = tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))[0]
+        if long_reduce and small_m and resolve(tc_sizes[1] >= 128, False) and \
+           rngs[1].arg[-1] is AxisType.GLOBAL and rngs[1].src[0].divides(3) is not None:
+          rngs[1] = tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[1]), 3))[0]
+        if tk.applied_opts[-1] == Opt(OptOps.LOCAL, 1, 4):
+          outer_rngs = [r for r in tk.rngs if r.arg[-1] is AxisType.GLOBAL]
+          if outer_rngs and resolve(outer_rngs[0].src[0] >= 384, False) and \
+             (outer_local:=next((x for x in (4, 3, 2) if outer_rngs[0].src[0].divides(x) is not None), None)):
+            tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(outer_rngs[0]), outer_local))
+        elif resolve(tc_sizes[0] <= 4, False) and resolve(tc_sizes[2] >= 256, False):
+          outer_rngs = [r for r in tk.rngs if r.arg[-1] is AxisType.GLOBAL]
+          outer_local = 16 if resolve(tc_sizes[2] >= 512, False) else 2
+          if (outer_rng:=next((r for r in reversed(outer_rngs) if r.src[0].divides(outer_local) is not None), None)) is not None:
+            tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(outer_rng), outer_local))
       return tk
 
   # make a copy so it does not mutate the input
@@ -82,7 +123,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
-    for axis, sz in itertools.product((0, 1, 2), (16,)):
+    group_sizes = (8, 16) if len(k.bufs) >= 7 else (16,)
+    for axis, sz in itertools.product((0, 1, 2), group_sizes):
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
         break
@@ -114,10 +156,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.target.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024) and (k.upcast_size() < 32):
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024) and (k.upcast_size() < 2):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
-    for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    upcast_amounts = ([128] if not len(upcasted_axis) else []) if is_dsp else ([3,4] if k.reduceop is not None else [2,3,4])
+    for axis, upcast_amount in itertools.product(k.upcastable_dims, upcast_amounts):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
@@ -141,15 +184,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # if last reduce dim is small(ish), loop unroll the reduce
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
+  four_by_four_reduce = len(k.unrollable_dims) >= 2 and all(resolve(k.full_shape[x] == 4, False) for x in k.unrollable_dims[-2:])
   try:
     if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
-      if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
+      if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 4:
         k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
         # if it's small, upcast a second reduce dimension too
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        for splits in [4]:
+        bn_spatial_reduce = len(k.unrollable_dims) >= 2 and resolve(k.full_shape[k.unrollable_dims[-2]] == 6, False)
+        for splits in ([8, 4] if bn_spatial_reduce else [4]):
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
@@ -166,20 +211,44 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     if NOLOCALS:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
+      special_local = False
+      if four_by_four_reduce and len(global_axes:=k.axes_of(AxisType.GLOBAL, AxisType.LOOP)) >= 3:
+        lk, local_rngs = k.copy(), [k.rngs[x] for x in global_axes[-3:]]
+        try:
+          for rng, sz in zip(local_rngs, (16, 4, 4)):
+            lk.apply_opt(Opt(OptOps.LOCAL, lk.rngs.index(rng), sz))
+          k, special_local = lk, True
+        except KernelOptError: pass
       # prioritize making expand axes local
-      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
-                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
-      to_local: list[tuple[int, int]] = []
-      for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
-        local_size = prod(sz for _, sz in to_local)
-        local_sz: int|None = next((x for x in ([32] * (axis == 0) + [16,8,4,3,2]) if k.full_shape[axis] % x == 0 and local_size * x <= 128), None)
-        if local_sz is not None: to_local.append((axis, local_sz))
-      deleted_shape = 0
-      for axis, local_sz in sorted(to_local[:3]):
-        axis = axis - deleted_shape
-        will_delete_shape = local_sz == k.full_shape[axis]
-        k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
-        if will_delete_shape: deleted_shape += 1
+      if not special_local:
+        local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
+                                for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
+        to_local: list[tuple[int, int]] = []
+        for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
+          local_size = prod(sz for _, sz in to_local)
+          local_sz: int|None = next((x for x in ([32] * (axis == 0) + [16,8,4,3,2]) if k.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+          if local_sz is not None: to_local.append((axis, local_sz))
+        deleted_shape = 0
+        for axis, local_sz in sorted(to_local[:3]):
+          axis = axis - deleted_shape
+          will_delete_shape = local_sz == k.full_shape[axis]
+          k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
+          if will_delete_shape: deleted_shape += 1
+
+      # Both 3x3 reduce axes are already fully unrolled above. Tile the exposed
+      # spatial axes without changing reduction order.
+      unroll_sizes = [k.full_shape[x] for x in k.axes_of(AxisType.UNROLL)]
+      global_axes = k.axes_of(AxisType.GLOBAL, AxisType.LOOP)
+      if unroll_sizes == [3, 3] and len(global_axes) >= 2:
+        axis_size = k.full_shape[global_axes[1]]
+        if axis_size <= 16: k.apply_opt(Opt(OptOps.UPCAST, 1, 0))
+        elif axis_size % 4 == 0: k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+        if len(global_axes) >= 4 and k.full_shape[global_axes[2]] == 4: k.apply_opt(Opt(OptOps.LOCAL, 2, 4))
+
+      remaining_reduces = [k.full_shape[x] for x in k.unrollable_dims]
+      if len(remaining_reduces) == 2 and remaining_reduces[0] == 6 and remaining_reduces[1] >= 8 and \
+         remaining_reduces[1] % 4 == 0 and k.upcast_size() <= 16:
+        k.apply_opt(Opt(OptOps.UNROLL, 1, 4))
 
   # **** threading ****
 

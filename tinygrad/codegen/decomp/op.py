@@ -43,19 +43,22 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
 
 # ***** threefry *****
 
-def threefry2x32(x: UOp, key: UOp):
+def threefry2x32(x: UOp, key: UOp, ctx:Renderer|None=None):
+  native_shifts = ctx is not None and Ops.SHL in ctx.code_for_op and Ops.SHR in ctx.code_for_op
+  shl = (lambda v, s: v << s) if native_shifts else (lambda v, s: v * 2**s)
+  shr = (lambda v, s: v >> s) if native_shifts else (lambda v, s: v // 2**s)
   # split x and key from uint64 to two uint32
-  x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  x0, x1 = x.cast(dtypes.uint32), shr(x, 32).cast(dtypes.uint32)
+  key0, key1 = key.cast(dtypes.uint32), shr(key, 32).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr:list[UOp] = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
-    for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
+    for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ (shl(xr[1], r) + shr(xr[1], 32-r))
     xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
 
-  return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
+  return shl(xr[1].cast(dtypes.uint64), 32) | xr[0].cast(dtypes.uint64)
 
 # ***** decomposition patterns *****
 

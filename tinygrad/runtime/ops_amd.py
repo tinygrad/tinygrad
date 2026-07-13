@@ -13,7 +13,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.runtime.support.elf import elf_loader, elf_symbols
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
@@ -557,23 +557,36 @@ class AMDCopyQueue(HWQueue):
 
     sdma_queue.signal_doorbell(dev)
 
+class AMDProgramModule:
+  __slots__ = ("lib_gpu", "image", "symbols", "rodata_entry", "__weakref__")
+  def __init__(self, dev:AMDDevice, lib_gpu:HCQBuffer, image:bytes, spec:BufferSpec, symbols:dict[str, int], rodata_entry:int):
+    self.lib_gpu, self.image, self.symbols, self.rodata_entry = lib_gpu, image, symbols, rodata_entry
+    weakref.finalize(self, HCQProgram._fini, dev, lib_gpu, spec)
+
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes, **kwargs):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.dev, self.name, self.lib = dev, name, lib
 
-    image, sections, relocs = elf_loader(self.lib)
+    module_key = hashlib.sha256(self.lib).digest()
+    if (module:=self.dev.program_modules.get(module_key)) is None:
+      image, sections, relocs = elf_loader(self.lib)
+      symbols = elf_symbols(self.lib)
 
-    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
+      for apply_image_offset, rel_sym_offset, typ, addent in relocs:
+        if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
+        else: raise RuntimeError(f"unknown AMD reloc {typ}")
+
+      lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
+      self.dev.allocator._copyin(lib_gpu, image)
+      self.dev.synchronize()
+      rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
+      self.dev.program_modules[module_key] = module = AMDProgramModule(self.dev, lib_gpu, bytes(image), buf_spec, symbols, rodata_entry)
+    self.module = module
+    self.lib_gpu, image, symbols, rodata_entry = module.lib_gpu, module.image, module.symbols, module.rodata_entry
+
+    rodata_entry = symbols.get(f"{name}.kd", rodata_entry)
     assert rodata_entry >= 0, ".rodata section not found"
-
-    for apply_image_offset, rel_sym_offset, typ, addent in relocs:
-      if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
-      else: raise RuntimeError(f"unknown AMD reloc {typ}")
-
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
-    self.dev.allocator._copyin(self.lib_gpu, image)
-    self.dev.synchronize()
 
     desc_sz = ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)
     desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+desc_sz]))
@@ -604,7 +617,6 @@ class AMDProgram(HCQProgram):
 
     super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
-    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
                wait=False, timeout:int|None=None):
@@ -1002,6 +1014,7 @@ class AMDDevice(HCQCompiled):
                      functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000,
                      can_recover=self.is_am(), arch=self.arch)
+    self.program_modules:weakref.WeakValueDictionary[bytes, AMDProgramModule] = weakref.WeakValueDictionary()
 
     # Scratch setup
     self.max_private_segment_size = 0

@@ -42,7 +42,7 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
   if not is_image_shape(buf._shape): return None
   if idx_x.dtype != idx_y.dtype: idx_x, idx_y = idx_x.cast(dtypes.int), idx_y.cast(dtypes.int)
   start_idx = idx_x.stack(idx_y)
-  idx = uop_given_valid(valid, start_idx)
+  idx = uop_given_valid(valid, start_idx, try_simplex=True)
   drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
 
   if not drop_stmt and idx is start_idx: return None
@@ -74,7 +74,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
-    cidx = uop_given_valid(valid, ((x//4)%cw).stack(x//(4*cw)))
+    cidx = uop_given_valid(valid, ((x//4)%cw).stack(x//(4*cw)), try_simplex=True)
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))

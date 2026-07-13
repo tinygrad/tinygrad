@@ -45,7 +45,7 @@ def set_options(action_info, options:bytes):
   return amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
-def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
+def compile_hip(prg:str, arch="gfx1100", asm=False, use_device_libs=True, backend_opt=3) -> bytes:
   check(comgr.amd_comgr_create_action_info(ctypes.byref(action_info := comgr.amd_comgr_action_info_t())))
   check(comgr.amd_comgr_action_info_set_language(action_info, comgr.AMD_COMGR_LANGUAGE_HIP))
   check(comgr.amd_comgr_action_info_set_isa_name(action_info, b"amdgcn-amd-amdhsa--" + arch.encode()))
@@ -70,16 +70,19 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     check(comgr.amd_comgr_set_data_name(data_src, b"<null>"))
     check(comgr.amd_comgr_data_set_add(data_set_src, data_src))
     # -include hiprtc_runtime.h was removed
+    frontend_opt = getenv("AMD_FRONTEND_OPT", 1)
     options = [
-      "-O3", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
+      f"-O{frontend_opt}", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
       "-D__HIPCC_RTC__", "-std=c++14", "-nogpuinc", "-Wno-gnu-line-marker", "-Wno-missing-prototypes", f"--offload-arch={arch}",
       "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu"]
     check(set_options(action_info, ' '.join(options).encode()))
-    status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
+    compile_action = comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC if use_device_libs else comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC
+    status = comgr.amd_comgr_do_action(compile_action, action_info, data_set_src, data_set_bc)
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
       raise RuntimeError("compile failed")
-    check(set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
+    check(set_options(action_info, f"-O{backend_opt} -mllvm -vectorize-loops=false "
+                                     "-mllvm -vectorize-slp=false -mllvm -unroll-threshold=0".encode()))
     check(comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
 
   check(set_options(action_info, b""))
@@ -93,11 +96,43 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
 class HIPCompiler(Compiler):
   def __init__(self, arch:str):
     assert comgr.dll.nm in c.DLL._loaded_, f"comgr not available: {comgr.dll.emsg}"
-    self.arch = arch
-    super().__init__(f"compile_hip_{self.arch}")
+    self.arch, self.frontend_opt, self.generic_opt = arch, getenv("AMD_FRONTEND_OPT", 1), getenv("AMD_GENERIC_COMPILE_OPT", 1)
+    super().__init__(f"compile_hip_{self.arch}_F{self.frontend_opt}G{self.generic_opt}")
   def compile(self, src:str) -> bytes:
-    try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
+    try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text', use_device_libs="__ocml_" in src)
     except RuntimeError as e: raise CompileError(e) from e
+  def compile_cached_batch(self, srcs:list[tuple[str, str]]) -> list[tuple[str, str, bytes]]:
+    batch_size = getenv("AMD_COMPILE_BATCH_SIZE", 256)
+    batch_opt = getenv("AMD_COMPILE_OPT", 2)
+    generic_opt = getenv("AMD_GENERIC_COMPILE_OPT", 1)
+    if batch_size <= 1 or any(src.split('\n', 1)[0].strip() == '.text' for _,src in srcs): return super().compile_cached_batch(srcs)
+
+    renamed = []
+    for name,src in srcs:
+      new_name = f"{name}_{hashlib.sha256(src.encode()).hexdigest()[:8]}"
+      renamed.append((new_name, src.replace(f" {name}(", f" {new_name}(", 1)))
+
+    ret:list[tuple[str, str, bytes]|None] = [None] * len(srcs)
+    groups:dict[tuple[int, bool], list[int]] = {}
+    opts = [batch_opt if name.startswith("coop_") else generic_opt for name,_ in renamed]
+    for i,(_,src) in enumerate(renamed): groups.setdefault((opts[i], "__ocml_" in src), []).append(i)
+    for (opt,use_device_libs),indices in groups.items():
+      for start in range(0, len(indices), batch_size):
+        batch = indices[start:start+batch_size]
+        preamble = dict.fromkeys(line for i in batch for line in
+                                 renamed[i][1].split('extern "C" __attribute__((global))', 1)[0].splitlines())
+        kernels = []
+        for i in batch:
+          _, kernel = renamed[i][1].split('extern "C" __attribute__((global))', 1)
+          kernels.append('extern "C" __attribute__((global))'+kernel)
+        combined = '\n'.join((*preamble, *kernels))
+        try: lib = compile_hip(combined, self.arch, use_device_libs=use_device_libs, backend_opt=opt)
+        except RuntimeError as e: raise CompileError(e) from e
+        for i in batch:
+          name,src = renamed[i]
+          ret[i] = (name, src, lib)
+    assert all(x is not None for x in ret)
+    return [x for x in ret if x is not None]
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
 class HIPCCCompiler(Compiler):

@@ -1,18 +1,19 @@
 from dataclasses import replace, dataclass
 import itertools, functools
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, PROFILE, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
+from tinygrad.uop.ops import TRACK_MATCH_STATS
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_simplify_valid, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
@@ -22,12 +23,15 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_mops
+from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
+
+empty_matcher = PatternMatcher([])
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
@@ -113,6 +117,10 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
   return UOp.stack(*src).reshape(b.shape)
 
+@functools.cache
+def shape_indexes(shape:tuple[int, ...]) -> tuple[tuple[UOp, ...], ...]:
+  return tuple(tuple(UOp.const(dtypes.index, i) for i in idx) for idx in itertools.product(*map(range, shape)))
+
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
@@ -128,15 +136,48 @@ unbroadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-def do_devectorize(b:UOp):
-  if b.shape == (): return None
+def do_devectorize(ctx, b:UOp):
+  ren = ctx.ren if isinstance(ctx, DevectorizeContext) else (ctx[-1] if isinstance(ctx, tuple) else ctx)
+  if b.op in GroupOp.Elementwise and b.dtype in dtypes.floats and ren.supports_float4: return None
+  if (shape:=b._shape) is None or shape == (): return None
   # broadcasting needs to be already unpacked
-  if not all_same([x.shape for x in b.src]): return None
+  if any(x._shape != shape for x in b.src): return None
   src = []
-  for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.index, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+  for idx_c in shape_indexes(shape):
+    new_src = tuple(index_lane(ctx, x, idx_c) if isinstance(ctx, DevectorizeContext) else
+                    (x.src[idx_c[0].arg] if len(idx_c) == 1 and x.op is Ops.STACK else UOp(Ops.INDEX, x.dtype, (x,)+idx_c)) for x in b.src)
+    src.append(UOp(b.op, b.dtype, new_src, b.arg, b.tag))
+  return UOp(Ops.STACK, b.dtype, tuple(src)).reshape(shape) if b.op is not Ops.STORE else UOp.group(*src)
+
+@dataclass
+class DevectorizeContext:
+  ren: Renderer
+  lanes: dict[tuple[UOp, tuple[UOp, ...]], UOp]
+  @property
+  def rewrite_cache_key(self): return (type(self.ren), self.ren.target)
+
+def index_lane(ctx:DevectorizeContext, x:UOp, idxs:tuple[UOp, ...]) -> UOp:
+  key = (x, idxs)
+  if (ret:=ctx.lanes.get(key)) is not None: return ret
+  if x.op is Ops.STACK and idxs and idxs[0].op is Ops.CONST:
+    ret = index_lane(ctx, x.src[idxs[0].arg], idxs[1:]) if len(idxs) > 1 else x.src[idxs[0].arg]
+  elif x.op in GroupOp.Movement and len(idxs) == len(x.shape):
+    ret = index_lane(ctx, x.src[0], apply_movement_op(x.op, x.src[0].shape, x.marg, idxs))
+  elif x.op is Ops.INDEX:
+    ret = index_lane(ctx, x.src[0], x.src[1:]+idxs)
+  elif x.op in GroupOp.Elementwise:
+    ret = UOp(x.op, x.dtype, tuple(index_lane(ctx, s, idxs) if s._shape else s for s in x.src), x.arg, x.tag)
+  else: ret = UOp(Ops.INDEX, x.dtype, (x,)+idxs)
+  ctx.lanes[key] = ret
+  return ret
+
+def index_elementwise(x:UOp, idx:UOp):
+  indexes = idx.src[1:]
+  return UOp(x.op, x.dtype, tuple(UOp(Ops.INDEX, s.dtype, (s,)+indexes) if s._shape else s for s in x.src), x.arg, x.tag)
+
+def index_elementwise_lane(ctx:DevectorizeContext, x:UOp, idx:UOp):
+  indexes = idx.src[1:]
+  return UOp(x.op, x.dtype, tuple(index_lane(ctx, s, indexes) if s._shape else s for s in x.src), x.arg, x.tag)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -152,11 +193,13 @@ def do_stack_wmma(u:UOp):
 ew_devectorizer = PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise),
 ])
 
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
+  (UPat(GroupOp.Elementwise, name="x").f(Ops.INDEX, allow_any_len=True, name="idx"), index_elementwise_lane),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
@@ -298,53 +341,54 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  if VIZ or PROFILE or TRACK_MATCH_STATS: sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+  elif (gpu_sink:=pm_add_gpudims.rewrite(sink, ren)) is not None: sink = gpu_sink
 
   # **** optimizations are done, now we lower to actual code ****
 
   sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
-
-  # simplify indexing
-  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=DevectorizeContext(ren, {}), name="devectorize2")
 
   # some coalesing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalesing (late)
   sink = memory_coalesing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
+  if IMAGE: sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
-  # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym, name="extra symbolic")
+  has_invalid = (sink.op is Ops.CONST and sink.arg is Invalid) or any(u.op is Ops.CONST and u.arg is Invalid for u in sink.backward_slice)
+  if has_invalid:
+    sink = graph_rewrite(sink, pm_simplify_valid, name="simplify valid after coalescing")
+    has_invalid = (sink.op is Ops.CONST and sink.arg is Invalid) or any(u.op is Ops.CONST and u.arg is Invalid for u in sink.backward_slice)
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
 
-  # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic, name="final symbolic")
-
   # **** decomps ****
 
-  # floordiv+mod / dtype decomp (early)
+  # final symbolic + floordiv/mod + dtype decomp
   supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
-  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
+  pm_decomp = symbolic+get_simplifying_rewrite_patterns(supported_ops)
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  candidate_dtypes = {*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong}
+  emulated_dtypes = set(EMULATED_DTYPES.tolist(dtypes)) | (candidate_dtypes - ren.supported_dtypes())
+  needs_dtype_decomp = sink.dtype in emulated_dtypes or any(u.dtype in emulated_dtypes for u in sink.backward_slice)
+  if needs_dtype_decomp:
+    sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
+    sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+  if has_invalid: sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
-  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_index
+  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else empty_matcher
+  pm_final_rewrite = symbolic_simple+extra_matcher+pm_split_ends+pm_no_index
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer
@@ -425,7 +469,7 @@ pm_to_program = PatternMatcher([
 
 @track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.src[0].arg.name,(ret.src[0].arg.function_name, ast), ret=renderer), replay=True)
 @Context(ALLOW_DEVICE_USAGE=0)
-def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
+def do_to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   """
   Transform an AST into a compiled PROGRAM. May trigger BEAM search.
 
@@ -436,25 +480,50 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
+  from tinygrad.codegen.opt.gemm import cooperative_gemm_program, direct_conv_bwd_activation_program
+  from tinygrad.codegen.opt.reduce import activation_var_grad_program, bn_grad_512_program, channel_reduce_program, col2im_program
+  from tinygrad.codegen.opt.reduce import im2col_program, moments_512_program
+  from tinygrad.codegen.opt.reduce import maxpool_backward_program, maxpool_program
+  if ast.op is Ops.SINK and (prg:=direct_conv_bwd_activation_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=cooperative_gemm_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=activation_var_grad_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=moments_512_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=bn_grad_512_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=channel_reduce_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=col2im_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=im2col_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=maxpool_backward_program(ast, renderer, compile_binary)) is not None: return prg
+  if ast.op is Ops.SINK and (prg:=maxpool_program(ast, renderer, compile_binary)) is not None: return prg
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prog_info = ProgramInfo.from_sink(full_sink)
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
-    prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
+    prg = UOp(Ops.PROGRAM, src=(full_sink,))
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
+  if VIZ:
+    if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
+    prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+    graph_rewrite(prg, PatternMatcher([]), name="View Program")
+    return prg
+  # PROGRAM lowering is a linear root-only pipeline. Driving it through graph_rewrite
+  # needlessly walks the full SINK and LINEAR graphs between each stage.
+  if len(prg.src) == 1: prg = do_linearize(renderer, prg, prg.src[0])
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
-  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
+  if prg.src[0].arg.estimates is None and (estimated:=do_estimates(prg, prg.src[0], prg.src[1])) is not None: prg = estimated
+  if len(prg.src) == 2:
+    prg = do_assemble(renderer, prg, prg.src[1]) if isinstance(renderer, ISARenderer) else do_render(renderer, prg, prg.src[1])
+  if compile_binary and len(prg.src) == 3 and (compiled:=do_compile(renderer, prg, prg.src[2])) is not None: prg = compiled
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
-def to_program(ast:UOp, renderer:Renderer) -> UOp:
+def to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
-  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  # UOps are structurally interned, so identity is already a collision-free structural
+  # cache key within this process and avoids recursively hashing every kernel graph.
+  key = (ast, type(renderer), renderer.target, compile_binary, *[x.value for x in config])
+  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer, compile_binary=compile_binary)
   return prg

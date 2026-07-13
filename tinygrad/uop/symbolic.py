@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, struct
+import math, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
@@ -46,10 +46,18 @@ def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   if p is not x or (t:=xa + a - pa) % D: return None
   return base - k*div if (k:=t//D - s) else base
 
+def _has_scaled_mod_term(x:UOp) -> bool:
+  if (cached:=x.__dict__.get("_has_scaled_mod_term")) is not None: return cached
+  if x.op is Ops.ADD: ret = any(_has_scaled_mod_term(s) for s in x.src)
+  else: ret = x.op is Ops.FLOORMOD or (x.op is Ops.MUL and any(s.op is Ops.FLOORMOD for s in x.src))
+  x.__dict__["_has_scaled_mod_term"] = ret
+  return ret
+
 def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   # a scaled mod (base%div)*mul recombines with a partner q*(div*mul) carrying the quotient of a b == base (mod div):
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
+  if not _has_scaled_mod_term(x): return None
   terms = list(x.split_uop(Ops.ADD))
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
@@ -303,8 +311,10 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     return v.src[0], True, int((v.src[1]).vmax)-1
   return None
 
-def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
+@functools.cache
+def uop_given_valid(valid:UOp, uop:UOp, try_simplex=False) -> UOp:
   # return simplified uop (might be the same as input)
+  if valid.op is Ops.CONST: return uop
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[PyConst|None]] = defaultdict(lambda: [None, None])
@@ -312,6 +322,11 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     if (res:=parse_valid(stmt)) is None: continue
     expr, is_upper, c = res
     bounds[expr][int(is_upper)] = c
+  if not bounds: return uop
+  if not try_simplex:
+    uop_nodes = uop.backward_slice_with_self
+    bounds = defaultdict(lambda: [None, None], ((expr, v) for expr,v in bounds.items() if expr in uop_nodes))
+    if not bounds: return uop
 
   # simplify uop given that valid is True
   all_candidates = []
@@ -399,7 +414,7 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if x.dtype is not dtypes.index: return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
-  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
+  return cond.where(new_x, i) if (new_x:=uop_given_valid(cond, x, try_simplex=False)) is not x else None
 
 # TODO: this is O(number of WHERE * number of node)
 # def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
