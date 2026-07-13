@@ -518,13 +518,13 @@ class HCQ2Compiled(Compiled):
   @functools.cache
   def timeline_value(self, queue:str|None=None, init_value:int=1) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
-    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = init_value
+    buf.as_mmio().view(fmt='Q')[0] = init_value
     return buf
 
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
     sig = self.timeline_signal()._buf.cpu_view().mv.cast('Q')
-    tl = self.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')
+    tl = self.timeline_value().as_mmio().view(fmt='Q')
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
@@ -568,6 +568,10 @@ class HCQ2Buffer:
   def base(self) -> HCQ2Buffer: return self._base or self
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
+  def _as_mmio(self, src:Buffer) -> MMIOInterface:
+    self.dev.synchronize()
+    return src._buf.cpu_view()
+
   def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
     return self._do_map(buf)
@@ -602,5 +606,3 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self._copy(d, self._wrap(self.dev.device, len(dest), src))
     self.dev.synchronize()
     dest[:] = d._buf.cpu_view()[:len(dest)]
-
-  # def _as_buffer(self, buf): return buf.cpu_view().mv

@@ -509,7 +509,7 @@ class PCIIface(PCIIfaceBase):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.timeline_signal()._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.timeline_signal()._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value().as_mmio().view(fmt='Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):

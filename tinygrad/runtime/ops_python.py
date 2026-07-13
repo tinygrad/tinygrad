@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape
-from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.device import Buffer, Compiled, Compiler, Allocator, MMIOInterface
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
@@ -51,7 +51,7 @@ class PythonProgram:
     void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.STORE}
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
-      pbufs: list[memoryview] = list(bufs)
+      pbufs: list[MMIOInterface] = list(bufs)
       pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
       i = 0
@@ -222,11 +222,12 @@ class PythonRenderer(Renderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
 class PythonAllocator(Allocator['PythonDevice']):
-  def _alloc(self, size, options): return memoryview(bytearray(size))
+  def _alloc(self, size, options): return MMIOInterface.from_memoryview(memoryview(bytearray(size)))
   def _copyin(self, dest, src:memoryview): dest[:] = src
-  def _copyout(self, dest:memoryview, src): dest[:] = src
-  def _map(self, buf): return buf.cpu_view().mv
-  def _offset(self, buf, size, offset): return buf[offset:offset+size]
+  def _copyout(self, dest:memoryview, src): dest[:] = src[:]
+  def _as_mmio(self, src:Buffer) -> MMIOInterface: return src._buf
+  def map(self, buf:Buffer): return buf.as_mmio()
+  def _offset(self, buf:MMIOInterface, size, offset): return buf.view(offset=offset, size=size)
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

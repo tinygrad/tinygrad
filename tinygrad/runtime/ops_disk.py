@@ -1,7 +1,7 @@
 import os, sys, mmap, io, ctypes, contextlib, pathlib
 from typing import Generator, Callable
-from tinygrad.helpers import OSX, round_up
-from tinygrad.device import Compiled, Allocator
+from tinygrad.helpers import OSX, round_up, mv_address
+from tinygrad.device import Compiled, Allocator, MMIOInterface
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc

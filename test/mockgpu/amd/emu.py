@@ -2128,8 +2128,8 @@ class WaveState:
       ctypes.memset(self.accvgpr_buf._buf.va_addr, 0, vgpr_size * 4)
     else:
       self.accvgpr_buf = self.vgpr_buf
-    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.as_mmio().view(fmt='I')
+    self._sgpr_mv = self.sgpr_buf.as_mmio().view(fmt='I')
     # Zero memory using ctypes memset (much faster than Python loops)
     ctypes.memset(self.vgpr_buf._buf.va_addr, 0, vgpr_size * 4)
     ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
