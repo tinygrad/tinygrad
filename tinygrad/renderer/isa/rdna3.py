@@ -538,6 +538,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
   (UPat.var("y", dtype=dtypes.int32s+dtypes.int16s+dtypes.int8s+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
   # narrowing long goes through b32
+  (UPat.var("y", dtypes.int64s).cast(dtypes.float), lambda y: long2double(y).cast(dtypes.float)),
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half)+dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   # NOTE: this only works because we assume upper half is right, widen cast is noop
@@ -678,7 +679,7 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     from tinygrad.codegen.opt import tc
