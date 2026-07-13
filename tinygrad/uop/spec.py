@@ -101,6 +101,9 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
+  # WAIT until a condition evaluates to true.
+  (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
+
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
@@ -135,7 +138,6 @@ spec_tensor = PatternMatcher([
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
-  (UPat(Ops.WAIT, dtypes.void, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype == y.dtype),
 
   # CALL
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
@@ -215,8 +217,7 @@ spec_program = PatternMatcher([
 ])+spec_shared
 
 spec_hcq = PatternMatcher([
-  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"),
-   lambda x: is_device(x.arg)),
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"), lambda x: is_device(x.arg)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
 ])+spec_shared
 
