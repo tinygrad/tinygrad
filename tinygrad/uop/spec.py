@@ -137,10 +137,6 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
   (UPat(Ops.WAIT, dtypes.void, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype == y.dtype),
 
-  # HCQ command encoding
-  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.AFTER)),), name="x"),
-   lambda x: is_device(x.arg)),
-
   # CALL
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
 
@@ -191,8 +187,6 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.AFTER),)), lambda: True),
-
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
@@ -220,6 +214,12 @@ spec_program = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 ])+spec_shared
 
+spec_hcq = PatternMatcher([
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"),
+   lambda x: is_device(x.arg)),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
+])+spec_shared
+
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
   # SLICE on BUFFER is allowed if BUFFER is
@@ -240,7 +240,7 @@ spec_full = PatternMatcher([
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.index), (UPat(), UPat()), arg=None), lambda: True),
-])+spec_tensor+spec_program
+])+spec_tensor+spec_program+spec_hcq
 
 # **** pyrender (move this) ****
 
