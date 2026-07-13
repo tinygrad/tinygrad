@@ -214,7 +214,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   nregs = (n * base.dtype.itemsize+3)//4
   vreg = make_vgpr(ctx, width=nregs)
   nbytes = n * base.dtype.itemsize
-  tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not dtypes.is_unsigned(x.dtype)]
+  tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not (dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype))]
   nx = x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,))
   if gate is not None:
     if alt.op is Ops.GROUP: packed = alt.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(alt.src)), tag=(vreg,))
@@ -483,9 +483,7 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
 def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
-  # handle bool where, s_cndmask?
-  ins = RDNA3Ops.v_cndmask_b32_e64
-  #ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize ==  4 else RDNA3Ops.v_cndmask_b16
+  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
 # ---- lowering passes ----
@@ -501,6 +499,7 @@ extra_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
 
+# TODO: Ops.NEG should be 0 - x, 64 bit consts should also be folded into imm field when possible
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 # cast i8 -> i16/i32 = bfe
 # NOTE: down casting float to int should round first then reduce precision
