@@ -113,8 +113,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # INS dtype is the output register dtype, not inferable from srcs
       return None
     case Ops.NOOP:
-      # NOOP passes through dtype from src[0], void when no src
-      return src[0].dtype if src else dtypes.void
+      # NOOP passes through dtype from src[0], uninferable when no src (may carry any dtype)
+      return src[0].dtype if src else None
     case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
