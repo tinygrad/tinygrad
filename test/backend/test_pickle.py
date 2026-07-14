@@ -38,6 +38,17 @@ class TestPickle(unittest.TestCase):
     # expect at most one COPY kernel
     self.assertLessEqual(GlobalCounters.kernel_count, 1)
 
+  def test_pickle_dedupe_equal_buffers(self):
+    print("** init")
+    # two independent buffers with identical content will serialize all together and not once each
+    data = np.random.randn(8192).astype(np.float32)
+    a, b = Tensor(data).realize(), Tensor(data.copy()).realize()
+    self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
+    one, two = len(pickle.dumps([a])), len(pickle.dumps([a, b]))
+    # adding identical content buffer costs way less than another full copy of the data
+    self.assertLess(two - one, a.nbytes() // 2)
+    np.testing.assert_equal(pickle.loads(pickle.dumps([a, b]))[1].numpy(), data)
+
   def test_pickle_realized_tensor_alt(self):
     print("** init")
     t = Tensor.rand(10, 10).to("CPU").realize()
