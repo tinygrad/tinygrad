@@ -84,7 +84,7 @@ def run_jit(jis, all_buffers, input_buffers, var_vals):
   with Context(DEBUG=0):
     for rawbuf in all_buffers:
       if rawbuf in input_buffers: continue
-      rawbuf.copy_from(Buffer("PYTHON", rawbuf.size, rawbuf.dtype, opaque=memoryview(bytes(rawbuf.nbytes))))
+      rawbuf.copy_from(Buffer("PYTHON", rawbuf.size, rawbuf.dtype, opaque=memoryview(bytearray(rawbuf.nbytes))))
 
   for ei in jis: ei.run(var_vals, jit=True)
 

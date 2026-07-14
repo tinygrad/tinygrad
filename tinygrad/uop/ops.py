@@ -770,8 +770,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
       ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
-    # fake realize. if target device is PYTHON it needs bytearray to be writable
-    ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
+    ret.buffer.allocate(memoryview(bytearray(data))) # fake realize. buffer storage must be writable, and bytes isn't
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret if ret.device == device else ret.copy_to_device(device)
   def clone(self, device=None) -> UOp:

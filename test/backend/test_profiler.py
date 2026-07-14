@@ -70,7 +70,7 @@ class TestProfiler(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
@@ -80,7 +80,7 @@ class TestProfiler(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
       gs, ls = TestProfiler.prg.arg.launch_dims({})
       TestProfiler.runtime(buf1._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
       buf1.as_memoryview()
@@ -103,8 +103,8 @@ class TestProfiler(unittest.TestCase):
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(struct.pack("ff", 0, 1))))
-      buf2.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf2.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]

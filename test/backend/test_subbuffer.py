@@ -58,7 +58,7 @@ class TestSubBuffer(unittest.TestCase):
       _ = Buffer(Device.DEFAULT, 10, dtypes.uint8).ensure_allocated()
 
       self.buf.ensure_allocated()
-      self.buf.copy_from(Buffer("PYTHON", 10, dtypes.uint8, opaque=memoryview(bytes(range(10, 20)))))
+      self.buf.copy_from(Buffer("PYTHON", 10, dtypes.uint8, opaque=memoryview(bytearray(range(10, 20)))))
 
       vbuf.ensure_allocated()
 
@@ -110,7 +110,7 @@ class TestSubBuffer(unittest.TestCase):
     data_out_sub = bytearray([0]*3)
     data_out_sub[:] = sub_buf.as_memoryview()
     assert data_out_sub == bytearray(range(3, 6))
-    sub_buf.copy_from(Buffer("PYTHON", 3, dtypes.uint8, opaque=memoryview(bytes(range(3)))))
+    sub_buf.copy_from(Buffer("PYTHON", 3, dtypes.uint8, opaque=memoryview(bytearray(range(3)))))
     assert sub_buf.as_memoryview().tolist() == list(range(3))
     assert self.buf.as_memoryview().tolist()[3:6] == list(range(3))
     data_out_sub[:] = sub_buf.as_memoryview()
@@ -143,12 +143,12 @@ class TestSubBuffer(unittest.TestCase):
   def test_subbuffer_alloc(self):
     sub_buf = self.buf.view(4, dtypes.int8, offset=3)
     sub_buf.allocate()
-    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytes(range(10, 14)))))
+    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytearray(range(10, 14)))))
     assert self.buf.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
     sub_buf = self.buf_unalloc.view(4, dtypes.int8, offset=3)
     sub_buf.allocate()
-    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytes(range(10, 14)))))
+    sub_buf.copy_from(Buffer("PYTHON", 4, dtypes.int8, opaque=memoryview(bytearray(range(10, 14)))))
     assert self.buf_unalloc.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
   def test_subbuffer_dealloc(self):

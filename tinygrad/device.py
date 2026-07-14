@@ -112,7 +112,7 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(initial_value)))
+        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
