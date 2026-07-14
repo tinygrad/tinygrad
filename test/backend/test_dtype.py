@@ -25,10 +25,10 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if dtype not in supported_dtypes and dtype not in dtypes.fp8s+(dtypes.half,dtypes.bfloat16): return []
   return dts
 
-def _to_torch_storage_type(dtype:DType):
-  if dtype == dtypes.bfloat16: return torch.float32
-  if dtype in dtypes.fp8s: return torch.float32
-  return _to_torch_dtype(dtype)
+def _to_torch_storage(a:Tensor) -> torch.Tensor:
+  # tolist() of an fp8 Tensor gives floats, so convert and store in uint8
+  if a.dtype in dtypes.fp8s: return torch.tensor([float_to_fp8(x, a.dtype) for x in a.flatten().tolist()], dtype=torch.uint8).reshape(a.shape)
+  return torch.tensor(a.tolist(), dtype=_to_torch_dtype(a.dtype))
 
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
@@ -54,7 +54,7 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
   _test_op(lambda: a.cast(target_dtype), target_dtype, expected)
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype)).tolist()
+  expected = _to_torch_storage(a).view(_to_torch_dtype(target_dtype)).tolist()
   if target_dtype in dtypes.fp8s: expected = [fp8_to_float(x, target_dtype) for x in expected]
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected)
 
@@ -276,10 +276,11 @@ class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
+    a = Tensor(data, dtype=dt1)
+    expected = _to_torch_storage(a).view(_to_torch_dtype(dt2))
     if dt2 in dtypes.fp8s:
       expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
-    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
+    _test_op(lambda: a.bitcast(dt2), dt2, expected.tolist())
 
   def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
