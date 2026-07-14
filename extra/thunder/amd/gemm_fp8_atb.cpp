@@ -82,6 +82,9 @@ using G = kittens::group<NUM_WARPS>;
 #ifndef SCALE_MODE
 #define SCALE_MODE 5
 #endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 
 __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr
 #if SCALE_MODE & 1
@@ -92,6 +95,9 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
 #endif
 #if SCALE_MODE & 4
     , float *g_amax_ptr
+#endif
+#if LAYER_SCALE
+    , int *layer_num
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
@@ -326,16 +332,21 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     if (warp_m == 0) __builtin_amdgcn_s_barrier();
 
 #if SCALE_MODE != 0
+#if LAYER_SCALE
+    const int layer = layer_num[0];
+#else
+    const int layer = 0;
+#endif
     float scale = 1.0f;
 #if SCALE_MODE & 1
-    float x_scale = (*x_scale_ptr + 1e-08f) * (1.0f / 448.0f);
+    float x_scale = (x_scale_ptr[layer] + 1e-08f) * (1.0f / 448.0f);
     scale *= x_scale;
 #endif
 #if SCALE_MODE & 2
-    scale *= *w_scale_ptr;
+    scale *= w_scale_ptr[layer];
 #endif
 #if SCALE_MODE & 4
-    float g_scale = (*g_amax_ptr + 1e-08f) * (1.0f / 448.0f);
+    float g_scale = (g_amax_ptr[layer] + 1e-08f) * (1.0f / 448.0f);
     scale *= g_scale;
 #endif
 

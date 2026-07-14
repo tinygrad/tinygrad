@@ -66,6 +66,23 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
       assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
         f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
 
+def run_quantize_fp8_layer(shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = Tensor.randn(*shape).cast(dtypes.bfloat16).contiguous()
+  amax_state = Tensor([1.0, 2.0], dtype=dtypes.float32).contiguous()
+  amax_out = Tensor.zeros(2, dtype=dtypes.float32).contiguous()
+  layer_num = Tensor([1], dtype=dtypes.int32).contiguous()
+  with Context(DEBUG=0): Tensor.realize(x, amax_state, amax_out, layer_num)
+
+  fp8, _, _, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE, amax_out=amax_out, layer_num=layer_num)
+  ref_fp8, _, ref_amax = quantize_fp8(x, amax_state=amax_state[1])
+  Tensor.realize(fp8, amax_out, ref_fp8, ref_amax)
+
+  with Context(DEBUG=0):
+    assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
+    assert amax_out[0].item() == 0.0, "atomic max modified the wrong layer"
+    assert amax_out[1].allclose(ref_amax, atol=0, rtol=0).item(), "layer amax mismatch"
+
 class TestQuantizeFP8(unittest.TestCase):
   def setUp(self):
     ren = Device[Device.DEFAULT].renderer
@@ -74,6 +91,8 @@ class TestQuantizeFP8(unittest.TestCase):
 
   def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
   def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
+  @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD atomic max")
+  def test_delayed_layer(self): run_quantize_fp8_layer((getenv("N", 2048), 1024))
 
   @needs_second_gpu
   def test_multi(self):
