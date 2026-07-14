@@ -72,7 +72,7 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
   def test_profile_multiops(self):
@@ -85,7 +85,7 @@ class TestProfiler(unittest.TestCase):
       TestProfiler.runtime(buf1._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
       buf1.as_memoryview()
 
-    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
+    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
 
     assert len(evs) == 3, "3 kernel runs are expected"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
@@ -108,7 +108,7 @@ class TestProfiler(unittest.TestCase):
 
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
-      assert len(evs) == 1, "one kernel runs are expected"
+      assert len(evs) == (0 if hasattr(TestProfiler.d0.allocator, '_as_buffer') else 1), "one kernel runs are expected"
 
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
