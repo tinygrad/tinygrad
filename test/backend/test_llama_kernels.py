@@ -127,24 +127,26 @@ class TestFusedQKVRoPE(unittest.TestCase):
 
   def test_llama31_8b_forward(self):
     Tensor.manual_seed(0)
-    B, N, H, H_KV, D = self.SHAPE
+    _, N, H, H_KV, D = self.SHAPE
     GROUP = H // H_KV
     freqs_cis = self.freqs_cis()
 
-    x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
-    q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
-    Tensor.realize(q, k, v)
-    packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
-    q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
-    k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
-    q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
-    q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
-    Tensor.realize(q_ref, k_ref, v_ref)
+    for B in (1, 2):
+      with self.subTest(B=B):
+        x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
+        q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
+        Tensor.realize(q, k, v)
+        packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
+        q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
+        k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
+        q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
+        q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
+        Tensor.realize(q_ref, k_ref, v_ref)
 
-    with Context(DEBUG=0):
-      self.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
-      self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
-      self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
+        with Context(DEBUG=0):
+          self.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
+          self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
+          self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
 
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
