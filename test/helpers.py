@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, truncate
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV
 from tinygrad.renderer import Renderer
@@ -73,6 +73,7 @@ def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   ret = np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
+  if dt == dtypes.bfloat16 or dt in dtypes.fp8s: ret = np.array([truncate[dt](x) for x in ret], dtype=ret.dtype)
   if not allow_subnormal: ret = np.where(np.abs(ret) < min_normal(dt), 0, ret)
   return ret
 
