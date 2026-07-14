@@ -218,7 +218,7 @@ class Tensor(RandMixin):
 
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
-      self._buffer().copyin(x._data())
+      (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
