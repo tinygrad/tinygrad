@@ -829,17 +829,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)): return None
 
-    numel = self.numel()
-    out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
-    if out.op is not Ops.INDEX: return None
-    if len(out.src) == 1: return 0 if resolve(numel == 1, False) else None
-    idx, has_range = out.src[1], False
-    if idx.op is Ops.RANGE: return 0
-    if idx.op is Ops.ADD and idx.src[0].op is Ops.RANGE: idx, has_range = idx.src[1], True
-    if idx.op is Ops.CONST and (has_range or resolve(numel == 1, False)):
-      if not isinstance(idx.arg, int): return None  # masked/padded regions produce InvalidType
-      return idx.arg
-    return None
+    idx = self.flatten().index(UOp.range(self.numel(), 0))
+    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
+    return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
 
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
@@ -1718,6 +1710,14 @@ def do_unbind(ctx:dict[Variable, int], x:UOp):
   ctx[v] = i
   return v
 pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
+
+# ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
+pm_contiguous_view_offset = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(),)), lambda: UOp.const(dtypes.index, 0)),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE))), lambda: UOp.const(dtypes.index, 0)),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda c: c),
+  (UPat(Ops.INDEX, src=(UPat(), UPat.cvar('c'))), lambda ctx, c: c if resolve(ctx.numel() == 1, False) else None),
+])
 
 # *** what was symbolic.py ***
 

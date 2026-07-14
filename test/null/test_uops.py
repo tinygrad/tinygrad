@@ -368,5 +368,16 @@ class TestUOpRender(unittest.TestCase):
     u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "{0,1,2}")
 
+class TestContiguousViewOffset(unittest.TestCase):
+  def _check(self, u, expected): self.assertEqual(u.contiguous_view_offset(), expected)
+
+  def test_simple(self): self._check(UOp.empty(10), 0)
+  def test_shrink(self): self._check(UOp.empty(10)[1:8], 1)
+  def test_2d(self): self._check(UOp.empty(2,5)[1, 2:4], 7)
+  def test_shrink_to_one(self): self._check(UOp.empty(10)[1], 1)
+  def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
+  def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
+  def test_strided(self): self._check(UOp.empty(4)[::2], None)
+
 if __name__ == '__main__':
   unittest.main()
