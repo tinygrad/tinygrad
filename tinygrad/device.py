@@ -205,7 +205,7 @@ class Buffer:
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)))
+    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
     return self
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
