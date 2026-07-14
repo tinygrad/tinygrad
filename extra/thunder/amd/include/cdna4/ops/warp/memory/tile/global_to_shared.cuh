@@ -294,13 +294,10 @@ __device__ __forceinline__ void load(ST& dst, const GL& src, const COORD& idx,
 
     #pragma unroll
     for (int i = 0; i < memcpy_per_tile; ++i) {
-        int32_t lds_byte = lds_cur;                 // still SGPR
-        asm volatile("" : "+s"(lds_byte));           // keep it SGPR at the use
-
-        asm volatile("s_mov_b32 m0, %0" :: "s"(lds_byte));
+        as3_uint32_ptr lds_ptr = (as3_uint32_ptr)(uintptr_t)lds_cur;
         llvm_amdgcn_raw_buffer_load_lds(
             SRD, 
-            (as3_uint32_ptr)0, 
+            lds_ptr,
             16, 
             swizzled_offsets[i], 
             SOFF, 
