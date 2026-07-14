@@ -10,24 +10,31 @@ from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu
 
 class TestFusedQKVRoPE(unittest.TestCase):
+  SHAPE = (2, 8192, 32, 8, 128)
+
   def setUp(self):
     if Device.DEFAULT != "AMD": self.skipTest("requires AMD HIP kernel")
     if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
 
+  def rand_bf16(self, *shape:int) -> Tensor:
+    return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+
+  def freqs_cis(self) -> Tensor:
+    _, N, _, _, D = self.SHAPE
+    return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone(Device.DEFAULT).realize()
+
   def test_llama31_8b_forward(self):
     Tensor.manual_seed(0)
-    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
-    n_rep = H // H_KV
-    packed = H_KV * (n_rep + 2) * D
-    freqs_cis = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone(Device.DEFAULT).realize()
+    B, N, H, H_KV, D = self.SHAPE
+    GROUP = H // H_KV
+    freqs_cis = self.freqs_cis()
 
-    x = (Tensor.randn(B, N, packed) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+    x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
     q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
     Tensor.realize(q, k, v)
-    packed_ref = x.reshape(B, N, H_KV, n_rep + 2, D)
-    q_ref = packed_ref[:, :, :, :n_rep].reshape(B, N, H, D)
-    k_ref = packed_ref[:, :, :, n_rep].reshape(B, N, H_KV, D)
-    v_ref = packed_ref[:, :, :, n_rep+1].reshape(B, N, H_KV, D)
+    packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
+    q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
+    k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
     q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
     q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
     Tensor.realize(q_ref, k_ref, v_ref)
@@ -39,21 +46,22 @@ class TestFusedQKVRoPE(unittest.TestCase):
 
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
-    B, N, H, H_KV, D, PARTIALS = 2, 8192, 32, 8, 128, 2
+    B, N, H, H_KV, D = self.SHAPE
+    PARTIALS = 2
     GROUP = H // H_KV
-    freqs_cis = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone(Device.DEFAULT).realize()
-    dq = (Tensor.randn(B, N, H, D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
-    dk = (Tensor.randn(B * PARTIALS, N, H_KV, D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
-    dv = (Tensor.randn(B * PARTIALS, N, H_KV, D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+    freqs_cis = self.freqs_cis()
+    dq = self.rand_bf16(B, N, H, D)
+    dk_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
+    dv_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
 
-    # Invert the layout transform in Flash Attention's gradient function to reproduce its native dQ buffer.
+    # Invert Flash Attention's dQ layout transform to reproduce its native buffer.
     dq_native = dq.transpose(1, 2).reshape(B, H, N//16, 4, 4, 4, 2, D//32, 2, 2) \
       .permute(0, 1, 2, 5, 6, 8, 7, 3, 4, 9).reshape(B, H, N, D).contiguous().realize()
     dx = Tensor.empty(B, N, H_KV * (GROUP + 2) * D, dtype=dtypes.bfloat16)
     arch = Device[Device.DEFAULT].renderer.target.arch
     fxn = functools.partial(custom_fused_qkv_rope_backward, device=Device.DEFAULT, arch=arch,
                             B=B, N=N, H=H, H_KV=H_KV, D=D)
-    dx = Tensor.custom_kernel(dx, dq_native, dk, dv, freqs_cis, fxn=fxn)[0].realize()
+    dx = Tensor.custom_kernel(dx, dq_native, dk_partial, dv_partial, freqs_cis, fxn=fxn)[0].realize()
 
     def inverse_rope(x:Tensor) -> Tensor:
       x = x.reshape(*x.shape[:-1], D//2, 2).float()
@@ -62,8 +70,8 @@ class TestFusedQKVRoPE(unittest.TestCase):
                           -x[..., 0] * cs[..., 1] + x[..., 1] * cs[..., 0], dim=-1).flatten(-2).cast(dtypes.bfloat16)
 
     dq_ref = inverse_rope(dq).reshape(B, N, H_KV, GROUP, D)
-    dk_ref = inverse_rope(dk.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16)).unsqueeze(3)
-    dv_ref = dv.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
+    dk_ref = inverse_rope(dk_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16)).unsqueeze(3)
+    dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
 
