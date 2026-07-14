@@ -138,9 +138,12 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
     cons, width = x.tag, 1
     if isinstance(x.tag[0], tuple): cons, width = x.tag
     defs = [ctx.vreg(x.tag, width=width)]
+  elif x.op is Ops.BUFFER:
+    n = int(x.max_numel() * max(x.dtype.itemsize//4, 1))
+    defs = [make_vgpr(ctx, width=1) for _ in range(n)]
   else:
-    if x.op is Ops.BUFFER: n = max(x.dtype.itemsize//4, 1) * x.src[0].arg
-    else: n = max(x.dtype.itemsize // 4, 1)
+    # NOTE: reg buffer doesn't actually need contiguous invariant
+    n = max(x.dtype.itemsize // 4, 1)
     defs = [make_vgpr(ctx, width=n)]
   return x.replace(tag=tuple(defs))
 
@@ -223,15 +226,15 @@ def store(ctx, addr:UOp, x:UOp):
   base, idx = addr.src[:2]
   if base.addrspace is AddrSpace.REG:
     if len(rdefs(base)) == 0: return None # ensure vreg alloc
-    vreg = rdefs(base)[0]
-    # keep addr }s a control dep so reduce-identity stores re-run inside their ranges
+    vregs = rdefs(base)
+    # keep addr as a control dep so reduce-identity stores re-run inside their ranges
     if base.dtype.itemsize <= 4:
-      mov = vmov(val).replace(tag=(vreg.sub(idx.arg),))
+      mov = vmov(val).replace(tag=(vregs[idx.arg],))
       return mov.replace(src=mov.src+(addr,))
     else:
       buf = base.src[0] if base.op is Ops.BUFFER else base.src[0].src[0]
       assert buf.arg == 1, f"reg buf of multiple ({buf.arg}) 2 reg values"
-      ms = [vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)]
+      ms = [vmov(val.index(i)).replace(tag=(vr,)) for i,vr in enumerate(vregs)]
       return UOp.group(*[m.replace(src=m.src+(addr,)) for m in ms])
 
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
@@ -684,13 +687,11 @@ class RDNA3Renderer(ISARenderer):
 
   # NOTE; FLAT_SCRATCH base implicit, since this is only used for spill/fill just fold ioffs
   def fill(self, spill_offset:int, x:UOp) -> UOp:
-    print(rdefs(x))
     bufsz = sum([r.size for r in rdefs(x)])
     _insmap = {4:RDNA3Ops.scratch_load_b32,8:RDNA3Ops.scratch_load_b64,16:RDNA3Ops.scratch_load_b128}
     return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),), tag=rdefs(x))
 
   def spill(self, spill_offset:int, x:UOp) -> UOp:
-    print(rdefs(x))
     bufsz = sum([r.size for r in rdefs(x)])
     _insmap = {4:RDNA3Ops.scratch_store_b32,8:RDNA3Ops.scratch_store_b64,16:RDNA3Ops.scratch_store_b128}
     return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),x))
