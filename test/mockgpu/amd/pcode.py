@@ -688,10 +688,10 @@ class Parser:
         return _extract_bits(base, hi, lo)
       # Dynamic bit slice: (base >> lo) & ((1 << (hi - lo + 1)) - 1)
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-      hi, lo = first.cast(dt), second.cast(dt)
-      width = hi - lo + _const(dt, 1)
+      hi_u, lo_u = first.cast(dt), second.cast(dt)
+      width = hi_u - lo_u + _const(dt, 1)
       mask = (_const(dt, 1) << width) - _const(dt, 1)
-      return (base.cast(dt) >> lo) & mask
+      return (base.cast(dt) >> lo_u) & mask
     self.eat('RBRACKET')
     dt_suffix = None
     if self.try_eat('DOT'):
@@ -1123,11 +1123,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           val = parse_tokens(toks[j:], env, funcs)
           lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
           lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
-          lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
-          hi_val = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
-          block_assigns[lo_var] = env[lo_var] = lo_val
-          block_assigns[hi_var] = env[hi_var] = hi_val
-          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_val), (f'{hi_var}.{hi_type}', hi_val)])
+          lo_u = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
+          hi_u = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
+          block_assigns[lo_var] = env[lo_var] = lo_u
+          block_assigns[hi_var] = env[hi_var] = hi_u
+          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_u), (f'{hi_var}.{hi_type}', hi_u)])
           i += 1
           continue
 

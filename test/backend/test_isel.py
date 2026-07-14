@@ -34,9 +34,9 @@ class TestIselX86(unittest.TestCase):
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
   def test_vinsertps(self):
-    a = UOp.variable("a", 0, 0, dtypes.float32.vec(4))
-    b = UOp.variable("b", 0, 0, dtypes.float32.vec(4))
-    c = UOp.variable("c", 0, 0, dtypes.float32.vec(4))
+    a = UOp.variable("a", 0, 0, dtypes.float32)
+    b = UOp.variable("b", 0, 0, dtypes.float32)
+    c = UOp.variable("c", 0, 0, dtypes.float32)
     d = UOp.variable("e", 0, 0, dtypes.float32)
 
     valid = [UOp.stack(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),

@@ -1,5 +1,4 @@
 from collections import defaultdict
-from tinygrad.device import Device
 from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
@@ -13,7 +12,8 @@ def _collect_bufs(u:UOp) -> list[UOp]:
 def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   if b in held_bufs: return False
   devs = (b.device,) if isinstance(b.device, str) else b.device
-  return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
+  # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
+  return all(not d.startswith(("DISK", "TINYFS", "CL", "WEBGPU")) for d in devs)
 
 LaneKey = tuple[str, int]
 

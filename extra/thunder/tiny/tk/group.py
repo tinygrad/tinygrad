@@ -92,7 +92,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -122,7 +122,7 @@ class Group:
           else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -152,7 +152,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -182,7 +182,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 

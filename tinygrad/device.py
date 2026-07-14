@@ -135,10 +135,8 @@ class Buffer:
     if device not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
-      elif self._base is not None:
-        assert hasattr(allocator, "_offset"), "offset function required for view"
-        self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
-      else: self._bufs[device] = allocator._map(self.ensure_allocated()._buf)
+      elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
+      else: self._bufs[device] = allocator.map(self.ensure_allocated())
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
@@ -152,7 +150,6 @@ class Buffer:
     if self._base is not None:
       self._base.ensure_allocated()
       self._base.allocated_views += 1
-      assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._bufs[self.device] = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._bufs[self.device] = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
@@ -196,8 +193,7 @@ class Buffer:
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and self.options is None:
-      return self.allocator._as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
@@ -237,6 +233,8 @@ class Allocator(Generic[DeviceType]):
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
+  def map(self, buf:Buffer): return self._map(buf.ensure_allocated()._buf)
+
   # implemented by the runtime
   def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
   def _free(self, opaque, options:BufferSpec): pass  # if opaque is a Python object, you don't need a free
@@ -245,7 +243,7 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf): raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   # def _as_buffer(self, src) -> memoryview:
-  # def _offset(self, buf, size:int, offset:int):
+  def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 

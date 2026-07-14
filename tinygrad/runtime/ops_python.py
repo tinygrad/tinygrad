@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape
-from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.device import Buffer, Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
@@ -225,6 +225,8 @@ class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src
   def _copyout(self, dest:memoryview, src): dest[:] = src
+  def map(self, buf:Buffer): return buf.as_memoryview(force_zero_copy=True)
+  def _offset(self, buf:memoryview, size:int, offset:int): return buf[offset:offset+size]
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

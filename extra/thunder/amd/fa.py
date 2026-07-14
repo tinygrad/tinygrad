@@ -95,8 +95,9 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
-    dk_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xk, axis=shard_axis)
-    dv_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xv, axis=shard_axis)
+    HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
+    dk_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xk, axis=shard_axis)
+    dv_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xv, axis=shard_axis)
 
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
@@ -110,8 +111,8 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       dq = dq.reshape(B, H, N//16, 4, 2, 2, D//32, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
 
     # reduce partial dK/dV across GROUP_SIZE query heads
-    dk = dk_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
-    dv = dv_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
+    dk = dk_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
+    dv = dv_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
 
     if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
     sinks = Tensor(ker.src[6], device=ker.src[6].device)
@@ -224,9 +225,11 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
                   f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}"]
 
   BLOCK_SIZE_KV = 256
+  GROUP_SIZE = H // H_KV
+  HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
   NUM_WARPS = 4
   NUM_THREADS = 64 * NUM_WARPS
-  gsz = (H, N // BLOCK_SIZE_KV, B)
+  gsz = (H // HEADS_PER_WG, N // BLOCK_SIZE_KV, B)
   lsz = (NUM_THREADS, 1, 1)
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
