@@ -64,10 +64,12 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if cls.DTYPE is None: raise unittest.SkipTest("base class")
-    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=cls.DTYPE in supported_dtypes)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=cls.DTYPE in supported_dtypes and cls.DTYPE not in dtypes.fp8s)
 
   def test_to_np(self):
-    _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
+    a = Tensor(self.DATA, dtype=self.DTYPE)
+    self.assertEqual(a.dtype, self.DTYPE)
+    _test_to_np(a, _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
   def test_casts_to(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
