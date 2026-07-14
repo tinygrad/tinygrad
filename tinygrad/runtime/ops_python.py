@@ -223,6 +223,7 @@ class PythonRenderer(Renderer):
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
+  def _as_buffer(self, src) -> memoryview: return src
   def _copyin(self, dest, src:memoryview): dest[:] = src
   def _copyout(self, dest:memoryview, src): dest[:] = src
   def map(self, buf:Buffer): return buf.as_memoryview(force_zero_copy=True)

@@ -551,8 +551,8 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
 
-  def _map(self, buf:HCQBuffer):
-    if self.dev in buf.mapped_devs: return
+  def _map(self, buf:HCQBuffer) -> HCQBuffer:
+    if self.dev in buf.mapped_devs: return buf
     if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
 
@@ -560,6 +560,7 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     # Devices can save mappings and internal metadata as a new buffer.
     if (mb:=self._do_map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
+    return buf
 
   @suppress_finalizing
   def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):

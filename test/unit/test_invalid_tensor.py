@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid, dtypes
 from tinygrad.engine.realize import run_linear
 
@@ -9,7 +10,7 @@ class TestInvalidTensor(unittest.TestCase):
     buf = out.uop.buffer
     buf.allocate()
     sentinel = memoryview(bytearray(b'\x42' * buf.nbytes))
-    buf.copyin(sentinel)
+    buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=sentinel))
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
     run_linear(linear, var_vals)
     ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()

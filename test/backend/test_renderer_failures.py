@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -16,7 +16,7 @@ def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
   sz = 1 if local_size is None else prod(local_size)
   outs = [UOp.new_buffer(Device.DEFAULT, sz, u.src[1].dtype) for u in sink.src if u.op is Ops.STORE]
-  for u in outs: u.buffer.allocate().copyin(np.zeros(sz, dtype=_to_np_dtype(u.dtype)).data)
+  for u in outs: u.buffer.allocate().copy_from(Buffer("PYTHON", sz, u.dtype, opaque=memoryview(bytes(u.buffer.nbytes))))
   run_linear(UOp(Ops.LINEAR, src=(sink.call(*outs, *(x.uop.base for x in inputs)),)))
   return [u.buffer.numpy() for u in outs]
 

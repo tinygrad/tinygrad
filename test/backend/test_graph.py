@@ -1,9 +1,9 @@
 import numpy as np
-import functools, unittest, ctypes
+import functools, unittest
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Context, from_mv
+from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import run_linear, compile_linear
@@ -31,7 +31,7 @@ def make_buffer(device, size=BUF_SIZE, fill=False):
   buf = Buffer(device, size, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
-      buf.copyin(Tensor(np.random.randint(-10000, 10000, size=size, dtype=np.int32)).realize().uop.base.realized.as_memoryview())
+      buf.copy_from(Tensor(np.random.randint(-10000, 10000, size=size, dtype=np.int32)).realize().uop.base.realized)
   return buf
 
 def make_view(base, offset_elems, size_elems):
@@ -55,10 +55,7 @@ def run_schedule(calls:list[UOp]):
   run_linear(UOp(Ops.LINEAR, src=tuple(calls)))
 
 def zero_bufs(bufs):
-  for b in bufs:
-    mv = memoryview(bytearray(b.nbytes))
-    ctypes.memset(from_mv(mv), 0, len(mv))
-    b.copyin(mv)
+  for b in bufs: b.copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=memoryview(bytes(b.nbytes))))
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
