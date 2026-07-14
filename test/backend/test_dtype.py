@@ -296,6 +296,11 @@ class TestBitCast(unittest.TestCase):
     b = a.bitcast(dtypes.float32)
     assert b.numpy()[0,0] == 1.
 
+  def test_bitcast_bf16_from_cast(self):
+    # a bfloat16 from a cast holds bfloat16 bits. 1.0 is 0x3f80 in bfloat16, which is 1.875 in half
+    a = Tensor([1.0], dtype=dtypes.float32).cast(dtypes.bfloat16)
+    assert a.bitcast(dtypes.half).numpy()[0] == 1.875
+
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 
 class TestUint16DType(TestDType):
