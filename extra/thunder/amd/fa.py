@@ -16,6 +16,75 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   axis = ref.uop.axis if axis is None else axis
   return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
 
+@functools.cache
+def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
+                                  device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+  code = (pathlib.Path(__file__).parent / "fused_qkv_rope.cpp").read_text()
+  threads = 256
+  thread_idx = UOp.special(threads, "lidx0")
+  block_idx_x, block_idx_y = UOp.special(B, "gidx0"), UOp.special(N, "gidx1")
+  sink = UOp.sink(q.base, k.base, v.base, xqkv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y,
+                  arg=KernelInfo(name="fused_qkv_rope_forward"))
+  compile_args = ["-std=c++20", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
+                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+  code = (pathlib.Path(__file__).parent / "fused_qkv_rope_bwd.cpp").read_text()
+  threads = 256
+  thread_idx = UOp.special(threads, "lidx0")
+  block_idx_x, block_idx_y = UOp.special(B, "gidx0"), UOp.special(N, "gidx1")
+  sink = UOp.sink(dxqkv.base, dq.base, dk.base, dv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y,
+                  arg=KernelInfo(name="fused_qkv_rope_backward"))
+  compile_args = ["-std=c++20", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, None, None, UOp, None]:
+  dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
+  xqkv_u, freqs_u = call.src[4], call.src[5]
+  xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
+  B, N, _ = xqkv.shape
+  H, H_KV, D = dq.shape[2], dk.shape[2], dq.shape[3]
+  num_devices = len(xqkv.device) if isinstance(xqkv.device, tuple) else 1
+  is_dp, is_mp = xqkv.uop.axis == 0, xqkv.uop.axis == 2
+  B_local = B // num_devices if is_dp else B
+  H_local = H // num_devices if is_mp else H
+  H_KV_local = H_KV // num_devices if is_mp else H_KV
+  single_device = xqkv.device[0] if isinstance(xqkv.device, tuple) else xqkv.device
+  arch = Device[single_device].renderer.target.arch
+  dxqkv = _sharded_empty_like(xqkv, axis=xqkv.uop.axis if isinstance(xqkv.device, tuple) else None)
+  fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
+                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
+  dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
+  return None, None, None, dxqkv.uop, None
+
+def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int) -> tuple[Tensor, Tensor, Tensor]:
+  B, N, packed_dim = xqkv.shape
+  assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
+  assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
+  assert freqs_cis.shape == (1, freqs_cis.shape[1], 1, head_dim // 2, 2) and freqs_cis.shape[1] >= N, \
+    f"invalid RoPE frequency shape {freqs_cis.shape} for sequence length {N} and head dimension {head_dim}"
+  num_devices = len(xqkv.device) if isinstance(xqkv.device, tuple) else 1
+  is_dp, is_mp = xqkv.uop.axis == 0, xqkv.uop.axis == 2
+  B_local = B // num_devices if is_dp else B
+  H_local = n_heads // num_devices if is_mp else n_heads
+  H_KV_local = n_kv_heads // num_devices if is_mp else n_kv_heads
+  single_device = xqkv.device[0] if isinstance(xqkv.device, tuple) else xqkv.device
+  arch = Device[single_device].renderer.target.arch
+  axis = 0 if is_dp else 2 if is_mp else None
+  q = _sharded_empty((B, N, n_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
+  k = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
+  v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
+  fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
+                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
+  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=_fused_qkv_rope_grad)
+  return q, k, v
+
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 

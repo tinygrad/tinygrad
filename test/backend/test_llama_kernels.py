@@ -5,7 +5,44 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
+from extra.thunder.amd.fa import fused_qkv_rope
 from test.helpers import needs_second_gpu
+
+class TestFusedQKVRoPE(unittest.TestCase):
+  def setUp(self):
+    if Device.DEFAULT != "AMD": self.skipTest("requires AMD HIP kernel")
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_forward_backward(self):
+    Tensor.manual_seed(0)
+    B, N, H, H_KV, D = 1, 16, 4, 2, 64
+    n_rep = H // H_KV
+    packed = H_KV * (n_rep + 2) * D
+    freqs_cis = precompute_freqs_cis(D, N).cast(dtypes.bfloat16).clone(Device.DEFAULT).realize()
+
+    x = Tensor.randn(B, N, packed).cast(dtypes.bfloat16).contiguous().realize()
+    q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
+    loss = q.float().sum() + k.float().sum() + v.float().sum()
+    x_grad = loss.gradient(x)[0]
+    Tensor.realize(q, k, v, x_grad)
+
+    x_ref = x.detach().clone().realize()
+    packed_ref = x_ref.reshape(B, N, H_KV, n_rep + 2, D)
+    q_ref = packed_ref[:, :, :, :n_rep].reshape(B, N, H, D)
+    k_ref = packed_ref[:, :, :, n_rep].reshape(B, N, H_KV, D)
+    v_ref = packed_ref[:, :, :, n_rep+1].reshape(B, N, H_KV, D)
+    q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis)
+    q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
+    ref_loss = q_ref.float().sum() + k_ref.float().sum() + v_ref.float().sum()
+    x_ref_grad = ref_loss.gradient(x_ref)[0]
+    Tensor.realize(q_ref, k_ref, v_ref, x_ref_grad)
+
+    with Context(DEBUG=0):
+      self.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
+      self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
+      self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
+      self.assertTrue(x_grad.allclose(x_ref_grad, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)

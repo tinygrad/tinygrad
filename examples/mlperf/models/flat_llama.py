@@ -11,7 +11,7 @@ if __name__ == "__main__":
     os.environ["HK_FLASH_ATTENTION"] = "1"
     if "ASM_GEMM" not in os.environ:
       os.environ["ASM_GEMM"] = "1"
-from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
+from tinygrad import Tensor, Device, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, round_up
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
@@ -154,7 +154,7 @@ class FlatTransformer:
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().is_param_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).clone(Device.DEFAULT).realize().is_param_(False)
 
     def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().is_param_(False)
     names = ["xqkv", "xo", "x2"]
@@ -195,18 +195,18 @@ class FlatTransformer:
                                                                   next_grad_amax_state=next_grad_amax_xqkv)
     amaxs.append(new_amax)
     saves.extend([x_normed, rrms, *s, xqkv])
-    xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
-    xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
-
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     if getenv("HK_FLASH_ATTENTION"):
-      from extra.thunder.amd.fa import flash_attention
+      from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
+      xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim)
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True)
       saves.extend(save)
     else:
+      xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+      xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
       xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
