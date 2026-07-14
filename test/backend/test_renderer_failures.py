@@ -10,7 +10,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, python_alu
-from tinygrad.tensor import Tensor, _to_np_dtype
+from tinygrad.tensor import Tensor
 
 def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
