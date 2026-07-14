@@ -193,6 +193,24 @@ class TestMemoryPlanner(unittest.TestCase):
     assert r1_arena is not None and r2_arena is not None
     assert r1_arena is r2_arena
 
+  def test_copy_slice_tracks_underlying_buffer(self):
+    src = UOp.new_buffer(("NULL", "NULL:1"), 16, dtypes.int8)
+    dest = UOp.new_buffer(("NULL", "NULL:1"), 16, dtypes.int8)
+    after = UOp(Ops.AFTER, src.dtype, (src,))
+    selected = UOp(Ops.MSELECT, src.dtype, (after,), 0)
+    view = UOp(Ops.SLICE, src.dtype, (selected.reshape((4, 4)), UOp.const(dtypes.index, 4)), 8)
+    linear = _make_linear([[dest, view]], copies=[(dest, view)])
+    result = memory_plan_rewrite(linear)
+    planned_dest, planned_view = result.src[0].src[1:]
+    self.assertEqual(planned_dest.op, Ops.SLICE)
+    self.assertEqual(planned_view.op, Ops.SLICE)
+    planned_src = planned_view.src[0]
+    while planned_src.op is not Ops.SLICE: planned_src = planned_src.src[0]
+    self.assertEqual(planned_src.op, Ops.SLICE)
+    self.assertIs(planned_dest.src[0], planned_src.src[0])
+    dest_start, src_start = planned_dest.src[1].arg, planned_src.src[1].arg
+    self.assertTrue(dest_start + planned_dest.arg <= src_start or src_start + planned_src.arg <= dest_start)
+
   def test_compute_bufs_reuse_among_compute(self):
     bs = [
       [b(0), b(1)],

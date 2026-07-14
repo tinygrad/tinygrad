@@ -406,7 +406,6 @@ class TestCustomKernel(unittest.TestCase):
   @unittest.expectedFailure
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
-  @unittest.expectedFailure
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
