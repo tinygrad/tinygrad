@@ -26,7 +26,7 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      self.assertEqual(len(sinks), 26)
+      self.assertEqual(len(sinks), 25)
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):
@@ -50,6 +50,15 @@ class TestRingAllReduce(unittest.TestCase):
       t = Tensor.ones(N, N*100).contiguous().shard(ds, axis=0).realize()
       out = t.sum(0)
       self.assertListEqual(out.tolist(), [4]*N*100)
+
+  def test_correct_all2all(self):
+    with Context(ALL2ALL=2):
+      N = 4
+      ds = tuple(f"CPU:{i}" for i in range(N))
+      t = Tensor.arange(N*N*100).reshape(N, N*100).contiguous().shard(ds, axis=0).realize()
+      width = N*100
+      expected = [N*i + width*N*(N-1)//2 for i in range(width)]
+      self.assertListEqual(t.sum(0).tolist(), expected)
 
 class TestAllreduceCast(unittest.TestCase):
   def _get_copy_dtypes(self, dtype, allreduce_cast):
