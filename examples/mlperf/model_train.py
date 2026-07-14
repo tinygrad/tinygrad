@@ -1758,6 +1758,7 @@ def train_gptoss():
   Tensor.realize(*optim.params, *fp8_inv_scales)
 
   @TinyJit
+  @Context(TRAINING=1)
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
