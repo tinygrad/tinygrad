@@ -21,7 +21,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
 
   def freqs_cis(self) -> Tensor:
     _, N, _, _, D = self.SHAPE
-    return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone(Device.DEFAULT).realize()
+    return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
 
   def test_llama31_8b_forward(self):
     Tensor.manual_seed(0)
