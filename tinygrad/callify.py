@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, ParamArg, graph_rewrite, track_rewrites
-from tinygrad.helpers import VIZ, pluralize
+from tinygrad.helpers import VIZ, pluralize, all_int
 
 @dataclass
 class AllocCtx:
@@ -54,6 +54,8 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
 
 def remove_contiguous_view(src:UOp):
+  # no symbolic shape
+  if not all_int(src.shape): return None
   # drop the contiguous if this will be a bufferview
   if (view:=src.contiguous_view()) is not None and view[0].op is Ops.BUFFER: return src
   if src.base.op is not Ops.MULTI or isinstance(src.device, str): return None
@@ -159,6 +161,8 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
 def replace_input_view(ctx:AllocCtx, src:UOp):
+  # no symbolic shape
+  if not all_int(src.shape): return None
   if (cv:=src.contiguous_view()) is None or (buf:=cv[0]).op is not Ops.BUFFER: return None
   # don't view written-to bufs
   if buf in ctx.written_bufs: return None
