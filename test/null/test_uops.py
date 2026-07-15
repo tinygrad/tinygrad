@@ -6,7 +6,7 @@ from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
-from tinygrad.uop.spec import spec_shared
+from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
 
@@ -41,6 +41,11 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
     # an explicit (strong) const dtype is legal until the field is removed
     self.assertEqual(UOp.const(dtypes.int32, 3).dtype, dtypes.int32)
+
+  def test_weak_dtype_rejected_by_program_spec(self):
+    for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
+      with self.assertRaises(RuntimeError): type_verify(UOp.const(weak, value).sink(), spec_program)
+      type_verify(UOp.const(concrete, value).sink(), spec_program)
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
