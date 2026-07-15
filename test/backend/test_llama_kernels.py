@@ -5,6 +5,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8, fused_rmsnorm_mul_quantize_fp8
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu
@@ -113,6 +114,26 @@ class TestLocalAmax(unittest.TestCase):
     out = (x * local_abs_max(x)).clone().realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
+
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+class TestFusedAddRMSNorm(unittest.TestCase):
+  def test_llama31_8b_forward(self):
+    shape, eps = (2, 8192, 4096), 1e-5
+    x = Tensor.full(shape, 0.25, dtype=dtypes.bfloat16).contiguous()
+    residual = Tensor.full(shape, 0.125, dtype=dtypes.bfloat16).contiguous()
+    weight = Tensor.full((shape[-1],), 0.75, dtype=dtypes.bfloat16).contiguous()
+    amax = Tensor.full((), 1.0, dtype=dtypes.float32).contiguous()
+    Tensor.realize(x, residual, weight, amax)
+
+    fp8, _, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, weight, amax, eps, FP8_DTYPE)
+    ref_h = x + residual
+    ref_fp8, _, ref_x_normed, ref_rrms = fused_rmsnorm_mul_quantize_fp8(ref_h, weight, amax, eps, FP8_DTYPE)
+    Tensor.realize(fp8, h, x_normed, rrms, ref_fp8, ref_h, ref_x_normed, ref_rrms)
+
+    with Context(DEBUG=0):
+      for got, ref in ((h, ref_h), (x_normed, ref_x_normed), (rrms, ref_rrms)):
+        self.assertTrue(got.allclose(ref, atol=2e-2, rtol=2e-2).item())
+      self.assertTrue(fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=2e-2, rtol=2e-2).item())
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):

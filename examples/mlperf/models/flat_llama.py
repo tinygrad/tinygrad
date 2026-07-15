@@ -188,16 +188,26 @@ class FlatTransformer:
     scale_b = scale.reshape(self.n_layers, out_features, 1) if COLUMNWISE_WEIGHT_SCALE else scale.reshape(-1, 1, 1)
     return (w * scale_b).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
 
-  def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor, layer_num:Tensor,
+  def attention(self, x:Tensor, freqs_cis:Tensor, residual:Tensor|None=None, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor, layer_num:Tensor,
                  amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
                  next_amax_xqkv:Tensor, next_amax_xo:Tensor,
                  grad_amax_xqkv:Tensor, grad_amax_xo:Tensor, next_grad_amax_xqkv:Tensor, next_grad_amax_xo:Tensor):
     bsz, seqlen, _ = x.shape
     saves = []
 
-    xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                                  amax_x=amax_xqkv, next_amax_x=next_amax_xqkv, grad_amax_state=grad_amax_xqkv,
-                                                                  next_grad_amax_state=next_grad_amax_xqkv, layer_num=layer_num)
+    if residual is None:
+      h = x
+      xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
+                                                                    amax_x=amax_xqkv, next_amax_x=next_amax_xqkv,
+                                                                    grad_amax_state=grad_amax_xqkv,
+                                                                    next_grad_amax_state=next_grad_amax_xqkv, layer_num=layer_num)
+    else:
+      xqkv, h, x_normed, rrms, (new_amax, *s) = add_norm_quantize_matmul(x, residual, attention_norm, wqkv, s_qkv,
+                                                                          self.norm_eps, amax_x=amax_xqkv,
+                                                                          next_amax_x=next_amax_xqkv,
+                                                                          grad_amax_state=grad_amax_xqkv,
+                                                                          next_grad_amax_state=next_grad_amax_xqkv,
+                                                                          layer_num=layer_num)
     saves.extend([x_normed, rrms, *s, xqkv])
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
@@ -218,7 +228,7 @@ class FlatTransformer:
     out, new_amax, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo,
                                next_grad_amax_state=next_grad_amax_xo, next_amax_x=next_amax_xo, layer_num=layer_num)
     saves.extend([*s, out])
-    return out, saves
+    return out, h, saves
 
   def feed_forward(self, x:Tensor, residual:Tensor, **kwargs):
     saves = []
@@ -266,12 +276,11 @@ class FlatTransformer:
     return out, h, saves
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
-    attn, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, residual:Tensor|None=None, save:bool=True):
+    attn, x, attn_saves = self.attention(x, freqs_cis, residual, **attn_kwargs)
     ffn, h, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
-    h = h + ffn
-    if save: return (h, *attn_saves, *ffn_saves)
-    else: return (h,)
+    if save: return (h, ffn, *attn_saves, *ffn_saves[:-1])
+    else: return (h, ffn)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -318,6 +327,7 @@ class FlatTransformer:
     freqs_cis = self.freqs_cis.cast(h.dtype)
     if not getenv("HK_FLASH_ATTENTION"): freqs_cis = freqs_cis[:, :tokens.shape[1], :, :, :]
     a, na, ga, nga, s = self._fp8_amax, self._fp8_next_amax, self._fp8_grad_amax, self._fp8_next_grad_amax, self._fp8_inv_scale
+    residual = None
     for i in range(self.n_layers):
       layer_num = self._layer_num[i]
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i], layer_num=layer_num,
@@ -336,9 +346,10 @@ class FlatTransformer:
       else:
         ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"], next_amax_x13=na["x13"], s_13=s["w13"],
                           grad_amax_xw13=ga["xw13"], next_grad_amax_xw13=nga["xw13"])
-      h, *_ = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
+      h, residual, *_ = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, residual, save=save)
 
-    logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
+    assert residual is not None
+    logits = matmul(self.norm(h + residual), self.output[0], fp8=False)[0]
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:

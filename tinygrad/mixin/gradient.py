@@ -40,10 +40,11 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  unique_bodies = list(dict.fromkeys(gb for _, gb in grad_bodies))
+  bwd_body = UOp.maketuple(*unique_bodies).substitute(fwd_subs, walk=True)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
-  gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
+  gb_map = {i:unique_bodies.index(gb) for i,gb in grad_bodies}
   return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
 
 # ctx is grad_output
