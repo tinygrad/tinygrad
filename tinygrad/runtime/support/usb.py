@@ -54,6 +54,7 @@ class USB3:
     # Set configuration and claim interface
     checked(libusb.libusb_set_configuration)(self.handle, 1)
     checked(libusb.libusb_claim_interface)(self.handle, 0)
+    checked(libusb.libusb_set_interface_alt_setting)(self.handle, 0, 0)
 
   def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
     assert len(data) <= len(self._ctrl_mv)
@@ -120,10 +121,10 @@ class CustomASM24Controller:
 
     if value is None: return (data >> (8 * offset)) & ((1 << (8 * size)) - 1)
 
-  def pcie_cfg_req(self, byte_addr:int, bus:int=1, value:int|None=None, size:int=4):
-    assert byte_addr >> 12 == 0 and bus >> 8 == 0
+  def pcie_cfg_req(self, byte_addr:int, bus:int=1, dev:int=0, fn:int=0, value:int|None=None, size:int=4):
+    assert byte_addr >> 12 == 0 and bus >> 8 == 0 and dev >> 5 == 0 and fn >> 3 == 0
     fmt_type = (0x44 if value is not None else 0x4) | int(bus > 0)
-    address = (bus << 24) | (byte_addr & 0xfff)
+    address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xfff)
     return self.pcie_request(fmt_type, address, value, size)
 
   def pcie_mem_write(self, address:int, data:bytes):
