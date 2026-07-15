@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, ParamArg, graph_rewrite, track_rewrites
-from tinygrad.helpers import VIZ, pluralize, all_int
+from tinygrad.helpers import VIZ, pluralize
 
 @dataclass
 class AllocCtx:
@@ -150,11 +150,11 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
 
 def replace_input_view(ctx:AllocCtx, src:UOp):
   if (cv:=src.contiguous_view()) is None or (buf:=cv[0]).op is not Ops.BUFFER: return None
-  # don't view written-to bufs 
+  # don't view written-to bufs
   if buf in ctx.written_bufs: return None
   # don't construct no-op views
   if (offset:=cv[1]) == 0 and src.numel() == buf.numel() and src.dtype == buf.dtype: return None
-  return replace_input_buffer(ctx, UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, cv[1])), src.numel())).reshape(src.shape)
+  return replace_input_buffer(ctx, UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())).reshape(src.shape)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
