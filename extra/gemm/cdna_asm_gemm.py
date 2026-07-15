@@ -1,12 +1,17 @@
 import atexit, functools, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 
 TILE_M, TILE_N, TILE_K = 256, 256, 64
+
+def gemm_program_info(sink:UOp) -> ProgramInfo:
+  info = ProgramInfo.from_sink(sink)
+  return replace(info, outs=(info.globals[0],), ins=info.globals[1:])
 
 # ** FP8 GEMM custom kernel
 
@@ -34,7 +39,7 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
                                  f"-DSCALE_MODE={scale_mode}", f"-DUNUSED_EXTRA_COUNT={len(extra_args)}",
                                  *(["-DLAYER_SCALE=1"] if layer_scale else [])]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+                               UOp(Ops.BINARY, arg=lib)), arg=gemm_program_info(sink))
 
 # ** FP8 AtB GEMM custom kernel
 
@@ -61,7 +66,7 @@ def custom_hk_fp8_atb_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
                                  f"-DSCALE_MODE={scale_mode}", *(["-DLAYER_SCALE=1"] if layer_scale else [])]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+                               UOp(Ops.BINARY, arg=lib)), arg=gemm_program_info(sink))
 
 def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|None=None, layer_num:Tensor|None=None) -> Tensor:
   assert a.dtype == b.dtype == FP8_DTYPE, f"expected fp8, got {a.dtype} {b.dtype}"
@@ -113,7 +118,7 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+                               UOp(Ops.BINARY, arg=lib)), arg=gemm_program_info(sink))
 
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
@@ -202,7 +207,7 @@ def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                                UOp(Ops.BINARY, arg=lib)))
+                                UOp(Ops.BINARY, arg=lib)), arg=gemm_program_info(sink))
 
 @functools.cache
 def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
@@ -220,7 +225,7 @@ def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                                UOp(Ops.BINARY, arg=lib)))
+                                UOp(Ops.BINARY, arg=lib)), arg=gemm_program_info(sink))
 
 def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
   assert a.dtype == b.dtype == dtypes.bfloat16, f"expected bf16, got {a.dtype} {b.dtype}"

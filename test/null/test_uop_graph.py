@@ -607,6 +607,28 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
 
 class TestConstBufferize(unittest.TestCase):
+  def test_mselect_bufferize_drops_singleton_index(self):
+    from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
+    devices = ("NULL", "NULL:1")
+    zero, r0, r1 = UOp.const(dtypes.index, 0), UOp.range(4, 0), UOp.range(4, 1)
+    produced = UOp.new_buffer(devices, 16, dtypes.bfloat16).index(zero, r0, r1) \
+      .bufferize(zero, r0, r1, arg=BufferizeOpts(device=devices, removable=False))
+    src = produced.after(UOp(Ops.NOOP))
+    stage = src.index(0, r0, r1).contiguous().bufferize(r0, r1, arg=BufferizeOpts(device=devices))
+    result = graph_rewrite(stage.mselect(0), pm_const_buffer_folding, name="test")
+    self.assertEqual(result.src[0].op, Ops.AFTER)
+    self.assertEqual(result.shape, stage.shape)
+
+  def test_mselect_bufferize_keeps_non_singleton_index(self):
+    from tinygrad.schedule.rangeify import remove_noop_mselect_bufferize, BufferizeOpts
+    devices = ("NULL", "NULL:1")
+    rhead, r0, r1 = UOp.range(2, 2), UOp.range(4, 0), UOp.range(4, 1)
+    produced = UOp.new_buffer(devices, 32, dtypes.bfloat16).index(rhead, r0, r1) \
+      .bufferize(rhead, r0, r1, arg=BufferizeOpts(device=devices, removable=False))
+    src = produced.after(UOp(Ops.NOOP))
+    stage = src.index(0, r0, r1).contiguous().bufferize(r0, r1, arg=BufferizeOpts(device=devices))
+    self.assertIsNone(remove_noop_mselect_bufferize(stage.mselect(0)))
+
   def test_const_bufferize_with_ranges(self):
     """Test that CONST.BUFFERIZE with ranges is folded correctly.
 

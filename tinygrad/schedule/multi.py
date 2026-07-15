@@ -1,5 +1,5 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, resolve
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -76,7 +76,9 @@ def reduce_multi(root:UOp, multi:UOp):
     # allreduce in pre-cast dtype when sum_acc_dtype promoted from bf16/half
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
-      return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
+      local_to_reduce = multi.src[0].src[0].reshape(local.shape) if all(resolve(s == 1) for s in multi.src[0].shape[:num_axes]) \
+                        else local.cast(orig_dtype)
+      return local_to_reduce.allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   new_axis = multi.axis - num_axes if multi.axis is not None else None

@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, graph_rewrite
+from tinygrad.schedule.multi import multi_pm
 
 class TestRingAllReduce(unittest.TestCase):
   def test_schedule_ring(self):
@@ -82,6 +83,14 @@ class TestAllreduceCast(unittest.TestCase):
     dtypes_on = self._get_copy_dtypes(dtypes.float, allreduce_cast=1)
     dtypes_off = self._get_copy_dtypes(dtypes.float, allreduce_cast=0)
     self.assertEqual(dtypes_on, dtypes_off)
+
+  def test_singleton_local_reduce_uses_original_dtype(self):
+    ds = tuple(f"NULL:{i}" for i in range(8))
+    with Context(ALLREDUCE_CAST=1):
+      t = Tensor.empty(8, 16, dtype=dtypes.bfloat16, device="NULL").shard(ds, axis=0).realize()
+      lowered = graph_rewrite(t.sum(0).uop, multi_pm)
+    allreduce = next(u for u in lowered.toposort() if u.op is Ops.ALLREDUCE)
+    self.assertNotIn(Ops.CAST, {u.op for u in allreduce.src[0].toposort()})
 
 if __name__ == '__main__':
   unittest.main()

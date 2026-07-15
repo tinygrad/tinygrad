@@ -317,6 +317,14 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
+def remove_noop_mselect_bufferize(m:UOp):
+  if len(m.src) != 1 or (b:=m.src[0]).op is not Ops.STAGE or len(b.src) < 2: return None
+  if (c:=b.src[0]).op is not Ops.CONTIGUOUS or len(c.src) != 1 or (idx:=c.src[0]).op is not Ops.INDEX: return None
+  if idx.src[0].op is not Ops.AFTER or idx.dtype != b.dtype or len(idx.src[1:]) != len(idx.src[0].shape): return None
+  live_idxs = tuple(x for s,x in zip(idx.src[0].shape, idx.src[1:]) if not (x.op is Ops.CONST and x.arg == 0 and resolve(s == 1)))
+  if live_idxs != b.src[1:] or not resolve(prod(idx.src[0].shape) == prod(b.shape)): return None
+  return m.replace(src=(idx.src[0].reshape(b.shape),))
+
 def normalize_slice_source(x:UOp) -> UOp|None:
   if x.src[0].op is not Ops.INDEX or x.src[1].op is not Ops.CONST: return None
   return UOp(Ops.SLICE, x.dtype, (x.src[0].src[0], x.src[1]), x.arg)
@@ -344,6 +352,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"),), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  (UPat(Ops.MSELECT, name="m"), remove_noop_mselect_bufferize),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST

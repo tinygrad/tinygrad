@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
+from tinygrad.uop.ops import UOp, KernelInfo
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, gemm_program_info
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -90,6 +91,15 @@ def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpu
 
 def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
+
+class TestGemmProgramInfo(unittest.TestCase):
+  def test_opaque_gemm_accesses(self):
+    c, a, b = (UOp.param(i, dtypes.bfloat16, (16,), "NULL") for i in range(3))
+    sink = UOp.sink(c, a, b, UOp.special(512, "lidx0"), UOp.special(4, "gidx0"), arg=KernelInfo("gemm"))
+    info = gemm_program_info(sink)
+    self.assertEqual(info.globals, (0, 1, 2))
+    self.assertEqual(info.outs, (0,))
+    self.assertEqual(info.ins, (1, 2))
 
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
