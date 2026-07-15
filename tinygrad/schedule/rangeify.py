@@ -490,7 +490,7 @@ to_define_global = PatternMatcher([
 ])
 
 rangeify_codegen = PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+  (UPat.var("x").f(Ops.CONTIGUOUS), lambda x: x),
 
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
