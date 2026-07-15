@@ -17,13 +17,23 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
+def safe_self_store(dest:UOp, src:UOp) -> bool:
+  if dest.shape != src.shape: return False
+  reaches_dest: dict[UOp, bool] = {}
+  unsafe = {Ops.PERMUTE, Ops.FLIP, Ops.SHRINK, Ops.PAD, Ops.STACK}
+  for s in src.toposort(gate=lambda s: s.op not in {Ops.CONTIGUOUS, Ops.AFTER}):
+    if s.op is Ops.REDUCE: return False
+    reaches_dest[s] = s is dest.base or any(reaches_dest.get(x, False) for x in s.src)
+    if reaches_dest[s] and s.op in unsafe: return False
+  return reaches_dest.get(src, False)
+
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
   if src.op in {Ops.COPY, Ops.SLICE} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.backward_slice_with_self: ctx[src] = None
+  if dest.base in src.backward_slice_with_self and not safe_self_store(dest, src): ctx[src] = None
 
 pm_generate_realize_map = PatternMatcher([
   # always realize

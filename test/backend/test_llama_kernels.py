@@ -1,6 +1,7 @@
 import unittest, functools
 from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
 from tinygrad.helpers import getenv
+from examples.mlperf.optim import GradAccClipAdamW
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
@@ -114,6 +115,22 @@ class TestLocalAmax(unittest.TestCase):
     out = (x * local_abs_max(x)).clone().realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
+
+class TestMasterWeightUpdate(unittest.TestCase):
+  def test_master_is_quantization_source(self):
+    initial = Tensor([[[1., 2.], [3., 4.]]]).contiguous().realize()
+    param = initial.cast(dtypes.bfloat16).contiguous().realize().is_param_()
+    master = initial.clone().realize()
+    update = Tensor.full(param.shape, 0.125).contiguous().realize()
+    optim = GradAccClipAdamW([param], lr=0.25, weight_decay=0.1)
+    expected_master = (initial - (update + 0.25 * 0.1 * initial)).realize()
+    optim.lr.realize()
+    param.assign(optim._apply_update(param, update, master))
+    GlobalCounters.reset()
+    Tensor.realize(param, master)
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertTrue(master.allclose(expected_master, atol=1e-6, rtol=1e-6).item())
+    self.assertTrue(param.allclose(expected_master.cast(dtypes.bfloat16), atol=0, rtol=0).item())
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedAddRMSNorm(unittest.TestCase):

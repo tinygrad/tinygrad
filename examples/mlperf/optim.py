@@ -95,7 +95,7 @@ class GradAccClipAdamW(Optimizer):
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
-    if master is not None: master.assign(new_w)
+    if master is not None: new_w = master.assign(new_w)
     if self.zero: new_w = self._zero_gather(new_w)
     # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
     offloaded = master is not None and master.device != t.device
