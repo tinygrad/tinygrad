@@ -8,13 +8,14 @@ from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import run_linear
 from test.helpers import replace_opts
 
-def realize_with_opts(t:Tensor, opts:tuple[Opt, ...]|None=()) -> Tensor:
-  if opts is None: opts = ()
+def realize_with_opts(t:Tensor, opts:tuple[Opt, ...]|None=None) -> Tensor:
   linear = t.schedule_linear()
-  call = linear.src[-1]
-  assert call.op is Ops.CALL and call.src[0].op is Ops.SINK
-  call = call.replace(src=(replace_opts(call.src[0], list(opts)),)+call.src[1:])
-  run_linear(linear.replace(src=linear.src[:-1]+(call,)))
+  if opts is not None:
+    call = linear.src[-1]
+    assert call.op is Ops.CALL and call.src[0].op is Ops.SINK
+    call = call.replace(src=(replace_opts(call.src[0], list(opts)),)+call.src[1:])
+    linear = linear.replace(src=linear.src[:-1]+(call,))
+  run_linear(linear)
   return t
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
