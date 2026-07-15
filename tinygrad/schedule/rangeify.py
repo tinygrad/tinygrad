@@ -432,7 +432,6 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
   range:int = 0
-  opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   param = UOp(Ops.PARAM, src=(UOp.const(dtypes.int, prod(buf.max_shape)),),
@@ -491,12 +490,8 @@ to_define_global = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
 
-def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
-  if isinstance(x.arg, tuple) and all(isinstance(y, Opt) for y in x.arg): ctx.opts = x.arg
-  return x.src[0]
-
 rangeify_codegen = PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), get_contiguous),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
 
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
@@ -520,7 +515,7 @@ def split_store(x:UOp) -> UOp|None:
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
   if stored.op is Ops.COPY: ret = stored.replace(src=stored.src + ret.ended_ranges)
-  else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
+  else: ret = ret.sink(arg=KernelInfo())
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
