@@ -121,8 +121,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return dtypes.bool
     case Ops.WHERE:
       assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
-      assert src[1].dtype == src[2].dtype, f"dtype mismatch in where {src[1].dtype} != {src[2].dtype}"
-      return src[1].dtype
+      if src[1].dtype == src[2].dtype: return src[1].dtype
+      return least_upper_dtype(src[1].dtype, src[2].dtype)
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
       if all_same(dts:=[x.dtype for x in src]): return dts[0]
@@ -159,9 +159,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
-    # TODO: support dtype broadcasting (promotion)
-    if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
-    return src[0].dtype
+    if all_same(dts:=[x.dtype for x in src]): return dts[0]
+    return least_upper_dtype(*dts)
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
