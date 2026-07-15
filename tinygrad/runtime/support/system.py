@@ -132,8 +132,7 @@ class _System:
 
       bar_off += 8 if bar_64 else 4
 
-    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0,
-                     value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
     return bars
 
   def flock_acquire(self, name:str) -> int:
@@ -232,8 +231,8 @@ class USBPCIDevice(PCIDevice):
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
-  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, size=size)
-  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, value=value, size=size)
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
 
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):

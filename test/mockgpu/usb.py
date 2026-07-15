@@ -166,7 +166,7 @@ class MockUSB3:
     elif request == 0xF0:
       address_lo, address_hi, payload = struct.unpack('<III', data)
       address, fmt_type, byte_en = address_lo | (address_hi << 32), value & 0xFF, value >> 8
-      if index == 1: self._bulk_write_op = ("pcie_write", address, payload)
+      if index == 1: self._bulk_write_op = ("pcie_write", address, payload * 4)
       elif index == 2: self._bulk_read_op = ("pcie_read", address, payload * 4)
       else:
         assert index == 0 and byte_en
