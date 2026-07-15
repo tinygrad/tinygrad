@@ -156,8 +156,12 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
       return arg
     case Ops.CONST:
-      # TODO: need const refactor to bool/weakint/weakfloat
-      return None
+      # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
+      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is the lattice bottom, typed by its consumer
+      if isinstance(arg, bool): return dtypes.bool
+      if isinstance(arg, int): return dtypes.weakint
+      if isinstance(arg, float): return dtypes.weakfloat
+      raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
@@ -171,7 +175,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    # CONST derives its dtype by value only when the constructor omits one; an explicit (strong) const dtype is legal until the field is removed
+    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
