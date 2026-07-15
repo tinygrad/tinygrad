@@ -1,4 +1,4 @@
-import ctypes, struct, time, functools
+import ctypes, struct, time, functools, itertools
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -31,8 +31,8 @@ class USB3:
     libusb.libusb_free_device_list(devs, 1)
     return ret
 
-  def __init__(self, dev:c.POINTER[libusb.struct_libusb_device]):
-    self._transferred = ctypes.c_int(0)
+  def __init__(self, dev:c.POINTER[libusb.struct_libusb_device], *args, **kwargs):
+    self._tags, self._transferred = itertools.count(1), ctypes.c_int(0)
     self._bulk_buf, self._bulk_mv = alloc_cbuffer(4 << 20)
     self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
 
@@ -44,7 +44,7 @@ class USB3:
     checked(libusb.libusb_get_device_descriptor)(libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
     _ret = checked(libusb.libusb_get_string_descriptor_ascii)(self.handle, _desc.iProduct, _buf, 256)
     self.product = bytes(_buf[:_ret]).decode("ascii", errors="replace")
-    assert self.product.startswith("custom")
+    assert self.product.startswith("custom") or self.product.startswith("AS2462")
 
     # Detach kernel driver if needed
     if checked(libusb.libusb_kernel_driver_active)(self.handle, 0):
@@ -77,6 +77,14 @@ class USB3:
     if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
     checked(libusb.libusb_bulk_transfer, "bulk IN 0x81 failed")(self.handle, 0x81, self._bulk_buf, length, self._transferred, timeout)
     return self._bulk_mv[:self._transferred.value]
+
+  # NOTE: keep it for flash.py
+  def send_batch(self, cdbs:list[bytes], odata:list[bytes|None]|None=None):
+    for cdb, data in zip(cdbs, odata or [None] * len(cdbs)):
+      self.bulk_write(struct.pack("<IIIBBB16s", 0x43425355, tag:=next(self._tags), len(data) if data is not None else 0, 0, 0, len(cdb), cdb))
+      if data is not None: self.bulk_write(data)
+      sig, rtag, _, status = struct.unpack("<IIIB", self.bulk_read(13, timeout=2000))
+      assert (sig, rtag, status) == (0x53425355, tag, 0)
 
 class CustomASM24Controller:
   def __init__(self, usb:USB3):
