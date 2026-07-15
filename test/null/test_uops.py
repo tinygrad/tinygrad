@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
-from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
+from tinygrad.dtype import dtypes, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_shared
@@ -39,6 +39,12 @@ class TestSafeCast(unittest.TestCase):
 class TestExecALU(unittest.TestCase):
   def test_sqrt(self):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
+
+  def test_invalid_poison(self):
+    # Invalid poisons any binary op regardless of result dtype: a comparison must not fold to a boolean
+    self.assertIs(exec_alu(Ops.CMPLT, dtypes.bool, (Invalid, 1)), Invalid)
+    self.assertIs(exec_alu(Ops.CMPNE, dtypes.bool, (Invalid, 1)), Invalid)
+    self.assertIs(exec_alu(Ops.ADD, dtypes.index, (Invalid, 1)), Invalid)
 
   def test_div(self):
     self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (8, 2)), 4)
