@@ -145,7 +145,8 @@ class MockUSB3:
   def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
   def __init__(self, *args, **kwargs):
     self.product = "custom mock"
-    self._bulk_op: tuple[str, int, int]|None = None
+    self._bulk_read_op: tuple[str, int, int]|None = None
+    self._bulk_write_op: tuple[str, int, int]|None = None
     self._f0_reply = bytes(8)
 
   @property
@@ -159,12 +160,14 @@ class MockUSB3:
     elif request == 0xE5:
       self.state._xram_write_byte(value, index)
     elif request == 0xF2:
-      self._bulk_op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000, (value & 0x7FFF) * 512)
+      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000, (value & 0x7FFF) * 512)
+      if value & 0x8000: self._bulk_read_op = op
+      else: self._bulk_write_op = op
     elif request == 0xF0:
       address_lo, address_hi, payload = struct.unpack('<III', data)
       address, fmt_type, byte_en = address_lo | (address_hi << 32), value & 0xFF, value >> 8
-      if index == 1: self._bulk_op = ("pcie_write", address, payload)
-      elif index == 2: self._bulk_op = ("pcie_read", address, payload * 4)
+      if index == 1: self._bulk_write_op = ("pcie_write", address, payload)
+      elif index == 2: self._bulk_read_op = ("pcie_read", address, payload * 4)
       else:
         assert index == 0 and byte_en
         offset = (byte_en & -byte_en).bit_length() - 1
@@ -186,24 +189,24 @@ class MockUSB3:
     return memoryview(data[:length])
 
   def bulk_write(self, data:bytes, timeout:int=1000):
-    assert self._bulk_op is not None
-    op, address, size = self._bulk_op
+    assert self._bulk_write_op is not None
+    op, address, size = self._bulk_write_op
     assert len(data) == size
     if op == "sram_write":
       host_addr, region_size = self.state._dma_regions[address]
       ctypes.memmove(host_addr, data, min(len(data), region_size))
     elif op == "pcie_write": self.state._pcie_write(address, data)
     else: raise RuntimeError(f"cannot bulk write for {op}")
-    self._bulk_op = None
+    self._bulk_write_op = None
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
-    assert self._bulk_op is not None
-    op, address, size = self._bulk_op
+    assert self._bulk_read_op is not None
+    op, address, size = self._bulk_read_op
     assert length == size
     if op == "sram_read":
       host_addr, region_size = self.state._dma_regions[address]
       data = bytes((ctypes.c_ubyte * min(length, region_size)).from_address(host_addr))
     elif op == "pcie_read": data = self.state._pcie_read(address, length)
     else: raise RuntimeError(f"cannot bulk read for {op}")
-    self._bulk_op = None
+    self._bulk_read_op = None
     return memoryview(data)
