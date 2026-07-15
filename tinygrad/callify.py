@@ -9,6 +9,7 @@ class AllocCtx:
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
   bases: set[UOp] = field(default_factory=set)
   assigns: list[UOp] = field(default_factory=list)
+  written_bufs: set[UOp] = field(default_factory=set)
   replacements: list[UOp] = field(default_factory=list)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
@@ -42,6 +43,8 @@ def replace_contig_with_store_after(u:UOp):
   if u.device is None: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
+  # drop contiguous if already contiguous
+  if u.src[0].op in GroupOp.Movement|{Ops.BITCAST} and u.src[0].contiguous_view_offset() is not None: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if disk_like(u): return u.rtag(None)
   buf = u.empty_like()
@@ -51,41 +54,6 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
-
-def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
-  if (offset := src.contiguous_view_offset()) is None: return None
-  buf = src.base
-  if buf.op is Ops.SLICE:
-    byte_offset = buf.src[1].arg * buf.src[0].dtype.itemsize + offset * src.dtype.itemsize
-    buf = buf.src[0]
-    if byte_offset % buf.dtype.itemsize != 0: return None
-    offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
-
-def contiguous_mops_to_view(c:UOp, src:UOp):
-  """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
-  buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
-  if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
-
-  # no symbolic shape
-  if not all_int(c.shape): return None
-
-  if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
-    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
-    return c.replace(src=(view,)) if c.op is Ops.COPY else view
-
-  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
-  if not isinstance(c.device, str):
-    from tinygrad.schedule.multi import multi_pm
-    resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
-    if resolved.op is not Ops.MULTI: return None
-    if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.reshape(resolved.src[0].shape).multi(resolved.arg).contiguous(tag=c.tag)
-
-  return None
 
 def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # how output s lands in the caller's buffer t, or None if it must be copied into t
@@ -138,9 +106,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
-
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
    copy.replace(src=(x,)+copy.src[1:], tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
@@ -183,6 +148,14 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].expr if b.op is Ops.BIND else None,
                    b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
+def replace_input_view(ctx:AllocCtx, src:UOp):
+  if (cv:=src.contiguous_view()) is None or (buf:=cv[0]).op is not Ops.BUFFER: return None
+  # don't view written-to bufs 
+  if buf in ctx.written_bufs: return None
+  # don't construct no-op views
+  if (offset:=cv[1]) == 0 and src.numel() == buf.numel() and src.dtype == buf.dtype: return None
+  return replace_input_buffer(ctx, UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, cv[1])), src.numel())).reshape(src.shape)
+
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
@@ -193,7 +166,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.index)), name="b"), replace_input_buffer),
+  (UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"), replace_input_view),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
@@ -215,6 +188,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
+  # get all the written-to bufs, never view these
+  ctx.written_bufs = {store.src[0].buf_uop for after in ctx.assigns if after.op is Ops.AFTER for store in after.src[1:] if store.op is Ops.STORE}
   ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
