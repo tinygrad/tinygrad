@@ -43,8 +43,6 @@ def replace_contig_with_store_after(u:UOp):
   if u.device is None: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
-  # drop contiguous if already contiguous
-  if u.src[0].op in GroupOp.Movement|{Ops.BITCAST} and u.src[0].contiguous_view_offset() is not None: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if disk_like(u): return u.rtag(None)
   buf = u.empty_like()
@@ -54,6 +52,15 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
+
+def remove_contiguous_view(src:UOp):
+  # drop the contiguous if this will be a bufferview
+  if (view:=src.contiguous_view()) is not None and view[0].op is Ops.BUFFER: return src
+  if src.base.op is not Ops.MULTI or isinstance(src.device, str): return None
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops
+  from tinygrad.schedule.multi import multi_pm
+  resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
+  return resolved if resolved.op is Ops.MULTI and (view:=resolved.src[0].contiguous_view()) is not None and view[0].op is Ops.BUFFER else None
 
 def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # how output s lands in the caller's buffer t, or None if it must be copied into t
@@ -105,6 +112,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
 
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+
+  # remove contiguous when movement ops collapse to a contiguous range
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),)), remove_contiguous_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
