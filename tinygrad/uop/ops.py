@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, Invalid, AddrSpace
+from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
@@ -119,6 +119,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
+    case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIPROCAL:
+      return dtypes.weakfloat if src[0].dtype == dtypes.weakint else least_upper_float(src[0].dtype)
     case Ops.WHERE:
       assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
       if src[1].dtype == src[2].dtype: return src[1].dtype
