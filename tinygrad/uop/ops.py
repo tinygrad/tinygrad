@@ -1661,13 +1661,16 @@ def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) i
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 def select_dtype(u): return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
+def lower_alu_dtype(u, x, y, *ds):
+  dt = least_upper_dtype(x.dtype, y.dtype, *ds)
+  src = u.src[:-2]+(x.cast(dt), y.cast(dt))
+  return src[0].alu(u.op, *src[1:]).cast(u.dtype)
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
-  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))), lambda u,x,y:
-    x.cast(dt:=least_upper_dtype(select_dtype(u), x.dtype, y.dtype)).alu(u.op, y.cast(dt)).cast(u.dtype)),
+  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))),
+   lambda u,x,y: lower_alu_dtype(u, x, y, select_dtype(u))),
   (UPat(Ops.CONST, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
-  (UPat(Ops.WHERE, dtypes.index, src=(UPat.var("cond"), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))), lambda cond,x,y:
-    cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt)).cast(dtypes.index)),
+  (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index)), name="u"), lower_alu_dtype),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.index)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.index), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.index)),
