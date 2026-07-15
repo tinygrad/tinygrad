@@ -260,6 +260,13 @@ pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
 ])+pm_mops
 
+# float ALUs need a float operand
+# make that cast explicit before the decomps, which expand SIN/LOG2/EXP2 into float polynomials and assert a float operand
+pm_cast_float_alu = PatternMatcher([
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(name="x"),), name="u"),
+   lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -326,6 +333,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
+
+  sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
   # **** decomps ****
 
