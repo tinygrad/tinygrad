@@ -26,6 +26,22 @@ class TestDTypeFromUOp(unittest.TestCase):
     idx = UOp.range(4, 0)
     self.assertEqual(idx.valid(idx < 4).dtype, dtypes.index)
 
+  def test_const_dtype_from_value(self):
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), True), dtypes.bool)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), 3), dtypes.weakint)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), ConstFloat(3.0)), dtypes.weakfloat)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), Invalid), dtypes.bool)
+    self.assertRaises(TypeError, dtype_from_uop, Ops.CONST, (), (1, 2))
+
+  @Context(SPEC=2)
+  def test_const_default_dtype_is_derived(self):
+    self.assertEqual(UOp(Ops.CONST, arg=3).dtype, dtypes.weakint)
+    self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
+    self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
+    self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
+    # an explicit (strong) const dtype is legal until the field is removed
+    self.assertEqual(UOp.const(dtypes.int32, 3).dtype, dtypes.int32)
+
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
     a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
