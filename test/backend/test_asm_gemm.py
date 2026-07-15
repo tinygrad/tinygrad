@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, gemm_program_info
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
@@ -92,6 +92,20 @@ def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpu
 def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
 
+def run_bf16_weight_gemm(M:int, N:int, K:int) -> None:
+  Tensor.manual_seed(0)
+  a = Tensor.randn(M, K, dtype=dtypes.bfloat16).realize()
+  w = Tensor.randn(N, K, dtype=dtypes.bfloat16).realize()
+  out = asm_gemm(a, w.T)
+  out.sum().backward()
+  ref = (a.detach().float() @ w.detach().float().T).cast(dtypes.bfloat16)
+  Tensor.realize(out, a.grad, w.grad, ref)
+  if Device.DEFAULT.startswith("NULL"): return
+  atol, rtol = 2e-1, 1e-2
+  assert out.allclose(ref, atol=atol, rtol=rtol).item(), "forward mismatch"
+  assert a.grad.allclose(w.detach().float().sum(0), atol=atol, rtol=rtol).item(), "grad_a mismatch"
+  assert w.grad.allclose(a.detach().float().sum(0).reshape(1, K).expand(N, K), atol=atol, rtol=rtol).item(), "grad_w mismatch"
+
 class TestGemmProgramInfo(unittest.TestCase):
   def test_opaque_gemm_accesses(self):
     c, a, b = (UOp.param(i, dtypes.bfloat16, (16,), "NULL") for i in range(3))
@@ -100,6 +114,14 @@ class TestGemmProgramInfo(unittest.TestCase):
     self.assertEqual(info.globals, (0, 1, 2))
     self.assertEqual(info.outs, (0,))
     self.assertEqual(info.ins, (1, 2))
+
+  @unittest.skipUnless(Device.DEFAULT.startswith("NULL") and is_cdna4(), "requires NULL CDNA4")
+  def test_llama_output_uses_physical_weight(self):
+    a = Tensor.empty(1, 256, 4096, dtype=dtypes.bfloat16).realize()
+    w = Tensor.empty(128256, 4096, dtype=dtypes.bfloat16).realize()
+    out = asm_gemm(a, w.T)
+    gemm = next(u for u in out.uop.toposort() if u.op is Ops.CALL)
+    self.assertIs(gemm.src[3], w.uop)
 
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
@@ -130,6 +152,7 @@ class TestAsmGEMM(unittest.TestCase):
       self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 256)
+  def test_weight_view(self): run_bf16_weight_gemm(256, 256, 256)
 
   def test_verify_with_numpy(self):
     import numpy as np

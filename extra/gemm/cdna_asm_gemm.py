@@ -425,7 +425,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
                              has_w_post=w_post_scale is not None, has_layer_num=layer_num is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, *((layer_num,) if layer_num is not None else ()), fxn=fxn, grad_fxn=bw)[0]
     elif a.dtype == dtypes.bfloat16:
-      out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
+      b_physical = Tensor(b.uop.src[0]) if b.uop.op is Ops.PERMUTE and b.uop.arg == (1, 0) else b.T
+      out = Tensor.custom_kernel(out, a, b_physical, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
   if k_sharded: out = out.sum(0)
