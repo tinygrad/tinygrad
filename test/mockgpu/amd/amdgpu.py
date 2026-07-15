@@ -9,7 +9,7 @@ MOCKGPU_ARCH = "cdna4" if DEV.arch == "gfx950" else "rdna4" if DEV.arch.startswi
 assert (ma:=getenv("MOCKGPU_ARCH", "")) == "", "MOCKGPU_ARCH is deprecated, use DEV=" + \
   str(replace(DEV.value, arch={"cdna4":"gfx950", "rdna4":"gfx1201"}.get(ma, "gfx1100"))) # type: ignore
 GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000, "cdna4": 90500}[MOCKGPU_ARCH]
-import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
+import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4, tinygrad.runtime.autogen.am.sdma_6_0_0 as sdma
 
 SDMA_MAX_COPY_SIZE = 0x400000
 
@@ -275,6 +275,7 @@ class SDMAExecutor(AMDQueue):
       elif op == amd_gpu.SDMA_OP_POLL_REGMEM: cont = self._execute_poll_regmem()
       elif op == amd_gpu.SDMA_OP_GCR: self._execute_gcr()
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
+      elif op == sdma.SDMA_OP_WRITE: self._execute_write()
       elif op == amd_gpu.SDMA_OP_TIMESTAMP: self._execute_timestamp()
       elif op == 32: self.rptr[0] += 4  # SDMA_OP_DUMMY_TRAP: pipeline flush, no interrupt
       else: raise RuntimeError(f"Unknown SDMA op {op}")
@@ -288,6 +289,12 @@ class SDMAExecutor(AMDQueue):
   def _execute_trap(self):
     struct = sdma_pkts.trap.from_address(self.base + self.rptr[0] % self.size)
     self.rptr[0] += ctypes.sizeof(struct)
+
+  def _execute_write(self):
+    packet = to_mv(self.base + self.rptr[0] % self.size, 16).cast('I')
+    addr, count = packet[1] | packet[2] << 32, packet[3] + 1
+    ctypes.memmove(self.gpu.translate_addr(addr), self.base + self.rptr[0] % self.size + 16, count * 4)
+    self.rptr[0] += (4 + count) * 4
 
   def _execute_poll_regmem(self):
     struct = sdma_pkts.poll_regmem.from_address(self.base + self.rptr[0] % self.size)
