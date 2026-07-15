@@ -141,15 +141,13 @@ class _System:
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
-    if os.path.exists(lock_name:=temp(name)): lock_fd = os.open(lock_name, os.O_RDWR)
-    else: lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
+    if os.path.exists(lock_name:=temp(name)): self.lock_fd = os.open(lock_name, os.O_RDWR)
+    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
 
-    try: fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-      os.close(lock_fd)
-      raise RuntimeError(f"Failed to acquire lock file {name}. `sudo lsof {lock_name}` may help identify the process holding the lock.")
+    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError: raise RuntimeError(f"Failed to acquire lock file {name}. `sudo lsof {lock_name}` may help identify the process holding the lock.")
 
-    return lock_fd
+    return self.lock_fd
 
 System = _System()
 
@@ -223,15 +221,11 @@ class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    try:
-      usb = USB3(dev)
-      if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-      self.usb: CustomASM24Controller = CustomASM24Controller(usb)
-      self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
-      self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
-    except BaseException:
-      os.close(self.lock_fd)
-      raise
+    usb = USB3(dev)
+    if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
+    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
+    self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
