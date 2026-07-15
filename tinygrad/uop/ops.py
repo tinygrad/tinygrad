@@ -10,7 +10,7 @@ from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten
-from tinygrad.helpers import colored, ansilen, printable
+from tinygrad.helpers import colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
 
@@ -830,7 +830,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device or ())): return None
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
-    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
+    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset", bottom_up=True)
     if out.op is not Ops.INDEX or not (b:=out.src[0]).tag or (c:=out.src[1]).op is not Ops.CONST or not isinstance(c.arg, int): return None
     return b.rtag(None), c.arg
 
@@ -1716,6 +1716,9 @@ pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
 
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
+  # never continue into other ops (but allow indexing simplifications)
+  (UPat(GroupOp.All-GroupOp.Movement-{Ops.BITCAST, Ops.INDEX}, dtypes.all), lambda: panic(BottomUpGate)),
+  # normalize to 1d bitcasts
   (UPat(Ops.BITCAST, name="b"), lambda b: b.src[0].flatten().bitcast(b.dtype).reshape(b.shape) if len(b.shape) != 1 else None),
   (UPat(Ops.BITCAST, name="b").index(UPat.cvar("c")), lambda ctx, b, c:
    b.src[0].flatten().index(UOp.range(ctx.numel() * (osz:=b.element_size())//(isz:=b.src[0].element_size()), 0) + (c * osz//isz)) if b.tag else None),
