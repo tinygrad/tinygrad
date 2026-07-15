@@ -1421,6 +1421,7 @@ def train_llama3():
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
     p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
   grads = [p.grad for p in optim.params]
+  loss_acc = Tensor.zeros(1, device=device if is_sharding else Device.DEFAULT, dtype=dtypes.float32).contiguous().realize()
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1478,8 +1479,8 @@ def train_llama3():
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)
 
-    loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+    loss_acc.assign(loss_acc + loss.flatten().float())
+    return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1492,9 +1493,11 @@ def train_llama3():
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+    loss_cpu = loss_acc.to("CPU")
+    loss_acc.assign(0)
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax, loss_cpu, loss_acc)
 
-    return lr_cpu, grad_norm_cpu
+    return loss_cpu, lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Context(TRAINING=0)
@@ -1549,7 +1552,7 @@ def train_llama3():
       st = time.perf_counter()
 
       stopped = False
-      losses, data_time, dev_time = [], 0, 0
+      loss_count, data_time, dev_time = 0, 0, 0
       for _ in range(grad_acc if i >= 2 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
@@ -1558,16 +1561,16 @@ def train_llama3():
           break
         mst = time.perf_counter()
         data_time += mst - ist
-        losses.append(minibatch(tokens).item())
+        minibatch(tokens)
+        loss_count += 1
         dev_time += time.perf_counter() - mst
       if stopped: break
 
       gt = time.perf_counter()
       ret = optim_step()
-      lr, grad_norm = ret[0].item(), ret[1].item()
+      loss, lr, grad_norm = ret[0].item() / loss_count, ret[1].item(), ret[2].item()
       et = time.perf_counter()
 
-      loss = sum(losses) / len(losses)
       optim_time = et - gt
       dev_time += optim_time
       step_time = et - st
