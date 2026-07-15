@@ -34,6 +34,7 @@ class USB3:
   def __init__(self, dev:c.POINTER[libusb.struct_libusb_device]):
     self._transferred = ctypes.c_int(0)
     self._bulk_buf, self._bulk_mv = alloc_cbuffer(4 << 20)
+    self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: checked(libusb.libusb_open)(dev, x))
 
@@ -54,6 +55,16 @@ class USB3:
     checked(libusb.libusb_set_configuration)(self.handle, 1)
     checked(libusb.libusb_claim_interface)(self.handle, 0)
 
+  def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
+    assert len(data) <= len(self._ctrl_mv)
+    self._ctrl_mv[:len(data)] = data
+    assert checked(libusb.libusb_control_transfer)(self.handle, 0x40, request, value, index, self._ctrl_buf, len(data), timeout) == len(data)
+
+  def control_read(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> memoryview:
+    assert length <= len(self._ctrl_mv)
+    assert checked(libusb.libusb_control_transfer)(self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout) == length
+    return self._ctrl_mv[:length]
+
   def bulk_write(self, payload:bytes, timeout:int=1000):
     if len(payload) > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(len(payload))
     self._bulk_mv[:len(payload)] = payload
@@ -69,7 +80,6 @@ class USB3:
 class CustomASM24Controller:
   def __init__(self, usb:USB3):
     self.usb = usb
-    self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
 
     # Custom firmware now boots with PCIe off. Power it on before probing the link.
     ltssm = self.read(0xB450, 1)[0]
@@ -77,19 +87,14 @@ class CustomASM24Controller:
     ltssm = self.read(0xB450, 1)[0]
     if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
 
-  def set_pcie_power(self, enabled:bool, timeout:int=10000):
-    checked(libusb.libusb_control_transfer,
-            f"F3 PCIe power {'on' if enabled else 'off'} failed")(self.usb.handle, 0x40, 0xF3, int(enabled), 0, None, 0, timeout)
+  def set_pcie_power(self, enabled:bool, timeout:int=10000): self.usb.control_write(0xF3, value=int(enabled), timeout=timeout)
 
   def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0):
-    struct.pack_into('<III', self._ctrl_mv, 0, address & 0xFFFFFFFF, address >> 32, value)
-    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF0, fmt_type | (byte_en << 8), mode & 0x03, self._ctrl_buf, 12, 5000)
-    assert ret == 12, f"F0 OUT failed: {ret}"
+    self.usb.control_write(0xF0, fmt_type | (byte_en << 8), mode & 0x03, struct.pack('<III', address & 0xFFFFFFFF, address >> 32, value), 5000)
 
   def _f0_in(self) -> tuple[int, int, int]:
-    ret = libusb.libusb_control_transfer(self.usb.handle, 0xC0, 0xF0, 0, 0, self._ctrl_buf, 8, 5000)
-    assert ret == 8, f"F0 IN failed: {ret}"
-    return struct.unpack_from('<I', self._ctrl_mv)[0], (self._ctrl_mv[4] >> 5) & 0x7, self._ctrl_mv[7]
+    data = self.usb.control_read(0xF0, 8, timeout=5000)
+    return struct.unpack_from('<I', data)[0], (data[4] >> 5) & 0x7, data[7]
 
   def pcie_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4, cnt:int=10):
     assert size > 0 and size <= 4, f"Invalid size {size}"
@@ -138,16 +143,12 @@ class CustomASM24Controller:
     result = b''
     for off in range(0, length, 0xFF):
       chunk = min(0xFF, length - off)
-      ret = libusb.libusb_control_transfer(self.usb.handle, 0xC0, 0xE4, base_addr + off, 0, self._ctrl_buf, chunk, 1000)
-      assert ret == chunk, f"read(0x{base_addr + off:04X}, {chunk}) failed: {ret}"
-      result += bytes(self._ctrl_mv[:ret])
+      result += self.usb.control_read(0xE4, chunk, value=base_addr + off)
     return result
 
   def write(self, base_addr:int, data:bytes):
     """Write to chip XDATA via vendor control OUT (bRequest=0xE5). wValue=addr, wIndex=val."""
-    for off, val in enumerate(data):
-      checked(libusb.libusb_control_transfer,
-              f"write(0x{base_addr + off:04X}, 0x{val:02X}) failed")(self.usb.handle, 0x40, 0xE5, base_addr + off, val, None, 0, 1000)
+    for off, val in enumerate(data): self.usb.control_write(0xE5, value=base_addr + off, index=val)
 
   def scsi_write(self, buf:bytes):
     """Write to SRAM via 0xF2 vendor command + bulk OUT."""
@@ -155,13 +156,12 @@ class CustomASM24Controller:
     sectors = len(buf_padded) // 512
     num_slots = ceildiv(len(buf_padded), 0x4000)  # 16KB per slot
     windex = (num_slots & 0xFF) << 8
-    checked(libusb.libusb_control_transfer, "F2 setup failed")(self.usb.handle, 0x40, 0xF2, sectors, windex, None, 0, 1000)
+    self.usb.control_write(0xF2, value=sectors, index=windex)
     self.usb.bulk_write(buf_padded)
 
   def scsi_read_arm(self, size:int):
     windex = (ceildiv(size, 0x4000) & 0xFF) << 8
-    checked(libusb.libusb_control_transfer,
-            "F2 read arm failed")(self.usb.handle, 0x40, 0xF2, (ceildiv(size, 512) & 0x7FFF) | 0x8000, windex, None, 0, 1000)
+    self.usb.control_write(0xF2, value=(ceildiv(size, 512) & 0x7FFF) | 0x8000, index=windex)
 
   def scsi_read(self, size:int) -> memoryview: return self.usb.bulk_read(round_up(size, 512), timeout=10000)[:size]
 
