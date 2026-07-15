@@ -156,8 +156,12 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
       return arg
     case Ops.CONST:
-      # TODO: need const refactor to bool/weakint/weakfloat
-      return None
+      # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
+      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is the lattice bottom, typed by its consumer
+      if isinstance(arg, bool): return dtypes.bool
+      if isinstance(arg, int): return dtypes.weakint
+      if isinstance(arg, float): return dtypes.weakfloat
+      raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable:
@@ -171,7 +175,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    # CONST derives its dtype by value only when the constructor omits one; an explicit (strong) const dtype is legal until the field is removed
+    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -1660,17 +1665,19 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
-def select_dtype(u): return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
-def lower_alu_dtype(u, x, y, *ds):
-  dt = least_upper_dtype(x.dtype, y.dtype, *ds)
+def select_dtype(u:UOp):
+  return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
+def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
   src = u.src[:-2]+(x.cast(dt), y.cast(dt))
   return src[0].alu(u.op, *src[1:]).cast(u.dtype)
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
-  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))),
-   lambda u,x,y: lower_alu_dtype(u, x, y, select_dtype(u))),
   (UPat(Ops.CONST, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
-  (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index)), name="u"), lower_alu_dtype),
+  # Binary can widen the dtype, WHERE cannot
+  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))),
+   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),
+  (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index)), name="u"),
+   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(x.dtype, y.dtype))),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.index)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.index), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.index)),
