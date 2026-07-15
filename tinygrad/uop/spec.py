@@ -178,7 +178,7 @@ spec_tensor = PatternMatcher([
 
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
-   lambda root,x: root.dtype == x.dtype),
+   lambda root,x: root.dtype == x.dtype and root.arg is None),
 
   # TODO: this should not be here. STAGE is transformed to BUFFER later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
