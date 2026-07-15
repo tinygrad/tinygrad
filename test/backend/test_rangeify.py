@@ -5,6 +5,17 @@ from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.engine.realize import run_linear
+from test.helpers import replace_opts
+
+def realize_with_opts(t:Tensor, opts:tuple[Opt, ...]|None=()) -> Tensor:
+  if opts is None: opts = ()
+  linear = t.schedule_linear()
+  call = linear.src[-1]
+  assert call.op is Ops.CALL and call.src[0].op is Ops.SINK
+  call = call.replace(src=(replace_opts(call.src[0], list(opts)),)+call.src[1:])
+  run_linear(linear.replace(src=linear.src[:-1]+(call,)))
+  return t
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestDoubleMatmul(unittest.TestCase):
@@ -15,7 +26,7 @@ class TestDoubleMatmul(unittest.TestCase):
 
   def _test(self, opts):
     with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
-      out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
+      out = realize_with_opts(self.a @ self.b @ self.c, opts)
 
     with Context(DEBUG=0):
       err = (out-self.ref).square()
@@ -145,7 +156,7 @@ class TestPcontig(unittest.TestCase):
 
   def test_flash_attention(self, opts=None):
     with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
-      ret = fa().realize() if opts is None else fa().contiguous(arg=opts).realize()
+      ret = realize_with_opts(fa(), opts)
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
     with Context(DEBUG=2):
       cmp = fa().realize()
