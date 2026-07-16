@@ -302,8 +302,8 @@ class Scheduler:
             # do the reduce_axes always disappear? i think they don't
             # they need to be moved into the WMMA srcs
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.ren.target.device, tc.threads, tc_upcast_axes, ()) #, tc_reduce_axes)
-            tc_uop = UOp(Ops.WMMA, src=(
-              srcs[0], srcs[1], UOp.const(tc.dtype_out, (0.0,)*tc.elements_per_thread[2])), arg=wmma_arg, tag=1)
+            tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const(tc.dtype_out, (0.0,)*tc.elements_per_thread[2]),
+                              tc.dims, self.ren.target.device, tc.threads, tag=1).replace(arg=wmma_arg)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
