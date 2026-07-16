@@ -190,8 +190,7 @@ class NV_FLCN(NV_IP):
     # On Ada (AD104+) GPUs, the VBIOS FWSEC must finish initializing
     # before Falcon registers at BAR0+0x110000 are accessible.
     # Poll BAR0+0x118234 until it reads 0xff.
-    wait_cond(lambda: self.nvdev.rreg(0x118234) & 0xff == 0xff,
-              timeout_ms=10000, msg="GFW boot timeout")
+    self.wait_for_reset()
 
     self.reset(self.falcon)
     self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
