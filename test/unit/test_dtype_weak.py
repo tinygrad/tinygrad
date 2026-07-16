@@ -8,6 +8,11 @@ from tinygrad.uop.spec import spec_tensor
 
 
 class TestWeakPromotion(unittest.TestCase):
+  def test_storage_width(self):
+    t = Tensor.const(dtypes.weakint, 2)
+    for fn in (lambda: t.bitcast(dtypes.int32), lambda: Tensor.const(dtypes.int32, 2).bitcast(dtypes.weakint), t.element_size, t.nbytes):
+      with self.assertRaises(RuntimeError): fn()
+
   def test_uop_scalar_const_unchanged(self):
     for dtype, value in ((dtypes.index, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
       out = UOp.variable("x", 0.0 if dtype == dtypes.float32 else 0, 10.0 if dtype == dtypes.float32 else 10, dtype) + value

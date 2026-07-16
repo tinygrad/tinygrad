@@ -98,7 +98,7 @@ class dtypes:
   @staticmethod
   def from_py(x) -> DType:
     # NOTE: isinstance(True, int) is True, so bool must be checked before int
-    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, (bool, InvalidType)): return dtypes.bool
     if isinstance(x, float): return dtypes.default_float
     if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
