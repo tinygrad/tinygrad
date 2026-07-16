@@ -18,6 +18,9 @@
     margin: 0;
     padding: 0;
   }
+  :root {
+    --left-sidebar-width: 15%;
+  }
   html, body {
     color: #f0f0f5;
     margin: 0;
@@ -229,7 +232,7 @@
     scrollbar-gutter: stable;
   }
   .ctx-list-parent {
-    width: 15%;
+    width: var(--left-sidebar-width);
     padding-top: 50px;
     border-right: 1px solid #4a4b56;
     left: 0;
@@ -285,6 +288,9 @@
   .collapsed .container {
     display: none;
   }
+  .collapsed {
+    --left-sidebar-width: 0%;
+  }
   .rewrite-list {
     display: flex;
     flex-wrap: wrap;
@@ -335,6 +341,10 @@
   }
   #device-list {
     height: fit-content;
+  }
+  #device-list, #timeline {
+    position: relative;
+    left: var(--left-sidebar-width);
   }
   .raw-text {
     padding-left: 15px;

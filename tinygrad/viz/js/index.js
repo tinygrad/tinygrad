@@ -302,9 +302,9 @@ function timeAtCycle(clk) {
 }
 
 function getZoomIdentity() {
-  const xscale = timelineScale(), deviceRight = rect("#device-list").right, profilerRight = rect("#profiler").right, [viewLeft, sidebarLeft] = viewBounds();
+  const xscale = timelineScale(), deviceRight = rect("#device-list").right, [viewLeft, sidebarLeft] = viewBounds();
   const viewRight = sidebarLeft || rect(".main-container").right;
-  const x0 = Math.max(deviceRight, viewLeft)-deviceRight, x1 = Math.min(profilerRight, viewRight)-deviceRight;
+  const x0 = Math.max(0, viewLeft-deviceRight), x1 = Math.min(canvasDims()[0], viewRight-deviceRight);
   // for packets, set zoom to the full range of instruction events
   const [st, et] = data.instSt != null ? [data.instSt, data.instEt] : [data.first, data.dur];
   const k = (x1-x0)/(xscale(et)-xscale(st));
@@ -1129,7 +1129,8 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   const resize = (e) => {
     const change = e.clientX - element.dataset.startX;
     let newWidth = ((Number(element.dataset.startWidth)+(left ? change : -change))/Number(element.dataset.containerWidth))*100;
-    element.style.width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
+    const width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
+    if (left) document.documentElement.style.setProperty("--left-sidebar-width", width); else element.style.width = width;
   };
   handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
