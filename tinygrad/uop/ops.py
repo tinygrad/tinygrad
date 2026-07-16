@@ -600,9 +600,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
   @staticmethod
-  def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tag=None, tc_upcast_axes=None):
+  def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tc_upcast_axes=None):
     # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
-    return UOp(Ops.WMMA, src=(a, b, acc), arg=(dims, a.dtype, device, threads, tc_upcast_axes), tag=tag)
+    return UOp(Ops.WMMA, src=(a, b, acc), arg=(dims, a.dtype, device, threads, tc_upcast_axes))
   def _rop(self, op:Ops, axis:tuple[int, ...]):
     # NOTE: we don't allow reduce on 1s axis
     axis = tuple(sorted(axis))
