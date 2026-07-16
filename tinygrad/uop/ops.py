@@ -99,6 +99,11 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
       if s in ret: ret[s][u] = None
   return ret
 
+def promo_dtype(src:tuple[UOp,...]) -> DType:
+  # TODO: delete this once we merge index and weakint
+  dts = [x.dtype for x in src]
+  return dts[0] if all_same(dts) else least_upper_dtype(*dts)
+
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
@@ -123,12 +128,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return dtypes.weakfloat if src[0].dtype == dtypes.weakint else least_upper_float(src[0].dtype)
     case Ops.WHERE:
       assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
-      if src[1].dtype == src[2].dtype: return src[1].dtype
-      return least_upper_dtype(src[1].dtype, src[2].dtype)
+      return promo_dtype(src[1:])
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
-      if all_same(dts:=[x.dtype for x in src]): return dts[0]
-      return least_upper_dtype(*dts)
+      return promo_dtype(src)
     case Ops.BIND:
       assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
       return src[0].dtype
@@ -164,9 +167,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
-  if op in GroupOp.Broadcastable:
-    if all_same(dts:=[x.dtype for x in src]): return dts[0]
-    return least_upper_dtype(*dts)
+  if op in GroupOp.Broadcastable: return promo_dtype(src)
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
