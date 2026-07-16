@@ -9,26 +9,30 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 NUM_WG, THREADS = 256, 256
 
 @functools.cache
-def custom_fused_fp8_adamw(master:UOp, weight:UOp, next_inv:UOp, update:UOp, inv_scale:UOp, lr:UOp, *, arch:str, wd:float) -> UOp:
+def custom_fused_fp8_adamw(master:UOp, weight:UOp, next_inv:UOp, m:UOp, v:UOp, grad:UOp, inv_scale:UOp, lr:UOp, b1_t:UOp, b2_t:UOp,
+                           *, arch:str, b1:float, b2:float, eps:float, wd:float) -> UOp:
   layers = master.shape[0]
   assert master.shard_shape[0] == layers, f"unsupported layer-sharded fp8 optimizer shape {master.shape}"
   layer_elems = prod(master.shard_shape) // layers
   assert layer_elems % (NUM_WG * THREADS) == 0, f"unsupported fp8 optimizer shape {master.shape}"
   threads = UOp.special(THREADS, "lidx0")
   workgroups = UOp.special(layers * NUM_WG, "gidx0")
-  sink = UOp.sink(master.base, weight.base, next_inv.base, update.base, inv_scale.base, lr.base,
+  sink = UOp.sink(master.base, weight.base, next_inv.base, m.base, v.base, grad.base, inv_scale.base, lr.base, b1_t.base, b2_t.base,
                   threads, workgroups, arg=KernelInfo(f"fused_fp8_adamw_{layers}_{layer_elems}",
-                  estimates=Estimates(ops=8*layers*layer_elems, mem=13*layers*layer_elems)))
+                  estimates=Estimates(ops=24*layers*layer_elems, mem=19*layers*layer_elems)))
   code = (pathlib.Path(__file__).parent / "fused_fp8_adamw.cpp").read_text()
   lib = HIPCCCompiler(arch, ["-std=c++20", "-ffast-math", f"-DLAYERS={layers}", f"-DLAYER_ELEMS={layer_elems}",
-                               f"-DWEIGHT_DECAY={wd}f"]).compile_cached(code)
+                               f"-DBETA1={b1}f", f"-DBETA2={b2}f", f"-DONE_MINUS_BETA1={1.0-b1}f", f"-DONE_MINUS_BETA2={1.0-b2}f",
+                               f"-DEPS={eps}f", f"-DWEIGHT_DECAY={wd}f"]).compile_cached(code)
   info = ProgramInfo.from_sink(sink)
-  info = replace(info, outs=info.globals[:3], ins=(info.globals[0], *info.globals[2:6]))
+  info = replace(info, outs=info.globals[:5], ins=(info.globals[0], *info.globals[2:]))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)), arg=info)
 
-def fused_fp8_adamw(master:Tensor, weight:Tensor, next_inv:Tensor, update:Tensor, inv_scale:Tensor, lr:Tensor, *, wd:float):
-  assert master.dtype == update.dtype == dtypes.float32 and weight.dtype == dtypes.fp8e4m3
+def fused_fp8_adamw(master:Tensor, weight:Tensor, next_inv:Tensor, m:Tensor, v:Tensor, grad:Tensor, inv_scale:Tensor,
+                    lr:Tensor, b1_t:Tensor, b2_t:Tensor, *, b1:float, b2:float, eps:float, wd:float):
+  assert master.dtype == dtypes.float32 and weight.dtype == dtypes.fp8e4m3
+  assert m.dtype == v.dtype == grad.dtype == dtypes.bfloat16
   device = master.device[0] if isinstance(master.device, tuple) else master.device
   arch = Device[device].renderer.target.arch
-  return Tensor.custom_kernel(master, weight, next_inv, update, inv_scale, lr,
-    fxn=functools.partial(custom_fused_fp8_adamw, arch=arch, wd=wd))[:3]
+  return Tensor.custom_kernel(master, weight, next_inv, m, v, grad, inv_scale, lr, b1_t, b2_t,
+    fxn=functools.partial(custom_fused_fp8_adamw, arch=arch, b1=b1, b2=b2, eps=eps, wd=wd))[:5]

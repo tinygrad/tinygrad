@@ -1,8 +1,8 @@
-import unittest
-from tinygrad import Tensor, Device, dtypes, Context
+import time, unittest
+from tinygrad import Tensor, Device, TinyJit, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, gemm_program_info
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, hk_fp8_ab_gemm, gemm_program_info
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -106,6 +106,18 @@ def run_bf16_weight_gemm(M:int, N:int, K:int) -> None:
   assert a.grad.allclose(w.detach().float().sum(0), atol=atol, rtol=rtol).item(), "grad_a mismatch"
   assert w.grad.allclose(a.detach().float().sum(0).reshape(1, K).expand(N, K), atol=atol, rtol=rtol).item(), "grad_w mismatch"
 
+def run_fp8_ab_gemm(M:int, N:int, K:int) -> None:
+  Tensor.manual_seed(0)
+  a = (Tensor.rand(M, K) * 4 - 2).cast(FP8_DTYPE).contiguous().realize()
+  b = (Tensor.rand(K, N) * 4 - 2).cast(FP8_DTYPE).contiguous().realize()
+  x_scale = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+  w_scale = Tensor.ones((), dtype=dtypes.float32).contiguous().realize()
+  g_amax = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+  out = hk_fp8_ab_gemm(a, b, x_scale=x_scale, w_scale=w_scale, g_amax=g_amax).realize()
+  ref = (a.float() @ b.float()).cast(dtypes.bfloat16).realize()
+  if Device.DEFAULT.startswith("NULL"): return
+  assert out.allclose(ref, atol=1, rtol=1e-2).item(), "fp8 A @ B mismatch"
+
 class TestGemmProgramInfo(unittest.TestCase):
   def test_opaque_gemm_accesses(self):
     c, a, b = (UOp.param(i, dtypes.bfloat16, (16,), "NULL") for i in range(3))
@@ -121,6 +133,20 @@ class TestGemmProgramInfo(unittest.TestCase):
     w = Tensor.empty(128256, 4096, dtype=dtypes.bfloat16).realize()
     out = asm_gemm(a, w.T)
     gemm = next(u for u in out.uop.toposort() if u.op is Ops.CALL)
+    self.assertIs(gemm.src[3], w.uop)
+
+  @unittest.skipUnless(Device.DEFAULT.startswith("NULL") and is_cdna4(), "requires NULL CDNA4")
+  def test_fp8_dgrad_uses_physical_weight(self):
+    a = Tensor.empty(1, 256, 256, dtype=FP8_DTYPE).realize()
+    w = Tensor.empty(256, 256, dtype=FP8_DTYPE).realize()
+    x_scale = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+    w_scale = Tensor.ones((), dtype=dtypes.float32).contiguous().realize()
+    grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+    next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32)
+    out = asm_gemm(a, w.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
+    out.sum().backward()
+    gemm = next(u for u in a.grad.uop.toposort() if u.op is Ops.CALL and u.src[0].arg.name.startswith("hk_fp8_ab_gemm"))
     self.assertIs(gemm.src[3], w.uop)
 
 # 128x smaller than usual
@@ -213,6 +239,35 @@ class TestGemmLlama(unittest.TestCase):
     grad_dtype = dtypes.bfloat16 if self.dtype == FP8_DTYPE else self.dtype
     assert z.dtype == dtypes.bfloat16
     assert x.grad.dtype == y.grad.dtype == grad_dtype
+
+  def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 256)
+
+  def test_fp8_ab_speed(self):
+    M, N, K, iters = getenv("M", 4096), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)
+    a = Tensor.empty(M, K, dtype=FP8_DTYPE).realize()
+    b = Tensor.empty(K, N, dtype=FP8_DTYPE).realize()
+
+    @TinyJit
+    def ab(a:Tensor, b:Tensor): return hk_fp8_ab_gemm(a, b).realize()
+    @TinyJit
+    def ab_with_transpose(a:Tensor, b:Tensor): return asm_gemm(a, b).realize()
+
+    for _ in range(3): ab(a, b)
+    Device[Device.DEFAULT].synchronize()
+    st = time.perf_counter()
+    for _ in range(iters): ab(a, b)
+    Device[Device.DEFAULT].synchronize()
+    ab_ms = (time.perf_counter() - st) * 1e3 / iters
+
+    for _ in range(3): ab_with_transpose(a, b)
+    Device[Device.DEFAULT].synchronize()
+    st = time.perf_counter()
+    for _ in range(iters): ab_with_transpose(a, b)
+    Device[Device.DEFAULT].synchronize()
+    transpose_ms = (time.perf_counter() - st) * 1e3 / iters
+
+    print(f"fp8 AB: {ab_ms:.3f} ms, transpose + ABt: {transpose_ms:.3f} ms, speedup: {transpose_ms/ab_ms:.2f}x")
+    self.assertLess(ab_ms, transpose_ms)
 
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=self.dtype)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336, dtype=self.dtype)

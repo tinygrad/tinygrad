@@ -7,6 +7,21 @@
 #ifndef LAYER_ELEMS
 #define LAYER_ELEMS 16777216
 #endif
+#ifndef BETA1
+#define BETA1 0.9f
+#endif
+#ifndef BETA2
+#define BETA2 0.95f
+#endif
+#ifndef ONE_MINUS_BETA1
+#define ONE_MINUS_BETA1 0.1f
+#endif
+#ifndef ONE_MINUS_BETA2
+#define ONE_MINUS_BETA2 0.05f
+#endif
+#ifndef EPS
+#define EPS 1e-5f
+#endif
 #ifndef WEIGHT_DECAY
 #define WEIGHT_DECAY 0.1f
 #endif
@@ -17,20 +32,26 @@ constexpr float FP8_MAX = 448.0f;
 constexpr float AMAX_MARGIN = 1.1f;
 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG, 1) void
-fused_fp8_adamw(float *master, __hip_fp8_storage_t *weight, float *next_inv, const float *update,
-                const float *inv_scale, const float *lr) {
+fused_fp8_adamw(float *master, __hip_fp8_storage_t *weight, float *next_inv, __hip_bfloat16 *m, __hip_bfloat16 *v,
+                const __hip_bfloat16 *grad, const float *inv_scale, const float *lr, const float *b1_t, const float *b2_t) {
   if (blockIdx.x >= LAYERS * NUM_WG) return;
   const int layer = blockIdx.x / NUM_WG;
   const int wg = blockIdx.x % NUM_WG;
-  const int layer_start = layer * LAYER_ELEMS;
+  const size_t layer_start = (size_t)layer * LAYER_ELEMS;
   float local_max = 0.0f;
 
-  for (int i = wg * THREADS_PER_WG + threadIdx.x; i < LAYER_ELEMS; i += NUM_WG * THREADS_PER_WG) {
-    const int idx = layer_start + i;
+  for (size_t i = wg * THREADS_PER_WG + threadIdx.x; i < LAYER_ELEMS; i += NUM_WG * THREADS_PER_WG) {
+    const size_t idx = layer_start + i;
+    const float g = (float)grad[idx];
+    const float m_new = BETA1 * (float)m[idx] + ONE_MINUS_BETA1 * g;
+    const float v_new = BETA2 * (float)v[idx] + ONE_MINUS_BETA2 * g * g;
+    const float update = lr[0] * (m_new / (1.0f - b1_t[0])) / (sqrtf(v_new / (1.0f - b2_t[0])) + EPS);
     const float old_w = master[idx];
-    const float new_w = old_w - update[idx] - lr[0] * WEIGHT_DECAY * old_w;
+    const float new_w = old_w - update - lr[0] * WEIGHT_DECAY * old_w;
     const float scaled = fminf(FP8_MAX, fmaxf(-FP8_MAX, new_w / inv_scale[layer]));
     const __hip_fp8_storage_t q = __hip_cvt_float_to_fp8(scaled, __HIP_SATFINITE, __HIP_E4M3);
+    m[idx] = (__hip_bfloat16)m_new;
+    v[idx] = (__hip_bfloat16)v_new;
     master[idx] = new_w;
     weight[idx] = q;
     local_max = fmaxf(local_max, fabsf(__half2float(__half(__hip_cvt_fp8_to_halfraw(q, __HIP_E4M3)))));

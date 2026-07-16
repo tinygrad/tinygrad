@@ -158,14 +158,14 @@ class TestFusedFP8AdamW(unittest.TestCase):
     weight_ref = (master_ref * scale).clamp(-448.0, 448.0).cast(dtypes.fp8e4m3)
     next_inv_ref = (weight_ref.float().abs().max(axis=(1, 2)) * inv_scale * 1.1 + 1e-8) / 448.0
 
-    optim = object.__new__(GradAccClipAdamW)
-    optim.lr, optim.wd = lr, wd
-    weight._inv_scale, weight._next_inv_scale = next_inv, inv_scale
-    optim._apply_fused_fp8_update(0, weight, update, master)
-    next_inv = weight._next_inv_scale
-    Tensor.realize(master, weight, next_inv, master_ref, weight_ref, next_inv_ref)
+    from extra.llama_kernels.fused_fp8_adamw import fused_fp8_adamw
+    master, weight, next_inv, m, v = fused_fp8_adamw(master, weight, next_inv, m, v, grad, inv_scale, lr, b1_t, b2_t,
+      b1=b1, b2=b2, eps=eps, wd=wd)
+    Tensor.realize(master, weight, next_inv, m, v, master_ref, weight_ref, next_inv_ref)
     with Context(DEBUG=0):
-      self.assertTrue(weight._inv_scale.allclose(inv_scale_ref, atol=0, rtol=0).item(), "delayed scale did not advance")
+      self.assertTrue(inv_scale.allclose(inv_scale_ref, atol=0, rtol=0).item(), "delayed scale changed")
+      self.assertTrue(m.allclose(m_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "first moment mismatch")
+      self.assertTrue(v.allclose(v_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "second moment mismatch")
       self.assertTrue(master.allclose(master_ref, atol=2e-6, rtol=2e-6).item(), "master mismatch")
       weight_diff = (weight.float() - weight_ref.float()).abs()
       self.assertLessEqual(weight_diff.max().item(), 1.0, "FP8 weight error exceeds one quantization unit")

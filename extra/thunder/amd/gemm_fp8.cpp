@@ -103,6 +103,9 @@ using G = kittens::group<NUM_WARPS>;
 #ifndef UNUSED_EXTRA_COUNT
 #define UNUSED_EXTRA_COUNT 0
 #endif
+#ifndef AB_GEMM
+#define AB_GEMM 0
+#endif
 
 __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr
 #if SCALE_MODE & 1
@@ -130,7 +133,11 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
 
     kittens::gl<fp8e4m3, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};
+#if AB_GEMM
+    kittens::gl<fp8e4m3, 1, 1, K, N> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
+#else
     kittens::gl<fp8e4m3, 1, 1, N, K> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
+#endif
     kittens::gl<bf16, 1, 1, M, N>    C{C_ptr, nullptr, nullptr, nullptr, nullptr};
 
     // Each threadblock computes 256x256 output tile
@@ -150,12 +157,20 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     constexpr int REG_BLOCK_N = BLOCK_SIZE_COL / WARPS_COL / 2;
 
     using ST_A = st_fp8e4m3<HALF_BLOCK_SIZE_ROW, BLOCK_K, st_16x128_s>;
+#if AB_GEMM
+    using ST_B = st_fp8e4m3<BLOCK_K, HALF_BLOCK_SIZE_COL, st_16x128_s>;
+#else
     using ST_B = st_fp8e4m3<HALF_BLOCK_SIZE_COL, BLOCK_K, st_16x128_s>;
+#endif
     __shared__ ST_A As[2][2];
     __shared__ ST_B Bs[2][2];
 
     using RT_A = rt_fp8e4m3<REG_BLOCK_M, BLOCK_K>;
+#if AB_GEMM
+    using RT_B = rt_fp8e4m3<REG_BLOCK_N, BLOCK_K, col_l>;
+#else
     using RT_B = rt_fp8e4m3<REG_BLOCK_N, BLOCK_K>;
+#endif
     using RT_C = rt_fl<REG_BLOCK_M, REG_BLOCK_N, col_l, rt_16x16_s>;
 
     RT_A a;
@@ -210,14 +225,36 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     G::prefill_swizzled_offsets(As[tic][0], A, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs[tic][0], B, swizzled_offsets_B);
 
+#if AB_GEMM
+    const fp8e4m3 *b_base = (fp8e4m3*)&B[{0, 0, 0, 0}];
+    const int b_row_stride = B.template stride<2>() * sizeof(fp8e4m3);
+    i32x4 b_srsrc_base = make_srsrc(b_base, K * b_row_stride, b_row_stride);
+    const int wid = warpid() % NUM_WARPS;
+    constexpr int elem_per_warp = (ST_B::underlying_subtile_bytes_per_thread / sizeof(fp8e4m3)) * kittens::WARP_THREADS;
+    uint32_t b_lds[2][2] = {
+        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
+         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))},
+        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
+         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))}
+    };
+#endif
+
     zero(cA);
     zero(cB);
     zero(cC);
     zero(cD);
 
+#if AB_GEMM
+    G::load(Bs[tic][0], B, {0, 0, 0, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][0]);
+#else
     G::load(Bs[tic][0], B, {0, 0, block_col * 2, 0}, swizzled_offsets_B);
+#endif
     G::load(As[tic][0], A, {0, 0, block_row * 2, 0}, swizzled_offsets_A);
+#if AB_GEMM
+    G::load(Bs[tic][1], B, {0, 0, 0, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][1]);
+#else
     G::load(Bs[tic][1], B, {0, 0, block_col * 2 + 1, 0}, swizzled_offsets_B);
+#endif
     G::load(As[tic][1], A, {0, 0, block_row * 2 + 1, 0}, swizzled_offsets_A);
 
     if (warp_m == 1) {
@@ -227,9 +264,17 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     asm volatile("s_waitcnt vmcnt(4)");
     __builtin_amdgcn_s_barrier();
 
+#if AB_GEMM
+    G::load(Bs[toc][0], B, {0, 0, 1, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][0]);
+#else
     G::load(Bs[toc][0], B, {0, 0, block_col * 2, 1}, swizzled_offsets_B);
+#endif
     G::load(As[toc][0], A, {0, 0, block_row * 2, 1}, swizzled_offsets_A);
+#if AB_GEMM
+    G::load(Bs[toc][1], B, {0, 0, 1, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][1]);
+#else
     G::load(Bs[toc][1], B, {0, 0, block_col * 2 + 1, 1}, swizzled_offsets_B);
+#endif
 
     asm volatile("s_waitcnt vmcnt(6)");
     __builtin_amdgcn_s_barrier();
@@ -238,8 +283,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     #pragma unroll 2
     for (int k = 0; k < k_iters - 2; k++, tic^=1, toc^=1) {
         
+#if AB_GEMM
+        load(b0, Bs[tic][0], warp_n * REG_BLOCK_N);
+#else
         auto bs_subtile0 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][0], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile0)>(b0, bs_subtile0);
+#endif
         auto as_subtile0 = kittens::subtile_inplace<REG_BLOCK_M, BLOCK_K>(As[tic][0], {warp_m, 0});
         load_st_to_rt<RT_A, decltype(as_subtile0)>(a, as_subtile0);
         G::load(As[toc][1], A, {0, 0, block_row * 2 + 1, k + 1}, swizzled_offsets_A);
@@ -253,9 +302,14 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
+#if AB_GEMM
+        load(b1, Bs[tic][1], warp_n * REG_BLOCK_N);
+        G::load(Bs[tic][0], B, {0, 0, k + 2, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][0]);
+#else
         auto bs_subtile1 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][1], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile1)>(b1, bs_subtile1);
         G::load(Bs[tic][0], B, {0, 0, block_col * 2, k + 2}, swizzled_offsets_B);
+#endif
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -276,7 +330,11 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
+#if AB_GEMM
+        G::load(Bs[tic][1], B, {0, 0, k + 2, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][1]);
+#else
         G::load(Bs[tic][1], B, {0, 0, block_col * 2 + 1, k + 2}, swizzled_offsets_B);
+#endif
         asm volatile("s_waitcnt vmcnt(6)");
         __builtin_amdgcn_s_barrier();
 
@@ -289,8 +347,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     {
         constexpr int k = k_iters - 2;
 
+#if AB_GEMM
+        load(b0, Bs[tic][0], warp_n * REG_BLOCK_N);
+#else
         auto bs_subtile0 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][0], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile0)>(b0, bs_subtile0);
+#endif
         auto as_subtile0 = kittens::subtile_inplace<REG_BLOCK_M, BLOCK_K>(As[tic][0], {warp_m, 0});
         load_st_to_rt<RT_A, decltype(as_subtile0)>(a, as_subtile0);
         G::load(As[toc][1], A, {0, 0, block_row * 2 + 1, k + 1}, swizzled_offsets_A);
@@ -303,8 +365,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
+#if AB_GEMM
+        load(b1, Bs[tic][1], warp_n * REG_BLOCK_N);
+#else
         auto bs_subtile1 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][1], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile1)>(b1, bs_subtile1);
+#endif
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -325,8 +391,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
+#if AB_GEMM
+        load(b0, Bs[toc][0], warp_n * REG_BLOCK_N);
+#else
         bs_subtile0 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[toc][0], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile0)>(b0, bs_subtile0);
+#endif
         // at most vmcnt(4) is required by here
         __builtin_amdgcn_s_barrier();
 
@@ -353,8 +423,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_s_barrier();
 
+#if AB_GEMM
+        load(b1, Bs[tic][1], warp_n * REG_BLOCK_N);
+#else
         auto bs_subtile1 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][1], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile1)>(b1, bs_subtile1);
+#endif
         // at most vmcnt(0) is required by here
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
