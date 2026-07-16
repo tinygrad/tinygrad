@@ -78,7 +78,7 @@ fused_silu_mul_bwd_w13(
     const __hip_bfloat16 *x3 = reinterpret_cast<const __hip_bfloat16*>(&x3_raw);
     const __hip_bfloat16 *gv = reinterpret_cast<const __hip_bfloat16*>(&g_raw);
 
-    __hip_fp8_storage_t fp8_1[VEC], fp8_3[VEC];
+    float g1v[VEC], g3v[VEC];
     #pragma unroll
     for (int i = 0; i < VEC; i++) {
       const float f1 = static_cast<float>(x1[i]);
@@ -91,12 +91,19 @@ fused_silu_mul_bwd_w13(
       const float g1 = gs * silu_prime * f3;
       const float g3 = gs * silu;
       local_max = fmaxf(local_max, fmaxf(fabsf(g1), fabsf(g3)));
-      fp8_1[i] = __hip_cvt_float_to_fp8(fmaxf(-FP8_MAX, fminf(FP8_MAX, g1 * g_scale)), __HIP_SATFINITE, __HIP_E4M3);
-      fp8_3[i] = __hip_cvt_float_to_fp8(fmaxf(-FP8_MAX, fminf(FP8_MAX, g3 * g_scale)), __HIP_SATFINITE, __HIP_E4M3);
+      // ROCm 7.1's saturating float2 helper clamps an overflowing lane 1 with lane 0, so clamp each lane before packing.
+      g1v[i] = fmaxf(-FP8_MAX, fminf(FP8_MAX, g1 * g_scale));
+      g3v[i] = fmaxf(-FP8_MAX, fminf(FP8_MAX, g3 * g_scale));
     }
 
-    *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw1_off]) = *reinterpret_cast<uint64_t*>(fp8_1);
-    *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw3_off]) = *reinterpret_cast<uint64_t*>(fp8_3);
+    union packed_fp8x8 { uint64_t u64; __hip_fp8x2_storage_t x2[4]; } fp8_1, fp8_3;
+    #pragma unroll
+    for (int i = 0; i < VEC; i += 2) {
+      fp8_1.x2[i/2] = __hip_cvt_float2_to_fp8x2(make_float2(g1v[i], g1v[i+1]), __HIP_SATFINITE, __HIP_E4M3);
+      fp8_3.x2[i/2] = __hip_cvt_float2_to_fp8x2(make_float2(g3v[i], g3v[i+1]), __HIP_SATFINITE, __HIP_E4M3);
+    }
+    *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw1_off]) = fp8_1.u64;
+    *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw3_off]) = fp8_3.u64;
   }
 
   sdata[tid] = local_max;

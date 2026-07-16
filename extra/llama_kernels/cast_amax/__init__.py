@@ -16,14 +16,15 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_next:UOp,
                           layer_num:UOp|None=None, dname:str=None) -> UOp:
   hidden = xw13.shape[2] // 2
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  bwd_num_wg = 512
+  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(bwd_num_wg, "gidx0")
   mem = n_elems * 2 * 3 + n_elems * 2 + 4
   sink = UOp.sink(grad_xw13_fp8.base, grad_amax_next.base,
                   xw13.base, grad_x2.base, amax_state.base, grad_amax_state.base,
                   *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_bwd_w13_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_bwd_w13.cpp", n_elems, hidden,
-                         ["-DLAYER_SCALE=1"] if layer_num is not None else [])
+                         ["-DLAYER_SCALE=1"] if layer_num is not None else [], num_wg=bwd_num_wg)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 

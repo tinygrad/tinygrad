@@ -50,7 +50,7 @@ def zero_scalar(device) -> Tensor:
 def compile_hip(src:str, defines:list[str]):
   return HIPCCCompiler("gfx950", ["-std=c++20", "-ffast-math", *defines]).compile_cached(src)
 
-def compile_cpp(cpp_dir:pathlib.Path, cpp_name:str, n_elems:int, hidden:int, extra_defines:list[str]=[]):
+def compile_cpp(cpp_dir:pathlib.Path, cpp_name:str, n_elems:int, hidden:int, extra_defines:list[str]=[], num_wg:int=NUM_WG):
   src = (cpp_dir/cpp_name).read_text()
-  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={hidden}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}", *extra_defines]
+  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={hidden}", f"-DNUM_WG={num_wg}", f"-DTHREADS_PER_WG={THREADS_PER_WG}", *extra_defines]
   return src, compile_hip(src, defines)

@@ -2,7 +2,7 @@ import time, unittest
 from tinygrad import Tensor, Device, TinyJit, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, hk_fp8_ab_gemm, gemm_program_info
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, hk_fp8_ab_gemm, hk_fp8_atb_gemm, gemm_program_info
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -117,6 +117,56 @@ def run_fp8_ab_gemm(M:int, N:int, K:int) -> None:
   ref = (a.float() @ b.float()).cast(dtypes.bfloat16).realize()
   if Device.DEFAULT.startswith("NULL"): return
   assert out.float().allclose(ref.float(), atol=2, rtol=1e-2).item(), "fp8 A @ B mismatch"
+
+def run_fp8_atb_gemm(M:int, N:int, K:int, benchmark:bool=False) -> None:
+  """Check the production FP8 AtB shape without paying for a second full-size GEMM."""
+  Tensor.manual_seed(0)
+  # Exactly representable, normal FP8 values avoid architecture-specific FP8 subnormal handling.
+  a = (Tensor.rand(1, K, M) < 0.5).where(-1, 1).cast(FP8_DTYPE).contiguous().realize()
+  b = (Tensor.rand(1, K, N) < 0.5).where(-1, 1).cast(FP8_DTYPE).contiguous().realize()
+
+  @TinyJit
+  def atb(a:Tensor, b:Tensor): return hk_fp8_atb_gemm(a, b).realize()
+
+  out = atb(a, b)
+  # Cover all four accumulator stores, multiple output workgroups, tile edges, and the final tile.
+  samples = tuple((m, n) for m, n in ((0, 0), (64, 32), (128, 0), (0, 128), (248, 248),
+                  (256, 256), (M // 2, N // 2), (M - 8, N - 8)) if m + 8 <= M and n + 8 <= N)
+  got = []
+  for m, n in samples:
+    got.append(out[m:m+8, n:n+8].flatten())
+  got_t = Tensor.cat(*got).realize()
+  if not Device.DEFAULT.startswith("NULL"):
+    import numpy as np
+    out_again = atb(a, b)
+    got_again = Tensor.cat(*(out_again[m:m+8, n:n+8].flatten() for m, n in samples)).float().numpy()
+    got_first = got_t.float().numpy()
+    if not np.array_equal(got_first, got_again):
+      repeat_err = np.max(np.abs(got_first-got_again).reshape(len(samples), 8, 8), axis=(1, 2))
+      raise AssertionError(f"fp8 A.T @ B is nondeterministic, max errors by sample: {dict(zip(samples, repeat_err.tolist()))}")
+    # A CPU float32 dot is intentionally independent of both the custom kernel and tinygrad's GEMM lowering.
+    ref_np = np.stack([a[0, :, m:m+8].float().numpy().T @ b[0, :, n:n+8].float().numpy() for m, n in samples])
+    got_np = got_first.reshape(len(samples), 8, 8)
+    if not np.allclose(got_np, ref_np, atol=2, rtol=0):
+      max_err = np.max(np.abs(got_np-ref_np), axis=(1, 2))
+      missing = {}
+      for idx in np.nonzero(max_err > 2)[0]:
+        m, n = samples[idx]
+        aa, bb = a[0, :, m:m+8].float().numpy(), b[0, :, n:n+8].float().numpy()
+        chunks = np.stack([aa[k:k+128].T @ bb[k:k+128] for k in range(0, K, 128)])
+        missing[(m, n)] = int(np.argmin(np.max(np.abs(chunks - (ref_np[idx]-got_np[idx])), axis=(1, 2))))
+      raise AssertionError(f"fp8 A.T @ B mismatch, max errors by sample: {dict(zip(samples, max_err.tolist()))}, closest missing K tiles: {missing}")
+
+  if benchmark:
+    for _ in range(3): atb(a, b)
+    Device[Device.DEFAULT].synchronize()
+    iters = getenv("ITERS", 20)
+    st = time.perf_counter()
+    for _ in range(iters): atb(a, b)
+    Device[Device.DEFAULT].synchronize()
+    ms = (time.perf_counter() - st) * 1e3 / iters
+    pflops = 2 * M * N * K / (ms * 1e-3) / 1e15
+    print(f"fp8 AtB {M}x{N}x{K}: {ms:.3f} ms, {pflops:.3f} PFLOPS")
 
 class TestGemmProgramInfo(unittest.TestCase):
   def test_opaque_gemm_accesses(self):
@@ -241,6 +291,9 @@ class TestGemmLlama(unittest.TestCase):
     assert x.grad.dtype == y.grad.dtype == grad_dtype
 
   def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 384)
+
+  def test_fp8_atb_slow_shape(self):
+    run_fp8_atb_gemm(M=6144, N=4096, K=16384, benchmark=True)
 
   def test_fp8_ab_speed(self):
     M, N, K, iters = getenv("M", 16384), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)

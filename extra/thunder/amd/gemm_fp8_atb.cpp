@@ -139,7 +139,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     RT_C cD;
 
     int wgid = blockIdx.x;
-    const int WGM = 8;
+    const int WGM = 4;
     wgid = chiplet_transform_chunked(wgid, total_blocks_needed, NUM_XCDS, 32);
 
     const int num_wgid_in_group = WGM * blocks_per_col;
@@ -151,21 +151,12 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     int warp_m = (warpid() / WARPS_COL);
     int warp_n = (warpid() % WARPS_COL);
 
-    const fp8e4m3 *a_base = (fp8e4m3*)&A[{0, 0, 0, 0}];
     const fp8e4m3 *b_base = (fp8e4m3*)&B[{0, 0, 0, 0}];
-    const int a_row_stride = A.template stride<2>() * sizeof(fp8e4m3);
     const int b_row_stride = B.template stride<2>() * sizeof(fp8e4m3);
-    i32x4 a_srsrc_base = make_srsrc(a_base, K * a_row_stride, a_row_stride);
     i32x4 b_srsrc_base = make_srsrc(b_base, K * b_row_stride, b_row_stride);
 
     const int wid = warpid() % NUM_WARPS;
-    constexpr int elem_per_warp = (ST_A::underlying_subtile_bytes_per_thread / sizeof(fp8e4m3)) * kittens::WARP_THREADS;
-    uint32_t a_lds[2][2] = {
-        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
-         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))},
-        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
-         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))}
-    };
+    constexpr int elem_per_warp = (16 / sizeof(fp8e4m3)) * kittens::WARP_THREADS;
     uint32_t b_lds[2][2] = {
         {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
          to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))},
@@ -175,7 +166,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
 
     int tic = 0, toc = 1;
     using T = fp8e4m3;
-    constexpr int bytes_per_thread = ST_A::underlying_subtile_bytes_per_thread;
+    constexpr int bytes_per_thread = 16;
     constexpr int bytes_per_memcpy = bytes_per_thread * NUM_THREADS;
     constexpr int memcpy_per_tile_A = HALF_BLOCK_SIZE_ROW * BLOCK_K * sizeof(T) / bytes_per_memcpy;
     constexpr int memcpy_per_tile_B = HALF_BLOCK_SIZE_COL * BLOCK_K * sizeof(T) / bytes_per_memcpy;
@@ -190,16 +181,16 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     zero(cD);
 
     G::load(Bs[tic][0], B, {0, 0, 0, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][0]);
-    G::load(As[tic][0], A, {0, 0, 0, block_row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[tic][0]);
+    G::load(As[tic][0], A, {0, 0, 0, block_row * 2}, swizzled_offsets_A);
     G::load(Bs[tic][1], B, {0, 0, 0, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][1]);
-    G::load(As[tic][1], A, {0, 0, 0, block_row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[tic][1]);
+    G::load(As[tic][1], A, {0, 0, 0, block_row * 2 + 1}, swizzled_offsets_A);
 
     if (warp_m == 1) __builtin_amdgcn_s_barrier();
     asm volatile("s_waitcnt vmcnt(4)");
     __builtin_amdgcn_s_barrier();
 
     G::load(Bs[toc][0], B, {0, 0, 1, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][0]);
-    G::load(As[toc][0], A, {0, 0, 1, block_row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[toc][0]);
+    G::load(As[toc][0], A, {0, 0, 1, block_row * 2}, swizzled_offsets_A);
     G::load(Bs[toc][1], B, {0, 0, 1, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][1]);
 
     asm volatile("s_waitcnt vmcnt(6)");
@@ -209,7 +200,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
     for (int k = 0; k < k_iters - 2; k++, tic^=1, toc^=1) {
         load(b0, Bs[tic][0], warp_n * REG_BLOCK_N);
         load(a, As[tic][0], warp_m * REG_BLOCK_M);
-        G::load(As[toc][1], A, {0, 0, k + 1, block_row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[toc][1]);
+        G::load(As[toc][1], A, {0, 0, k + 1, block_row * 2 + 1}, swizzled_offsets_A);
         asm volatile("s_waitcnt lgkmcnt(8)");
         __builtin_amdgcn_s_barrier();
 
@@ -231,7 +222,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
         __builtin_amdgcn_s_barrier();
 
         load(a, As[tic][1], warp_m * REG_BLOCK_M);
-        G::load(As[tic][0], A, {0, 0, k + 2, block_row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[tic][0]);
+        G::load(As[tic][0], A, {0, 0, k + 2, block_row * 2}, swizzled_offsets_A);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -255,7 +246,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_atb_gemm(bf16 *C_ptr, fp8e4m3 *
         constexpr int k = k_iters - 2;
         load(b0, Bs[tic][0], warp_n * REG_BLOCK_N);
         load(a, As[tic][0], warp_m * REG_BLOCK_M);
-        G::load(As[toc][1], A, {0, 0, k + 1, block_row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds[toc][1]);
+        G::load(As[toc][1], A, {0, 0, k + 1, block_row * 2 + 1}, swizzled_offsets_A);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");

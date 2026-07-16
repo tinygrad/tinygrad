@@ -8,6 +8,7 @@ from extra.llama_kernels import NUM_WG, local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import _custom_bwd as custom_rmsnorm_bwd
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8, fused_rmsnorm_mul_quantize_fp8
+from extra.llama_kernels.cast_amax import _custom_fused_bwd_w13 as custom_fused_bwd_w13
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fa_backward_pre, custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu
@@ -214,6 +215,69 @@ class TestFusedAddRMSNorm(unittest.TestCase):
     with Context(DEBUG=0):
       self.assertTrue(grad_x.allclose(expected_grad_x, atol=0, rtol=0).item(), "residual add mismatch")
       self.assertTrue(grad_weight.allclose(grad_weight_ref, atol=0, rtol=0).item(), "weight grad changed")
+
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+class TestFusedSiluMulBwdW13(unittest.TestCase):
+  def test_llama31_8b_shape(self):
+    shape, hidden, layer = (2, 8192, 28672), 14336, 7
+    xw1 = Tensor.full((*shape[:-1], hidden), 0.125, dtype=dtypes.bfloat16)
+    xw3 = Tensor.full((*shape[:-1], hidden), -0.25, dtype=dtypes.bfloat16)
+    xw13 = xw1.cat(xw3, dim=-1).contiguous().realize()
+    grad_x2 = Tensor.full((*shape[:-1], hidden), 0.01, dtype=dtypes.bfloat16).contiguous().realize()
+    amax_state = Tensor.full((32,), 448.0, dtype=dtypes.float32).contiguous().realize()
+    grad_amax_state = Tensor.full((32,), 1.0, dtype=dtypes.float32).contiguous().realize()
+    grad_amax_next = Tensor.zeros(32, dtype=dtypes.float32).contiguous().realize()
+    layer_num = Tensor([layer], dtype=dtypes.int32).contiguous().realize()
+
+    grad_xw13, grad_amax_next, *_ = Tensor.custom_kernel(
+      Tensor.empty(*shape, dtype=dtypes.fp8e4m3), grad_amax_next, xw13, grad_x2, amax_state, grad_amax_state, layer_num,
+      fxn=functools.partial(custom_fused_bwd_w13, dname=Device.DEFAULT))
+    Tensor.realize(grad_xw13, grad_amax_next)
+
+    x1, x3, grad = Tensor([0.125]), Tensor([-0.25]), Tensor([0.01]).cast(dtypes.bfloat16).float()
+    sig = x1.sigmoid()
+    silu = x1 * sig
+    grad_w1 = grad * (sig + silu * (1.0 - sig)) * x3
+    grad_w3 = grad * silu
+    grad_ref = Tensor.cat(grad_w1, grad_w3).mul(448.0).clamp(-448.0, 448.0).cast(dtypes.fp8e4m3).float().realize()
+    amax_ref = Tensor.cat(grad_w1.abs(), grad_w3.abs()).max().item()
+    grad_xw1, grad_xw3 = grad_xw13[..., :hidden].float(), grad_xw13[..., hidden:].float()
+    Tensor.realize(grad_xw1, grad_xw3)
+
+    with Context(DEBUG=0):
+      self.assertEqual(grad_xw1.min().item(), grad_ref[0].item())
+      self.assertEqual(grad_xw1.max().item(), grad_ref[0].item())
+      self.assertEqual(grad_xw3.min().item(), grad_ref[1].item())
+      self.assertEqual(grad_xw3.max().item(), grad_ref[1].item())
+      self.assertAlmostEqual(grad_amax_next[layer].item(), amax_ref, places=7)
+      self.assertEqual((grad_amax_next != 0).sum().item(), 1)
+
+  def test_values(self):
+    Tensor.manual_seed(0)
+    hidden, layer = 14336, 7
+    xw13 = (Tensor.randn(1, 1, hidden * 2) * 1.5).cast(dtypes.bfloat16).contiguous().realize()
+    grad_x2 = (Tensor.randn(1, 1, hidden) * 0.02).cast(dtypes.bfloat16).contiguous().realize()
+    amax_state = Tensor.full((32,), 448.0, dtype=dtypes.float32).contiguous().realize()
+    grad_amax_state = Tensor.full((32,), 0.05, dtype=dtypes.float32).contiguous().realize()
+    grad_amax_next = Tensor.zeros(32, dtype=dtypes.float32).contiguous().realize()
+    layer_num = Tensor([layer], dtype=dtypes.int32).contiguous().realize()
+    grad_xw13, grad_amax_next, *_ = Tensor.custom_kernel(
+      Tensor.empty(*xw13.shape, dtype=dtypes.fp8e4m3), grad_amax_next, xw13, grad_x2, amax_state, grad_amax_state, layer_num,
+      fxn=functools.partial(custom_fused_bwd_w13, dname=Device.DEFAULT))
+
+    xw1, xw3 = xw13[..., :hidden].float(), xw13[..., hidden:].float()
+    sig = xw1.sigmoid()
+    silu = xw1 * sig
+    grad_w1 = grad_x2.float() * (sig + silu * (1.0 - sig)) * xw3
+    grad_w3 = grad_x2.float() * silu
+    grad_ref = Tensor.cat(grad_w1, grad_w3, dim=-1).mul(8960.0).clamp(-448.0, 448.0).cast(dtypes.fp8e4m3)
+    amax_ref = Tensor.cat(grad_w1.abs(), grad_w3.abs(), dim=-1).max()
+    Tensor.realize(grad_xw13, grad_amax_next, grad_ref, amax_ref)
+
+    with Context(DEBUG=0):
+      self.assertTrue(grad_xw13.float().allclose(grad_ref.float(), atol=0, rtol=0).item())
+      self.assertTrue(grad_amax_next[layer].allclose(amax_ref, atol=1e-7, rtol=0).item())
+      self.assertEqual((grad_amax_next != 0).sum().item(), 1)
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):
