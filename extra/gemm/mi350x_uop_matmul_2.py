@@ -6,7 +6,7 @@ os.environ["AMD_LLVM"] = "0"
 from tinygrad import Tensor, Context, dtypes, UOp, GlobalCounters
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, AxisType, KernelInfo, Ops
+from tinygrad.uop.ops import AxisType, KernelInfo
 
 WARP_SIZE = 64
 
@@ -60,8 +60,7 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
   acc_load = acc_after[N_inner_loop, M_inner_loop]
 
   # do WMMA
-  wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-  out = UOp(Ops.WMMA, dtypes.float, (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
+  out = UOp.wmma(Ar[M_inner_loop], Br[N_inner_loop], acc_load, ((16, 16, 32), 'AMD', 64))
 
   # store back the acc
   acc_store = acc[N_inner_loop, M_inner_loop].store(out)
