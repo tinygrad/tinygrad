@@ -126,13 +126,14 @@ class TestMasterWeightUpdate(unittest.TestCase):
     update = Tensor.full(param.shape, 0.125).contiguous().realize()
     optim = GradAccClipAdamW([param], lr=0.25, weight_decay=0.1)
     expected_master = (initial - (update + 0.25 * 0.1 * initial)).realize()
+    expected_param = expected_master.cast(dtypes.bfloat16).contiguous().realize()
     optim.lr.realize()
     param.assign(optim._apply_update(param, update, master))
     GlobalCounters.reset()
     Tensor.realize(param, master)
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertTrue(master.allclose(expected_master, atol=1e-6, rtol=1e-6).item())
-    self.assertTrue(param.allclose(expected_master.cast(dtypes.bfloat16), atol=0, rtol=0).item())
+    self.assertTrue(param.allclose(expected_param, atol=0, rtol=0).item())
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT.split(":")[0] == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedFP8AdamW(unittest.TestCase):

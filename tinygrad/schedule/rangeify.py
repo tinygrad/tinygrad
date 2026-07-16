@@ -71,7 +71,7 @@ def fix_store_hazard(target:UOp, src:UOp):
 def view_to_slice(r:UOp) -> UOp|None:
   if r.op is not Ops.SHRINK or r.src[0].op is not Ops.RESHAPE or len(r.marg) != 1: return None
   src, (offset, size) = r.src[0].src[0], r.marg[0]
-  if src.op is not Ops.MSELECT or src.shape == () or not isinstance(offset, int) or not isinstance(size, int): return None
+  if src.op is not Ops.MSELECT or src.shape == () or not r.can_buffer_view() or not isinstance(offset, int) or not isinstance(size, int): return None
   if prod(r.src[0].shape) != prod(src.shape) or size != r.numel(): return None
   return UOp(Ops.SLICE, r.dtype, (src, UOp.const(dtypes.index, offset)), size)
 

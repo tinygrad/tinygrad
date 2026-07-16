@@ -55,6 +55,8 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
     atomic_arg = "if ({2} > {3}) __hip_atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
   elif device in ("CPU", "NULL"):
     atomic_arg = "if ({2} > {3}) __atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED);"
+  elif device == "CL":
+    atomic_arg = "if ({2} > {3}) atomic_max((volatile __global int*){0}, {1});"
   else:
     raise NotImplementedError(f"no atomic max for device {device}")
   amax_idx = amax_out.index(layer)
