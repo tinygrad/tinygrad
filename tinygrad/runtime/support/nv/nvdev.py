@@ -130,10 +130,10 @@ class NVDev:
 
     vram_size_reg = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read()
     self.vram, self.mmio = self.pci_dev.map_bar(1), self.pci_dev.map_bar(0, fmt='I')
-    if vram_size_reg:
-      self.vram_size = vram_size_reg << 20
-    else:
+    if vram_size_reg in (0, 0xbadf5108):
       self.vram_size = self.vram.nbytes
+    else:
+      self.vram_size = vram_size_reg << 20
       if DEBUG >= 1: print(f"nv {self.devfmt}: WARNING: VRAM scratch reg is 0, using BAR1 size {self.vram_size // (1024 * 1024)} MB", flush=True)
     self.large_bar = self.vram.nbytes >= self.vram_size
 
