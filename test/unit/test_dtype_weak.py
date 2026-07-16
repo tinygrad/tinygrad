@@ -2,10 +2,17 @@ import unittest
 from unittest.mock import patch
 
 from tinygrad import Tensor, dtypes
+from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
+from tinygrad.uop.spec import spec_tensor
 
 
 class TestWeakPromotion(unittest.TestCase):
+  def test_storage_width(self):
+    t = Tensor.const(dtypes.weakint, 2)
+    for fn in (lambda: t.bitcast(dtypes.int32), lambda: Tensor.const(dtypes.int32, 2).bitcast(dtypes.weakint), t.element_size, t.nbytes):
+      with self.assertRaises(RuntimeError): fn()
+
   def test_uop_scalar_const_unchanged(self):
     for dtype, value in ((dtypes.index, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
       out = UOp.variable("x", 0.0 if dtype == dtypes.float32 else 0, 10.0 if dtype == dtypes.float32 else 10, dtype) + value
@@ -22,6 +29,8 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(((t_bool + 1) + t_u16).dtype, dtypes.uint16)
     self.assertEqual((Tensor(3) + t_i8).dtype, dtypes.int8)
     self.assertEqual(Tensor([2], dtype=dtypes.uint8).pad(((1, 1),), value=1).dtype, dtypes.uint8)
+    # zeros/ones are full with a python fill value, so they are weak too (jnp.zeros pins float32; deliberate divergence)
+    self.assertEqual((Tensor.zeros(3) + t_f16).dtype, dtypes.float16)
 
   def test_unchanged_rows(self):
     t_i8, t_f16, t_f32 = Tensor([1], dtype=dtypes.int8), Tensor([1], dtype=dtypes.float16), Tensor([1], dtype=dtypes.float32)
@@ -73,12 +82,21 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((weak + Tensor([1], dtype=dtypes.int32, device="CPU")).item(), 3)
     self.assertEqual((weak + Tensor([1], dtype=dtypes.int64, device="CPU")).item(), 3)
 
-  @unittest.expectedFailure  # TODO: weak consts lower to concrete dtypes before kernels
   def test_null_lowering(self):
     for t in (Tensor.full((1,), 1, dtype=dtypes.int64, device="NULL") + 2**40,
               Tensor.full((1,), 1.0, dtype=dtypes.float64, device="NULL") + (1.0 + 2**-40)):
       t.realize()
       self.assertNotIn(t.uop.buffer.dtype, dtypes.weaks)
+
+
+class TestWeakSpec(unittest.TestCase):
+  def test_weak_operand_allowed(self):
+    x = UOp.variable("x", 0, 10, dtypes.int64)
+    weak = UOp.const(dtypes.weakint, 3)
+    for u in (x.alu(Ops.ADD, weak), x.alu(Ops.CMPLT, weak), x.alu(Ops.SHL, weak)):
+      self.assertIs(spec_tensor.rewrite(u), True)
+    gate = UOp.variable("gate", False, True, dtypes.bool)
+    self.assertIs(spec_tensor.rewrite(UOp(Ops.WHERE, dtypes.int8, (gate, UOp.const(dtypes.int8, 1), weak))), True)
 
 
 if __name__ == "__main__":

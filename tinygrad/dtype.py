@@ -98,7 +98,7 @@ class dtypes:
   @staticmethod
   def from_py(x) -> DType:
     # NOTE: isinstance(True, int) is True, so bool must be checked before int
-    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, (bool, InvalidType)): return dtypes.bool
     if isinstance(x, float): return dtypes.default_float
     if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
@@ -154,6 +154,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
