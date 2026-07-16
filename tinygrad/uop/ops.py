@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace
+from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, strong_dtype, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
@@ -788,9 +788,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if ret.device == device else ret.copy_to_device(device)
   def clone(self, device=None) -> UOp:
     device = device or self.device
-    ret = self.empty_like(device=device)
+    ret = self.empty_like(dtype=strong_dtype(self.dtype), device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
-    return ret.after(ret.store(src))
+    return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
