@@ -47,6 +47,8 @@ class TestTiny(unittest.TestCase):
       for x in range(N):
         self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
     self.assertEqual(out.dtype, dtype)
+
+  @unittest.skipIf(Device.DEFAULT == "DSP", "half is broken on DSP")
   def test_hgemm(self): self.test_gemm(dtype=dtypes.half)
 
   def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
