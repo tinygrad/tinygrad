@@ -204,7 +204,7 @@
     background-color: #0f1018;
     padding: 20px;
     z-index: 2;
-    position: relative;
+    position: absolute;
     height: 100%;
   }
   .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
@@ -232,6 +232,7 @@
     width: 15%;
     padding-top: 50px;
     border-right: 1px solid #4a4b56;
+    left: 0;
   }
   .ctx-list, .metadata {
     width: 100%;
@@ -243,7 +244,6 @@
     width: 20%;
     border-left: 1px solid #4a4b56;
     margin-left: auto;
-    position: absolute;
     right: 0;
   }
   .resize-handle {
