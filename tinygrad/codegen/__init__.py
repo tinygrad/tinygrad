@@ -80,7 +80,7 @@ def unroll_axis(ctx:dict[int, int], u:UOp, arg):
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
   if u.tag != 1: return None
-  in0, in1, out0 = u.arg[6]
+  in0, in1, out0 = u.arg[4]
   wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]), tag=None)
   return unroll_axis(ctx, wmma, out0)
 
