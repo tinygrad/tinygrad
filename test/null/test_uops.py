@@ -5,10 +5,47 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
-from tinygrad.uop.spec import spec_shared
+from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
+
+class TestDTypeFromUOp(unittest.TestCase):
+  def test_broadcastable_promotion(self):
+    self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.float16, 1.0)), None), dtypes.float32)
+    self.assertEqual(dtype_from_uop(Ops.MUL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.int32, 1)), None), dtypes.int32)
+    self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.int8, 1)), None), dtypes.int8)
+
+  def test_same_dtype_fast_path(self):
+    src = (UOp.const(dtypes.index, 1), UOp.const(dtypes.index, 2))
+    self.assertEqual(dtype_from_uop(Ops.ADD, src, None), dtypes.index)
+
+  def test_where_promotion(self):
+    cond = UOp.const(dtypes.bool, True)
+    self.assertEqual(dtype_from_uop(Ops.WHERE, (cond, UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.float16, 1.0)), None), dtypes.float32)
+    idx = UOp.range(4, 0)
+    self.assertEqual(idx.valid(idx < 4).dtype, dtypes.index)
+
+  def test_const_dtype_from_value(self):
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), True), dtypes.bool)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), 3), dtypes.weakint)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), ConstFloat(3.0)), dtypes.weakfloat)
+    self.assertEqual(dtype_from_uop(Ops.CONST, (), Invalid), dtypes.bool)
+    self.assertRaises(TypeError, dtype_from_uop, Ops.CONST, (), (1, 2))
+
+  @Context(SPEC=2)
+  def test_const_default_dtype_is_derived(self):
+    self.assertEqual(UOp(Ops.CONST, arg=3).dtype, dtypes.weakint)
+    self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
+    self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
+    self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
+    # an explicit (strong) const dtype is legal until the field is removed
+    self.assertEqual(UOp.const(dtypes.int32, 3).dtype, dtypes.int32)
+
+  def test_weak_dtype_rejected_by_program_spec(self):
+    for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
+      with self.assertRaises(RuntimeError): type_verify(UOp.const(weak, value).sink(), spec_program)
+      type_verify(UOp.const(concrete, value).sink(), spec_program)
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):

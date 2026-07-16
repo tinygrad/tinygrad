@@ -204,7 +204,7 @@
     background-color: #0f1018;
     padding: 20px;
     z-index: 2;
-    position: relative;
+    position: absolute;
     height: 100%;
   }
   .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
@@ -224,14 +224,20 @@
     width: 100%;
     height: calc(100% - 50px);
     margin-top: 50px;
+    margin-left: 15%;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
+  }
+  #custom {
+    margin-right: 20%;
+    z-index: 1;
   }
   .ctx-list-parent {
     width: 15%;
     padding-top: 50px;
     border-right: 1px solid #4a4b56;
+    left: 0;
   }
   .ctx-list, .metadata {
     width: 100%;
@@ -243,6 +249,7 @@
     width: 20%;
     border-left: 1px solid #4a4b56;
     margin-left: auto;
+    right: 0;
   }
   .resize-handle {
     position: absolute;
@@ -282,6 +289,10 @@
   }
   .collapsed .container {
     display: none;
+  }
+  .collapsed #profiler, .collapsed #custom {
+    margin-left: 0;
+    margin-right: 0;
   }
   .rewrite-list {
     display: flex;

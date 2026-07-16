@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, Invalid, AddrSpace
+from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
@@ -99,6 +99,11 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
       if s in ret: ret[s][u] = None
   return ret
 
+def promo_dtype(src:tuple[UOp,...]) -> DType:
+  # TODO: delete this once we merge index and weakint
+  dts = [x.dtype for x in src]
+  return dts[0] if all_same(dts) else least_upper_dtype(*dts)
+
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
@@ -119,14 +124,14 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
+    case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIPROCAL:
+      return dtypes.weakfloat if src[0].dtype == dtypes.weakint else least_upper_float(src[0].dtype)
     case Ops.WHERE:
       assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
-      assert src[1].dtype == src[2].dtype, f"dtype mismatch in where {src[1].dtype} != {src[2].dtype}"
-      return src[1].dtype
+      return promo_dtype(src[1:])
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
-      if all_same(dts:=[x.dtype for x in src]): return dts[0]
-      return least_upper_dtype(*dts)
+      return promo_dtype(src)
     case Ops.BIND:
       assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
       return src[0].dtype
@@ -154,14 +159,15 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
       return arg
     case Ops.CONST:
-      # TODO: need const refactor to bool/weakint/weakfloat
-      return None
+      # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
+      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is the lattice bottom, typed by its consumer
+      if isinstance(arg, bool): return dtypes.bool
+      if isinstance(arg, int): return dtypes.weakint
+      if isinstance(arg, float): return dtypes.weakfloat
+      raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
-  if op in GroupOp.Broadcastable:
-    # TODO: support dtype broadcasting (promotion)
-    if not all_same([x.dtype for x in src]): raise RuntimeError(f"dtype mismatch in {op}")
-    return src[0].dtype
+  if op in GroupOp.Broadcastable: return promo_dtype(src)
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
@@ -170,7 +176,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    # CONST derives its dtype by value only when the constructor omits one; an explicit (strong) const dtype is legal until the field is removed
+    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -1659,14 +1666,19 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
-def select_dtype(u): return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
+def select_dtype(u:UOp):
+  return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
+def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
+  src = u.src[:-2]+(x.cast(dt), y.cast(dt))
+  return src[0].alu(u.op, *src[1:]).cast(u.dtype)
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
-  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))), lambda u,x,y:
-    x.cast(dt:=least_upper_dtype(select_dtype(u), x.dtype, y.dtype)).alu(u.op, y.cast(dt)).cast(u.dtype)),
   (UPat(Ops.CONST, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
-  (UPat(Ops.WHERE, dtypes.index, src=(UPat.var("cond"), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))), lambda cond,x,y:
-    cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt)).cast(dtypes.index)),
+  # Binary can widen the dtype, WHERE cannot
+  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))),
+   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),
+  (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index)), name="u"),
+   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(x.dtype, y.dtype))),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.index)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.index), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.index)),
