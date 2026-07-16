@@ -101,10 +101,11 @@ def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
 def _wmma_name(u:UOp) -> str:
   return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.scalar().name}"
 
-# (name, dims, dtype_in, dtype_out, device, threads, upcast_axes)
+# (name, dims, dtype_in, dtype_out, device, threads, upcast_sizes)
 def wmma_args(uops:list[UOp]):
-  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype.scalar(), *(uop.arg[2:5]))
-                for uop in uops if uop.op is Ops.WMMA)
+  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype.scalar(), *(uop.arg[2:4]),
+               tuple(uop.src[i].shape[-1] for i in range(3)))
+              for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
   kernel_typedef: str = "void"
@@ -442,8 +443,7 @@ class CUDARenderer(CStyleLanguage):
       or (count in (2,4,8,16) and dt in dtypes.fp8s)]
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
-    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes in wmma_args(uops):
-      upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
+    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_sizes in wmma_args(uops):
       wmma_dtypes = [self._render_dtype(dtype, size, AddrSpace.REG) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
       n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)] # 4 => CUDA reg size in bytes
       operands = [f"%{i}" for i in range(sum(n_operands))]

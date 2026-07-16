@@ -79,9 +79,10 @@ def unroll_axis(ctx:dict[int, int], u:UOp, arg):
   return out.permute(argsort(permute_head+permute_tail))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
-  if u.tag != 1: return None
+  if u.arg[4] is None: return None
   in0, in1, out0 = u.arg[4]
-  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]), tag=None)
+  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]),
+                   arg=(*u.arg[:4], None))
   return unroll_axis(ctx, wmma, out0)
 
 expander2 = PatternMatcher([

@@ -264,7 +264,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
           src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
             for j in range(x.max_numel()*2)))),
-          arg=(*x.arg[:4], (*x.arg[4][:2], ((0, x.max_numel()*2),)))).index(i*2)
+          arg=(*x.arg[:4], None)).index(i*2)
           for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
         (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
           src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
