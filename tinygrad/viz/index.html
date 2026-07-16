@@ -224,9 +224,13 @@
     width: 100%;
     height: calc(100% - 50px);
     margin-top: 50px;
+    margin-left: 15%;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
+  }
+  #custom {
+    margin-right: 20%;
   }
   .ctx-list-parent {
     width: 15%;
@@ -285,8 +289,9 @@
   .collapsed .container {
     display: none;
   }
-  .collapsed #device-list, .collapsed #timeline {
-    left: 0;
+  .collapsed #profiler, .collapsed #custom {
+    margin-left: 0;
+    margin-right: 0;
   }
   .rewrite-list {
     display: flex;
@@ -338,10 +343,6 @@
   }
   #device-list {
     height: fit-content;
-  }
-  #device-list, #timeline {
-    position: relative;
-    left: 15%;
   }
   .raw-text {
     padding-left: 15px;
