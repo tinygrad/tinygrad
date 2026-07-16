@@ -367,9 +367,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA:
-        in0, in1, out0 = self.arg[4]
         wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
-        return wmma_b + (prod([x for _,x in out0]),)
+        return wmma_b + (self.src[2].shape[-1],)
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
@@ -602,8 +601,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tag=None, tc_upcast_axes=None):
-    if tc_upcast_axes is None:
-      tc_upcast_axes = tuple(((i, s.shape[-1] if s.shape else 1),) for i,s in enumerate((a, b, acc)))
     # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
     return UOp(Ops.WMMA, src=(a, b, acc), arg=(dims, a.dtype, device, threads, tc_upcast_axes), tag=tag)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
