@@ -4,8 +4,9 @@ from tinygrad.helpers import getenv
 from examples.mlperf.optim import GradAccClipAdamW
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
-from extra.llama_kernels import local_abs_max
+from extra.llama_kernels import NUM_WG, local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import _custom_bwd as custom_rmsnorm_bwd
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8, fused_rmsnorm_mul_quantize_fp8
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
@@ -151,6 +152,29 @@ class TestFusedAddRMSNorm(unittest.TestCase):
       for got, ref in ((h, ref_h), (x_normed, ref_x_normed), (rrms, ref_rrms)):
         self.assertTrue(got.allclose(ref, atol=2e-2, rtol=2e-2).item())
       self.assertTrue(fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=2e-2, rtol=2e-2).item())
+
+  def test_backward_with_residual_grad(self):
+    shape = (2, 8192, 4096)
+    grad_fp8 = Tensor.full(shape, 0.01, dtype=dtypes.bfloat16).contiguous().realize()
+    x_normed = Tensor.full(shape, 0.125, dtype=dtypes.bfloat16).contiguous().realize()
+    rrms = Tensor.full(shape[:-1], 0.5, dtype=dtypes.float32).contiguous().realize()
+    weight = Tensor.full((shape[-1],), 0.25, dtype=dtypes.bfloat16).contiguous().realize()
+    grad_h = Tensor.full(shape, 0.02, dtype=dtypes.bfloat16).contiguous().realize()
+    amax = Tensor.full((), 2.0, dtype=dtypes.float32).contiguous().realize()
+    grad_weight_shape = (NUM_WG, shape[-1])
+    args = (grad_fp8, x_normed, rrms, weight, amax)
+    grad_x, grad_weight, *_ = Tensor.custom_kernel(
+      Tensor.empty(*shape, dtype=dtypes.bfloat16), Tensor.empty(*grad_weight_shape, dtype=dtypes.float32), *args, grad_h,
+      fxn=functools.partial(custom_rmsnorm_bwd, has_h_grad=True, has_layer_num=False, dname=Device.DEFAULT))
+    grad_x_ref, grad_weight_ref, *_ = Tensor.custom_kernel(
+      Tensor.empty(*shape, dtype=dtypes.bfloat16), Tensor.empty(*grad_weight_shape, dtype=dtypes.float32), *args,
+      fxn=functools.partial(custom_rmsnorm_bwd, has_h_grad=False, has_layer_num=False, dname=Device.DEFAULT))
+    Tensor.realize(grad_x, grad_weight, grad_x_ref, grad_weight_ref)
+    expected_grad_x = (grad_x_ref + grad_h).realize()
+
+    with Context(DEBUG=0):
+      self.assertTrue(grad_x.allclose(expected_grad_x, atol=0, rtol=0).item(), "residual add mismatch")
+      self.assertTrue(grad_weight.allclose(grad_weight_ref, atol=0, rtol=0).item(), "weight grad changed")
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):

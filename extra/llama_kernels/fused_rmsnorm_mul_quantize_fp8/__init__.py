@@ -46,17 +46,22 @@ def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax
 
 @functools.cache
 def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,
-                grad_fp8:UOp, x_normed:UOp, rrms:UOp, weight:UOp, amax_state:UOp, layer_num:UOp|None=None, dname:str=None) -> UOp:
+                grad_fp8:UOp, x_normed:UOp, rrms:UOp, weight:UOp, amax_state:UOp, *extra:UOp,
+                has_h_grad:bool=False, has_layer_num:bool=False, dname:str=None) -> UOp:
+  h_grad = extra[0] if has_h_grad else None
+  layer_num = extra[int(has_h_grad)] if has_layer_num else None
   MBS, SEQ, HIDDEN = x_normed.shape
   n_elems = MBS * SEQ * HIDDEN
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 * 3 + NUM_WG * HIDDEN * 4 + MBS * SEQ * 4 + HIDDEN * 2 + 4
+  mem = n_elems * 2 * (3 + has_h_grad) + NUM_WG * HIDDEN * 4 + MBS * SEQ * 4 + HIDDEN * 2 + 4
   sink = UOp.sink(grad_x.base, grad_weight_partial.base,
                   grad_fp8.base, x_normed.base, rrms.base, weight.base, amax_state.base,
+                  *((h_grad.base,) if h_grad is not None else ()),
                   *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
-                  arg=KernelInfo(f"fused_rmsnorm_mul_quantize_fp8_bwd_{n_elems}_h{HIDDEN}",
-                                 estimates=Estimates(ops=8*n_elems, mem=mem)))
+                  arg=KernelInfo(f"fused_rmsnorm_mul_quantize_fp8_bwd{'_add' if has_h_grad else ''}_{n_elems}_h{HIDDEN}",
+                                 estimates=Estimates(ops=(8+has_h_grad)*n_elems, mem=mem)))
   defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
+  if has_h_grad: defines.append("-DHAS_H_GRAD=1")
   if layer_num is not None: defines.append("-DLAYER_SCALE=1")
   src = _src_bwd()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
@@ -71,19 +76,21 @@ def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_st
   grad_h_from_fp8 = None
   grad_weight_uop = None
   if fp8_grad_u is not None:
-    fxn = functools.partial(_custom_bwd, dname=dname_of(device))
+    h_grad_t = Tensor(h_grad_u, device=device).cast(dtypes.bfloat16) if h_grad_u is not None else None
+    fxn = functools.partial(_custom_bwd, dname=dname_of(device), has_h_grad=h_grad_t is not None, has_layer_num=layer_num_u is not None)
     grad_x_t, grad_weight_partial_t, *_ = Tensor.custom_kernel(
       grad_x, grad_weight_partial,
       Tensor(fp8_grad_u, device=device).cast(dtypes.bfloat16),
       Tensor(x_normed_u.after(kernel), device=device),
       Tensor(rrms_u.after(kernel), device=device),
       Tensor(weight_u, device=device),
-      Tensor(amax_state_u, device=device), *((Tensor(layer_num_u, device=device),) if layer_num_u is not None else ()), fxn=fxn)
+      Tensor(amax_state_u, device=device), *((h_grad_t,) if h_grad_t is not None else ()),
+      *((Tensor(layer_num_u, device=device),) if layer_num_u is not None else ()), fxn=fxn)
     grad_h_from_fp8 = grad_x_t
     grad_weight_uop = grad_weight_partial_t.sum(axis=0).cast(dtypes.bfloat16).uop
-  if h_grad_u is not None:
+  if h_grad_u is not None and grad_h_from_fp8 is None:
     h_grad_t = Tensor(h_grad_u, device=device).cast(dtypes.bfloat16)
-    grad_total = (grad_h_from_fp8 + h_grad_t) if grad_h_from_fp8 is not None else h_grad_t
+    grad_total = h_grad_t
   else:
     grad_total = grad_h_from_fp8
   return grad_total.uop, grad_weight_uop

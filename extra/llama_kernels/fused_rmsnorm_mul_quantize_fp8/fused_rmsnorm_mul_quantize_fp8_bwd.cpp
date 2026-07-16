@@ -11,6 +11,7 @@
 //   rrms (fp32)         — saved rrms per row
 //   weight (bf16)       — per-HIDDEN rmsnorm weight
 //   amax_state (bf16)   — delayed amax used to compute the fp8 scale in fwd
+//   h_grad (bf16)       — optional residual-path gradient added to grad_x
 //
 // Chain: y = x_normed * weight; fp8 = sat(y * scale). Through STE: grad_y = grad_fp8 * scale.
 //        grad_x_normed = grad_y * weight.
@@ -32,6 +33,9 @@
 #ifndef LAYER_SCALE
 #define LAYER_SCALE 0
 #endif
+#ifndef HAS_H_GRAD
+#define HAS_H_GRAD 0
+#endif
 
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
@@ -52,6 +56,9 @@ fused_rmsnorm_mul_quantize_fp8_bwd(
     const float*          __restrict__ rrms,                // in:  fp32, ROWS
     const __hip_bfloat16* __restrict__ weight,              // in:  bf16, HIDDEN
     const float*          __restrict__ amax_state           // in:  fp32 scalar or n_layers
+#if HAS_H_GRAD
+    , const __hip_bfloat16* __restrict__ h_grad             // in:  bf16, ROWS*HIDDEN
+#endif
 #if LAYER_SCALE
     , const int*        __restrict__ layer_num
 #endif
@@ -134,8 +141,12 @@ fused_rmsnorm_mul_quantize_fp8_bwd(
       #pragma unroll
       for (int i = 0; i < VEC; i++) {
         const int idx = v * VEC + i;
-        const float dx = rrms_v * (g_xn_regs[idx] - xn_regs[idx] * mean_term);
-        out[i] = static_cast<__hip_bfloat16>(dx);
+        const __hip_bfloat16 dx = static_cast<__hip_bfloat16>(rrms_v * (g_xn_regs[idx] - xn_regs[idx] * mean_term));
+#if HAS_H_GRAD
+        out[i] = static_cast<__hip_bfloat16>(static_cast<float>(dx) + static_cast<float>(h_grad[row_off + h_base + i]));
+#else
+        out[i] = dx;
+#endif
       }
       *reinterpret_cast<float4*>(&grad_x[row_off + h_base]) = *reinterpret_cast<float4*>(out);
     }
