@@ -604,6 +604,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tag=None, tc_upcast_axes=None):
     if tc_upcast_axes is None:
       tc_upcast_axes = tuple(((i, s.shape[-1] if s.shape else 1),) for i,s in enumerate((a, b, acc)))
+    # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
     return UOp(Ops.WMMA, src=(a, b, acc), arg=(dims, a.dtype, device, threads, tc_upcast_axes), tag=tag)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
     # NOTE: we don't allow reduce on 1s axis
