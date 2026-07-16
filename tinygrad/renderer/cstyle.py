@@ -55,7 +55,7 @@ base_rewrite = PatternMatcher([
                  f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 
   # load/store
-  # a LOAD in a WAIT condition is re-evaluated every spin: volatile keeps the compiler from hoisting it out of the loop
+  # a LOAD feeding a WAIT condition is re-evaluated every spin: volatile keeps the compiler from hoisting it out of the loop
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), name="x"), lambda ctx,x,bidx:
    f"(*(volatile {ctx._render_dtype(x.dtype, x.max_numel(), x.addrspace, override_ptr=True)})({ctx[bidx]}))" if x in ctx.wait_loads else None),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"({ctx.render_access(bidx)})"),

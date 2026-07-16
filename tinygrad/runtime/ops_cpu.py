@@ -198,3 +198,4 @@ class CPUDevice(HCQCompiled):
   def finalize(self):
     for _ in self.workers: CPUComputeQueue()._cmd(CpuOp.QUIT).submit(self)
     for t in self.workers: t.join(timeout=2.0)
+
