@@ -118,7 +118,7 @@ class NVDev:
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
-    if needs_reset: self.flcn.wait_for_reset()
+    self.flcn.wait_for_reset()
 
   def _early_mmu_init(self):
     self.include("dev_vm", "tu102")
