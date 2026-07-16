@@ -1,9 +1,11 @@
-import functools
+import functools, weakref
 from tinygrad import Tensor, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, zero_scalar
+
+quantize_bwd_mailbox:weakref.WeakKeyDictionary[UOp, tuple[UOp, UOp, UOp|None]] = weakref.WeakKeyDictionary()
 
 @functools.cache
 def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:UOp, layer_num:UOp|None=None, device=None) -> UOp:
@@ -83,6 +85,7 @@ def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   if layer_num is not None: amax_state_t = amax_state_t[Tensor(layer_num, device=device)[0]]
   scale = FP8_MAX / (amax_state_t.float() + 1e-8)
   grad_x = (Tensor(gradient, device=device).float() * scale).cast(dtypes.bfloat16)
+  quantize_bwd_mailbox[grad_x.uop] = (gradient, amax_state, layer_num)
   return (None, None, grad_x.uop, None) + ((None,) if layer_num is not None else ())
 
 def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3, amax_out:Tensor|None=None,

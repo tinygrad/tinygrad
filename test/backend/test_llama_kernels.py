@@ -9,7 +9,7 @@ from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quant
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import _custom_bwd as custom_rmsnorm_bwd
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8, fused_rmsnorm_mul_quantize_fp8
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
-from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
+from extra.thunder.amd.fa import custom_fa_backward_pre, custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu
 from test.backend.test_asm_gemm import has_hipcc
 
@@ -240,6 +240,29 @@ class TestFusedQKVRoPE(unittest.TestCase):
     dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
+
+  def test_flash_attention_backward_pre_scale(self):
+    B, N, H, H_KV, D = self.SHAPE
+    shape, dq_shape, delta_shape = (B, N, H, D), (B, H, N, D), (B, H, 1, N)
+    attn = Tensor.full(shape, 0.125, dtype=dtypes.bfloat16).contiguous().realize()
+    grad = Tensor.full(shape, 0.01, dtype=dtypes.bfloat16).contiguous().realize()
+    amax = Tensor.full((32,), 2.0, dtype=dtypes.float32).contiguous().realize()
+    layer_num = Tensor([3], dtype=dtypes.int32).contiguous().realize()
+    scaled_ref = (grad.float() * (448.0 / (amax[layer_num[0]] + 1e-8))).cast(dtypes.bfloat16).contiguous().realize()
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    common = dict(device=Device.DEFAULT, arch=arch, B=B, N=N, H=H, H_KV=H_KV, D=D)
+    delta_ref, dq_ref, *_ = Tensor.custom_kernel(
+      Tensor.empty(*delta_shape, dtype=dtypes.float32), Tensor.empty(*dq_shape, dtype=dtypes.bfloat16), attn, scaled_ref,
+      fxn=functools.partial(custom_fa_backward_pre, **common))
+    delta, dq, scaled, *_ = Tensor.custom_kernel(
+      Tensor.empty(*delta_shape, dtype=dtypes.float32), Tensor.empty(*dq_shape, dtype=dtypes.bfloat16),
+      Tensor.empty(*shape, dtype=dtypes.bfloat16), attn, grad, amax, layer_num,
+      fxn=functools.partial(custom_fa_backward_pre, scale_do=True, has_layer_num=True, **common))
+    Tensor.realize(delta_ref, dq_ref, delta, dq, scaled)
+    with Context(DEBUG=0):
+      self.assertTrue(scaled.allclose(scaled_ref, atol=0, rtol=0).item(), "scaled dO mismatch")
+      self.assertTrue(delta.allclose(delta_ref, atol=0, rtol=0).item(), "delta changed")
+      self.assertTrue(dq.allclose(dq_ref, atol=0, rtol=0).item(), "dQ initialization changed")
 
 if __name__ == '__main__':
   unittest.main()

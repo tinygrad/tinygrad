@@ -113,6 +113,8 @@ def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
+    from extra.llama_kernels.quantize_fp8_delayed import quantize_bwd_mailbox
+    scale_args = quantize_bwd_mailbox.pop(dou, None)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
     l_vec = Tensor(ker.src[2].after(ker), device=ker.src[2].device)
     xq = Tensor(ker.src[3], device=ker.src[3].device)
@@ -127,7 +129,16 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
-    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
+    if scale_args is not None:
+      raw_do, amax_state, layer_num = scale_args
+      do = Tensor(raw_do, device=dou.device)
+      scaled_do = _sharded_empty(do.shape, do, axis=do.uop.axis)
+      delta_vec, dq, do = Tensor.custom_kernel(delta_vec, dq, scaled_do, attn, do, Tensor(amax_state, device=dou.device),
+        *((Tensor(layer_num, device=dou.device),) if layer_num is not None else ()),
+        fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local,
+                              D=D, scale_do=True, has_layer_num=layer_num is not None))[:3]
+    else:
+      delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
 
     dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
 
@@ -215,10 +226,17 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
-def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, *args:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int,
+                           scale_do:bool=False, has_layer_num:bool=False):
+  scaled_do = args[0] if scale_do else None
+  o, do = args[1:3] if scale_do else args[:2]
+  amax_state = args[3] if scale_do else None
+  layer_num = args[4] if scale_do and has_layer_num else None
   code = (pathlib.Path(__file__).parent / "fa_bwd_pre.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
                   f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_D={D}"]
+  if scale_do: compile_args.append("-DSCALE_DO=1")
+  if has_layer_num: compile_args.append("-DLAYER_SCALE=1")
 
   DOT_SLICE_QO = 16
   NUM_WARPS = 4
@@ -229,11 +247,12 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
 
   el = o.dtype.itemsize
-  mem = 3*B*H*N*D * el + B*H*N * delta_vec.dtype.itemsize
-  estimates = Estimates(ops=2*B*H*N*D, lds=mem, mem=mem)
-  sink = UOp.sink(delta_vec.base, dq.base, o.base, do.base,
+  mem = (3+scale_do)*B*H*N*D * el + B*H*N * delta_vec.dtype.itemsize
+  estimates = Estimates(ops=(2+scale_do)*B*H*N*D, lds=mem, mem=mem)
+  sink = UOp.sink(delta_vec.base, dq.base, *((scaled_do.base,) if scaled_do is not None else ()), o.base, do.base,
+                  *((amax_state.base,) if amax_state is not None else ()), *((layer_num.base,) if layer_num is not None else ()),
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_backward_pre", estimates=estimates))
+                  arg=KernelInfo(name=f"custom_fa_backward_pre{'_scale' if scale_do else ''}", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   lib = bytearray(lib)
