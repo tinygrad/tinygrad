@@ -305,7 +305,7 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 
 # *****************
 
-def make_addr_table(call:UOp, gaddrs:list[UOp], name:str):
+def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
   bare = {g: g.replace(src=(unwrap_after(g.src[0]),)) for g in gaddrs}
 
   order = sorted(dedup(bare.values()), key=lambda g: ((b:=unwrap_mstack(g.buf_uop)[0]).arg.slot, to_tuple(b.tag)))
@@ -314,26 +314,23 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str):
   reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(dtypes.int, slots[bare[g]])).load() for g in gaddrs}
   return reads, (table.after(*[make_patch(table, i * table.dtype.itemsize, addr) for addr, i in slots.items()]),) if slots else ()
 
-def rm_rt_getaddrs(call:UOp) -> UOp|None:
-  if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
+def make_blob_bufs(call:UOp, blobs:list[UOp]) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
+  bufs = {b: make_placeholder(call.arg.aux.device, b.max_numel(), b.dtype, "template") for b in blobs}
+  return bufs, tuple(buf.after(make_binary_patch(buf, b.src[0].arg)) for b,buf in bufs.items())
+
+def rm_rt_uops(call:UOp) -> UOp|None:
+  if not (rt_uops:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR or (u.op is Ops.BITCAST and u.src[0].op is Ops.BINARY)]): return None
+  gaddrs, blobs = partition(rt_uops, lambda u: u.op is Ops.GETADDR)
   inputs, internals = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
 
   # exec fills the inputs table with the input addresses every run, so it has no fill patches
-  (input_reads, _), (rt_reads, rt_fills), (sys_reads, sys_fills) = (make_addr_table(call, gs, name) for gs, name in
-    ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems")))
-  return call.replace(src=(call.src[0].substitute(input_reads | rt_reads | sys_reads), *call.src[1:], *rt_fills, *sys_fills),
+  (reads, _), *tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))] + \
+                        [make_blob_bufs(call, blobs)]
+  reads, fills = reads | {k:v for r,_ in tables for k,v in r.items()}, [f for _,fs in tables for f in fs]
+  return call.replace(src=(call.src[0].substitute(reads), *call.src[1:], *fills),
                       arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
-pm_rm_rt_getaddrs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_getaddrs)])
-
-# *****************
-
-def rm_rt_binaries(call:UOp) -> UOp|None:
-  if not (blobs:=[u for u in call.src[0].toposort() if u.op is Ops.BITCAST and u.src[0].op is Ops.BINARY]): return None
-  blob_bufs = {blob: make_placeholder(call.arg.aux.device, blob.max_numel(), blob.dtype, "template") for blob in blobs}
-  fills = [buf.after(make_binary_patch(buf, blob.src[0].arg)) for blob, buf in blob_bufs.items()]
-  return call.replace(src=(call.src[0].substitute(blob_bufs), *call.src[1:], *fills))
-pm_rm_rt_binaries = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_binaries)])
+pm_rm_rt_uops = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_uops)])
 
 # *****************
 
@@ -413,8 +410,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
     # pie
     linear = graph_rewrite(linear, pm_split_patches, ctx=jit, walk=True, name="split rt/lt patches")
     linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="simplify packed placeholders", enter_calls=True)
-    linear = graph_rewrite(linear, pm_rm_rt_getaddrs, walk=True, name="replace rt getaddrs")
-    linear = graph_rewrite(linear, pm_rm_rt_binaries, walk=True, name="replace rt binaries")
+    linear = graph_rewrite(linear, pm_rm_rt_uops, walk=True, name="replace rt uops")
     linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
 
     # and compile it
