@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
@@ -439,9 +439,6 @@ class ElementwiseMixin(CreationMixin):
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
 
-  def _ensure_float(self) -> Self:
-    return self if self.is_floating_point() else self.cast(least_upper_float(self.dtype))
-
   def reciprocal(self) -> Self:
     """
     Computes `1/x` element-wise.
@@ -450,7 +447,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
-    return self._ensure_float().alu(Ops.RECIPROCAL)
+    return self.alu(Ops.RECIPROCAL)
 
   def trunc(self) -> Self:
     """
@@ -470,7 +467,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
     ```
     """
-    return self._ensure_float().alu(Ops.SQRT)
+    return self.alu(Ops.SQRT)
 
   def sin(self) -> Self:
     """
@@ -480,7 +477,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
     ```
     """
-    return self._ensure_float().alu(Ops.SIN)
+    return self.alu(Ops.SIN)
 
   def cos(self) -> Self:
     """
@@ -517,7 +514,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 4., 8.]).log2().numpy())
     ```
     """
-    return self._ensure_float().alu(Ops.LOG2)
+    return self.alu(Ops.LOG2)
 
   def exp2(self) -> Self:
     """
@@ -529,7 +526,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., 1., 2., 3.]).exp2().numpy())
     ```
     """
-    return self._ensure_float().alu(Ops.EXP2)
+    return self.alu(Ops.EXP2)
 
   def pow(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """

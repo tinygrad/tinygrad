@@ -149,7 +149,8 @@ class TestTensorCores(unittest.TestCase):
 
         # TODO: support this even if numpy doesn't
         if _to_np_dtype(real_bufs[0].dtype) is None: continue
-        real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
+        # Zero to check that all values are filled
+        real_bufs[0].copy_from(Buffer("PYTHON", real_bufs[0].size, real_bufs[0].dtype, opaque=memoryview(bytearray(real_bufs[0].nbytes))))
         run_program(ast, real_bufs)
         result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(real_bufs[0].dtype))
 

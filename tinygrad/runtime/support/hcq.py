@@ -546,13 +546,13 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, max_copyout_size:int|None=None, **kwargs):
+  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, **kwargs):
     super().__init__(dev, **kwargs)
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
-    self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
+    self.b_timeline, self.b_next = [0] * len(self.b), 0
 
-  def _map(self, buf:HCQBuffer):
-    if self.dev in buf.mapped_devs: return
+  def _map(self, buf:HCQBuffer) -> HCQBuffer:
+    if self.dev in buf.mapped_devs: return buf
     if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
 
@@ -560,6 +560,7 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     # Devices can save mappings and internal metadata as a new buffer.
     if (mb:=self._do_map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
+    return buf
 
   @suppress_finalizing
   def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
@@ -617,7 +618,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
                      dev_suff="SDMA:0"):
-      for i in range(0, dest.nbytes, cp_size:=(self.max_copyout_size or self.b[0].size)):
+      for i in range(0, dest.nbytes, cp_size:=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(self.b[0], src.offset(i), lsize:=min(cp_size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
