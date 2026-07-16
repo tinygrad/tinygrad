@@ -15,7 +15,7 @@ def apply_rewrite(expr):
 def apply_rewrite_values(expr):
   srcs = full_rewrite(expr.sink()).src
   if len(srcs) == 1:
-    if srcs[0].op is Ops.CONST: return (srcs[0].arg,)*srcs[0].dtype.count
+    if srcs[0].op is Ops.CONST: return (srcs[0].arg,) if not isinstance(srcs[0].arg, tuple) else srcs[0].arg
     if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
   return tuple(s.arg for s in srcs)
 
@@ -188,7 +188,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
     base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
+    self.assertEqual(list(apply_rewrite_values(UOp.stack(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
 
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
@@ -198,7 +198,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
     const_stack = UOp.const(dtypes.float32, (7.0, 8.0, 9.0, 10.0))
-    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
+    self.assertEqual(list(apply_rewrite_values(UOp.stack(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
 
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP

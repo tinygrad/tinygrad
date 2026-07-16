@@ -73,11 +73,6 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   # no symbolic shape
   if not all_int(c.shape): return None
 
-  # check if view is supported
-  from tinygrad.device import Device
-  devs = (src.device,) if isinstance(src.device, str) else src.device
-  if not all(hasattr(Device[d].allocator, "_offset") for d in devs): return None
-
   if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
     view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view

@@ -1434,7 +1434,9 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts] if hasattr(model, "_fp8_next_amax") else []
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
+  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts] if hasattr(model, "_fp8_next_grad_amax") else []
   fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
 
   from tinygrad.nn.state import get_state_dict
@@ -1456,7 +1458,7 @@ def train_llama3():
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
-  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1474,7 +1476,7 @@ def train_llama3():
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax, *fp8_grad_amax)
+    return loss_cpu.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1482,10 +1484,12 @@ def train_llama3():
     scheduler.step()
 
     for g in grads: g.assign(0)
+    for cur, nxt in zip(fp8_amax, fp8_next_amax): cur.assign(nxt)
+    for cur, nxt in zip(fp8_grad_amax, fp8_next_grad_amax): cur.assign(nxt)
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
     return lr_cpu, grad_norm_cpu
 
@@ -1749,11 +1753,12 @@ def train_gptoss():
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
-  # realize everything here
-  if optim.master_params: Tensor.realize(*optim.master_params)
+  if optim.master_params:
+    for m in optim.master_params: m.realize()
   Tensor.realize(*optim.params, *fp8_inv_scales)
 
   @TinyJit
+  @Context(TRAINING=1)
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)

@@ -227,9 +227,9 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
     with save_viz() as viz:
       inner = UOp.const(dtypes.int, 3)
-      func = UOp(Ops.FUNCTION, src=(UOp(Ops.SINK, src=(inner,)),))
-      call = UOp(Ops.CALL, src=(func,))
-      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
+      func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
+      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 
@@ -268,12 +268,12 @@ class TestViz(unittest.TestCase):
   def test_stack_movement_not_folded_unless_all_const(self):
     a = UOp.variable("a", 0, 10, dtype=dtypes.int)
     c = UOp.const(dtypes.int, 1)
-    stack = a.vectorize(c)
+    stack = a.stack(c)
     reshaped = stack.reshape((1, 2))
     graph = uop_to_json(VizData(), reshaped)
     self.assertFalse(graph[id(stack)]["exclude"])
 
-    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
+    const_stack = c.stack(UOp.const(dtypes.int, 2))
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])

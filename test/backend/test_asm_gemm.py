@@ -30,8 +30,9 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     b_rand, w_scale, _ = quantize_fp8(b_rand.T.contiguous())
     if multi: b_rand, w_scale = b_rand.shard(devs, axis=None if b_shard is None else 1-b_shard), w_scale.to(devs).contiguous()
     grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32, device=devs).contiguous()
+    next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32, device=devs)
     with Context(DEBUG=0):
-      Tensor.realize(a_rand, x_scale, b_rand, w_scale, grad_amax_state)
+      Tensor.realize(a_rand, x_scale, b_rand, w_scale, grad_amax_state, next_grad_amax_state)
 
   # clone all inputs before any backward: a clone copies the source's current .grad
   a, b = a_rand.clone(), b_rand.clone()
@@ -41,7 +42,8 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     a_ref, b_ref = a_rand.clone(), b_rand.clone()
   if multi and isinstance(a.device, str): a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
-    tst = asm_gemm(a, b.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
+    tst = asm_gemm(a, b.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
   else:
     tst = asm_gemm(a, b)
   tst.sum().backward()
@@ -167,7 +169,9 @@ class TestGemmLlama(unittest.TestCase):
       x_scale = Tensor.empty((), dtype=dtypes.float32)
       w_scale = Tensor.empty((), dtype=dtypes.float32)
       grad_amax_state = Tensor.empty((), dtype=dtypes.float32).contiguous()
-      z = asm_gemm(x, y, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
+      next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32)
+      z = asm_gemm(x, y, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
     else:
       z = asm_gemm(x, y)
     z.sum().backward()

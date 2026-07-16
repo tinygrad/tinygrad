@@ -84,6 +84,9 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
+  (invalid_pat.where(UPat.var("a"), UPat()), lambda i,a: i.cast(a.dtype)),
+  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i.cast(a.dtype))),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
@@ -126,7 +129,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
    lambda x,c: x if c.arg == 0 else x.logical_not() if c.arg == 1 else x.const_like(True)),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
-  (UPat.var("x") < UPat.var("x"), lambda x: x.vconst_like(False, dtypes.bool)), # x < x -> False
+  (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False, dtypes.bool)), # x < x -> False
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
   (UPat.var("x") & 0, lambda x: x.const_like(0)), # x&0 -> 0
@@ -137,7 +140,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
    lambda x,mask,c: x // c.arg if c.arg > 0 and c.arg & (c.arg-1) == 0 and mask.arg | (c.arg-1) == -1 else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)) != UPat.var("x"),
-   lambda x: x.vconst_like(False, dtypes.bool)), # x != x -> False (only ints)
+   lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition

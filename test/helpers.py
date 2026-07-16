@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, truncate
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV
 from tinygrad.renderer import Renderer
@@ -38,6 +38,10 @@ def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
+def call_is_hcq(call:UOp) -> bool:
+  ast = call.src[0]
+  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+
 def jit_cache_count(linear:UOp) -> int:
   n = 0
   for call in linear.src:
@@ -51,12 +55,15 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     assert expected_len == 0, expected_len
     return
+  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 2 # HCQ2 merges calls on the same queue
   if call_is_graph(linear.src[0]):
     assert len(linear.src) == 1, len(linear.src)
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION
     assert len(inner.src) == expected_len, f"expected {expected_len}, got {len(inner.src)}"
   else:
     assert len(linear.src) == expected_len, f"expected {expected_len}, got {len(linear.src)}"
+
+def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
 
 def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   if dtypes.is_unsigned(dt):
@@ -66,9 +73,8 @@ def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
   ret = np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
-  if not allow_subnormal:
-    min_normal = 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
-    ret = np.where(np.abs(ret) < min_normal, 0, ret)
+  if dt == dtypes.bfloat16 or dt in dtypes.fp8s: ret = np.array([truncate[dt](x) for x in ret], dtype=ret.dtype)
+  if not allow_subnormal: ret = np.where(np.abs(ret) < min_normal(dt), 0, ret)
   return ret
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:

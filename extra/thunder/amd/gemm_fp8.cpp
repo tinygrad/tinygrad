@@ -106,7 +106,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     , float *w_scale_ptr
 #endif
 #if SCALE_MODE & 4
-    , float *g_scale_ptr
+    , float *g_amax_ptr
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
@@ -148,12 +148,28 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     RT_C cC;
     RT_C cD;
 
-    // Calculate which block this threadblock should work on
-    int global_block_id = blockIdx.x;
-
-    // Convert linear block ID to 2D coordinates
-    int block_row = global_block_id / blocks_per_col;
-    int block_col = global_block_id % blocks_per_col;
+    int block_row, block_col;
+    if constexpr (N > M) {
+        // Wide outputs repeatedly consume the same A rows. Keep a short strip
+        // resident on each XCD while walking N to improve local cache reuse.
+        int wgid = chiplet_transform_chunked(int(blockIdx.x), total_blocks_needed, NUM_XCDS, 64);
+        constexpr int WGM = 3;
+        const int num_wgid_in_group = WGM * blocks_per_col;
+        const int group_id = wgid / num_wgid_in_group;
+        const int first_block_row = group_id * WGM;
+        const int group_size_m = min(blocks_per_row - first_block_row, WGM);
+        block_row = first_block_row + ((wgid % num_wgid_in_group) % group_size_m);
+        block_col = (wgid % num_wgid_in_group) / group_size_m;
+    } else {
+        int wgid = chiplet_transform_chunked(int(blockIdx.x), total_blocks_needed, NUM_XCDS, 64);
+        constexpr int WGM = 8;
+        const int num_wgid_in_group = WGM * blocks_per_col;
+        const int group_id = wgid / num_wgid_in_group;
+        const int first_block_row = group_id * WGM;
+        const int group_size_m = min(blocks_per_row - first_block_row, WGM);
+        block_row = first_block_row + ((wgid % num_wgid_in_group) % group_size_m);
+        block_col = (wgid % num_wgid_in_group) / group_size_m;
+    }
     int block_m = block_row * BLOCK_SIZE_ROW;
     int block_n = block_col * BLOCK_SIZE_COL;
 
@@ -358,7 +374,8 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     scale *= *w_scale_ptr;
 #endif
 #if SCALE_MODE & 4
-    scale *= *g_scale_ptr;
+    float g_scale = (*g_amax_ptr + 1e-08f) * (1.0f / 448.0f);
+    scale *= g_scale;
 #endif
 
     mul(cA, cA, scale);

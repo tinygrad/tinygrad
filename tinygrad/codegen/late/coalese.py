@@ -41,7 +41,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
   if not is_image_shape(buf._shape): return None
   if idx_x.dtype != idx_y.dtype: idx_x, idx_y = idx_x.cast(dtypes.int), idx_y.cast(dtypes.int)
-  start_idx = idx_x._stack(idx_y)
+  start_idx = idx_x.stack(idx_y)
   idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf._shape[0], buf._shape[1])
 
@@ -74,7 +74,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
   for ch, cw in [shapes[buf.arg.slot]] if buf.arg.slot in shapes else image_valid_dims(buf.dtype, buf.max_numel(), ren.target.arch):
-    cidx = uop_given_valid(valid, ((x//4)%cw)._stack(x//(4*cw)))
+    cidx = uop_given_valid(valid, ((x//4)%cw).stack(x//(4*cw)))
     dropped = len(_drop_valid_stmts(valid, cidx, ch, cw))
     if dropped > best_drop: best_drop, cands = dropped, [(ch, cw, cidx)]
     elif dropped == best_drop: cands.append((ch, cw, cidx))
@@ -152,7 +152,7 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
           for i,g in enumerate(grp):
             assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
             datas.append(offsets[g][0].src[1])
-          store = idx.store(UOp._stack(*datas) if len(datas) > 1 else datas[0])
+          store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
           ld = idx.load()

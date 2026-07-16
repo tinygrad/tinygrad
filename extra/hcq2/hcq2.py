@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools, ctypes
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, CallInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic
@@ -18,6 +18,8 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 # *****************
 # 0. helpers
+
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 HCQ_DEVS = frozenset(("AMD",))
 HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
@@ -56,9 +58,9 @@ def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
   return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype))
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
-  data, isz = UOp(Ops.BINARY, dtypes.uint8, src=(), arg=blob), buf.dtype.itemsize
-  r = UOp.range(len(blob) // isz, next(UOp.unique_num))
-  return buf.index(r).store(UOp(Ops.BITCAST, buf.dtype, (data,)).index(r).load()).end(r)
+  data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
+  r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
+  return buf.index(r).store(data.index(r).load()).end(r)
 
 # *****************
 # 0.1. external C calls
@@ -233,7 +235,7 @@ def add_global_sync(ctx:set[tuple[str, ...]], submit:UOp, q:UOp) -> UOp|None:
   ctx.add(devs)
 
   # some devices from a command buffer might be used for the first time this schedule, so we wait for their global timeline epoch.
-  wait = make_signal(devs).wait(make_signal_value(devs).index(UOp.const(dtypes.int, 0)) - 1)
+  wait = (make_signal(devs).index(zero:=UOp.const(dtypes.int, 0)).load() >= make_signal_value(devs).index(zero) - 1).wait()
   return submit.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), wait, *q.src)),))
 pm_add_global_sync = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_global_sync)])
 
@@ -251,7 +253,7 @@ def add_loads(ctx:set[int], submit:UOp, q:UOp) -> UOp|None:
 
         sig = make_mstack([make_signal(d if dl is None else devs[dl], queue=queue, sentinel=dl is None) for dl, d in zip(lanes, cur_devs)])
         val = make_mstack([make_signal_value(d if dl is None else devs[dl], queue=queue) for dl, d in zip(lanes, cur_devs)]).index(UOp.const(dtypes.int, 0))
-        new_src.append(sig.wait(val + dep.tag))
+        new_src.append((sig.index(UOp.const(dtypes.int, 0)).load() >= val + dep.tag).wait())
       s = s.src[0]
     new_src.append(s)
   return submit.replace(src=(q.replace(src=tuple(new_src)),))
@@ -397,7 +399,7 @@ pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNC
 # 8. callify hcq programs
 
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
-  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device["CPU"].renderer),)))])
+  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer),)))])
 
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
@@ -445,13 +447,13 @@ def hcq_compile_program(sink:UOp, renderer:Renderer, name:str, devs:str|tuple[st
 
 def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), "CPU") for dev in to_tuple(buf.device)))
+  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value) for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
 # *****************
 # 7. resolve patches
 
-def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
+def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar(),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
@@ -460,7 +462,8 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
 
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for b, v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-    struct.pack_into(f'<{v.dtype.fmt}', b.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.itemsize, truncate[v.dtype](v.arg))
+    data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.arg))
+    b.ensure_allocated()._buf.cpu_view().view(offset=off.arg * buf.dtype.itemsize, size=len(data), fmt='B')[:] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
@@ -470,7 +473,7 @@ def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
   addrs = tuple(UOp.const(dtypes.uint64, x.get_buf(d).va_addr) for x, d in zip(bufs, devs))
-  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64.vec(len(addrs)), addrs)
+  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64, addrs)
 
 pm_resolve_patches = PatternMatcher([
   # multi
@@ -591,14 +594,18 @@ class HCQ2Buffer:
   def base(self) -> HCQ2Buffer: return self._base or self
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
+  def _as_buffer(self, buf:HCQ2Buffer) -> memoryview:
+    self.dev.synchronize()
+    return buf.cpu_view().mv
+
   def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
     return self._do_map(buf)
 
   @suppress_finalizing
   def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
-    self.dev.synchronize()
     if options is not None and options.external_ptr is not None: return
+    self.dev.synchronize()
     if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _unmap(self, mb):
@@ -606,24 +613,3 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.iface.free(mb)
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
-
-  def _wrap(self, dev:str, sz:int, opaque:HCQ2Buffer) -> Buffer:
-    return Buffer(dev, sz, dtypes.uint8, opaque=opaque, options=BufferSpec(external_ptr=1))
-
-  def _copy(self, dst:Buffer, src:Buffer):
-    from tinygrad.engine.realize import run_linear
-    su = UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.copy_to_device(dst.device).call(UOp.from_buffer(dst), su),)), update_stats=False)
-
-  def _copyin(self, dest:HCQ2Buffer, src:memoryview):
-    s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
-    s._buf.cpu_view()[:len(src)] = src
-    self._copy(self._wrap(self.dev.device, len(src), dest), s)
-
-  def _copyout(self, dest:memoryview, src:HCQ2Buffer):
-    d = Buffer(self.dev.device, len(dest), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
-    self._copy(d, self._wrap(self.dev.device, len(dest), src))
-    self.dev.synchronize()
-    dest[:] = d._buf.cpu_view()[:len(dest)]
-
-  # def _as_buffer(self, buf): return buf.cpu_view().mv

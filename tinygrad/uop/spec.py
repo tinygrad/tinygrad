@@ -47,9 +47,6 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
-  # no vec dtypes allowed
-  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.count > 1 else None),
-
   # NOTE: for testing, we let sinks be anything
   (UPat(Ops.SINK, dtypes.void), lambda: True),
 
@@ -61,7 +58,8 @@ spec_shared = PatternMatcher([
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
-  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"), lambda s: all_same([x.shape for x in s.src])),
+  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
+   lambda s: all_same([x.shape for x in s.src]) and all(x.dtype == s.dtype for x in s.src)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -103,6 +101,9 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
+  # WAIT until a condition evaluates to true.
+  (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
+
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
@@ -127,6 +128,8 @@ def valid_gettuple(g:UOp, t:UOp):
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"), lambda u: dtypes.is_float(u.dtype)),
+
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.index and is_device(buf.arg.device))
@@ -183,18 +186,17 @@ spec_tensor = PatternMatcher([
   # codegen: PROGRAM with progressive sources through the pipeline (SINK, LINEAR?, SOURCE?, BINARY?)
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK),)), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # index is not allowed in programs
-  (UPat(GroupOp.All, dtypes.index), lambda: False),
+  # index and weak dtypes are not allowed in programs
+  (UPat(GroupOp.All, (dtypes.index, dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
@@ -216,8 +218,15 @@ spec_program = PatternMatcher([
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 ])+spec_shared
 
+spec_hcq = PatternMatcher([
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"), lambda x: is_device(x.arg)),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
+])+spec_shared
+
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
+  (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
+
   # SLICE on BUFFER is allowed if BUFFER is
   (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER})),
                         UPat(Ops.CONST, dtype=dtypes.index)), allow_any_len=True, name="bv"),
@@ -236,7 +245,7 @@ spec_full = PatternMatcher([
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.index), (UPat(), UPat()), arg=None), lambda: True),
-])+spec_tensor+spec_program
+])+spec_tensor+spec_program+spec_hcq
 
 # **** pyrender (move this) ****
 
