@@ -11,6 +11,7 @@ class TestWeakPromotion(unittest.TestCase):
   def test_rand_requires_concrete(self):
     with self.assertRaises(ValueError): Tensor.rand(2, dtype=dtypes.weakfloat)
     with self.assertRaises(ValueError): Tensor.const(dtypes.weakfloat, 1.0).rand_like()
+    with self.assertRaises(ValueError): Tensor.const(dtypes.weakfloat, 1.0).randn_like()
 
   def test_sum_stays_weak(self):
     for weak, value in ((dtypes.weakint, 1), (dtypes.weakfloat, 1.0)):
