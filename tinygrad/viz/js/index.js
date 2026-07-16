@@ -1129,8 +1129,7 @@ function appendResizer(element, { minWidth, maxWidth }, left=false) {
   const resize = (e) => {
     const change = e.clientX - element.dataset.startX;
     let newWidth = ((Number(element.dataset.startWidth)+(left ? change : -change))/Number(element.dataset.containerWidth))*100;
-    const width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
-    if (left) document.documentElement.style.setProperty("--left-sidebar-width", width); else element.style.width = width;
+    element.style.width = `${Math.max(minWidth, Math.min(maxWidth, newWidth))}%`;
   };
   handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
