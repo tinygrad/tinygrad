@@ -134,7 +134,7 @@ class PythonProgram:
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy
-          dims, dtype_in, device, threads = u.arg[1], first_src_dtype, u.arg[4], u.arg[5]
+          dims, dtype_in, device, threads = u.arg[0], first_src_dtype, u.arg[2], u.arg[3]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
           # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
