@@ -70,11 +70,8 @@ def sym_addr(sym:str) -> int:
   return addr
 
 def make_ext_call(fn, *args:UOp, ret:DType=dtypes.void, deps:tuple[UOp, ...]=()) -> UOp:
-  addr = make_getaddr(make_placeholder("CPU", 1, dtypes.uint8, name=("sym", fn.__name__), unique=False), ("CPU",))
-  call = f"(({ret.name}(*)({', '.join(a.dtype.name for a in args)}))({{0}}))" + \
-         f"({', '.join(f'({a.dtype.name})({{{i+1}}})' for i,a in enumerate(args))})"
-  if ret is dtypes.void: return UOp(Ops.CUSTOM, dtypes.void, (addr, *args, *deps), arg=call+";")
-  return UOp(Ops.CUSTOMI, ret, (addr, *args, *deps), arg=call)
+  sym = make_placeholder("CPU", 1, dtypes.uint8, name=("sym", fn.__name__), unique=False)
+  return UOp(Ops.CALL, ret, (make_getaddr(sym.after(*deps) if deps else sym, ("CPU",)), *args))
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []

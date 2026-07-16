@@ -87,9 +87,9 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER. AFTER on a LOAD gates a value on the extra srcs
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS, Ops.LOAD})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
@@ -103,6 +103,9 @@ spec_shared = PatternMatcher([
 
   # WAIT until a condition evaluates to true.
   (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
+
+  # CALL through a function pointer: src[0] is the address, src[1:] are the args
+  (UPat(Ops.CALL, src=(UPat(dtype=dtypes.uint64),), allow_any_len=True, arg=None), lambda: True),
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),

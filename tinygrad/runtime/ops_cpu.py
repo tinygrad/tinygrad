@@ -25,8 +25,9 @@ def op_signal(gate, a):
   return make_null_buf(dtypes.uint32).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).store(a[1].cast(dtypes.uint32)).barrier()
 
 def op_wait(gate, a):
-  cond = UOp(Ops.CUSTOMI, dtypes.bool, (a[0], a[1]), arg="(__atomic_load_n((unsigned int*)({0}), __ATOMIC_ACQUIRE) >= (unsigned int)({1}))")
-  return UOp(Ops.WAIT, dtypes.void, (cond, gate))
+  # gate the ring args with AFTER so the condition doesn't CSE with the other arms
+  sig = make_null_buf(dtypes.uint32).after(gate).index((a[0].after(gate) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()
+  return (sig >= a[1].after(gate).cast(dtypes.uint32)).wait_until()
 
 def op_timestamp(gate, a):
   ts = UOp.placeholder((2,), dtypes.uint64, slot=4, addrspace=AddrSpace.REG)  # struct timespec { long s; long ns; }
@@ -35,10 +36,8 @@ def op_timestamp(gate, a):
   return make_null_buf(dtypes.uint64).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 3)).cast(dtypes.index)).store(val)
 
 def op_exec(gate, a):
-  n = len(a) - 1
-  types = ",".join(["unsigned long"] * n)
-  call  = ",".join(f"{{{k+1}}}" for k in range(n))
-  return UOp(Ops.CUSTOM, dtypes.void, (*a, gate), arg=f"((void(*)({types}))({{0}}))({call});")
+  # call the kernel through its function pointer a[0] (gated on the arm's range via AFTER), the rest of the ring entry are its args
+  return UOp(Ops.CALL, dtypes.void, (a[0].after(gate), *a[1:]))
 
 def op_quit(gate, a): return UOp(Ops.CUSTOM, dtypes.void, (gate,), arg="return;")
 
@@ -49,12 +48,12 @@ def cpu_worker(ring_size=32768, args_cnt=3):
   ring = make_placeholder("CPU", ring_size, dtypes.uint64, name="ring", unique=False)
   head = UOp.placeholder((1,), dtypes.uint64, slot=3, addrspace=AddrSpace.REG)[0].set(0)
 
-  label = UOp(Ops.CUSTOM, dtypes.void, (head,), arg="loop_top:").barrier()
-  head_i, tail_i = head.after(label), tail.after(label)
+  # the top loop is an effectively infinite RANGE (QUIT returns out of it). the extra src orders it after the head reg init
+  loop = UOp.range(2**63-1, 1, AxisType.LOOP, src=(head,))
+  head_i, tail_i = head.after(loop), tail.after(loop)
 
   head_val = head_i[0].load()
-  tail_ld = UOp(Ops.CUSTOMI, dtypes.uint64, (tail_i.index(UOp.const(dtypes.int, 0)),), arg="__atomic_load_n(({0}), __ATOMIC_ACQUIRE)")
-  barrier = (tail_ld > head_val).wait_until().barrier()
+  barrier = (tail_i.index(UOp.const(dtypes.int, 0)).load() > head_val).wait_until().barrier()
 
   ring_b = ring.after(barrier)
   op, head_val = read_next(ring_b, head_val)
@@ -64,8 +63,7 @@ def cpu_worker(ring_size=32768, args_cnt=3):
   arms = [fn(gate:=UOp.range(op.eq(cmd).cast(dtypes.int), 0, AxisType.LOOP), args).end(gate) for cmd, fn in handlers.items()]
 
   advance = head.after(*(x.barrier() for x in arms))[0].store(head_val)
-  back = UOp(Ops.CUSTOM, dtypes.void, (advance.barrier(),), arg="goto loop_top;")
-  return back.sink(arg=KernelInfo(name="cpu_worker"), tag=1)
+  return advance.barrier().end(loop).sink(arg=KernelInfo(name="cpu_worker"), tag=1)
 
 def build_worker(ring_size:int, renderer) -> tuple[UOp, UOp]:
   return hcq_compile_program(cpu_worker(ring_size), ClangRenderer(renderer.target), "cpu_worker")

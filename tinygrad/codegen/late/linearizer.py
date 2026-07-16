@@ -3,7 +3,7 @@ from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, getenv, TUPLE_ORDER
+from tinygrad.helpers import prod, getenv, dedup, flatten, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
@@ -85,8 +85,10 @@ pm_add_control_flow = PatternMatcher([
 ])
 
 def do_split_ends(e:UOp):
+  # recover the RANGEs from range expressions. don't flow through a RANGE itself: its count may depend on an outer range this END doesn't end
+  rngs = dedup(flatten([(s,) if s.op is Ops.RANGE else tuple(s.ranges) for s in e.src[1:]]))
   ret = e.src[0]
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  for r in sorted(rngs, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
   return ret
 
 pm_split_ends = PatternMatcher([
