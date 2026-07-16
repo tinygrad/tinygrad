@@ -603,7 +603,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tag=None):
     dtype_in, dtype_out = a.dtype, acc.dtype
-    tc_upcast_axes = tuple(((i, s.shape[-1]),) for i,s in enumerate((a, b, acc)))
+    tc_upcast_axes = tuple(((i, s.shape[-1]),) if s._shape else () for i,s in enumerate((a, b, acc)))
     name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
     return UOp(Ops.WMMA, src=(a, b, acc), arg=(name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ()), tag=tag)
   def _rop(self, op:Ops, axis:tuple[int, ...]):
