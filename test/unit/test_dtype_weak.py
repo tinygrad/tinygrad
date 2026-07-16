@@ -8,6 +8,15 @@ from tinygrad.uop.spec import spec_tensor
 
 
 class TestWeakPromotion(unittest.TestCase):
+  def test_rand_requires_concrete(self):
+    with self.assertRaises(ValueError): Tensor.rand(2, dtype=dtypes.weakfloat)
+    with self.assertRaises(ValueError): Tensor.const(dtypes.weakfloat, 1.0).rand_like()
+
+  def test_sum_stays_weak(self):
+    for weak, value in ((dtypes.weakint, 1), (dtypes.weakfloat, 1.0)):
+      self.assertEqual(Tensor.const(weak, value).expand(3).sum().dtype, weak)
+    self.assertEqual((Tensor.const(dtypes.weakfloat, 1.0).expand(3).sum() + Tensor([1], dtype=dtypes.float16)).dtype, dtypes.float16)
+
   def test_storage_width(self):
     t = Tensor.const(dtypes.weakint, 2)
     for fn in (lambda: t.bitcast(dtypes.int32), lambda: Tensor.const(dtypes.int32, 2).bitcast(dtypes.weakint), t.element_size, t.nbytes):

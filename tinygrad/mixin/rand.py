@@ -60,7 +60,7 @@ class RandMixin(OpMixin):
     ```
     """
     dt = to_dtype(dtype or dtypes.default_float)
-    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
+    if not dtypes.is_float(dt) or dt in dtypes.weaks: raise ValueError(f"rand only supports concrete float dtypes, got {dt}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
