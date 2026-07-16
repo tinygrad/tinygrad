@@ -53,6 +53,7 @@ def custom_hk_fp8_ab_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:
   K2, N = B.shape
   assert K == K2, f"{A.shape} {B.shape}"
   block_m, block_n, block_k, num_warps = 256, 256, 128, 8
+  assert K >= 3 * block_k, f"fp8 ab requires at least three K tiles, got K={K}"
   assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid fp8 ab tile {(block_m, block_n, block_k)} for {(M, N, K)}"
   threads = UOp.special(64 * num_warps, "lidx0")
   workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
@@ -79,6 +80,12 @@ def hk_fp8_ab_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|
   assert K == K2, f"{a.shape} {b.shape}"
   is_multi = isinstance(a.device, tuple)
   ndev = len(a.device) if is_multi else 1
+  # A reduction shard and physical B row shard describe the same K partition. Gradients of
+  # replicated scalar losses can lose A's MULTI axis, so restore it from the saved weight.
+  if is_multi and a.uop.axis is None and b.uop.axis == 0:
+    a = Tensor(a.uop._shard(2, ndev).multi(2), device=a.device)
+  elif is_multi and a.uop.axis == 2 and b.uop.axis is None:
+    b = Tensor(b.uop._shard(0, ndev).multi(0), device=b.device)
   k_sharded = is_multi and a.uop.axis == 2
   m_sharded = is_multi and a.uop.axis == 1
   n_sharded = is_multi and b.uop.axis == 1

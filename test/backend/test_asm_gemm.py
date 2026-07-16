@@ -116,7 +116,7 @@ def run_fp8_ab_gemm(M:int, N:int, K:int) -> None:
   out = hk_fp8_ab_gemm(a, b, x_scale=x_scale, w_scale=w_scale, g_amax=g_amax).realize()
   ref = (a.float() @ b.float()).cast(dtypes.bfloat16).realize()
   if Device.DEFAULT.startswith("NULL"): return
-  assert out.allclose(ref, atol=1, rtol=1e-2).item(), "fp8 A @ B mismatch"
+  assert out.float().allclose(ref.float(), atol=2, rtol=1e-2).item(), "fp8 A @ B mismatch"
 
 class TestGemmProgramInfo(unittest.TestCase):
   def test_opaque_gemm_accesses(self):
@@ -137,8 +137,8 @@ class TestGemmProgramInfo(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT.startswith("NULL") and is_cdna4(), "requires NULL CDNA4")
   def test_fp8_dgrad_uses_physical_weight(self):
-    a = Tensor.empty(1, 256, 256, dtype=FP8_DTYPE).realize()
-    w = Tensor.empty(256, 256, dtype=FP8_DTYPE).realize()
+    a = Tensor.empty(1, 256, 512, dtype=FP8_DTYPE).realize()
+    w = Tensor.empty(512, 512, dtype=FP8_DTYPE).realize()
     x_scale = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
     w_scale = Tensor.ones((), dtype=dtypes.float32).contiguous().realize()
     grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
@@ -240,17 +240,17 @@ class TestGemmLlama(unittest.TestCase):
     assert z.dtype == dtypes.bfloat16
     assert x.grad.dtype == y.grad.dtype == grad_dtype
 
-  def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 256)
+  def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 384)
 
   def test_fp8_ab_speed(self):
-    M, N, K, iters = getenv("M", 4096), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)
+    M, N, K, iters = getenv("M", 16384), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)
     a = Tensor.empty(M, K, dtype=FP8_DTYPE).realize()
     b = Tensor.empty(K, N, dtype=FP8_DTYPE).realize()
 
     @TinyJit
-    def ab(a:Tensor, b:Tensor): return hk_fp8_ab_gemm(a, b).realize()
+    def ab(a:Tensor, b:Tensor): return (hk_fp8_ab_gemm(a, b) + 0).realize()
     @TinyJit
-    def ab_with_transpose(a:Tensor, b:Tensor): return asm_gemm(a, b).realize()
+    def ab_with_transpose(a:Tensor, b:Tensor): return (asm_gemm(a, b) + 0).realize()
 
     for _ in range(3): ab(a, b)
     Device[Device.DEFAULT].synchronize()

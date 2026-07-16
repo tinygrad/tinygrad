@@ -150,6 +150,9 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     constexpr int blocks_per_col = N / BLOCK_SIZE_COL; // Number of blocks per matrix col
     constexpr int total_blocks_needed = blocks_per_row * blocks_per_col; // Total blocks needed
     constexpr int k_iters = K / BLOCK_K; // K iterations
+#if AB_GEMM
+    static_assert(k_iters >= 3, "FP8 A @ B requires at least three K tiles");
+#endif
     constexpr int NUM_THREADS = NUM_WARPS * WARP_THREADS;
     constexpr int HALF_BLOCK_SIZE_ROW = BLOCK_SIZE_ROW / 2;
     constexpr int HALF_BLOCK_SIZE_COL = BLOCK_SIZE_COL / 2;
@@ -167,6 +170,8 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
 
     using RT_A = rt_fp8e4m3<REG_BLOCK_M, BLOCK_K>;
 #if AB_GEMM
+    // The col-layout loader uses ds_read_b64_tr_b8 to turn physical [K, N]
+    // LDS tiles into the [N, K] register arrangement consumed by mma_ABt.
     using RT_B = rt_fp8e4m3<REG_BLOCK_N, BLOCK_K, col_l>;
 #else
     using RT_B = rt_fp8e4m3<REG_BLOCK_N, BLOCK_K>;
@@ -225,33 +230,19 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     G::prefill_swizzled_offsets(As[tic][0], A, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs[tic][0], B, swizzled_offsets_B);
 
-#if AB_GEMM
-    const fp8e4m3 *b_base = (fp8e4m3*)&B[{0, 0, 0, 0}];
-    const int b_row_stride = B.template stride<2>() * sizeof(fp8e4m3);
-    i32x4 b_srsrc_base = make_srsrc(b_base, K * b_row_stride, b_row_stride);
-    const int wid = warpid() % NUM_WARPS;
-    constexpr int elem_per_warp = (ST_B::underlying_subtile_bytes_per_thread / sizeof(fp8e4m3)) * kittens::WARP_THREADS;
-    uint32_t b_lds[2][2] = {
-        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
-         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))},
-        {to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3))),
-         to_sgpr_u32(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(fp8e4m3)))}
-    };
-#endif
-
     zero(cA);
     zero(cB);
     zero(cC);
     zero(cD);
 
 #if AB_GEMM
-    G::load(Bs[tic][0], B, {0, 0, 0, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][0]);
+    G::load(Bs[tic][0], B, {0, 0, 0, block_col * 2}, swizzled_offsets_B);
 #else
     G::load(Bs[tic][0], B, {0, 0, block_col * 2, 0}, swizzled_offsets_B);
 #endif
     G::load(As[tic][0], A, {0, 0, block_row * 2, 0}, swizzled_offsets_A);
 #if AB_GEMM
-    G::load(Bs[tic][1], B, {0, 0, 0, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][1]);
+    G::load(Bs[tic][1], B, {0, 0, 0, block_col * 2 + 1}, swizzled_offsets_B);
 #else
     G::load(Bs[tic][1], B, {0, 0, block_col * 2 + 1, 0}, swizzled_offsets_B);
 #endif
@@ -265,13 +256,13 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     __builtin_amdgcn_s_barrier();
 
 #if AB_GEMM
-    G::load(Bs[toc][0], B, {0, 0, 1, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][0]);
+    G::load(Bs[toc][0], B, {0, 0, 1, block_col * 2}, swizzled_offsets_B);
 #else
     G::load(Bs[toc][0], B, {0, 0, block_col * 2, 1}, swizzled_offsets_B);
 #endif
     G::load(As[toc][0], A, {0, 0, block_row * 2, 1}, swizzled_offsets_A);
 #if AB_GEMM
-    G::load(Bs[toc][1], B, {0, 0, 1, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[toc][1]);
+    G::load(Bs[toc][1], B, {0, 0, 1, block_col * 2 + 1}, swizzled_offsets_B);
 #else
     G::load(Bs[toc][1], B, {0, 0, block_col * 2 + 1, 1}, swizzled_offsets_B);
 #endif
@@ -304,7 +295,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
 
 #if AB_GEMM
         load(b1, Bs[tic][1], warp_n * REG_BLOCK_N);
-        G::load(Bs[tic][0], B, {0, 0, k + 2, block_col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][0]);
+        G::load(Bs[tic][0], B, {0, 0, k + 2, block_col * 2}, swizzled_offsets_B);
 #else
         auto bs_subtile1 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][1], {warp_n, 0});
         load_st_to_rt<RT_B, decltype(bs_subtile1)>(b1, bs_subtile1);
@@ -331,7 +322,7 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
         __builtin_amdgcn_sched_barrier(0);
 
 #if AB_GEMM
-        G::load(Bs[tic][1], B, {0, 0, k + 2, block_col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds[tic][1]);
+        G::load(Bs[tic][1], B, {0, 0, k + 2, block_col * 2 + 1}, swizzled_offsets_B);
 #else
         G::load(Bs[tic][1], B, {0, 0, block_col * 2 + 1, k + 2}, swizzled_offsets_B);
 #endif
