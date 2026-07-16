@@ -207,6 +207,7 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
+  if dt in dtypes.weaks: return dt
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
