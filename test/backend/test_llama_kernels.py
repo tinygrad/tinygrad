@@ -144,6 +144,7 @@ class TestFusedFP8AdamW(unittest.TestCase):
     m = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
     v = (Tensor.rand(*shape) * 0.01).cast(dtypes.bfloat16).contiguous().realize()
     grad = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    grad_scale = Tensor([0.5], dtype=dtypes.float32).contiguous().realize()
     weight = Tensor.empty(*shape, dtype=dtypes.fp8e4m3).realize()
     next_inv = Tensor.zeros(shape[0], dtype=dtypes.float32).contiguous().realize()
     inv_scale = Tensor([0.001, 0.002], dtype=dtypes.float32).contiguous().realize()
@@ -151,9 +152,10 @@ class TestFusedFP8AdamW(unittest.TestCase):
     lr = Tensor([0.001], dtype=dtypes.float32).contiguous().realize()
     b1_t, b2_t = Tensor([b1], dtype=dtypes.float32).realize(), Tensor([b2], dtype=dtypes.float32).realize()
 
-    master_ref, m_ref, v_ref = master.clone().realize(), m.clone().realize(), v.clone().realize()
-    m_ref = b1 * m_ref.float() + (1.0 - b1) * grad.float()
-    v_ref = b2 * v_ref.float() + (1.0 - b2) * grad.float().square()
+    master_ref, m_ref, v_ref, grad_ref = master.clone().realize(), m.clone().realize(), v.clone().realize(), grad.clone().realize()
+    scaled_grad = (grad.float() * grad_scale).cast(dtypes.bfloat16).float()
+    m_ref = b1 * m_ref.float() + (1.0 - b1) * scaled_grad
+    v_ref = b2 * v_ref.float() + (1.0 - b2) * scaled_grad.square()
     update = lr * ((m_ref / (1.0 - b1_t)) / ((v_ref / (1.0 - b2_t)).sqrt() + eps))
     master_ref = master_ref - update - lr * wd * master_ref
     scale = inv_scale.reciprocal().reshape(shape[0], 1, 1)
@@ -161,11 +163,12 @@ class TestFusedFP8AdamW(unittest.TestCase):
     next_inv_ref = (weight_ref.float().abs().max(axis=(1, 2)) * inv_scale * 1.1 + 1e-8) / 448.0
 
     from extra.llama_kernels.fused_fp8_adamw import fused_fp8_adamw
-    master, weight, next_inv, m, v = fused_fp8_adamw(master, weight, next_inv, m, v, grad, inv_scale, lr, b1_t, b2_t,
+    master, weight, next_inv, m, v = fused_fp8_adamw(master, weight, next_inv, m, v, grad, grad_scale, inv_scale, lr, b1_t, b2_t,
       b1=b1, b2=b2, eps=eps, wd=wd)
     Tensor.realize(master, weight, next_inv, m, v, master_ref, weight_ref, next_inv_ref)
     with Context(DEBUG=0):
       self.assertTrue(inv_scale.allclose(inv_scale_ref, atol=0, rtol=0).item(), "delayed scale changed")
+      self.assertTrue(grad.allclose(grad_ref, atol=0, rtol=0).item(), "gradient changed")
       self.assertTrue(m.allclose(m_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "first moment mismatch")
       self.assertTrue(v.allclose(v_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "second moment mismatch")
       self.assertTrue(master.allclose(master_ref, atol=2e-6, rtol=2e-6).item(), "master mismatch")

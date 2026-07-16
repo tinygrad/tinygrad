@@ -33,7 +33,7 @@ constexpr float AMAX_MARGIN = 1.1f;
 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG, 1) void
 fused_fp8_adamw(float *master, __hip_fp8_storage_t *weight, float *next_inv, __hip_bfloat16 *m, __hip_bfloat16 *v,
-                const __hip_bfloat16 *grad, const float *inv_scale, const float *lr, const float *b1_t, const float *b2_t) {
+                const __hip_bfloat16 *grad, const float *grad_scale, const float *inv_scale, const float *lr, const float *b1_t, const float *b2_t) {
   if (blockIdx.x >= LAYERS * NUM_WG) return;
   const int layer = blockIdx.x / NUM_WG;
   const int wg = blockIdx.x % NUM_WG;
@@ -42,7 +42,7 @@ fused_fp8_adamw(float *master, __hip_fp8_storage_t *weight, float *next_inv, __h
 
   for (size_t i = wg * THREADS_PER_WG + threadIdx.x; i < LAYER_ELEMS; i += NUM_WG * THREADS_PER_WG) {
     const size_t idx = layer_start + i;
-    const float g = (float)grad[idx];
+    const float g = (float)(__hip_bfloat16)((float)grad[idx] * grad_scale[0]);
     const float m_new = BETA1 * (float)m[idx] + ONE_MINUS_BETA1 * g;
     const float v_new = BETA2 * (float)v[idx] + ONE_MINUS_BETA2 * g * g;
     const float update = lr[0] * (m_new / (1.0f - b1_t[0])) / (sqrtf(v_new / (1.0f - b2_t[0])) + EPS);

@@ -64,9 +64,10 @@ class GradAccClipAdamW(Optimizer):
 
   def _fstep_fp8(self, grads:list[Tensor]):
     grads = [g.to(self.m[i].device) if g.device != self.m[i].device else g for i, g in enumerate(grads)]
-    for g in grads: g.assign(g / self.grad_acc)
-    total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
-    for g in grads: g.assign((g * (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
+    total_norm = (Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt() / self.grad_acc).contiguous()
+    grad_scale = (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0) / self.grad_acc
+    for i, g in enumerate(grads):
+      if not self._can_fuse_fp8_update(i): g.assign((g * grad_scale).cast(g.dtype))
     self.b1_t *= self.b1
     self.b2_t *= self.b2
 
@@ -78,7 +79,7 @@ class GradAccClipAdamW(Optimizer):
         weight._next_inv_scale.assign(0)
         from extra.llama_kernels.fused_fp8_adamw import fused_fp8_adamw
         master_new, weight_new, next_inv_new, m_new, v_new = fused_fp8_adamw(
-          master, weight, weight._next_inv_scale, self.m[i], self.v[i], grad, weight._inv_scale, self.lr.to(master.device),
+          master, weight, weight._next_inv_scale, self.m[i], self.v[i], grad, grad_scale.to(master.device), weight._inv_scale, self.lr.to(master.device),
           self.b1_t, self.b2_t, b1=self.b1, b2=self.b2, eps=self.eps, wd=self.wd if weight.ndim >= 3 else 0.0)
         master.replace(master_new)
         weight.replace(weight_new)
