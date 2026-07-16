@@ -128,6 +128,8 @@ def valid_gettuple(g:UOp, t:UOp):
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"), lambda u: dtypes.is_float(u.dtype)),
+
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.index and is_device(buf.arg.device))
@@ -198,8 +200,8 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # index is not allowed in programs
-  (UPat(GroupOp.All, dtypes.index), lambda: False),
+  # index and weak dtypes are not allowed in programs
+  (UPat(GroupOp.All, (dtypes.index, dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),

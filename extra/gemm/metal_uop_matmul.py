@@ -1,5 +1,5 @@
 from tinygrad import UOp, dtypes
-from tinygrad.uop.ops import AxisType, Ops, KernelInfo, AddrSpace
+from tinygrad.uop.ops import AxisType, KernelInfo, AddrSpace
 from extra.gemm.amd_uop_matmul import test_matmul
 
 N = 2048
@@ -27,11 +27,8 @@ def hand_spec_tc_cores():
   acc = acc[0].set(0.0)
   acc = acc[1].set(0.0)
 
-  # TODO: make this simple
-  wmma_arg = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, 'METAL', 32, (((3, 2),), ((3, 2),), ((3, 2),)), ())
-
   acc_load = UOp.stack(acc.after(gk)[0], acc.after(gk)[1])
-  out = UOp(Ops.WMMA, dtypes.float, (a_tc, b_tc, acc_load), arg=wmma_arg)
+  out = UOp.wmma(a_tc, b_tc, acc_load, ((8, 8, 8), 'METAL', 32))
 
   end_loop = UOp.group(*[acc[i].store(out.index(i)) for i in range(2)]).end(gk)
 

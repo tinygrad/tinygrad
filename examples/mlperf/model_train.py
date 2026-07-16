@@ -1759,11 +1759,12 @@ def train_gptoss():
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
-  # realize everything here
-  if optim.master_params: Tensor.realize(*optim.master_params)
+  if optim.master_params:
+    for m in optim.master_params: m.realize()
   Tensor.realize(*optim.params, *fp8_inv_scales)
 
   @TinyJit
+  @Context(TRAINING=1)
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)

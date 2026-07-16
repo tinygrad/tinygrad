@@ -33,11 +33,9 @@ def _test_single_value(vals, op, dts):
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype, initial_value=np.array([a], dtype=_to_np_dtype(dtype)).tobytes()) for a,dtype in zip(vals, dts)]
   run_uops([out], [buf]+buf2)
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 def _test_single_value_const(vals, op, dts):
   uops = []
@@ -48,9 +46,7 @@ def _test_single_value_const(vals, op, dts):
   out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   run_uops([out], [buf])
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
@@ -59,9 +55,7 @@ def _test_uops_result(output_dtype, uops, res):
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   run_uops([out], [buf])
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):

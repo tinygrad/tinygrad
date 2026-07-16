@@ -23,6 +23,7 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
                        .style("color", d => d.color).text(d => d.st)).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
+const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
 
 // dims of shapes on the canvas aren't tracked by the browser, we compute it
 const canvasRect = (s, pixelScale) => {
@@ -301,12 +302,13 @@ function timeAtCycle(clk) {
 }
 
 function getZoomIdentity() {
+  const xscale = timelineScale(), deviceRight = rect("#device-list").right, [viewLeft, sidebarLeft] = viewBounds();
+  const viewRight = sidebarLeft || rect(".main-container").right;
+  const x0 = Math.max(0, viewLeft-deviceRight), x1 = Math.min(canvasDims()[0], viewRight-deviceRight);
   // for packets, set zoom to the full range of instruction events
-  if (data.instSt != null) {
-    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
-    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
-  }
-  return d3.zoomIdentity;
+  const [st, et] = data.instSt != null ? [data.instSt, data.instEt] : [data.first, data.dur];
+  const k = (x1-x0)/(xscale(et)-xscale(st));
+  return d3.zoomIdentity.translate(x0-xscale(st)*k, 0).scale(k);
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -805,8 +807,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
-  const x0 = rect(".ctx-list-parent").right;
-  const x1 = rect(".metadata-parent").left;
+  const [x0, x1] = viewBounds();
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");

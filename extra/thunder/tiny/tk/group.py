@@ -1,7 +1,6 @@
 import math
 from typing import cast, Callable
-from tinygrad import dtypes
-from tinygrad.uop.ops import AxisType, UOp, Ops
+from tinygrad.uop.ops import AxisType, UOp
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 
@@ -75,9 +74,9 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -92,7 +91,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -105,9 +104,9 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -122,7 +121,7 @@ class Group:
           else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -135,9 +134,9 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -152,7 +151,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -165,9 +164,9 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -182,7 +181,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32, (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
