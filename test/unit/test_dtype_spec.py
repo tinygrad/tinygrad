@@ -149,6 +149,9 @@ class TestAutoCastType(unittest.TestCase):
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
+  def test_int_sqrt(self):
+    _assert_eq(Tensor([1, 4, 9, 16]).sqrt(), dtypes.default_float, [1, 2, 3, 4])
+
   @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and d in supported_dtypes]))
   def test_int_to_float_unary_func(self, dtype):
     for func in [
