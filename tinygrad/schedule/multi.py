@@ -18,6 +18,15 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
       ret.append(apply_shrink(x, i).contiguous())
   return ms.replace(src=tuple(ret))
 
+def mstack_factor_op(ms:UOp):
+  s0 = ms.src[0]
+  if s0.op not in GroupOp.Elementwise and s0.op not in GroupOp.Movement: return None
+  if not all(s.op is s0.op and s.arg == s0.arg and s.dtype == s0.dtype and len(s.src) == len(s0.src) for s in ms.src[1:]): return None
+  all_kids = [[s.src[i] for s in ms.src] for i in range(len(s0.src))]
+  if not all(all_same(kids) or all(isinstance(k.device, str) for k in kids) for kids in all_kids): return None
+  new_srcs = tuple(kids[0] if all_same(kids) else UOp(Ops.MSTACK, kids[0].dtype, tuple(kids)) for kids in all_kids)
+  return s0.replace(src=new_srcs)
+
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
@@ -27,6 +36,8 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
+  # factor an op shared by every shard out of MSTACK: MSTACK(f(a),f(b)) -> f(MSTACK(a,b))
+  (UPat(Ops.MSTACK, name="ms"), mstack_factor_op),
   # move shrink before MSTACK
   (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
   # move MSELECT before movement ops
