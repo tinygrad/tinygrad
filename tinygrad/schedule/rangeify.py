@@ -153,6 +153,14 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
+  while target.op is Ops.RESHAPE: target = target.src[0]
+  while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
+  if target is not output or src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM} \
+     or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device: return None
+  if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SLICE for s in src.src[1:]): return None
+  return output.after(*(s.substitute({src.src[0].base:output}) for s in src.src[1:]))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CALL, name="c"), remove_noop_param_contiguous),
 
@@ -163,6 +171,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # resolve allreduce (must be bottom up)
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
   # split_reduceop

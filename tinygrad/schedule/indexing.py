@@ -30,7 +30,7 @@ def safe_self_store(dest:UOp, src:UOp) -> bool:
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
   if src.op in {Ops.COPY, Ops.SLICE} and src in ctx \
-     and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
+     and (dest.op is Ops.SLICE or not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD)):
     del ctx[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self and not safe_self_store(dest, src): ctx[src] = None

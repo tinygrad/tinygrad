@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, dtypes
+from tinygrad.device import MultiBuffer
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, graph_rewrite
 from tinygrad.schedule.multi import multi_pm
@@ -9,7 +10,7 @@ class TestRingAllReduce(unittest.TestCase):
     with Context(RING=2):
       N = 4
       ds = tuple(f"CPU:{i}" for i in range(N))
-      t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
+      t = Tensor.empty(N, N*96).shard(ds, axis=0).realize()
       linear = t.sum(0).linear_with_vars()[0]
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
@@ -41,16 +42,16 @@ class TestRingAllReduce(unittest.TestCase):
     pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
 
     self.assertEqual(len(pairs), N*(N-1))
-    self.assertEqual(len(sinks), 2)
+    self.assertEqual(len(sinks), 1)
     self.assertTrue(all(dst != src for dst, src in pairs))
 
   def test_correct_ring(self):
     with Context(RING=2):
       N = 4
       ds = tuple(f"CPU:{i}" for i in range(N))
-      t = Tensor.ones(N, N*100).contiguous().shard(ds, axis=0).realize()
+      t = Tensor.ones(N, N*96).contiguous().shard(ds, axis=0).realize()
       out = t.sum(0)
-      self.assertListEqual(out.tolist(), [4]*N*100)
+      self.assertListEqual(out.tolist(), [4]*N*96)
 
   def test_correct_all2all(self):
     with Context(ALL2ALL=2):
@@ -60,6 +61,22 @@ class TestRingAllReduce(unittest.TestCase):
       width = N*100
       expected = [N*i + width*N*(N-1)//2 for i in range(width)]
       self.assertListEqual(t.sum(0).tolist(), expected)
+
+  def test_correct_all2all_stack(self):
+    with Context(ALL2ALL=2):
+      N = 8
+      ds = tuple(f"CPU:{i}" for i in range(N))
+      out = Tensor.ones(N, N*96).contiguous().shard(ds, axis=0).realize().sum(0).realize()
+      mb = out.uop.buf_uop.buffer
+      self.assertIsInstance(mb, MultiBuffer)
+      for buf in mb.bufs:
+        self.assertListEqual(list(buf.as_memoryview().cast("f")), [N]*N*96)
+
+      cast_out = Tensor.ones(N, N*96, dtype=dtypes.bfloat16).contiguous().shard(ds, axis=0).realize().sum(0).cast(dtypes.bfloat16).realize()
+      cast_mb = cast_out.uop.buf_uop.buffer
+      self.assertIsInstance(cast_mb, MultiBuffer)
+      for buf in cast_mb.bufs:
+        self.assertListEqual(list(buf.as_memoryview().cast("H")), [0x4100]*N*96)
 
 class TestAllreduceCast(unittest.TestCase):
   def _get_copy_dtypes(self, dtype, allreduce_cast):

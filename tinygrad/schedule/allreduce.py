@@ -1,7 +1,7 @@
 import functools, itertools
-from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.dtype import Invalid
+from tinygrad.dtype import Invalid, dtypes
 
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
@@ -27,6 +27,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
   base, left = divmod(numel // factor,  ndev)
   chunks = list(itertools.pairwise(itertools.accumulate([(base + 1) * factor] * left + [base * factor] * (ndev - left), initial=0)))
+  direct_stack = all_same([e-s for s,e in chunks])
 
   # reduce-scatter
   reduced_chunks:list[UOp] = []
@@ -36,7 +37,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
       reduced = functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i)
       dep = None
-      if not isinstance(device, str):
+      if not isinstance(device, str) and not direct_stack:
         tmp = reduced.empty_like()
         dep = tmp.after(tmp.store(reduced))
         reduced = dep if output is None else tmp
@@ -50,6 +51,24 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
         reduced = cp.alu(op, chunk.copy_to_device(buf.device[dest], dest))
       reduced_chunks.append(reduced)
       reduced_deps.append(None)
+
+  # Write each reduced STACK chunk into its final slice so all gather copies lower directly to SDMA.
+  if direct_stack:
+    stack = UOp(Ops.STACK, src=tuple(reduced_chunks))
+    if output is None: output = UOp.empty(*shape, dtype=stack.dtype, device=device)
+    states = [[UOp(Ops.SLICE, output.dtype, (output.mselect(i), UOp.const(dtypes.index, s)), e-s) for s,e in chunks] for i in range(ndev)]
+    for i,rc in enumerate(stack.src):
+      owner = i if use_all2all else (i-1)%ndev
+      target_slice = states[owner][i]
+      states[owner][i] = target_slice.after(target_slice.store(rc.cast(output.dtype)))
+      source = states[owner][i]
+      for step in range(1, ndev):
+        dest_idx = (owner+step)%ndev
+        cp = source.copy_to_device(buf.device[dest_idx])
+        target_slice = states[dest_idx][i]
+        states[dest_idx][i] = target_slice.after(target_slice.store(cp))
+        if use_ring: source = states[dest_idx][i]
+    return output.after(*itertools.chain.from_iterable(states))
 
   # allgather
   copied_chunks:list[UOp] = []
@@ -74,10 +93,10 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if output is None: output = UOp.const(red.dtype, Invalid, shape=red.shape).clone(device=red.device)
-  to = red.param_like(0)
+  to = output.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
   ret = handle_allreduce(src, red, to)
   assert ret is not None
-  body = ret if ret.op is Ops.AFTER and ret.src[0] is to else to.after(to.store(ret))
+  body = ret if ret.op is Ops.AFTER and ret.src[0] is to else to.after(to.store(ret.cast(to.dtype)))
   return output.after(body.sink().call(output, buf.contiguous(), name="allreduce", precompile=True))

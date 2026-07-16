@@ -465,7 +465,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
-    for s in self.src: ret.update(s.ranges)
+    # A hardware-slice store is a whole-buffer state transition. Its ranges belong to the write, not the AFTER value.
+    slice_stores = self.op is Ops.AFTER and all(s.op is Ops.STORE and
+      (s.src[0].op is Ops.SLICE or (s.src[0].op is Ops.INDEX and s.src[0].src[0].op is Ops.SLICE)) for s in self.src[1:])
+    for s in self.src[:1] if slice_stores else self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
