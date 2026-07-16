@@ -1,7 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer
-from tinygrad.helpers import FUSE_OPTIM, getenv
+from tinygrad.helpers import FUSE_OPTIM, getenv, prod
 from tinygrad.uop.ops import UOp, Ops
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
@@ -50,7 +50,10 @@ class GradAccClipAdamW(Optimizer):
       updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updates, extra = self._step([], grads)
-    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
+    for i, tt in enumerate(self.params):
+      master = self.master_params[i] if self.master_params else None
+      if self._can_fuse_fp8_update(i): self._apply_fused_fp8_update(i, tt, updates[i], master)
+      else: tt.assign(self._apply_update(tt, updates[i], master))
     # collect inv_scale tensors attached to fp8 params (set by _apply_update)
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
     fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
@@ -58,6 +61,24 @@ class GradAccClipAdamW(Optimizer):
 
     Tensor.realize(*to_realize)
     return extra[-1]
+
+  def _can_fuse_fp8_update(self, i:int) -> bool:
+    if self.master_params is None: return False
+    layer_elems = prod(self.master_params[i].uop.shard_shape) // self.master_params[i].shape[0]
+    return (self.params[i].dtype == dtypes.fp8e4m3 and not MXFP8 and not IMMEDIATE_SCALE and not self.zero and
+            self.master_params[i].device == self.params[i].device and layer_elems in (16_777_216, 25_165_824, 58_720_256, 117_440_512))
+
+  def _apply_fused_fp8_update(self, i:int, weight:Tensor, update:Tensor, master:Tensor|None):
+    assert master is not None
+    weight._inv_scale.assign(weight._next_inv_scale)
+    weight._next_inv_scale.assign(0)
+    from extra.llama_kernels.fused_fp8_adamw import fused_fp8_adamw
+    master_new, weight_new, next_inv_new = fused_fp8_adamw(
+      master, weight, weight._next_inv_scale, update.float(), weight._inv_scale, self.lr.to(master.device),
+      wd=self.wd if weight.ndim >= 3 else 0.0)
+    master.replace(master_new)
+    weight.replace(weight_new)
+    weight._next_inv_scale.replace(next_inv_new)
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
     grads = list(grads)

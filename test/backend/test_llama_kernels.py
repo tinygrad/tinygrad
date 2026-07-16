@@ -133,6 +133,45 @@ class TestMasterWeightUpdate(unittest.TestCase):
     self.assertTrue(master.allclose(expected_master, atol=1e-6, rtol=1e-6).item())
     self.assertTrue(param.allclose(expected_master.cast(dtypes.bfloat16), atol=0, rtol=0).item())
 
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT.split(":")[0] == "AMD", "requires hipcc to compile and amd device to run")
+class TestFusedFP8AdamW(unittest.TestCase):
+  def test_llama31_8b_wo(self):
+    Tensor.manual_seed(0)
+    shape, b1, b2, eps, wd = (2, 4096, 4096), 0.9, 0.95, 1e-5, 0.1
+    master = (Tensor.rand(*shape) * 0.2 - 0.1).contiguous().realize()
+    m = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    v = (Tensor.rand(*shape) * 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    grad = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    weight = Tensor.empty(*shape, dtype=dtypes.fp8e4m3).realize()
+    next_inv = Tensor.zeros(shape[0], dtype=dtypes.float32).contiguous().realize()
+    inv_scale = Tensor([0.001, 0.002], dtype=dtypes.float32).contiguous().realize()
+    inv_scale_ref = inv_scale.clone().realize()
+    lr = Tensor([0.001], dtype=dtypes.float32).contiguous().realize()
+    b1_t, b2_t = Tensor([b1], dtype=dtypes.float32).realize(), Tensor([b2], dtype=dtypes.float32).realize()
+
+    master_ref, m_ref, v_ref = master.clone().realize(), m.clone().realize(), v.clone().realize()
+    m_ref = b1 * m_ref.float() + (1.0 - b1) * grad.float()
+    v_ref = b2 * v_ref.float() + (1.0 - b2) * grad.float().square()
+    update = lr * ((m_ref / (1.0 - b1_t)) / ((v_ref / (1.0 - b2_t)).sqrt() + eps))
+    master_ref = master_ref - update - lr * wd * master_ref
+    scale = inv_scale.reciprocal().reshape(shape[0], 1, 1)
+    weight_ref = (master_ref * scale).clamp(-448.0, 448.0).cast(dtypes.fp8e4m3)
+    next_inv_ref = (weight_ref.float().abs().max(axis=(1, 2)) * inv_scale * 1.1 + 1e-8) / 448.0
+
+    optim = object.__new__(GradAccClipAdamW)
+    optim.lr, optim.wd = lr, wd
+    weight._inv_scale, weight._next_inv_scale = next_inv, inv_scale
+    optim._apply_fused_fp8_update(0, weight, update, master)
+    next_inv = weight._next_inv_scale
+    Tensor.realize(master, weight, next_inv, master_ref, weight_ref, next_inv_ref)
+    with Context(DEBUG=0):
+      self.assertTrue(weight._inv_scale.allclose(inv_scale_ref, atol=0, rtol=0).item(), "delayed scale did not advance")
+      self.assertTrue(master.allclose(master_ref, atol=2e-6, rtol=2e-6).item(), "master mismatch")
+      weight_diff = (weight.float() - weight_ref.float()).abs()
+      self.assertLessEqual(weight_diff.max().item(), 1.0, "FP8 weight error exceeds one quantization unit")
+      self.assertLessEqual((weight_diff != 0).sum().item(), 1, "too many FP8 boundary differences")
+      self.assertTrue(next_inv.allclose(next_inv_ref, atol=1e-8, rtol=1e-6).item(), "next scale mismatch")
+
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedAddRMSNorm(unittest.TestCase):
   def test_llama31_8b_forward(self):

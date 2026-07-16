@@ -171,7 +171,7 @@ class FlatTransformer:
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
     self._fp8_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
-    self._fp8_next_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
+    self._fp8_next_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().clone().is_param_(False) for name, s in w_scales}
     self._layer_num = [Tensor([i], dtype=dtypes.int32).contiguous().is_param_(False) for i in range(n_layers)]
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02, w:Tensor|None=None):
