@@ -58,8 +58,8 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   return (None, None, grad_xw13_uop, None, None, None)
 
 def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor,
-                           next_grad_amax_state:Tensor, amax_out:Tensor) -> tuple[Tensor, Tensor]:
-  # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, new_amax)
+                           next_grad_amax_state:Tensor, amax_out:Tensor) -> Tensor:
+  # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns fp8.
   # grad_amax_state: delayed amax for grad_xw13 fp8 quantization in the backward.
   assert xw13.dtype == dtypes.bfloat16, f"expected bf16, got {xw13.dtype}"
   MBS, SEQ, H2 = xw13.shape
@@ -68,6 +68,6 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   axis = xw13.uop.axis if isinstance(xw13.device, tuple) else None
   fp8_out  = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,      xw13.device, axis)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
-  fp8_out, amax_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, xw13, amax_state, grad_amax_state, next_grad_amax_state,
-                                                fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
-  return fp8_out, amax_out
+  fp8_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, xw13, amax_state, grad_amax_state, next_grad_amax_state,
+                                     fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
+  return fp8_out

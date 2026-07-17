@@ -74,7 +74,7 @@ def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   return (None, None, grad_x.uop, None)
 
 def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, amax_out:Tensor,
-                         fp8_dtype=dtypes.fp8e4m3) -> tuple[Tensor, Tensor, Tensor]:
+                         fp8_dtype=dtypes.fp8e4m3) -> tuple[Tensor, Tensor]:
   # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling. Atomically updates the caller-owned amax_out.
   # Fused kernel reads x once and writes fp8 + scalar amax via global atomic max.
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
@@ -83,10 +83,9 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, amax_out:Tensor,
   n_elems = prod(x.uop.shard_shape)
   assert n_elems % NUM_WG == 0, f"{n_elems=} must divide over {NUM_WG=}"
   fxn = functools.partial(_custom_quantize_fp8_with_amax, device=x.device)
-  fp8_out, amax_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, x, amax_state,
-                                                fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
+  fp8_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, x, amax_state, fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
-  return fp8_out, inv_scale, amax_out
+  return fp8_out, inv_scale
 
 def quantize_fp8_scalar(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) -> Tensor:
   # NOTE: pure one-pass bf16 -> fp8 quantize with delayed scalar scale. No amax computation.

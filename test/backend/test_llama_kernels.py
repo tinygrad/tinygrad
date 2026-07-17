@@ -50,9 +50,9 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
 
   if delayed:
     amax_out = Tensor.zeros((), dtype=dtypes.float32, device=x.device).realize()
-    fp8, inv_scale, new_amax = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
+    fp8, inv_scale = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
     ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
-    Tensor.realize(fp8, inv_scale, new_amax)
+    Tensor.realize(fp8, inv_scale)
     Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax)
   else:
     fp8 = quantize_fp8_scalar(x, amax_state, FP8_DTYPE)
@@ -64,9 +64,8 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
     if delayed:
       assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
-      assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
-        f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
-      assert amax_out.allclose(ref_new_amax, atol=0, rtol=0).item()
+      assert amax_out.allclose(ref_new_amax, atol=0, rtol=0).item(), \
+        f"amax mismatch: got={amax_out.item()} ref={ref_new_amax.item()} diff={abs(amax_out.item()-ref_new_amax.item())}"
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires atomic max")
 class TestQuantizeFP8(unittest.TestCase):
@@ -85,11 +84,10 @@ class TestQuantizeFP8(unittest.TestCase):
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
     amax_out = Tensor.zeros((), dtype=dtypes.float32, device=devs).realize()
-    fp8, _, new_amax = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
-    Tensor.realize(fp8, new_amax)
+    fp8, _ = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
+    Tensor.realize(fp8)
     assert fp8.uop.shape == x.uop.shape
-    assert new_amax.shape == ()
-    assert amax_out.uop.buffer is new_amax.uop.buffer
+    assert amax_out.shape == ()
 
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):

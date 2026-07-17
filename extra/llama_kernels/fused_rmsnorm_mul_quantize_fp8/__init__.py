@@ -113,8 +113,8 @@ def _fused_add_bwd(*args, **kwargs):
   return (None, None, None, None, None, grad_h, grad_h, grad_w, None)
 
 def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, amax_out:Tensor,
-                                   eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-  # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, new_amax, x_normed, rrms).
+                                   eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor]:
+  # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, x_normed, rrms).
   # x_normed + rrms are saved for the rmsnorm backward (also recomputed here from x regs).
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
   assert x.shape[-1] == weight.shape[-1], f"HIDDEN mismatch: x={x.shape}, weight={weight.shape}"
@@ -125,14 +125,14 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, a
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
   fxn = functools.partial(_custom_fwd, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
+  fp8_out, x_normed_out, rrms_out, *_ = Tensor.custom_kernel(
     fp8_out, x_normed_out, rrms_out, amax_out, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_bwd)
-  return fp8_out, amax_out, x_normed_out, rrms_out
+  return fp8_out, x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
-                                       amax_out:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+                                       amax_out:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   # NOTE: h = x + residual; y_normed = rmsnorm(h); fp8 = quantize(y_normed * weight).
-  # Returns (fp8, new_amax, h, x_normed, rrms). h is also written so downstream can
+  # Returns (fp8, h, x_normed, rrms). h is also written so downstream can
   # reuse it without recomputing x+residual — eliminates the separate residual-add kernel.
   assert x.dtype == dtypes.bfloat16 and residual.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
   assert x.shape == residual.shape
@@ -144,7 +144,7 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
   fxn = functools.partial(_custom_fwd_add, dname=dname_of(x.device), eps_val=eps)
-  fp8_out, h_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
+  fp8_out, h_out, x_normed_out, rrms_out, *_ = Tensor.custom_kernel(
     fp8_out, h_out, x_normed_out, rrms_out, amax_out, x, residual, weight, amax_state,
     fxn=fxn, grad_fxn=_fused_add_bwd)
-  return fp8_out, amax_out, h_out, x_normed_out, rrms_out
+  return fp8_out, h_out, x_normed_out, rrms_out
