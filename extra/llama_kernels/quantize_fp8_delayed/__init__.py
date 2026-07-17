@@ -73,8 +73,7 @@ def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   grad_x = (Tensor(gradient, device=device).float() * scale).cast(dtypes.bfloat16)
   return (None, None, grad_x.uop, None)
 
-def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, amax_out:Tensor,
-                         fp8_dtype=dtypes.fp8e4m3) -> tuple[Tensor, Tensor]:
+def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, amax_out:Tensor, fp8_dtype=dtypes.fp8e4m3) -> tuple[Tensor, Tensor]:
   # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling. Atomically updates the caller-owned amax_out.
   # Fused kernel reads x once and writes fp8 + scalar amax via global atomic max.
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
