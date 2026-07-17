@@ -42,6 +42,35 @@ def normalize_messages(messages:list[dict]) -> None:
         try: tc["function"]["arguments"] = json.loads(args)
         except json.JSONDecodeError: pass
 
+class StreamRouter:
+  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .text for the final parse
+  def __init__(self, parse_tool_calls:bool, prefill_think:bool):
+    self.parse_tool_calls, self.text, self.buf, self.fresh = parse_tool_calls, "", "", False
+    self.mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
+  def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
+    self.text += piece
+    self.buf += piece
+    if self.mode == "undecided":  # decide whether the output starts with a think block
+      if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
+      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):].lstrip("\n")) if self.buf.startswith("<think>") else ("content", self.buf)
+    if self.mode == "reasoning":
+      emit, self.buf, done = stream_split(self.buf, "</think>", final)
+      if emit: yield "reasoning_content", emit
+      if not done: return
+      self.mode, self.fresh = "content", True
+    if self.fresh:  # strip blank lines right after the think block
+      self.buf = self.buf.lstrip("\n")
+      if not self.buf and not final: return
+      self.fresh = False
+    if self.mode == "tool": return  # inside a tool_call tag: swallow, self.text has everything for the final parse
+    if self.parse_tool_calls:
+      emit, self.buf, found = stream_split(self.buf, "<tool_call>", final)
+      if emit: yield "content", emit
+      if found: self.mode = "tool"
+    else:
+      yield "content", self.buf
+      self.buf = ""
+
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None):
@@ -177,44 +206,19 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    text, buf, fresh = "", "", False  # fresh: strip blank lines right after a think block ends
-    mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
-    def route(piece:str, final:bool=False):
-      nonlocal text, buf, mode, fresh
-      text += piece
-      buf += piece
-      if mode == "undecided":  # decide whether the output starts with a think block
-        if not final and len(buf) < len("<think>") and "<think>".startswith(buf): return
-        mode, buf = ("reasoning", buf[len("<think>"):].lstrip("\n")) if buf.startswith("<think>") else ("content", buf)
-      if mode == "reasoning":
-        emit, buf, done = stream_split(buf, "</think>", final)
-        if emit: yield chunk({"reasoning_content":emit})
-        if not done: return
-        mode, fresh = "content", True
-      if fresh:
-        buf = buf.lstrip("\n")
-        if not buf and not final: return
-        fresh = False
-      if mode == "tool": return  # inside a tool_call tag: swallow, text has everything for the final parse
-      if parse_tool_calls:
-        emit, buf, found = stream_split(buf, "<tool_call>", final)
-        if emit: yield chunk({"content":emit})
-        if found: mode = "tool"
-      else:
-        yield chunk({"content":buf})
-        buf = ""
+    router = StreamRouter(parse_tool_calls, prefill_think)
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      yield from route(dec(next_id))
+      for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    yield from route(dec(), final=True)
+    for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
     if parse_tool_calls:
       tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.DOTALL):
+      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.text, re.DOTALL):
         if (parsed := parse_tool_call(m.group(1))) is None:
           stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
           yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
