@@ -420,6 +420,26 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
+  def warmup(self, chunk_size:int=256):
+    # Capture both prefill JITs. Different first tokens prevent the second pass from reusing the first pass's KV cache.
+    warm_len = min(1 if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
+    if warm_len > 0:
+      for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
+
+    # Rollout uses fixed power-of-two KV shapes. Capture every shape up front so requests never pay a JIT transition.
+    if not self.has_recurrent_block:
+      min_bucket = max(1, getenv("DECODE_BUCKET", 256))
+      bucket_positions:dict[int, int] = {}
+      for pos in [0] + [1 << i for i in range(self.max_context.bit_length())]:
+        bucket = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
+        bucket_positions.setdefault(bucket, pos)
+      v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
+      token, temperature = Tensor([[0]], dtype="int32"), Tensor([0.0])
+      for _, pos in sorted(bucket_positions.items()):
+        for _ in range(2): self(token, v_start_pos.bind(pos), temperature).realize()
+    if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
+    self._cached_tokens = []
+
   def generate(self, tokens:list[int], chunk_size:int=256, temperature:float=0.0):
     if self.has_recurrent_block: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
