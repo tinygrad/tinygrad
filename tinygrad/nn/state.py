@@ -31,7 +31,8 @@ class TensorIO(io.RawIOBase, BinaryIO):
   def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
-               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F8_E4M3":dtypes.fp8e4m3, "F8_E5M2":dtypes.fp8e5m2,
+               "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def accept_filename(func: Callable[[Tensor], T]) -> Callable[[Tensor|str|pathlib.Path], T]:
@@ -102,7 +103,8 @@ def fs_store(t:Tensor) -> Tensor:
 
   level_chunks = base_chunks
   for _ in range(tree_depth + 1):
-    data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
+    # assign data into tinyfs:store and read back hashes
+    data = Tensor.empty(data.shape[0], dtype=dtypes.uint8, device="tinyfs:store").assign(data)[:level_chunks * 16].to(to_device)
     if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
     level_chunks = math.ceil(data.shape[0] / CHUNK_SIZE)
 
@@ -123,18 +125,16 @@ def fs_load(t:Tensor, size:int) -> Tensor:
   tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
   data, level_chunks = h, 0
   for i in reversed(range(tree_depth + 1)):
-    data = data.to("tinyfs:load")
-
     # if not last level, its still hashes
     if i > 0 or tree_depth == 0:
       level_chunks = max(1, math.ceil(base_chunks / (CHUNK_SIZE // 16)**(i-1)))
-      pad_amt = 16 * level_chunks
-    else: pad_amt = CHUNK_SIZE * level_chunks
-    if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
-    data = data[:pad_amt].contiguous()
-    if i != 0: data = data.to(t.device)
+      out_sz = 16 * level_chunks
+    else: out_sz = CHUNK_SIZE * level_chunks
+    # assign hash into tinyfs:load and read back data
+    (load:=Tensor.empty(out_sz, dtype=dtypes.uint8, device="tinyfs:load"))[:data.shape[0]].assign(data)
+    data = load
 
-  return data[:size]
+  return data.to(t.device)[:size]
 
 # state dict
 

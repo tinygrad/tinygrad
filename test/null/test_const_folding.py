@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType
+from tinygrad.dtype import DType, ConstType, Invalid
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
 import numpy as np
@@ -33,6 +33,24 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = Tensor.randn(32, 32)
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
+
+class TestWeakConstFolding(unittest.TestCase):
+  def test_weakint_math(self):
+    out = (UOp.const(dtypes.weakint, 2**40) + UOp.const(dtypes.weakint, 2**40)).simplify()
+    self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakint, 2**41))
+
+  def test_float_unaries(self):
+    for dtype in (dtypes.weakint, dtypes.weakfloat):
+      for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
+        out = UOp.const(dtype, 4).alu(op).simplify()
+        self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))
+
+  def test_weakfloat_math(self):
+    out = (UOp.const(dtypes.weakfloat, 1.25) + UOp.const(dtypes.weakfloat, 2.5)).simplify()
+    self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakfloat, 3.75))
+
+  def test_invalid_poison(self):
+    self.assertIs(UOp.const(dtypes.weakint, Invalid).alu(Ops.CDIV, UOp.const(dtypes.weakint, 0)).simplify().arg, Invalid)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
@@ -127,7 +145,7 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src
+      srcs = full_rewrite(UOp.const(dtypes.int32, (-1, -2**31, 75)).bitcast(dtypes.uint32).sink()).src
     self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
     self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
 

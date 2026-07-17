@@ -10,7 +10,7 @@ from tinygrad.device import Compiled, BufferSpec
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, mesa
+from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
@@ -342,7 +342,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape:tuple[int,...], frame_pos:int):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout, desc_buf]), "all buffers must be 0x100 aligned"
@@ -389,7 +389,8 @@ class NVKIface:
       NVKIface.root = self.rm_alloc(0, nv_gpu.NV01_ROOT_CLIENT, None, root=0)
 
       drvver = self.rm_control(self.root, nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2, nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS())
-      if int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 580: nv_gpu = nv_580
+      if int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 610: nv_gpu = nv_610
+      elif int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 580: nv_gpu = nv_580
 
       self.uvm(nv_gpu.UVM_INITIALIZE, nv_gpu.UVM_INITIALIZE_PARAMS())
 

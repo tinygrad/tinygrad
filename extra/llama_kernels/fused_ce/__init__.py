@@ -16,7 +16,7 @@ def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp
   row_lse = (logits[b, s, v_lse].cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
 
   v_smooth = UOp.range(vocab, 3, axis_type=AxisType.REDUCE)
-  target = logits[b, s, targets[row].cast(dtypes.weakint)].cast(dtypes.float)
+  target = logits[b, s, targets[row].cast(dtypes.index)].cast(dtypes.float)
   mean_logits = logits[b, s, v_smooth].cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
   loss = row_lse - (1.0 - label_smoothing) * target - label_smoothing * mean_logits
   stores = UOp.group(loss_out[row].store(loss), max_out[row].store(row_max), lse_out[row].store(row_lse))
@@ -32,11 +32,11 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   s = row % seq
 
   prob = (logits[b, s, v].cast(dtypes.float) - lse[row]).exp()
-  target = v.eq(targets[row].cast(dtypes.weakint)).where(1.0 - label_smoothing, 0.0)
+  target = v.eq(targets[row].cast(dtypes.index)).where(1.0 - label_smoothing, 0.0)
   smooth = label_smoothing / vocab
   grad = (prob - target - smooth) * scale[0]
 
-  return d_logits[b, s, v].store(grad.cast(d_logits.dtype.base)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
+  return d_logits[b, s, v].store(grad.cast(d_logits.dtype)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
 
 def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)

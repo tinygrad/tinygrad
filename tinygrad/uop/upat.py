@@ -6,6 +6,10 @@ from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deco
 class UPatCompileError(Exception): pass
 
 # **** UPat compiled ****
+# This file builds an IR of match predicates and compiles them to Python source.
+# Ops used: CUSTOM (format-string predicate over operands), CUSTOMI (inline string fragment),
+#           STORE (bind a matched UOp to a name), PYLITERAL (Python literal for CUSTOM operands),
+#           AND/OR (clause combininers).
 
 def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.is_any:
@@ -14,37 +18,40 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   # build the and_clause for acceptance
   and_clause:list[UOp] = []
   if self.op is not None:
-    if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
+    if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.arg)), arg="{0}.arg == {1}"))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg=("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len))))
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp(Ops.CUSTOMI, arg=self.name), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.match_dtype))), arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.match_dtype[0])), arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_dtype))),
+                            arg="{0}.dtype in {1}"))
+    else:
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])),
+                            arg="{0}.dtype == {1}"))
   if self.match_tag is not None:
     if len(self.match_tag) > 1:
-      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.match_tag))), arg="{0}.tag in {1}"))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.match_tag[0])), arg="{0}.tag == {1}"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_tag))), arg="{0}.tag in {1}"))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_tag[0])), arg="{0}.tag == {1}"))
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-      it = UOp(Ops.NOOP, arg=f"ituop{depth}")
+      it = UOp(Ops.CUSTOMI, arg=f"ituop{depth}")
       match = _get_clause(next(self.src[0]), it, depth+1)
-      and_clause.append(UOp(Ops.RANGE, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
+      and_clause.append(UOp(Ops.CUSTOM, src=(match, it, base), arg="all([{0} for {1} in {2}.src])"))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause))
+  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp(Ops.CUSTOMI, arg="True")
 
 # *** pattern matcher ***
 
@@ -81,13 +88,13 @@ def do_process_and(a:UOp) -> UOp|None:
     else:
       # check for duplicate stores
       dict_stores: dict[UOp, UOp] = {}
-      for a in stores:
-        if a.src[0] in dict_stores:
-          # duplicate store is a compare
-          new_src.append(UOp(Ops.CMPNE, src=(dict_stores[a.src[0]], a.src[1])))
+      for store in stores:
+        if store.src[0] in dict_stores:
+          # duplicate store is an identity compare
+          new_src.append(UOp(Ops.CUSTOM, src=(dict_stores[store.src[0]], store.src[1]), arg="{0} is {1}"))
           found = True
         else:
-          dict_stores[a.src[0]] = a.src[1]
+          dict_stores[store.src[0]] = store.src[1]
       # put the stores back
       for k,v in dict_stores.items(): new_src.append(UOp(Ops.STORE, src=(k,v)))
 
@@ -101,20 +108,17 @@ pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=F
 # renderer
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
-  return UOp(Ops.NOOP, arg=ret)
+  return UOp(Ops.CUSTOMI, arg=ret)
 
 pm_renderer = PatternMatcher([
-  (UPat(Ops.BIND, name="x"), wrap),
+  (UPat(Ops.PYLITERAL, name="x"), wrap),
 
-  # CMPNE is actually equal
-  (UPat(Ops.CMPNE, name="x"), lambda x: UOp(Ops.CUSTOM, src=x.src, arg="{0} is {1}")),
+  # AND of CUSTOMI fragments inside a CUSTOM becomes a single CUSTOMI (joined with " and ")
+  (UPat(Ops.CUSTOM, src=(UPat(Ops.AND, src=UPat(Ops.CUSTOMI), name="x"), UPat(), UPat()), name="r"),
+    lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
-  # RANGE can't have OR inside it
-  (UPat(Ops.RANGE, src=(UPat(Ops.AND, src=UPat(Ops.NOOP), name="x"), UPat(), UPat()), name="r"),
-    lambda r,x: r.replace(op=Ops.CUSTOM, src=(UOp(Ops.NOOP, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
-
-  (UPat(Ops.CUSTOM, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg.format(*[y.arg for y in x.src]))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.NOOP, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
+  (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=x.arg.format(*[y.arg for y in x.src]))),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
@@ -126,9 +130,9 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
-      assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.NOOP
+      assert s.src[0].op is Ops.CUSTOMI and s.src[1].op is Ops.CUSTOMI
       store_pieces.append(f"{s.src[0].arg}={s.src[1].arg}")
-    elif s.op is Ops.NOOP: and_pieces.append(s.arg)
+    elif s.op is Ops.CUSTOMI: and_pieces.append(s.arg)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
@@ -141,7 +145,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
+  ret = _get_clause(self, UOp(Ops.CUSTOMI, arg="uop"))
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):
@@ -157,8 +161,7 @@ def _get_code(self:UPat, has_ctx:bool):
 @functools.cache
 def upat_compile(self:UPat, fxn) -> Callable|None:
   real_fxn = types.FunctionType(*deconstruct_function(fxn))
-  # UOps used here don't follow the spec
-  with Context(SPEC=0): code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
+  code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
   if code is None: return None
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()

@@ -423,10 +423,10 @@ def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
-  sgpr = UOp.param(0, dtypes.uint32.ptr(SGPR_COUNT))
-  vmem = UOp.param(2, dtypes.uint32.ptr(1 << 46))
-  lds = UOp.param(3, dtypes.uint32.ptr(16384))
-  scratch = UOp.param(4, dtypes.uint8.ptr(1 << 30))
+  sgpr = UOp.param(0, dtypes.uint32, (SGPR_COUNT,))
+  vmem = UOp.param(2, dtypes.uint32, (1 << 46,))
+  lds = UOp.param(3, dtypes.uint32, (16384,))
+  scratch = UOp.param(4, dtypes.uint8, (1 << 30,))
   # Cache PARAM UOps by wave_size so all _Ctx instances with same wave_size share identical UOp references
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
@@ -434,10 +434,10 @@ class _Ctx:
   def __init__(self, inst_size: int, wave_size: int = 32):
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32.ptr(256 * wave_size))
+    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32, (256 * wave_size,))
     self.vgpr = _Ctx._vgpr_cache[wave_size]
     if wave_size == 64:
-      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32.ptr(256 * wave_size))
+      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32, (256 * wave_size,))
       self.accvgpr = _Ctx._accvgpr_cache[wave_size]
     else:
       self.accvgpr = self.vgpr
@@ -463,7 +463,7 @@ class _Ctx:
     """Read instruction dword from vmem at PC + dword_idx*4."""
     pc = self.rpc()
     addr = pc if dword_idx == 0 else pc + UOp.const(dtypes.uint64, dword_idx * 4)
-    return self.vmem.index(addr >> UOp.const(dtypes.uint64, 2), ptr=True).load()
+    return self.vmem.index(addr >> UOp.const(dtypes.uint64, 2)).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -516,14 +516,14 @@ class _Ctx:
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
     """Read SGPR with dynamic register index."""
-    if valid is not None: return self.sgpr.index(reg.valid(valid), ptr=True).load()
-    return self.sgpr.index(reg, ptr=True).load()
+    if valid is not None: return self.sgpr.index(reg.valid(valid)).load()
+    return self.sgpr.index(reg).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
     """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
     # RDNA: NULL (124) discards writes. CDNA: M0 (124) is writable.
     valid = None if self.wave_size == 64 else reg.ne(_c(124))
-    return self.sgpr.index(reg.valid(valid) if valid is not None else reg, ptr=True).store(val.cast(dtypes.uint32))
+    return self.sgpr.index(reg.valid(valid) if valid is not None else reg).store(val.cast(dtypes.uint32))
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
@@ -540,7 +540,7 @@ class _Ctx:
   def rvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read VGPR with dynamic register index."""
     idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return self.vgpr.index(idx.valid(valid), ptr=True).load() if valid is not None else self.vgpr.index(idx, ptr=True).load()
+    return self.vgpr.index(idx.valid(valid)).load() if valid is not None else self.vgpr.index(idx).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
@@ -551,7 +551,7 @@ class _Ctx:
   def raccvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read ACCVGPR with dynamic register index (CDNA only)."""
     idx = reg.cast(dtypes.int) * _c(self.wave_size, dtypes.int) + lane.cast(dtypes.int)
-    return self.accvgpr.index(idx.valid(valid), ptr=True).load() if valid is not None else self.accvgpr.index(idx, ptr=True).load()
+    return self.accvgpr.index(idx.valid(valid)).load() if valid is not None else self.accvgpr.index(idx).load()
 
   def waccvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write ACCVGPR with dynamic register index (CDNA only)."""
@@ -711,7 +711,7 @@ class _Ctx:
         # VGPR bit-slice: (vgpr_idx, rhs_val, hi_bit, lo_bit) - hi/lo are UOp constants
         hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
         width = hi_bit - lo_bit + 1
-        old = self.vgpr.index(val[0], ptr=True).load()
+        old = self.vgpr.index(val[0]).load()
         new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane)
         if len(val) > 4: active = active & _to_bool(val[4])
@@ -803,7 +803,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
     pcode = get_pcode(inst.op)
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_val = ctx.rmask(_c(VCC_LO.offset)), ctx.rexec()
-    srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
+    srcs: dict[str, UOp|int] = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
             'VCCZ': vcc.eq(UOp.const(vcc.dtype, 0)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(exec_val.dtype, 0)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
@@ -858,7 +858,7 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     if isinstance(inst, ir4.SOPK): s0 = simm16
     elif isinstance(inst, irc.SOPK) and 'CMPK' not in op_name and 'SETREG' not in op_name: s0 = simm16_sext
     else: s0 = ctx.rsgpr_dyn(sdst_off)
-    srcs = {'S0': s0, 'S1': simm16_sext, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
+    srcs: dict[str, UOp|int] = {'S0': s0, 'S1': simm16_sext, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
     # S_GETREG_B32: extract bits from HW register. Handle as special case since HW_REGISTERS is not a normal variable.
     # HW register values are stored at SGPR[SGPR_COUNT-16 + hwRegId] by _init_wave.
@@ -2010,7 +2010,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
     lds_addr = lds_base + lane.cast(dtypes.uint32) * _c(n_dwords * 4)
     for i in range(n_dwords):
       word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
-      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64), ptr=True).load(), _c(0))
+      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64)).load(), _c(0))
       lds_idx = (lds_addr + _c(i * 4)) >> _c(2)
       lds_slot = ctx.lds.index(lds_idx.valid(active))
       stores.append(lds_slot.store(active.where(val, lds_slot)))
@@ -2023,7 +2023,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   else:
     for i in range(n_dwords):
       word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
-      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64).valid(in_bounds), ptr=True).load(), _c(0))
+      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64).valid(in_bounds)).load(), _c(0))
       stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(vdata + _c(i), lane, val, exec_mask))
   return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 

@@ -6,7 +6,7 @@ os.environ["AMD_LLVM"] = "0"
 from tinygrad import Tensor, Context, dtypes, UOp, GlobalCounters
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, AxisType, KernelInfo, Ops
+from tinygrad.uop.ops import AxisType, KernelInfo
 
 WARP_SIZE = 64
 
@@ -37,8 +37,8 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
   K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
 
   # load from locals into registers
-  Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
-  Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
+  Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half, slot=1, addrspace=AddrSpace.REG)
+  Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half, slot=2, addrspace=AddrSpace.REG)
 
   M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+10)
   Asl = Asl.reshape(BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M)
@@ -60,8 +60,7 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
   acc_load = acc_after[N_inner_loop, M_inner_loop]
 
   # do WMMA
-  wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-  out = UOp(Ops.WMMA, dtypes.float.vec(4), (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
+  out = UOp.wmma(Ar[M_inner_loop], Br[N_inner_loop], acc_load, (16, 16, 32), 'AMD', 64)
 
   # store back the acc
   acc_store = acc[N_inner_loop, M_inner_loop].store(out)
@@ -72,7 +71,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
 
   # split out the globals into blocks
-  C = C.src[0].cast(dtypes.float.vec(4).ptr(C.ptrdtype.size)).reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
+  C = C.src[0].cast(dtypes.float).reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
   A = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K))[gx, :, K_outer_loop, :]
   B = B.reshape((K//BLOCK_K, BLOCK_K, N//BLOCK_N, BLOCK_N))[K_outer_loop, :, gy, :]
 
@@ -107,7 +106,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   if getenv("COMPUTE"):
     As, Bs = As.after(barrier), Bs.after(barrier)
 
-    acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float.vec(4), 0, AddrSpace.REG)
+    acc = UOp.placeholder((BLOCK_N//TC_N, BLOCK_M//TC_M//WARPGROUP_SIZE), dtypes.float, 0, AddrSpace.REG)
 
     sink = compute_on_locals(acc, As, Bs, 200, afters=(barrier,), warpgroup=warpgroup, warp=warp)
     sink = sink.end(K_outer_loop)

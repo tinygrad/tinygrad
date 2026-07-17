@@ -1,5 +1,5 @@
 import unittest, base64, functools, sys
-from tinygrad.llm.cli import SimpleTokenizer
+from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
 @unittest.skipIf(sys.platform == 'win32', "fetch race condition on Windows")
@@ -54,10 +54,11 @@ class TestLLMTokenizer(unittest.TestCase):
       "tokenizer.ggml.eos_token_id": 2,
     }
     tok = SimpleTokenizer.from_gguf_kv(kv)
-    self.assertEqual(tok.role("user"), [3])
+    template = FallbackTemplate(tok)
+    self.assertEqual(template.role("user"), "[INST]")
     self.assertEqual(tok.encode("hello"), [5])
-    self.assertEqual(tok.end_turn(), [4])
-    self.assertEqual(tok.role("assistant"), [])
+    self.assertEqual(template.end_turn(), "[/INST]")
+    self.assertEqual(template.role("assistant"), "")
 
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""

@@ -1,5 +1,5 @@
 from tinygrad import Device, UOp, getenv
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops
+from tinygrad.uop.ops import AxisType, KernelInfo
 from tinygrad.dtype import AddrSpace, dtypes
 
 N = getenv("N", 4096)
@@ -46,8 +46,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   # -- GLOBAL -> LOCAL --
   # wmma: spatial outer, k inner (k contiguous for vectorized WMMA tile loads)
   # gemm: k outer, spatial inner
-  A_local = UOp.placeholder((BLOCK_M, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype.base, slot=0, addrspace=AddrSpace.LOCAL)
-  B_local = UOp.placeholder((BLOCK_N, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype.base, slot=1, addrspace=AddrSpace.LOCAL)
+  A_local = UOp.placeholder((BLOCK_M, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype, slot=0, addrspace=AddrSpace.LOCAL)
+  B_local = UOp.placeholder((BLOCK_N, BLOCK_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype, slot=1, addrspace=AddrSpace.LOCAL)
 
   a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
   b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
@@ -80,7 +80,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
       # NOTE: since this is part of K, these 2 can be anywhere in the frags and long as a and b match
       a_frag = a_frag.reshape(2, 8)[lane_m, :]
       b_frag = b_frag.reshape(2, 8)[lane_m, :]
-    wmma = UOp(Ops.SHAPED_WMMA, dtypes.float, (a_frag, b_frag, acc_frag.after(k)), arg=((16, 16, 16), 'AMD', 32))
+    wmma = UOp.wmma(a_frag, b_frag, acc_frag.after(k), (16, 16, 16), 'AMD', 32)
     acc_store = acc_frag.store(wmma).end(tile_m, tile_n)
   else:
     # registers for LOCAL -> REG

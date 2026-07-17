@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Self
 from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype
+from tinygrad.uop import Ops
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
@@ -29,9 +30,24 @@ class DTypeMixin:
     print(t.dtype, t.numpy())
     ```
     """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.cast(dt))
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._wrap_uop(self._uop.alu(Ops.CAST, arg=dt))
 
-  def bitcast(self, dtype:DTypeLike) -> Self: raise NotImplementedError
+  def bitcast(self, dtype:DTypeLike) -> Self:
+    """
+    Bitcasts `self` to the given `dtype`. If the itemsize differs, the last axis is rescaled.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
+    print(t.dtype, t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.bitcast(dtypes.uint32)
+    print(t.dtype, t.numpy())
+    ```
+    """
+    dt = to_dtype(dtype)
+    if self.dtype in dtypes.weaks or dt in dtypes.weaks: raise RuntimeError(f"bitcast requires concrete dtypes, got {self.dtype} -> {dt}")
+    return self if self.dtype == dt else self._wrap_uop(self._uop.alu(Ops.BITCAST, arg=dt))
 
   def element_size(self) -> int:
     """
@@ -42,6 +58,7 @@ class DTypeMixin:
     print(t.element_size())
     ```
     """
+    if self.dtype in dtypes.weaks: raise RuntimeError(f"element_size requires a concrete dtype, got {self.dtype}")
     return self.dtype.itemsize
 
   def is_floating_point(self) -> bool:
@@ -54,7 +71,7 @@ class DTypeMixin:
     print(t.is_floating_point())
     ```
     """
-    return dtypes.is_float(self.dtype.base)
+    return dtypes.is_float(self.dtype)
 
   def float(self) -> Self:
     """

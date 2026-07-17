@@ -5,19 +5,12 @@ from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
-  def broadcast_to_input(x):
-    shape, j = [], 0
-    for i in range(len(ret.src[0].shape)):
-      if i in ret.arg[1]: shape.append(1)
-      else:
-        shape.append(x.shape[j])
-        j += 1
-    return x.reshape(tuple(shape)).expand(ret.src[0].shape)
+  def broadcast_to_input(x:UOp) -> UOp: return x._broadcast_to(ret.src[0].shape)
   if op == Ops.ADD: return (broadcast_to_input(ctx),)
   if op == Ops.MAX:
     assert ret.op is Ops.REDUCE, "only works on REDUCE"
     mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
-    count = mask._rop(Ops.ADD, ret.arg[1])
+    count = mask._rop(Ops.ADD, tuple(range(ret.arg[1])))
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
@@ -75,12 +68,13 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, tuple(i for i,(s,n) in enumerate(zip(ret.src[0].shape, ret.shape)) if s!=n))
+    (ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, tuple(range(len(ret.marg))))
      .reshape(ret.src[0].shape).cast(ctx.dtype), None)),
   (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[0]-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
+  (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),

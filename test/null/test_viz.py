@@ -211,9 +211,10 @@ class TestViz(unittest.TestCase):
     graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
-    # fallback to NOOP with the error message
-    nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
-    self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
+    # fallback to REWRITE_ERROR with the error message
+    self.assertIn("REWRITE_ERROR\nTraceback", graphs[2]["label"])
+    # cut after the first error, instead of going through all REWRITE_STACK_LIMIT matches
+    self.assertEqual(len(graphs), 3)
 
   def test_walk_rewrite(self):
     from tinygrad.uop.ops import _substitute
@@ -226,9 +227,9 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
     with save_viz() as viz:
       inner = UOp.const(dtypes.int, 3)
-      func = UOp(Ops.FUNCTION, src=(UOp(Ops.SINK, src=(inner,)),))
-      call = UOp(Ops.CALL, src=(func,))
-      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
+      func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
+      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 
@@ -251,8 +252,8 @@ class TestViz(unittest.TestCase):
     self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
   def test_const_reshape_expand_folded(self):
-    # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
-    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
+    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->EXPAND chain
     a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
@@ -261,19 +262,18 @@ class TestViz(unittest.TestCase):
     excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
     self.assertIn("CONST", excluded_nodes)
     self.assertIn("STACK", excluded_nodes)
-    self.assertIn("RESHAPE", excluded_nodes)
     self.assertIn("EXPAND", excluded_nodes)
     self.assertIn("CONST1 1", graph[id(alu)]["label"])
 
   def test_stack_movement_not_folded_unless_all_const(self):
     a = UOp.variable("a", 0, 10, dtype=dtypes.int)
     c = UOp.const(dtypes.int, 1)
-    stack = a.vectorize(c)
+    stack = a.stack(c)
     reshaped = stack.reshape((1, 2))
     graph = uop_to_json(VizData(), reshaped)
     self.assertFalse(graph[id(stack)]["exclude"])
 
-    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
+    const_stack = c.stack(UOp.const(dtypes.int, 2))
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])

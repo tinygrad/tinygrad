@@ -9,6 +9,7 @@ class Register:
   name: str
   index: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
+  size: int = 8
   @property
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
@@ -24,6 +25,11 @@ class IselContext:
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
+
+def greg(u:UOp):
+  if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return greg(u.src[0])
+  if isinstance(u.tag, tuple): return u.tag[0]
+  return u.tag
 
 @dataclass
 class PreRegAllocContext:

@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid, dtypes
 from tinygrad.engine.realize import run_linear
 
@@ -9,7 +10,7 @@ class TestInvalidTensor(unittest.TestCase):
     buf = out.uop.buffer
     buf.allocate()
     sentinel = memoryview(bytearray(b'\x42' * buf.nbytes))
-    buf.copyin(sentinel)
+    buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=sentinel))
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
     run_linear(linear, var_vals)
     ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()
@@ -64,6 +65,17 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid) > 1
     self._invalid_test_helper(out, [False, True, None, None])
 
+  def test_where_invalid_condition(self):
+    a, x = Tensor.arange(4), Tensor([0, 1, 2, 3])
+    bad = (a < 2).where(a, Invalid)
+    out = (bad < 1).logical_not().where(x + 10, x + 20)
+    self._invalid_test_helper(out, [20, 11, None, None])
+
+  def test_where_invalid_condition_bare(self):
+    cond = Tensor.full((4,), Invalid, dtype=dtypes.bool, buffer=False)
+    out = cond.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor([10.0, 20.0, 30.0, 40.0]))
+    self._invalid_test_helper(out, [None, None, None, None])
+
   def test_where_unary(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 4.0, 9.0, 16.0]), Invalid).sqrt()
@@ -115,8 +127,6 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.int, buffer=False)).bitcast(dtypes.int)
     self._invalid_test_helper(out, [0x3f800000, 0x40000000, None, None])
 
-  # tensor indexing uses reduce, so the entire result becomes invalid
-  @unittest.expectedFailure
   def test_tensor_index(self):
     idx = (Tensor.arange(4) < 2).where(Tensor([0, 1, 2, 3]), Invalid)
     out = Tensor([1.0, 2.0, 3.0, 4.0])[idx]

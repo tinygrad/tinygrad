@@ -1,6 +1,6 @@
 from typing import Callable, Any
-from tinygrad.dtype import AddrSpace, DType, ImageDType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
+from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
@@ -137,7 +137,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not isinstance(buf.dtype, ImageDType) else None),
+      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
      lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
@@ -290,7 +290,7 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     self.img_idx += 1
     return nimm(self.b, self.img_idx - 1, dtypes.int)
 
-  def param(self, b, x, sz): return self._param_img(x) if isinstance(x.dtype, ImageDType) else self._param(b, x, sz)
+  def param(self, b, x, sz): return self._param_img(x) if is_image_shape(x._shape) else self._param(b, x, sz)
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
@@ -301,9 +301,10 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
   def postrender(self, uops:list[UOp]):
     bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]
     texs, imgs = itertools.count().__next__, itertools.count().__next__
-    for b in filter(lambda b: isinstance(b.dtype, ImageDType), bufs): nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
+    for b in filter(lambda b: is_image_shape(b._shape), bufs):
+      nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
 
-    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
+    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not is_image_shape(u._shape)])
     self.b.shader.contents.info.num_images = texs() + imgs()
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}

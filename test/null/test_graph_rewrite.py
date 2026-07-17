@@ -15,7 +15,7 @@ def apply_rewrite(expr):
 def apply_rewrite_values(expr):
   srcs = full_rewrite(expr.sink()).src
   if len(srcs) == 1:
-    if srcs[0].op is Ops.CONST: return (srcs[0].arg,)*srcs[0].dtype.count
+    if srcs[0].op is Ops.CONST: return (srcs[0].arg,) if not isinstance(srcs[0].arg, tuple) else srcs[0].arg
     if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
   return tuple(s.arg for s in srcs)
 
@@ -107,30 +107,30 @@ class TestFoldingAndReduction(unittest.TestCase):
 class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_folding_with_define_var(self):
     # index dtype because div-mod rules only work on index
-    x_var_uop = UOp.variable('x', 0, 100).cast(dtypes.weakint)
+    x_var_uop = UOp.variable('x', 0, 100).cast(dtypes.index)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, Ops.CONST)
     self.assertEqual(optimized_mod_uop.arg, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     # index dtype because div-mod rules only work on index
-    n_var_uop = UOp.variable('n', 1, 1000).cast(dtypes.weakint)
+    n_var_uop = UOp.variable('n', 1, 1000).cast(dtypes.index)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
     # index dtype because div-mod rules only work on index
-    k_var_uop = UOp.variable('k', 0, 50).cast(dtypes.weakint)
+    k_var_uop = UOp.variable('k', 0, 50).cast(dtypes.index)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
-    lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
-      UOp(Ops.STACK, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
-      UOp.const(dtypes.int.vec(4), (0, 256, 512, 768))))
-    rhs = UOp.const(dtypes.int.vec(4), 2)
+    lhs = UOp(Ops.ADD, src=(
+      UOp(Ops.STACK, arg=None, src=(UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 32),), arg='lidx0'),)*4),
+      UOp.const(dtypes.int, (0, 256, 512, 768))))
+    rhs = UOp.const(dtypes.int, (2,)*4)
     unopt = lhs<rhs
     opt = apply_rewrite(unopt)
     print(unopt)
@@ -140,7 +140,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_large_divisor(self):
     # index dtype because div-mod rules only work on index
     x_var_uop = UOp.variable('x', 1, 5)
-    self.assertIs(apply_rewrite(x_var_uop.cast(dtypes.weakint) % 10).render(simplify=False), x_var_uop.render(simplify=False))
+    self.assertIs(apply_rewrite(x_var_uop.cast(dtypes.index) % 10).render(simplify=False), x_var_uop.render(simplify=False))
 
   def test_full_graph_rewrite_division_with_remainder(self):
     x_var_uop = UOp.variable('x', 7, 9)
@@ -182,28 +182,28 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
 class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
-    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
     self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
-    base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
+    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
+    self.assertEqual(list(apply_rewrite_values(UOp.stack(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
 
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
-    const_stack = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    const_stack = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
     self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
-    const_stack = UOp.const(dtypes.float32.vec(4), (7.0, 8.0, 9.0, 10.0))
-    self.assertEqual(list(apply_rewrite_values(UOp.vectorize(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
+    const_stack = UOp.const(dtypes.float32, (7.0, 8.0, 9.0, 10.0))
+    self.assertEqual(list(apply_rewrite_values(UOp.stack(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
 
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
-    base_vector = UOp.const(dtypes.float32.vec(4), (5.0, 10.0, 15.0, 20.0))
-    vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=tuple(base_vector.index(i) for i in range(4)))
+    base_vector = UOp.const(dtypes.float32, (5.0, 10.0, 15.0, 20.0))
+    vectorized_uop = UOp(Ops.STACK, src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
 

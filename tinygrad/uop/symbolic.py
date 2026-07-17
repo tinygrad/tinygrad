@@ -5,6 +5,7 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
+from tinygrad.uop.movement import mop_cleanup
 
 # TODO: symbolic shouldn't be importing from codegen
 from tinygrad.codegen.decomp.transcendental import xpow
@@ -19,10 +20,10 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
+  if (from_fmt:=c.dtype.fmt) is None or (to_fmt:=root.dtype.fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
   def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
-  return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
+  return root.const_like(convert(c.arg))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.arg
@@ -63,9 +64,9 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
         return ((b % (div*d))*mul).usum(*rest)
   return None
 
-# an invalid index is cond.where(idx, Invalid) in weakint. the consumer reads cond back off the WHERE with UOp.get_valid,
+# an invalid index is cond.where(idx, Invalid) in index. the consumer reads cond back off the WHERE with UOp.get_valid,
 # so casts and comparisons of a gated index can drop the gate: when the index is invalid the result is never used
-invalid_idx_gate = UPat().where(UPat.var("x"), UPat(Ops.CONST, dtypes.weakint, arg=Invalid))
+invalid_idx_gate = UPat().where(UPat.var("x"), UPat(Ops.CONST, dtypes.index, arg=Invalid))
 pm_index_invalid = PatternMatcher([
   (invalid_idx_gate.cast(name="cast"), lambda x,cast: x.cast(cast.dtype)),
   (UPat(GroupOp.Comparison, src=(invalid_idx_gate, UPat.var("y")), name="alu"), lambda x,y,alu: x.alu(alu.op,y)),
@@ -83,6 +84,9 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
+  (invalid_pat.where(UPat.var("a"), UPat()), lambda i,a: i.cast(a.dtype)),
+  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i.cast(a.dtype))),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
@@ -98,23 +102,22 @@ pm_data_invalid = PatternMatcher([
 
 propagate_invalid = pm_index_invalid + pm_data_invalid
 
-# TODO: this does nothing now
 pm_remove_invalid = PatternMatcher([
-  (UPat(Ops.CONST, arg=Invalid, name="i"), lambda i: i.const_like(0) if i.dtype.scalar() is not dtypes.weakint else None),
+  (invalid_pat, lambda i: i.const_like(0)),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) ^ 0, lambda x: x), # x^0 -> x
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)) ^ 0, lambda x: x), # x^0 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   ((UPat.var("x") ^ UPat.var("y")) ^ UPat.var("y"), lambda x,y: x), # (x^y)^y -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # variations of (x%c)+(x//c)*c = x
-  (UPat(Ops.ADD, dtype=dtypes.weakint, name="x"), fold_add_divmod_recombine),
+  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), fold_add_divmod_recombine),
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c"), lambda x,c: x if c.arg else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c"), lambda x,c: c if c.arg else x),
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
@@ -122,11 +125,11 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, False), UPat.const(dtypes.bool, True)), lambda x: x.logical_not()),
   # CAST(bool -> int) != const — CAST(True)=1, CAST(False)=0, so fold based on const value
-  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)) != UPat.cvar("c"),
+  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint, dtypes.index)) != UPat.cvar("c"),
    lambda x,c: x if c.arg == 0 else x.logical_not() if c.arg == 1 else x.const_like(True)),
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
-  (UPat.var("x") < UPat.var("x"), lambda x: x.vconst_like(False, dtypes.bool)), # x < x -> False
+  (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False, dtypes.bool)), # x < x -> False
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
   (UPat.var("x") & 0, lambda x: x.const_like(0)), # x&0 -> 0
@@ -136,8 +139,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
    lambda x,mask,k: x >> k.arg if mask.arg | ((1 << k.arg) - 1) == -1 else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
    lambda x,mask,c: x // c.arg if c.arg > 0 and c.arg & (c.arg-1) == 0 and mask.arg | (c.arg-1) == -1 else None),
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
-   lambda x: x.vconst_like(False, dtypes.bool)), # x != x -> False (only ints)
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint, dtypes.index)) != UPat.var("x"),
+   lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
@@ -182,12 +185,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  # STACK on INDEX CONST
-  (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
-   lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].arg for x in stk.src] else None),
-  # INDEX on STACK
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="stk"), UPat(Ops.CONST, name="c"))), lambda stk,c: stk.src[c.arg]),
-])
+])+mop_cleanup
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
 
@@ -213,7 +211,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x:
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x:
     x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize and not x.src[0].tuplize < x.src[1].tuplize else None),
 ])
 
@@ -231,7 +229,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
-  (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.weakint) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
+  (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.index) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
    lambda cond, t, f: cond.where(f,t) if f.arg is not Invalid else None),
@@ -257,35 +255,35 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 else None),
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
+  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.index))<UPat.cvar("c1"),
    lambda x,c0,c1: x<math.ceil(c1.arg/c0.arg) if c0.arg > 0 and c1.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
+  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.index))<UPat.cvar("c1"),
    lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
   # x//d<c -> x<c*d for d>0
-  ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
+  ((UPat.var("x", dtype=dtypes.index)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: x<(c.arg*d.arg) if d.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # generic lt folding
-  (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
-  (UPat.var("x", dtypes.weakint)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
+  (UPat.var("x", dtypes.index)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.index)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0. NOTE: not x < 1 means x > 0
-  ((UPat.var("x", dtypes.weakint)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  ((UPat.var("x", dtypes.index)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
-  (UPat.var('x', dtypes.ints+(dtypes.weakint,)).cast(dtypes.ints+(dtypes.weakint,), name="a").cast(name="b"),
+  (UPat.var('x', dtypes.ints+(dtypes.weakint, dtypes.index)).cast(dtypes.ints+(dtypes.weakint, dtypes.index), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # try to do math in int instead of long
   (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
     x.cast(dtypes.int).alu(u.op, y.cast(dtypes.int)).cast(u.dtype) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
-  ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
+  ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
   # only RANGE/IF/STORE/KERNEL have side effects
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.LINEAR, Ops.STAGE}
@@ -349,7 +347,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
 def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
+  return 0 if (res:=parse_valid(v)) is None else sum(-1 for other in valids if res[0] in other.backward_slice_with_self)
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
@@ -401,7 +399,7 @@ pm_move_where_on_load = PatternMatcher([
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
-  if x.dtype.scalar() is not dtypes.weakint: return None
+  if x.dtype is not dtypes.index: return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
@@ -427,14 +425,14 @@ pm_clean_up_group_sink = PatternMatcher([
   # clean up GROUP/SINK
   (UPat(Ops.GROUP, src=(UPat.var("x"),)), lambda x: x),
   (UPat((Ops.SINK, Ops.GROUP), name="root"),
-    lambda root: UOp(root.op, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), root.arg)
+    lambda root: UOp(root.op, src=tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), arg=root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
+   lambda x,y,alu: UOp(Ops.STACK, src=(UOp(alu.op, src=(x,y)),))),
   # ** where **
   # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
   # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
@@ -446,12 +444,12 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
-   lambda index, gate, alt: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt)),
+   lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda i: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat))),
-   lambda index, cond, val, i: UOp.store(index.src[0].index(cond.where(index.src[1], UOp.invalid())), val)),
+   lambda index, cond, val, i: UOp.store(index.src[0].index(index.src[1].valid(cond)), val)),
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   ((UPat.var("x") * UPat.cvar("c")).reciprocal(), lambda x,c: x.reciprocal()*c.reciprocal()), # 1/(x*c) -> (1/c)*(1/x)
@@ -465,5 +463,5 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** combine terms (opinionated) **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.weakint) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])+pm_clean_up_group_sink

@@ -8,11 +8,12 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
@@ -20,26 +21,13 @@ from tinygrad.codegen.late.coalese import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_mops, pm_syntactic_sugar, pm_store_ranges, mop_cleanup
+from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
-
-pm_remove_vec_dtypes = PatternMatcher([
-  # CONST must be stacked CONST
-  (UPat(Ops.CONST, name='c'),
-   lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
-  # rewrite PARAM to non pointer
-  (UPat((Ops.PARAM, Ops.BUFFER), name="buf"), lambda buf:
-   buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
-    if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
-  # remove all vec dtypes
-  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER}, name="x"),
-   lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
-])+pm_clean_up_group_sink
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
@@ -50,8 +38,9 @@ pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
-pm_no_weakints = PatternMatcher([
-  (UPat(GroupOp.All, dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
+pm_no_index = PatternMatcher([
+  (UPat(GroupOp.ALU.union({Ops.CONST}), dtype=dtypes.index, name="x"), lambda x: x.replace(dtype=dtypes.int)),
+  (UPat(Ops.CAST, dtype=dtypes.index, src=(UPat.var("x"),)), lambda x: x.cast(dtypes.int)),
 ])
 
 def build_range_map(sink:UOp) -> dict[int, int]:
@@ -71,10 +60,11 @@ def expand_reduce(r:UOp):
       for i,s in enumerate(u.shape):
         if s > 1: new_axes.append(i)
   if len(new_axes) == 0: return None
-  assert r.arg[1] == ()
-  # move to the front
+  assert r.arg[1] == 0
+  # permute so new_axes come to front, then reduce
+  perm = tuple(new_axes) + tuple(i for i in range(len(r.src[0].shape)) if i not in new_axes)
   out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
-  return r.src[0].reduce(*range_srcs, arg=(r.arg[0], tuple(new_axes))).reshape(out_shape)
+  return r.src[0].permute(perm).reduce(*range_srcs, arg=(r.arg[0], len(new_axes))).reshape(out_shape)
 
 def contract_axis(ctx:dict[int, int], u:UOp, arg):
   permute_tail = [ctx[rn] for rn,_ in arg]
@@ -89,9 +79,10 @@ def unroll_axis(ctx:dict[int, int], u:UOp, arg):
   return out.permute(argsort(permute_head+permute_tail))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
-  if u.tag != 1: return None
-  in0, in1, out0 = u.arg[6]
-  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]), tag=None)
+  if u.arg[4] is None: return None
+  in0, in1, out0 = u.arg[4]
+  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]),
+                   arg=(*u.arg[:4], None))
   return unroll_axis(ctx, wmma, out0)
 
 expander2 = PatternMatcher([
@@ -119,13 +110,13 @@ def broadcast_and_devec_wmma(b:UOp):
                   for u,shp in zip(b.src, shaped_aligned)]
   src = []
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    idx_c = [UOp.const(dtypes.index, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
-  return UOp.vectorize(*src).reshape(b.shape)
+  return UOp.stack(*src).reshape(b.shape)
 
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
-   lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
+   lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
   # push permute/reshape to the other side of the add
   (UPat(Ops.PERMUTE, src=(UPat(Ops.WMMA, name="wmma"),), name="permute") + UPat.var("add"),
     lambda wmma,permute,add: (wmma + add.permute(argsort(permute.arg))).permute(permute.arg)),
@@ -144,9 +135,9 @@ def do_devectorize(b:UOp):
   if not all_same([x.shape for x in b.src]): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    idx_c = [UOp.const(dtypes.index, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
-  return UOp.vectorize(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+  return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -154,7 +145,7 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp._stack(*[b.index(UOp.const(dtypes.weakint, i)) for i in range(b.max_numel())]))
+      src.append(UOp.stack(*[b.index(UOp.const(dtypes.index, i)) for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -164,29 +155,26 @@ ew_devectorizer = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-devectorizer2 = pm_mops+PatternMatcher([
+devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
-  # const INDEX into STACK is src (this is symbolic)
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
-   lambda a,i,idx: a.src[i.arg].index(*idx.src[2:])),
-  # INDEX without src is nothing
+  # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.STACK, name="s"))),
-   lambda b,s: UOp.vectorize(*[b.index(u) for u in s.src])),
+   lambda b,s: UOp.stack(*[b.index(u) for u in s.src])),
   # INDEX into RESHAPE moves the RESHAPE
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(Ops.RESHAPE, name="s"))),
    lambda b,s: b.index(s.src[0]).reshape(s.shape)),
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
-  # RESHAPE+EXPAND -> STACK
-  (UPat(Ops.EXPAND, src=(UPat(Ops.RESHAPE, src=(UPat.var("x"), UPat())), UPat()), name="out"),
-   lambda x,out: UOp.vectorize(*([x]*out.max_numel())) if out.shape == (out.max_numel(),) else None),
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.index, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  # EXPAND on scalar -> STACK
+  (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
+   lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
   # INDEX on INDEX is INDEX
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
    lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
@@ -206,12 +194,7 @@ def fix_group_for_reduce(x:UOp):
 
   # do the final reduce (if/barrier are added in gpudims step)
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
-  return buf.reduce(*reduce_loop, arg=(x.arg[0], ()))
-
-pm_group_for_reduce = PatternMatcher([
-  # fix group for reduce
-  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
-])
+  return buf.reduce(*reduce_loop, arg=(x.arg[0], 0))
 
 @dataclass
 class ReduceContext:
@@ -238,45 +221,52 @@ def merge_reduce_ends(sink:UOp):
   return sink.substitute(subs) if subs else None
 
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
-  # TODO: remove this is_ptr when placeholder isn't ptr
-  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG, is_ptr=False)
+  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
   ctx.acc_num += 1
   topo = r.src[0].toposort()
   ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
   input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
-  acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype.scalar()))
+  acc_init = acc.after(*input_ranges).store(identity_element(r.arg[0], r.dtype))
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
   return acc.after(acc_out)
 
 def expand_horizontal_reduce(r:UOp):
-  permute = [i for i in range(len(r.src[0].shape)) if i in r.arg[1]] + [i for i in range(len(r.src[0].shape)) if i not in r.arg[1]]
-  inp = r.src[0].permute(permute)
-  vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(len(r.arg[1]))])]
+  inp = r.src[0]
+  vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(r.arg[1])])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+  # remove reduces
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), allow_any_len=True, name="r"), reduce_ranges_to_acc),
   (UPat(Ops.REDUCE, src=(UPat(),), name="r"), expand_horizontal_reduce),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])+pm_clean_up_group_sink
 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
-pm_move_regs = PatternMatcher([
+pm_add_loads = PatternMatcher([
   # BITCAST?
   (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"), lambda x: x.replace(src=tuple([maybe_load(u) for u in x.src]))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
 def add_local_buffer(ctx, x:UOp):
-  # TODO: remove this is_ptr when placeholder isn't ptr
-  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace, is_ptr=False)
+  buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
   return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]).barrier())
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
 ])+pm_mops
+
+# float ALUs need a float operand
+# make that cast explicit before the decomps, which expand SIN/LOG2/EXP2 into float polynomials and assert a float operand
+pm_cast_float_alu = PatternMatcher([
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(name="x"),), name="u"),
+   lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
+])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -284,7 +274,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
-  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -303,32 +293,24 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
-  # this is new style (TODO: this should all be removed)
-  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
-
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
-  sink = graph_rewrite(sink, pm_group_for_reduce, name="group for reduce")
+
+  # remove reduce
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
-
-  # ** devectorizer (full_graph_rewrite) **
-  # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast, name="*** unbroadcast")
-
-  # add loads and remove invalids
-  sink = graph_rewrite(sink, pm_move_regs, name="** add loads")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
@@ -353,10 +335,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
 
-  # **** decomps ****
+  sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
-  # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
+  # **** decomps ****
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
@@ -373,7 +354,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_weakints
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_index
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer

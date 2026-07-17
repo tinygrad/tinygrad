@@ -1,6 +1,6 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
-from tinygrad.dtype import dtypes, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer import Renderer
 
 def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
@@ -57,7 +57,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.weakint)]
+  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.index)]
   elif ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
@@ -78,7 +78,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"
         mask: UOp = UOp.uprod(*[x.eq(0) for x in missing_locals])
-        subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
+        subs[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])

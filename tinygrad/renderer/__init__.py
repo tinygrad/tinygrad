@@ -35,7 +35,7 @@ class Estimates:
         while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.base.scalar().itemsize * mults
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.scalar().itemsize * mults
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.scalar().itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
@@ -52,7 +52,7 @@ class Estimates:
       elif u.op in GroupOp.ALU and u not in excluded:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+        flops += 2 * prod(u.arg[0]) // u.arg[3] * mults
     return Estimates(flops, lds, sum(mem.values()))
 
 class Renderer:
@@ -70,7 +70,6 @@ class Renderer:
   global_prod_max: tuple[int, ...]|None = None
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
-  pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
@@ -83,4 +82,4 @@ class Renderer:
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
-    return set(dtypes.all) - {dtypes.weakint} - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())
+    return set(dtypes.all) - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())

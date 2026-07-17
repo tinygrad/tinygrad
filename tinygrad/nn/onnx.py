@@ -2,12 +2,12 @@
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from tinygrad.nn.state import TensorIO
-from tinygrad.tensor import Tensor, _broadcast_shape
-from tinygrad.mixin import ReductionStr
+from tinygrad.tensor import Tensor
+from tinygrad.mixin.op import ReductionStr
 from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN, Context
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import Device
-from tinygrad.uop.ops import sint
+from tinygrad.uop.ops import sint, _broadcast_shape
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
@@ -422,9 +422,6 @@ class OnnxRunner:
                     if impl_opset.domain == required_opset.domain and impl_opset.version <= required_opset.version}
     if not eligible_ops: raise NotImplementedError(f"{op=} is not supported for domain {required_opset.domain} and version {required_opset.version}")
     return eligible_ops[max(eligible_ops.keys())]
-
-  def get_empty_input_data(self, device:str|None=None, dtype:DType|None=None) -> dict[str, Tensor]:
-    return {name:Tensor.empty(*spec.shape, device=device, dtype=dtype or spec.dtype) for name, spec in self.graph_inputs.items()}
 
   def to(self, device:str|None):
     self.graph_values = {k: (v.to(device) if isinstance(v, Tensor) else v) for k,v in self.graph_values.items()}
