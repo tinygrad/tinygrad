@@ -177,32 +177,32 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    text, think, pending, undecided, in_tool_call = "", "", "", "", False
+    text, buf, fresh = "", "", False  # fresh: strip blank lines right after a think block ends
     mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
-    fresh = False  # strip blank lines right after a think block ends
     def route(piece:str, final:bool=False):
-      nonlocal mode, text, think, pending, undecided, in_tool_call, fresh
+      nonlocal text, buf, mode, fresh
       text += piece
+      buf += piece
       if mode == "undecided":  # decide whether the output starts with a think block
-        undecided += piece
-        if not final and len(undecided) < len("<think>") and "<think>".startswith(undecided): return
-        if undecided.startswith("<think>"): mode, piece, undecided = "reasoning", undecided[len("<think>"):].lstrip("\n"), ""
-        else: mode, piece, undecided = "content", undecided, ""
+        if not final and len(buf) < len("<think>") and "<think>".startswith(buf): return
+        mode, buf = ("reasoning", buf[len("<think>"):].lstrip("\n")) if buf.startswith("<think>") else ("content", buf)
       if mode == "reasoning":
-        emit, think, done = stream_split(think + piece, "</think>", final)
+        emit, buf, done = stream_split(buf, "</think>", final)
         if emit: yield chunk({"reasoning_content":emit})
         if not done: return
-        mode, think, piece, fresh = "content", "", think, True
+        mode, fresh = "content", True
       if fresh:
-        piece = piece.lstrip("\n")
-        if not piece and not final: return
+        buf = buf.lstrip("\n")
+        if not buf and not final: return
         fresh = False
+      if mode == "tool": return  # inside a tool_call tag: swallow, text has everything for the final parse
       if parse_tool_calls:
-        if not in_tool_call:  # suppress tool_call tags from the stream, everything is kept in text for the final parse
-          emit, pending, in_tool_call = stream_split(pending + piece, "<tool_call>", final)
-          if emit: yield chunk({"content":emit})
-          if in_tool_call: pending = ""
-      elif piece: yield chunk({"content":piece})
+        emit, buf, found = stream_split(buf, "<tool_call>", final)
+        if emit: yield chunk({"content":emit})
+        if found: mode = "tool"
+      else:
+        yield chunk({"content":buf})
+        buf = ""
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
@@ -213,18 +213,14 @@ class Handler(HTTPRequestHandler):
         break
     yield from route(dec(), final=True)
     if parse_tool_calls:
-      tool_calls = []
-      calls = [(m.group(1), m.group(0)) for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)]
-      if not calls and "<tool_call>" in text:  # unclosed tag
-        inner = text.split("<tool_call>", 1)[1]
-        calls = [(inner, "<tool_call>" + inner)]
-      for i, (inner, raw) in enumerate(calls):
-        if (parsed := parse_tool_call(inner)) is None:
-          stderr_log(f"failed to parse tool call: {inner[:200]}")
-          yield chunk({"content":raw})  # don't silently drop output the client can't use
+      tool_calls: list[dict] = []
+      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(1))) is None:
+          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
         else:
           name, args = parsed
-          tool_calls.append({"index":i, "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
                              "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
