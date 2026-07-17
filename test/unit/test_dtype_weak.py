@@ -1,10 +1,11 @@
-import unittest
+import pathlib, tempfile, unittest
 from unittest.mock import patch
 
 from tinygrad import Tensor, dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.spec import spec_tensor
+from tinygrad.nn.state import safe_save
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -109,6 +110,42 @@ class TestWeakPromotion(unittest.TestCase):
       t.realize()
       self.assertNotIn(t.uop.buffer.dtype, dtypes.weaks)
 
+
+class TestWeakStorageBoundary(unittest.TestCase):
+  # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises
+  def test_weak_source(self):
+    w3, w05 = Tensor.const(dtypes.weakint, 3).reshape(1).expand(2), Tensor.const(dtypes.weakfloat, 0.5).reshape(1)
+    dst = Tensor.zeros(2, dtype=dtypes.int8, device="CPU").contiguous().realize()
+    self.assertEqual(dst.assign(w3).realize().tolist(), [3, 3])                       # weakint defers to int8
+    with self.assertRaises(RuntimeError): dst.assign(w05.expand(2))                   # weakfloat into int does not defer
+    with self.assertRaises(RuntimeError): dst[0:1] = w05
+    fdst = Tensor.zeros(2, dtype=dtypes.float32, device="CPU").contiguous().realize()
+    fdst[0:1] = w05                                                                    # weakfloat defers to float
+    self.assertEqual(fdst.tolist(), [0.5, 0.0])
+    with tempfile.TemporaryDirectory() as td:                                          # the DISK path checks the same
+      ddst = Tensor.empty(2, dtype=dtypes.int32, device=f"DISK:{td}/t")
+      self.assertEqual(ddst.assign(w3).tolist(), [3, 3])
+      with self.assertRaises(RuntimeError): ddst.assign(w05.expand(2))
+
+  def test_weak_has_no_storage(self):
+    w = Tensor.const(dtypes.weakint, 3)
+    with self.assertRaises(RuntimeError): w.assign(Tensor([1], device="CPU"))
+    with self.assertRaises(RuntimeError): w.reshape(1)[0] = 1
+    with tempfile.TemporaryDirectory() as td:
+      with self.assertRaises(ValueError): safe_save({"x": w.reshape(1).expand(2)}, f"{td}/w.safetensors")
+    with self.assertRaises(RuntimeError): Tensor.empty(2, dtype=dtypes.weakint)
+    with self.assertRaises(RuntimeError): UOp.new_buffer("CPU", 2, dtypes.weakint)  # the one storage boundary
+    with self.assertRaises(RuntimeError): Tensor([1], dtype=dtypes.weakint)
+    import numpy as np
+    with self.assertRaises(RuntimeError): Tensor(np.ones(2, dtype=np.int32), dtype=dtypes.weakint)
+    self.assertEqual(Tensor(np.array(3), dtype=dtypes.weakint).dtype, dtypes.weakint)  # a 0-D ndarray is a const, not storage
+    with self.assertRaises(RuntimeError): Tensor(np.ones(2, dtype=np.float32), dtype=dtypes.weakfloat)
+    with self.assertRaises(RuntimeError): Tensor(bytes(8), dtype=dtypes.weakfloat)
+    with self.assertRaises(RuntimeError): Tensor(bytes(8), dtype=dtypes.weakint)
+    with tempfile.NamedTemporaryFile(suffix=".bin") as f:
+      f.write(bytes(8))
+      f.flush()
+      with self.assertRaises(RuntimeError): Tensor(pathlib.Path(f.name), dtype=dtypes.weakint)
 
 class TestWeakSpec(unittest.TestCase):
   def test_weak_operand_allowed(self):

@@ -758,6 +758,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+    if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     slot = next(UOp.unique_num) if num is None else num
     return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(slot, dtype, device=device))
   @staticmethod

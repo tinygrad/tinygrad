@@ -81,7 +81,6 @@ def to_be32(val:Any) -> Any: return ((val & 0xFF) << 24) | (((val >> 8) & 0xFF) 
 def to_be64(val:Any) -> Any: return to_be32(val >> 32) | (to_be32(val & 0xFFFFFFFF) << 32)
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << (end - start + 1)) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
-def is_numpy_ndarray(x) -> bool: return str(type(x)) == "<class 'numpy.ndarray'>"
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   if len(kvs) != len(set(kv[0] for kv in kvs)): raise RuntimeError(f"{kvs} contains different values for the same key")
