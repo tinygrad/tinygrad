@@ -2269,6 +2269,8 @@ def train_flux():
 
     # eval loop
     if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
+      optim_step.captured.free_intermediates()
+
       eval_loss, eval_samples = Tensor.zeros((), device=GPUS), 0
       for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
         loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
