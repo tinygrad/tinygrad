@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
-NUM_WG, THREADS = 256, 256
+NUM_WG, THREADS = 512, 256
 
 @functools.cache
 def custom_fused_fp8_adamw(master:UOp, weight:UOp, next_inv:UOp, m:UOp, v:UOp, grad:UOp, grad_scale:UOp,
