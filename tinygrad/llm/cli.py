@@ -191,8 +191,12 @@ class Handler(HTTPRequestHandler):
     yield from route(dec(), final=True)
     if parse_tool_calls:
       tool_calls = []
-      for i, m in enumerate(re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)):
-        if (parsed := parse_tool_call(m.group(1))) is None: stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+      calls = [(m.group(1), m.group(0)) for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)]
+      if not calls and "<tool_call>" in text: calls = [(text.split("<tool_call>", 1)[1], text[text.index("<tool_call>"):])]  # unclosed tag
+      for i, (inner, raw) in enumerate(calls):
+        if (parsed := parse_tool_call(inner)) is None:
+          stderr_log(f"failed to parse tool call: {inner[:200]}")
+          yield chunk({"content":raw})  # don't silently drop output the client can't use
         else:
           name, args = parsed
           tool_calls.append({"index":i, "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
