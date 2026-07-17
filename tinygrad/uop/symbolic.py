@@ -85,12 +85,19 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
   # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
+  # when the gate's valid value is a const (e.g. a pad mask: where(valid, True, Invalid)),
+  # use the else value in don't-care positions so masks work
   (invalid_pat.where(UPat.var("a"), UPat()), lambda i,a: i.cast(a.dtype)),
+  (UPat.var("cond").where(UPat.cvar("x"), invalid_pat).where(UPat.var("a"), UPat.cvar("b")),
+   lambda cond,x,i,a,b: cond.where(x.where(a,b), b)),
   (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i.cast(a.dtype))),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
   # when a is cond, ~a|cond is True and would drop the Invalid gate (losing the valid), so keep cond as the gate
+  # when c is a const and the gate's valid value is a const (pad mask), use c in don't-care positions
+  (UPat.var("a").where(UPat.var("cond").where(UPat.cvar("x"), invalid_pat), UPat.cvar("c")),
+   lambda cond,i,x,a,c: (cond if a is cond else (a.logical_not()|cond)).where(a.where(x,c), c) if c.arg != Invalid else None),
   (UPat.var("a").where(invalid_gate, UPat.var("c")), lambda cond,i,x,a,c:
    (cond if a is cond else (a.logical_not()|cond)).where(a.where(x,c), i) if c.arg != Invalid else None),
   (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if b.arg != Invalid else None),
