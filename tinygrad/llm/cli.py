@@ -5,9 +5,10 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-jinja2: typing.Any
-try: import jinja2
-except ImportError: jinja2 = None
+
+def holdback(s:str, tag:str) -> int:
+  # length of the suffix of s that is a prefix of tag (the tag may be split across streamed pieces)
+  return max((i for i in range(1, min(len(s), len(tag))+1) if tag.startswith(s[-i:])), default=0)
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
@@ -132,48 +133,62 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0, parse_tool_calls=False):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
+                parse_tool_calls=False, prefill_think=False):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
+    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
+    yield chunk({"role":"assistant", "content":""})
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    text, pending, in_tool_call = "", "", False
+    text, pending, think, undecided, in_tool_call = "", "", "", "", False
+    mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
+    def route(piece:str, final:bool=False):
+      nonlocal mode, text, pending, think, undecided, in_tool_call
+      text += piece
+      if mode == "undecided":  # decide whether the output starts with a think block
+        undecided += piece
+        if not final and len(undecided) < len("<think>") and "<think>".startswith(undecided): return
+        mode, piece, undecided = ("reasoning", undecided[len("<think>"):], "") if undecided.startswith("<think>") else ("content", undecided, "")
+      if mode == "reasoning":
+        think += piece
+        if "</think>" in think:
+          before, piece = think.split("</think>", 1)
+          if before: yield chunk({"reasoning_content":before})
+          think, mode, piece = "", "content", piece.lstrip("\n")
+        else:
+          hold = 0 if final else holdback(think, "</think>")
+          if (flush := think[:len(think)-hold]): yield chunk({"reasoning_content":flush})
+          think = think[len(think)-hold:]
+          return
+      if not parse_tool_calls:
+        if piece: yield chunk({"content":piece})
+      else:
+        pending += piece
+        if in_tool_call: return
+        if "<tool_call>" in pending:
+          before, pending = pending.split("<tool_call>", 1)
+          if before: yield chunk({"content":before})
+          in_tool_call = True
+        else:
+          # hold back any suffix that could be the start of a "<tool_call>" tag split across tokens
+          hold = 0 if final else holdback(pending, "<tool_call>")
+          if (flush := pending[:len(pending)-hold]): yield chunk({"content":flush})
+          pending = pending[len(pending)-hold:]
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      piece = dec(next_id)
-      if not parse_tool_calls:
-        yield {"choices": [{"index":0, "delta":{"content":piece}, "finish_reason":None}], **tmpl}
-      else:
-        text += piece
-        pending += piece
-        if in_tool_call: pass
-        elif "<tool_call>" in pending:
-          before, pending = pending.split("<tool_call>", 1)
-          if before: yield {"choices": [{"index":0, "delta":{"content":before}, "finish_reason":None}], **tmpl}
-          in_tool_call = True
-        else:
-          # hold back any suffix that could be the start of a "<tool_call>" tag split across tokens
-          hold = max((i for i in range(1, min(len(pending), len("<tool_call>"))+1) if "<tool_call>".startswith(pending[-i:])), default=0)
-          flush_end = len(pending) - hold
-          if (flush := pending[:flush_end]): yield {"choices": [{"index":0, "delta":{"content":flush}, "finish_reason":None}], **tmpl}
-          pending = pending[flush_end:]
+      yield from route(dec(next_id))
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    if (tail := dec()):
-      if parse_tool_calls:
-        text += tail
-        if not in_tool_call and (tail := (pending + tail).split("<tool_call>", 1)[0]):
-          yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
-      else: yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    yield from route(dec(), final=True)
     if parse_tool_calls:
       tool_calls = []
       for i, m in enumerate(re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)):
@@ -183,7 +198,7 @@ class Handler(HTTPRequestHandler):
           tool_calls.append({"index":i, "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
                              "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
       if tool_calls:
-        yield {"choices": [{"index":0, "delta":{"tool_calls":tool_calls}, "finish_reason":None}], **tmpl}
+        yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
@@ -199,6 +214,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       messages, tools = body["messages"], body.get("tools")
+      prefill_think = False
       if self.server.template is not None:
         # the chat template expects tool_call arguments as dicts, OpenAI clients send them as JSON strings
         norm = []
@@ -209,6 +225,7 @@ class Handler(HTTPRequestHandler):
                                 else a}} if "function" in tc else tc for tc in m["tool_calls"]]
           norm.append(m)
         rendered = self.server.template.render(messages=norm, tools=tools, add_generation_prompt=norm[-1]["role"] != "assistant")
+        prefill_think = rendered.rstrip().endswith("<think>")
         ids: list[int] = tok.prefix() + tok.encode(rendered)
         if norm[-1]["role"] == "assistant":  # last assistant message is treated as prefill, drop its end-of-turn tokens
           end = tok.end_turn()
@@ -232,16 +249,19 @@ class Handler(HTTPRequestHandler):
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), parse_tool_calls=bool(body.get("tools")))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), parse_tool_calls=bool(tools),
+                              prefill_think=prefill_think)
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out, tool_calls, finish_reason = [], [], "stop"
+        out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
         for c in chunks:
           if c["choices"] and (delta := c["choices"][0].get("delta", {})):
             if delta.get("content"): out.append(delta["content"])
+            if delta.get("reasoning_content"): reasoning.append(delta["reasoning_content"])
             if delta.get("tool_calls"): tool_calls.extend(delta["tool_calls"])
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
+        if reasoning: message["reasoning_content"] = "".join(reasoning)
         if tool_calls: message["tool_calls"] = [{k:v for k, v in tc.items() if k != "index"} for tc in tool_calls]
         self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
@@ -275,13 +295,14 @@ def main():
   # compile the chat template if jinja2 is available (enables tool calling and model-specific formatting)
   template = None
   if (ct := kv.get('tokenizer.chat_template')) is not None:
-    if jinja2 is None: stderr_log("warning: jinja2 is not installed, the model's chat template is disabled")
-    else:
+    try:
+      import jinja2
       env = jinja2.Environment()
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
       template = env.from_string(ct)
+    except ImportError: stderr_log("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
   if args.warmup or args.serve:
