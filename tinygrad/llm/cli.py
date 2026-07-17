@@ -184,10 +184,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer,
-               template:jinja2.Template|FallbackTemplate|None=None):
-    self.model, self.model_name, self.tok = model, model_name, tok
-    self.template = template or FallbackTemplate(tok)
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:jinja2.Template|FallbackTemplate):
+    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     super().__init__(server_address, Handler)
 
 def main():
