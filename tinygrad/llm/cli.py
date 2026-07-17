@@ -146,40 +146,38 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    text, pending, think, undecided, in_tool_call = "", "", "", "", False
-    mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
+    mode, buf, tool_text = ("reasoning" if prefill_think else "undecided"), "", ""
     def route(piece:str, final:bool=False):
-      nonlocal mode, text, pending, think, undecided, in_tool_call
-      text += piece
+      nonlocal mode, buf, tool_text
       if mode == "undecided":  # decide whether the output starts with a think block
-        undecided += piece
-        if not final and len(undecided) < len("<think>") and "<think>".startswith(undecided): return
-        mode, piece, undecided = ("reasoning", undecided[len("<think>"):], "") if undecided.startswith("<think>") else ("content", undecided, "")
+        buf += piece
+        if not final and len(buf) < len("<think>") and "<think>".startswith(buf): return
+        mode, piece, buf = ("reasoning", buf[len("<think>"):], "") if buf.startswith("<think>") else ("content", buf, "")
       if mode == "reasoning":
-        think += piece
-        if "</think>" in think:
-          before, piece = think.split("</think>", 1)
+        buf += piece
+        if "</think>" in buf:
+          before, piece = buf.split("</think>", 1)
           if before: yield chunk({"reasoning_content":before})
-          think, mode, piece = "", "content", piece.lstrip("\n")
+          buf, mode, piece = "", "content", piece.lstrip("\n")
         else:
-          hold = 0 if final else holdback(think, "</think>")
-          if (flush := think[:len(think)-hold]): yield chunk({"reasoning_content":flush})
-          think = think[len(think)-hold:]
+          hold = 0 if final else holdback(buf, "</think>")
+          if (flush := buf[:len(buf)-hold]): yield chunk({"reasoning_content":flush})
+          buf = buf[len(buf)-hold:]
           return
       if not parse_tool_calls:
         if piece: yield chunk({"content":piece})
       else:
-        pending += piece
-        if in_tool_call: return
-        if "<tool_call>" in pending:
-          before, pending = pending.split("<tool_call>", 1)
+        tool_text += piece
+        if tool_text.startswith("<tool_call>"): return
+        if "<tool_call>" in tool_text:
+          before, tool_text = tool_text.split("<tool_call>", 1)
           if before: yield chunk({"content":before})
-          in_tool_call = True
+          tool_text = "<tool_call>" + tool_text
         else:
           # hold back any suffix that could be the start of a "<tool_call>" tag split across tokens
-          hold = 0 if final else holdback(pending, "<tool_call>")
-          if (flush := pending[:len(pending)-hold]): yield chunk({"content":flush})
-          pending = pending[len(pending)-hold:]
+          hold = 0 if final else holdback(tool_text, "<tool_call>")
+          if (flush := tool_text[:len(tool_text)-hold]): yield chunk({"content":flush})
+          tool_text = tool_text[len(tool_text)-hold:]
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
@@ -191,8 +189,8 @@ class Handler(HTTPRequestHandler):
     yield from route(dec(), final=True)
     if parse_tool_calls:
       tool_calls = []
-      calls = [(m.group(1), m.group(0)) for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)]
-      if not calls and "<tool_call>" in text: calls = [(text.split("<tool_call>", 1)[1], text[text.index("<tool_call>"):])]  # unclosed tag
+      calls = [(m.group(1), m.group(0)) for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", tool_text, re.DOTALL)]
+      if not calls and tool_text.startswith("<tool_call>"): calls = [(tool_text[len("<tool_call>"):], tool_text)]  # unclosed tag
       for i, (inner, raw) in enumerate(calls):
         if (parsed := parse_tool_call(inner)) is None:
           stderr_log(f"failed to parse tool call: {inner[:200]}")
@@ -230,7 +228,8 @@ class Handler(HTTPRequestHandler):
           norm.append(m)
         rendered = self.server.template.render(messages=norm, tools=tools, add_generation_prompt=norm[-1]["role"] != "assistant")
         prefill_think = rendered.rstrip().endswith("<think>")
-        ids: list[int] = tok.prefix() + tok.encode(rendered)
+        ids: list[int] = tok.encode(rendered)
+        if (prefix := tok.prefix()) and ids[:len(prefix)] != prefix: ids = prefix + ids
         if norm[-1]["role"] == "assistant":  # last assistant message is treated as prefill, drop its end-of-turn tokens
           end = tok.end_turn()
           if len(ids) >= len(end) and ids[-len(end):] == end: ids = ids[:-len(end)]
@@ -305,6 +304,8 @@ def main():
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
+      for name, key in {'bos_token':'bos', 'eos_token':'eos', 'unk_token':'unknown', 'pad_token':'padding', 'sep_token':'separator'}.items():
+        if (tid := kv.get(f'tokenizer.ggml.{key}_token_id')) is not None: env.globals[name] = tok.decode([tid])
       template = env.from_string(ct)
     except ImportError: stderr_log("warning: jinja2 is not installed, the model's chat template is disabled")
 
