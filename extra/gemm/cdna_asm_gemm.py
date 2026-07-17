@@ -128,6 +128,11 @@ def _mx_block_scale(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
   return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, scale_K*32)
 
+def _mx_block_scale_3d(e8:Tensor) -> Tensor:
+  # batched (E, rows, scale_K) dequant scale 2^(e8-127) broadcast to (E, rows, scale_K*32)
+  E, rows, scale_K = e8.shape
+  return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(E, rows, scale_K, 1).expand(E, rows, scale_K, 32).reshape(E, rows, scale_K*32)
+
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 def _asm_gemm_report():
