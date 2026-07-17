@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, quantize_mxfp8
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
