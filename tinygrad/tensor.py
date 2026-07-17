@@ -253,7 +253,7 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
+    if 0 in self.shape: return memoryview(bytearray(0)).cast(strong_dtype(self.dtype).fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     buf = self._buffer()
     fmt = buf.dtype.fmt
@@ -296,7 +296,7 @@ class Tensor(RandMixin):
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
-    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype))
+    if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(strong_dtype(self.dtype)))
     return self._buffer().numpy().reshape(self.shape)
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:

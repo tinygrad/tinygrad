@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from tinygrad import Tensor, dtypes
+from tinygrad.dtype import _to_np_dtype
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.spec import spec_tensor
@@ -28,10 +29,15 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(t.dtype, weak)
       self.assertEqual(t.data().itemsize, strong.itemsize)
       self.assertEqual(t.numpy().dtype.itemsize, strong.itemsize)
+      empty = t.expand(2, 0)
+      self.assertEqual(empty.data().format, strong.fmt)
+      self.assertEqual((empty.numpy().dtype, empty.numpy().shape), (_to_np_dtype(strong), (2, 0)))
+      self.assertEqual(empty.tolist(), [[], []])
       realized = t.clone("CPU").realize()
       self.assertEqual((realized.dtype, realized.uop.buffer.dtype), (strong, strong))
     with patch.object(dtypes, "default_int", dtypes.int64):
       self.assertEqual(Tensor.const(dtypes.weakint, 3).numpy().dtype.itemsize, dtypes.int64.itemsize)
+      self.assertEqual(Tensor.const(dtypes.weakint, 3).expand(0).numpy().dtype.itemsize, dtypes.int64.itemsize)
 
   def test_uop_scalar_const_unchanged(self):
     for dtype, value in ((dtypes.index, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
