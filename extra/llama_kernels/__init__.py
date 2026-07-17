@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
 from dataclasses import replace
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
