@@ -9,14 +9,6 @@ from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
 
-def stream_split(buf:str, tag:str, final:bool) -> tuple[str, str, bool]:
-  # split buf on the first full tag into (before, rest); hold back a partial tag at the end unless final
-  if tag in buf:
-    before, rest = buf.split(tag, 1)
-    return before, rest, True
-  hold = max((i for i in range(1, min(len(buf), len(tag))+1) if tag.startswith(buf[-i:])), default=0) if not final else 0
-  return buf[:len(buf)-hold], buf[len(buf)-hold:], False
-
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
@@ -34,9 +26,8 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   return None
 
 def normalize_messages(messages:list[dict]) -> None:
-  # chat templates expect string content (not null) and tool_call arguments as dicts (OpenAI clients send JSON strings)
+  # chat templates expect tool_call arguments as dicts (OpenAI clients send JSON strings)
   for m in messages:
-    if m.get("content") is None: m["content"] = ""
     for tc in m.get("tool_calls") or []:
       if "function" in tc and isinstance(args := tc["function"].get("arguments"), str):
         try: tc["function"]["arguments"] = json.loads(args)
@@ -47,18 +38,26 @@ class StreamRouter:
   def __init__(self):
     self.buf = ""
     self.mode = "undecided"  # output inside a think block is sent as reasoning_content
+  def split(self, tag:str, final:bool) -> tuple[str, bool]:
+    # split buf on the first full tag, holding back a partial tag at the end unless final
+    if tag in self.buf:
+      before, self.buf = self.buf.split(tag, 1)
+      return before, True
+    hold = max((i for i in range(1, min(len(self.buf), len(tag))+1) if tag.startswith(self.buf[-i:])), default=0) if not final else 0
+    emit, self.buf = self.buf[:len(self.buf)-hold], self.buf[len(self.buf)-hold:]
+    return emit, False
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
       self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, self.buf, done = stream_split(self.buf, "</think>", final)
+      emit, done = self.split("</think>", final)
       if emit: yield "reasoning_content", emit
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, self.buf, found = stream_split(self.buf, "<tool_call>", final)
+    emit, found = self.split("<tool_call>", final)
     if emit: yield "content", emit
     if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
 
@@ -241,15 +240,19 @@ class Handler(HTTPRequestHandler):
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
       if body.get("stream"): self.stream_json(chunks)
       else:
-        chunks = list(chunks)
-        deltas = [c["choices"][0]["delta"] for c in chunks if c["choices"] and c["choices"][0].get("delta")]
-        finish_reason = next((c["choices"][0]["finish_reason"] for c in reversed(chunks)
-                              if c["choices"] and c["choices"][0].get("finish_reason")), "stop")
-        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(d.get("content") or "" for d in deltas) or None}
-        if (reasoning := "".join(d.get("reasoning_content") or "" for d in deltas)): message["reasoning_content"] = reasoning
-        if (tool_calls := [{k:v for k, v in tc.items() if k != "index"} for d in deltas for tc in d.get("tool_calls", [])]):
-          message["tool_calls"] = tool_calls
-        self.send_data(json.dumps({**chunks[-1], "object":"chat.completion",
+        out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
+        for c in chunks:
+          if not c["choices"]: continue
+          choice = c["choices"][0]
+          if (delta := choice.get("delta", {})):
+            if delta.get("content"): out.append(delta["content"])
+            if delta.get("reasoning_content"): reasoning.append(delta["reasoning_content"])
+            tool_calls += [{k:v for k, v in tc.items() if k != "index"} for tc in delta.get("tool_calls", [])]
+          if choice.get("finish_reason"): finish_reason = choice["finish_reason"]
+        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
+        if reasoning: message["reasoning_content"] = "".join(reasoning)
+        if tool_calls: message["tool_calls"] = tool_calls
+        self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
