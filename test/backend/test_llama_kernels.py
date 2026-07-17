@@ -49,7 +49,8 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
   with Context(DEBUG=0): Tensor.realize(x, amax_state)
 
   if delayed:
-    fp8, inv_scale, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=x.device).realize()
+    fp8, inv_scale, new_amax = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
     ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
     Tensor.realize(fp8, inv_scale, new_amax)
     Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax)
@@ -65,6 +66,7 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
       assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
       assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
         f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
+      assert amax_out.allclose(ref_new_amax, atol=0, rtol=0).item()
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires atomic max")
 class TestQuantizeFP8(unittest.TestCase):
@@ -82,10 +84,12 @@ class TestQuantizeFP8(unittest.TestCase):
     x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
-    fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=devs).realize()
+    fp8, _, new_amax = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
     Tensor.realize(fp8, new_amax)
     assert fp8.uop.shape == x.uop.shape
     assert new_amax.shape == ()
+    assert amax_out.uop.buffer is new_amax.uop.buffer
 
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):
