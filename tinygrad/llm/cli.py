@@ -9,6 +9,39 @@ from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
 
+def stream_split(buf:str, tag:str, final:bool) -> tuple[str, str, bool]:
+  # split buf on the first full tag into (before, rest); hold back a partial tag at the end unless final
+  if tag in buf:
+    before, rest = buf.split(tag, 1)
+    return before, rest, True
+  hold = max((i for i in range(1, min(len(buf), len(tag))+1) if tag.startswith(buf[-i:])), default=0) if not final else 0
+  return buf[:len(buf)-hold], buf[len(buf)-hold:], False
+
+def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
+  s = s.strip()
+  if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
+    try:
+      call = json.loads(s)
+      return call["name"], call.get("arguments", call.get("parameters", {}))
+    except (json.JSONDecodeError, KeyError): return None
+  # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
+  if (fm := re.match(r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", s, re.DOTALL)):
+    args = {}
+    for pm in re.finditer(r"<parameter=([^>]+)>\s*(.*?)\s*</parameter>", fm.group(2), re.DOTALL):
+      try: args[pm.group(1)] = json.loads(pm.group(2))
+      except json.JSONDecodeError: args[pm.group(1)] = pm.group(2)
+    return fm.group(1), args
+  return None
+
+def normalize_messages(messages:list[dict]) -> None:
+  # chat templates expect string content (not null) and tool_call arguments as dicts (OpenAI clients send JSON strings)
+  for m in messages:
+    if m.get("content") is None: m["content"] = ""
+    for tc in m.get("tool_calls") or []:
+      if "function" in tc and isinstance(args := tc["function"].get("arguments"), str):
+        try: tc["function"]["arguments"] = json.loads(args)
+        except json.JSONDecodeError: pass
+
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None):
@@ -131,26 +164,71 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
+                parse_tool_calls=False, prefill_think=False):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
+    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
+    yield chunk({"role":"assistant", "content":""})
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
+    text, think, pending, undecided, in_tool_call = "", "", "", "", False
+    mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
+    fresh = False  # strip blank lines right after a think block ends
+    def route(piece:str, final:bool=False):
+      nonlocal mode, text, think, pending, undecided, in_tool_call, fresh
+      text += piece
+      if mode == "undecided":  # decide whether the output starts with a think block
+        undecided += piece
+        if not final and len(undecided) < len("<think>") and "<think>".startswith(undecided): return
+        if undecided.startswith("<think>"): mode, piece, undecided = "reasoning", undecided[len("<think>"):].lstrip("\n"), ""
+        else: mode, piece, undecided = "content", undecided, ""
+      if mode == "reasoning":
+        emit, think, done = stream_split(think + piece, "</think>", final)
+        if emit: yield chunk({"reasoning_content":emit})
+        if not done: return
+        mode, think, piece, fresh = "content", "", think, True
+      if fresh:
+        piece = piece.lstrip("\n")
+        if not piece and not final: return
+        fresh = False
+      if parse_tool_calls:
+        if not in_tool_call:  # suppress tool_call tags from the stream, everything is kept in text for the final parse
+          emit, pending, in_tool_call = stream_split(pending + piece, "<tool_call>", final)
+          if emit: yield chunk({"content":emit})
+          if in_tool_call: pending = ""
+      elif piece: yield chunk({"content":piece})
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
+      yield from route(dec(next_id))
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    yield from route(dec(), final=True)
+    if parse_tool_calls:
+      tool_calls = []
+      calls = [(m.group(1), m.group(0)) for m in re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)]
+      if not calls and "<tool_call>" in text:  # unclosed tag
+        inner = text.split("<tool_call>", 1)[1]
+        calls = [(inner, "<tool_call>" + inner)]
+      for i, (inner, raw) in enumerate(calls):
+        if (parsed := parse_tool_call(inner)) is None:
+          stderr_log(f"failed to parse tool call: {inner[:200]}")
+          yield chunk({"content":raw})  # don't silently drop output the client can't use
+        else:
+          name, args = parsed
+          tool_calls.append({"index":i, "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+      if tool_calls:
+        yield chunk({"tool_calls":tool_calls})
+        if finish_reason == "stop": finish_reason = "tool_calls"
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -164,21 +242,28 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # render and tokenize
+      from_template = not isinstance(self.server.template, FallbackTemplate)  # only the jinja path supports tools
+      if from_template: normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
       ids: list[int] = self.server.tok.encode(rendered)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
+                              parse_tool_calls=from_template and bool(body.get("tools")), prefill_think=rendered.rstrip().endswith("<think>"))
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out, finish_reason = [], "stop"
-        for c in chunks:
-          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
-          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
-        self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+        chunks = list(chunks)
+        deltas = [c["choices"][0]["delta"] for c in chunks if c["choices"] and c["choices"][0].get("delta")]
+        finish_reason = next((c["choices"][0]["finish_reason"] for c in reversed(chunks)
+                              if c["choices"] and c["choices"][0].get("finish_reason")), "stop")
+        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(d.get("content") or "" for d in deltas) or None}
+        if (reasoning := "".join(d.get("reasoning_content") or "" for d in deltas)): message["reasoning_content"] = reasoning
+        if (tool_calls := [{k:v for k, v in tc.items() if k != "index"} for d in deltas for tc in d.get("tool_calls", [])]):
+          message["tool_calls"] = tool_calls
+        self.send_data(json.dumps({**chunks[-1], "object":"chat.completion",
+          "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
