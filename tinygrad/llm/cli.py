@@ -230,11 +230,6 @@ class Handler(HTTPRequestHandler):
         else: ids += tok.role("assistant")
 
       # reply
-      if len(ids) > self.server.model.max_context:
-        err = {"message":f"prompt is {len(ids)} tokens, exceeds the max context of {self.server.model.max_context}, " \
-               "restart with a larger --max_context", "type":"invalid_request_error", "code":"context_length_exceeded"}
-        self.send_data(json.dumps({"error":err}).encode(), status_code=400)
-        return
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), parse_tool_calls=bool(body.get("tools")))
