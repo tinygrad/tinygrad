@@ -43,33 +43,24 @@ def normalize_messages(messages:list[dict]) -> None:
         except json.JSONDecodeError: pass
 
 class StreamRouter:
-  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .text for the final parse
-  def __init__(self, parse_tool_calls:bool, prefill_think:bool):
-    self.parse_tool_calls, self.text, self.buf, self.fresh = parse_tool_calls, "", "", False
-    self.mode = "reasoning" if prefill_think else "undecided"  # output inside a think block is sent as reasoning_content
+  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
+  def __init__(self):
+    self.buf = ""
+    self.mode = "undecided"  # output inside a think block is sent as reasoning_content
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
-    self.text += piece
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):].lstrip("\n")) if self.buf.startswith("<think>") else ("content", self.buf)
+      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
     if self.mode == "reasoning":
       emit, self.buf, done = stream_split(self.buf, "</think>", final)
       if emit: yield "reasoning_content", emit
       if not done: return
-      self.mode, self.fresh = "content", True
-    if self.fresh:  # strip blank lines right after the think block
-      self.buf = self.buf.lstrip("\n")
-      if not self.buf and not final: return
-      self.fresh = False
-    if self.mode == "tool": return  # inside a tool_call tag: swallow, self.text has everything for the final parse
-    if self.parse_tool_calls:
-      emit, self.buf, found = stream_split(self.buf, "<tool_call>", final)
-      if emit: yield "content", emit
-      if found: self.mode = "tool"
-    else:
-      yield "content", self.buf
-      self.buf = ""
+      self.mode = "content"
+    if self.mode == "tool": return
+    emit, self.buf, found = stream_split(self.buf, "<tool_call>", final)
+    if emit: yield "content", emit
+    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -193,8 +184,7 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                parse_tool_calls=False, prefill_think=False):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
@@ -206,7 +196,7 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    router = StreamRouter(parse_tool_calls, prefill_think)
+    router = StreamRouter()
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
@@ -216,19 +206,18 @@ class Handler(HTTPRequestHandler):
         finish_reason = "length"
         break
     for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
-    if parse_tool_calls:
-      tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.text, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(1))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
-        else:
-          name, args = parsed
-          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
-      if tool_calls:
-        yield chunk({"tool_calls":tool_calls})
-        if finish_reason == "stop": finish_reason = "tool_calls"
+    tool_calls: list[dict] = []
+    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+      if (parsed := parse_tool_call(m.group(1))) is None:
+        stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+        yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+      else:
+        name, args = parsed
+        tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+    if tool_calls:
+      yield chunk({"tool_calls":tool_calls})
+      if finish_reason == "stop": finish_reason = "tool_calls"
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -242,16 +231,14 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # render and tokenize
-      from_template = not isinstance(self.server.template, FallbackTemplate)  # only the jinja path supports tools
-      if from_template: normalize_messages(body["messages"])
+      if not isinstance(self.server.template, FallbackTemplate): normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
       ids: list[int] = self.server.tok.encode(rendered)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              parse_tool_calls=from_template and bool(body.get("tools")), prefill_think=rendered.rstrip().endswith("<think>"))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
       if body.get("stream"): self.stream_json(chunks)
       else:
         chunks = list(chunks)
