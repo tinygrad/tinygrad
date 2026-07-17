@@ -876,16 +876,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.MULTI, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
-    if self is not self.base:
-      buf = self.base.buffer
+    if self is not self.base or self.op is Ops.BITCAST:
+      if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
+      buf, offset = (b:=cv[0]).base.buffer, cv[1]
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
-      offset = self.contiguous_view_offset()
-      if offset is None: raise RuntimeError(f"non-contiguous view is not supported for {buf.device} buffer")
-      return buf.view(prod(self.max_shape), self.dtype, offset*self.dtype.itemsize)
-    if self.op is Ops.BITCAST:
-      buf = self.src[0].buffer
-      assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
-      return buf.view(prod(self.max_shape), self.dtype, 0)
+      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
