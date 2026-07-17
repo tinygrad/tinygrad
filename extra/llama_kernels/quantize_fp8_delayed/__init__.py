@@ -1,17 +1,33 @@
-import functools, weakref
+import functools, pathlib, weakref
+from dataclasses import replace
 from tinygrad import Tensor, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, zero_scalar
+from tinygrad.renderer import Estimates
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
+from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, compile_cpp, zero_scalar
 
 quantize_bwd_mailbox:weakref.WeakKeyDictionary[UOp, tuple[UOp, UOp, UOp|None]] = weakref.WeakKeyDictionary()
+
+def custom_quantize_fp8_with_amax_amd(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:UOp, layer_num:UOp|None=None) -> UOp:
+  n_elems = prod(x.shape)
+  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
+  sink = UOp.sink(fp8_out.base, amax_out.base, x.base, amax_state.base,
+                  *((layer_num.base,) if layer_num is not None else ()), threads, workgroups,
+                  arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", estimates=Estimates(ops=13*n_elems, mem=3*n_elems)))
+  src, lib = compile_cpp(pathlib.Path(__file__).parent, "quantize_fp8_with_amax.cpp", n_elems, 1,
+                         ["-DLAYER_SCALE=1"] if layer_num is not None else [])
+  info = ProgramInfo.from_sink(sink)
+  info = replace(info, outs=info.globals[:2], ins=info.globals[1:])
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=info)
 
 @functools.cache
 def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:UOp, layer_num:UOp|None=None, device=None) -> UOp:
   VEC = 8
   n_elems = prod(x.shape)
   assert n_elems % (NUM_WG * THREADS_PER_WG * VEC) == 0
+  dname = device[0].split(":")[0] if isinstance(device, tuple) else device.split(":")[0]
+  if dname in ("AMD", "HIP"): return custom_quantize_fp8_with_amax_amd(fp8_out, amax_out, x, amax_state, layer_num)
 
   x = x.reshape(n_elems)
   fp8_out = fp8_out.reshape(n_elems)
@@ -48,17 +64,12 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
     lds = lds.after(lds[tid.valid(active)].store(lds[tid].maximum(other)).barrier())
     step //= 2
 
-  device = device[0].split(":")[0] if isinstance(device, tuple) else device.split(":")[0]
-  if device in ("AMD", "HIP"):
-    # Avoid sending every workgroup to the same hot atomic. The scalar only increases, so if a non-atomic read already
-    # observes a value >= this WG's max, skipping the atomic is safe. Stale reads only cause extra atomics, not misses.
-    atomic_arg = "if ({2} > {3}) __hip_atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
-  elif device in ("CPU", "NULL"):
+  if dname in ("CPU", "NULL"):
     atomic_arg = "if ({2} > {3}) __atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED);"
-  elif device == "CL":
+  elif dname == "CL":
     atomic_arg = "if ({2} > {3}) atomic_max((volatile __global int*){0}, {1});"
   else:
-    raise NotImplementedError(f"no atomic max for device {device}")
+    raise NotImplementedError(f"no atomic max for device {dname}")
   amax_idx = amax_out.index(layer)
   max_val = lds[0].load()
   atomic = UOp(Ops.CUSTOM, dtypes.void, (amax_idx, max_val.bitcast(dtypes.int32), max_val, amax_idx.load()), arg=atomic_arg)

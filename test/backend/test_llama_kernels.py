@@ -97,6 +97,10 @@ class TestQuantizeFP8(unittest.TestCase):
   def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
   @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD atomic max")
   def test_delayed_layer(self): run_quantize_fp8_layer((getenv("N", 2048), 1024))
+  @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD custom kernel")
+  def test_delayed_llama31_8b_shapes(self):
+    for n in (65536, 98304):
+      with self.subTest(n=n): run_quantize_fp8((n, 1024))
 
   @needs_second_gpu
   def test_multi(self):
