@@ -5,6 +5,25 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
+jinja2: typing.Any
+try: import jinja2
+except ImportError: jinja2 = None
+
+def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
+  s = s.strip()
+  if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
+    try:
+      call = json.loads(s)
+      return call["name"], call.get("arguments", call.get("parameters", {}))
+    except (json.JSONDecodeError, KeyError): return None
+  # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
+  if (fm := re.match(r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", s, re.DOTALL)):
+    args = {}
+    for pm in re.finditer(r"<parameter=([^>]+)>\s*(.*?)\s*</parameter>", fm.group(2), re.DOTALL):
+      try: args[pm.group(1)] = json.loads(pm.group(2))
+      except json.JSONDecodeError: args[pm.group(1)] = pm.group(2)
+    return fm.group(1), args
+  return None
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -113,7 +132,7 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0, parse_tool_calls=False):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
@@ -124,15 +143,48 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
+    text, pending, in_tool_call = "", "", False
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
+      piece = dec(next_id)
+      if not parse_tool_calls:
+        yield {"choices": [{"index":0, "delta":{"content":piece}, "finish_reason":None}], **tmpl}
+      else:
+        text += piece
+        pending += piece
+        if in_tool_call: pass
+        elif "<tool_call>" in pending:
+          before, pending = pending.split("<tool_call>", 1)
+          if before: yield {"choices": [{"index":0, "delta":{"content":before}, "finish_reason":None}], **tmpl}
+          in_tool_call = True
+        else:
+          # hold back any suffix that could be the start of a "<tool_call>" tag split across tokens
+          hold = max((i for i in range(1, min(len(pending), len("<tool_call>"))+1) if "<tool_call>".startswith(pending[-i:])), default=0)
+          flush_end = len(pending) - hold
+          if (flush := pending[:flush_end]): yield {"choices": [{"index":0, "delta":{"content":flush}, "finish_reason":None}], **tmpl}
+          pending = pending[flush_end:]
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    if (tail := dec()):
+      if parse_tool_calls:
+        text += tail
+        if not in_tool_call and (tail := (pending + tail).split("<tool_call>", 1)[0]):
+          yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+      else: yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    if parse_tool_calls:
+      tool_calls = []
+      for i, m in enumerate(re.finditer(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)):
+        if (parsed := parse_tool_call(m.group(1))) is None: stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+        else:
+          name, args = parsed
+          tool_calls.append({"index":i, "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+      if tool_calls:
+        yield {"choices": [{"index":0, "delta":{"tool_calls":tool_calls}, "finish_reason":None}], **tmpl}
+        if finish_reason == "stop": finish_reason = "tool_calls"
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -146,39 +198,64 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix()
-      for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
-        content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
-        elif isinstance(content, list):
-          for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
-            else: raise RuntimeError(f"unhandled type: {c['type']}")
-        else: raise RuntimeError(f"unknown content type: {type(content)}")
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-        ids += tok.end_turn()
-      else: ids += tok.role("assistant")
+      messages, tools = body["messages"], body.get("tools")
+      if self.server.template is not None:
+        # the chat template expects tool_call arguments as dicts, OpenAI clients send them as JSON strings
+        norm = []
+        for m in messages:
+          if m.get("tool_calls"):
+            m = dict(m)
+            m["tool_calls"] = [{**tc, "function":{**tc["function"], "arguments":json.loads(a) if isinstance((a:=tc["function"]["arguments"]), str)
+                                else a}} if "function" in tc else tc for tc in m["tool_calls"]]
+          norm.append(m)
+        rendered = self.server.template.render(messages=norm, tools=tools, add_generation_prompt=norm[-1]["role"] != "assistant")
+        ids: list[int] = tok.prefix() + tok.encode(rendered)
+        if norm[-1]["role"] == "assistant":  # last assistant message is treated as prefill, drop its end-of-turn tokens
+          end = tok.end_turn()
+          if len(ids) >= len(end) and ids[-len(end):] == end: ids = ids[:-len(end)]
+      else:
+        if tools: stderr_log("warning: ignoring tools, install jinja2 to enable tool calling via the model's chat template")
+        ids = tok.prefix()
+        for i, msg in enumerate(messages):
+          ids += tok.role(msg["role"])
+          content = msg["content"]
+          if isinstance(content, str): ids += tok.encode(content)
+          elif isinstance(content, list):
+            for c in content:
+              if c["type"] == "text": ids += tok.encode(c["text"])
+              else: raise RuntimeError(f"unhandled type: {c['type']}")
+          else: raise RuntimeError(f"unknown content type: {type(content)}")
+          if msg["role"] == "assistant" and i == len(messages) - 1: break
+          ids += tok.end_turn()
+        else: ids += tok.role("assistant")
 
       # reply
+      if len(ids) > self.server.model.max_context:
+        err = {"message":f"prompt is {len(ids)} tokens, exceeds the max context of {self.server.model.max_context}, " \
+               "restart with a larger --max_context", "type":"invalid_request_error", "code":"context_length_exceeded"}
+        self.send_data(json.dumps({"error":err}).encode(), status_code=400)
+        return
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), parse_tool_calls=bool(body.get("tools")))
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out, finish_reason = [], "stop"
+        out, tool_calls, finish_reason = [], [], "stop"
         for c in chunks:
-          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and (delta := c["choices"][0].get("delta", {})):
+            if delta.get("content"): out.append(delta["content"])
+            if delta.get("tool_calls"): tool_calls.extend(delta["tool_calls"])
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
+        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
+        if tool_calls: message["tool_calls"] = [{k:v for k, v in tc.items() if k != "index"} for tc in tool_calls]
         self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+          "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
-    self.model, self.model_name, self.tok = model, model_name, tok
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any=None):
+    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     super().__init__(server_address, Handler)
 
 def main():
@@ -194,10 +271,22 @@ def main():
   model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
+        f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  # compile the chat template if jinja2 is available (enables tool calling and model-specific formatting)
+  template = None
+  if (ct := kv.get('tokenizer.chat_template')) is not None:
+    if jinja2 is None: stderr_log("warning: jinja2 is not installed, the model's chat template is disabled")
+    else:
+      env = jinja2.Environment()
+      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj)  # jinja2's tojson escapes <>& for HTML safety
+      env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+      env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
+      template = env.from_string(ct)
 
   # warmup the JIT
   if args.warmup or args.serve:
@@ -206,7 +295,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
