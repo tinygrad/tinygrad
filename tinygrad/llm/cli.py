@@ -37,6 +37,7 @@ class SimpleTokenizer:
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
+    self._encode_cache: tuple[str, tuple[int, ...], list[tuple[int, int]]]|None = None
     self.preset = preset
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
@@ -64,10 +65,23 @@ class SimpleTokenizer:
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
     pos = 0
-    for match in self._split_to_sentence.finditer(text):
+    checkpoints: list[tuple[int, int]] = []
+    if self._encode_cache is not None:
+      old_text, old_tokens, old_checkpoints = self._encode_cache
+      if text == old_text: return list(old_tokens)
+      common, limit = 0, min(len(text), len(old_text))
+      while common+4096 <= limit and text[common:common+4096] == old_text[common:common+4096]: common += 4096
+      common += next((i for i,(a,b) in enumerate(zip(text[common:limit], old_text[common:limit])) if a != b), limit-common)
+      if (checkpoint := next((x for x in reversed(old_checkpoints) if x[0] <= common), None)) is not None:
+        pos, token_pos = checkpoint
+        tokens, checkpoints = list(old_tokens[:token_pos]), [x for x in old_checkpoints if x[0] <= pos]
+    for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
       pos = match.end(0)
-    return tokens + self._encode_sentence(text[pos:])
+      checkpoints.append((pos, len(tokens)))
+    tokens += self._encode_sentence(text[pos:])
+    self._encode_cache = text, tuple(tokens), checkpoints
+    return tokens
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def stream_decoder(self) -> typing.Callable[..., str]:

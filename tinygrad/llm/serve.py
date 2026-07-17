@@ -109,20 +109,14 @@ class Handler(HTTPRequestHandler):
     request_st = time.perf_counter()
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  ")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    body_t = time.perf_counter()
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
-    json_t = time.perf_counter()
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
-      render_t = time.perf_counter()
       ids: list[int] = self.server.tok.encode(rendered)
-      tokenize_t = time.perf_counter()
-      stderr_log(f"prep:{(tokenize_t-request_st)*1e3:5.0f} ms "
-                 f"(body {(body_t-request_st)*1e3:.0f}, json {(json_t-body_t)*1e3:.0f}, "
-                 f"template {(render_t-json_t)*1e3:.0f}, tokenize {(tokenize_t-render_t)*1e3:.0f})  {colored('--', 'BLACK')}  ")
+      stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")

@@ -46,6 +46,11 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_llama_repeat(self): self._test_coding(self.llama_tok, "00000000000000000", [ 931, 931, 931, 931, 931, 410 ])
   def test_llama_pat(self): self._test_coding(self.llama_tok, "today\n  \n", [ 31213, 14211 ])
 
+  def test_llama_continued_conversation(self):
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world", [15339, 220, 128009, 14957])
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world again", [15339, 220, 128009, 14957, 1578])
+    self._test_coding(self.llama_tok, "hello changed <|eot_id|>world again", [15339, 5614, 220, 128009, 14957, 1578])
+
   def test_tekken_from_gguf_kv(self):
     kv = {
       "tokenizer.ggml.tokens": ["<unk>", "<s>", "</s>", "[INST]", "[/INST]", "hello"],
