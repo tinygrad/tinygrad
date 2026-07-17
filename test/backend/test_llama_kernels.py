@@ -43,8 +43,8 @@ class TestFusedCE(unittest.TestCase):
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
   def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
 
-  # note: this is the shape used in llama 8b
-  #def test_fused_ce_smoothing_16_1024_128256(self): run_fused_ce(16, 1024, 128256, label_smoothing=0.2)
+  @unittest.skipUnless(Device.DEFAULT.split(":")[0] == "AMD", "requires AMD custom kernel")
+  def test_fused_ce_llama31_8b(self): run_fused_ce(2, 8192, 128256)
 
 def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
   Tensor.manual_seed(0)
