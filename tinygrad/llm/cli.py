@@ -1,10 +1,13 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
+from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
+if TYPE_CHECKING:
+  import jinja2
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -64,25 +67,6 @@ class SimpleTokenizer:
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
-  def role(self, role:str):
-    if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
-    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
-    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
-    if self.preset == 'glm4': return self.encode("<|" + role + "|>")
-    if self.preset == 'tekken':
-      if role == 'user': return self.encode("[INST]")
-      if role == 'assistant': return []
-      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
-    return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-  def end_turn(self):
-    if self.preset == 'olmo': return self.encode("\n")
-    if self.preset == 'kimi-k2': return [self.eos_id]
-    if self.preset == 'qwen2': return [self.eos_id] + self.encode("\n")
-    if self.preset == 'glm4': return []
-    if self.preset == 'tekken': return self.encode("[/INST]")
-    return [self.eos_id]
-  def prefix(self) -> list[int]:
-    return ([] if self.bos_id is None else [self.bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
   def is_end(self, token_id:int) -> bool: return token_id in (self.eos_id, self.eot_id)
 
 models = {
@@ -106,6 +90,40 @@ models = {
 }
 
 # *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
+
+class FallbackTemplate:
+  # minimal jinja2.Template-compatible chat template without jinja2, no tool calling support
+  def __init__(self, tok:SimpleTokenizer): self.tok = tok
+  def role(self, role:str) -> str:
+    if self.tok.preset == 'olmo': return "<|" + role + "|>\n"  # OLMoE Instruct format
+    if self.tok.preset == 'kimi-k2': return "<|im_" + role + "|>" + role + "<|im_middle|>"
+    if self.tok.preset == 'qwen2': return "<|im_start|>" + role + "\n"
+    if self.tok.preset == 'glm4': return "<|" + role + "|>"
+    if self.tok.preset == 'tekken':
+      if role == 'user': return "[INST]"
+      if role == 'assistant': return ""
+      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.tok.preset}'")
+    return "<|start_header_id|>" + role + "<|end_header_id|>\n\n"
+  def end_turn(self) -> str:
+    if self.tok.preset == 'olmo': return "\n"
+    if self.tok.preset == 'kimi-k2': return self.tok.decode([self.tok.eos_id])
+    if self.tok.preset == 'qwen2': return self.tok.decode([self.tok.eos_id]) + "\n"
+    if self.tok.preset == 'glm4': return ""
+    if self.tok.preset == 'tekken': return "[/INST]"
+    return self.tok.decode([self.tok.eos_id])
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True) -> str:
+    out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
+    for msg in messages:
+      out += self.role(msg["role"])
+      content = msg.get("content")
+      if isinstance(content, str): out += content
+      elif isinstance(content, list):
+        for c in content:
+          if c["type"] == "text": out += c["text"]
+          else: raise RuntimeError(f"unhandled type: {c['type']}")
+      elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
+      out += self.end_turn()
+    return out + self.role("assistant") if add_generation_prompt else out
 
 class Handler(HTTPRequestHandler):
   server: LLMServer
@@ -141,25 +159,13 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
-    tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix()
-      for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
-        content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
-        elif isinstance(content, list):
-          for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
-            else: raise RuntimeError(f"unhandled type: {c['type']}")
-        else: raise RuntimeError(f"unknown content type: {type(content)}")
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-        ids += tok.end_turn()
-      else: ids += tok.role("assistant")
+      # render and tokenize
+      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
+      ids: list[int] = self.server.tok.encode(rendered)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
@@ -177,8 +183,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
-    self.model, self.model_name, self.tok = model, model_name, tok
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:jinja2.Template|FallbackTemplate):
+    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     super().__init__(server_address, Handler)
 
 def main():
@@ -194,10 +200,25 @@ def main():
   model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
+        f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  # use the model's chat template if jinja2 is available (enables model-specific formatting)
+  template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
+  if (ct := kv.get('tokenizer.chat_template')) is not None:
+    try:
+      import jinja2
+      env = jinja2.Environment()
+      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
+      env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+      env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
+      env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
+      env.globals['eos_token'] = tok.decode([tok.eos_id])
+      template = env.from_string(ct)
+    except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
   if args.warmup or args.serve:
@@ -206,7 +227,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
@@ -224,16 +245,19 @@ def main():
     exit(0)
 
   # interactive chat
-  ids: list[int] = tok.prefix()
+  messages: list[dict] = []
   while 1:
-    try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn() + tok.role("assistant")
-    except EOFError:
-      break
-    dec = tok.stream_decoder()
+    try: messages.append({"role":"user", "content":input('>>> ')})
+    except EOFError: break
+    ids = tok.encode(template.render(messages=messages, add_generation_prompt=True))
+    reply, dec = "", tok.stream_decoder()
     for next_id in model.generate(ids):
-      sys.stdout.write(dec(next_id) if not tok.is_end(next_id) else dec() + "\n\n")
+      if tok.is_end(next_id):
+        sys.stdout.write(dec() + "\n\n")
+        break
+      reply += (piece := dec(next_id))
+      sys.stdout.write(piece)
       sys.stdout.flush()
-      if tok.is_end(next_id): break
+    messages.append({"role":"assistant", "content":reply})
 
 if __name__ == "__main__": main()

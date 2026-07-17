@@ -91,7 +91,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -121,7 +121,7 @@ class Group:
           else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -151,7 +151,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -181,7 +181,7 @@ class Group:
           else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
           d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp.wmma(a_in, b_in, d_in, (wmma_dims, 'AMD', 64))
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 

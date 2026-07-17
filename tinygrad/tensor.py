@@ -3,7 +3,7 @@ from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
@@ -238,7 +238,7 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.cast(self.dtype).contiguous()
+    x = self.cast(strong_dtype(self.dtype)).contiguous()
     if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
@@ -255,10 +255,11 @@ class Tensor(RandMixin):
     """
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    fmt = self.dtype.fmt
-    assert fmt is not None, f"no fmt dtype for {self.dtype}"
+    buf = self._buffer()
+    fmt = buf.dtype.fmt
+    assert fmt is not None, f"no fmt dtype for {buf.dtype}"
     assert fmt != "e" or sys.version_info >= (3, 12)
-    return self._data().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
+    return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -277,6 +278,10 @@ class Tensor(RandMixin):
     """
     # TODO: remove half once minimum python supports it
     if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
+    if 0 in self.shape:
+      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
+      return _tolist(self.shape)
     return self.data().tolist()
 
   def numpy(self) -> 'numpy.ndarray':

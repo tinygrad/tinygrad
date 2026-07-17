@@ -309,66 +309,6 @@ class TestUOpGraph(unittest.TestCase):
         for uop, const in zip(uops, consts):
           self.assertEqual(uop, const)
 
-  @unittest.skip("no longer testable standalone")
-  def test_wmma_vectorize_fold(self):
-    for i in [2, 4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half, tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      var = UOp.variable("var", 0, 1, dtypes.half)
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[0], acc)
-      self.assertEqual(len(uops), 2)  # +1 for SINK
-
-    for i in [2, 4, 8]:
-      var = UOp.variable("var", 0, 1, dtypes.half)
-      vec = UOp(Ops.STACK, dtypes.half, tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[0], acc)
-      self.assertEqual(len(uops), 2)  # +1 for SINK
-
-  @unittest.skip("wmma is wrong here, it needs an arg")
-  def test_wmma_vectorize_no_fold(self):
-    for i in [4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half,
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
-
-    for i in [4, 8]:
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
-      vec = UOp(Ops.STACK, dtypes.half,
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp.variable(f'tmp{j}', 0, 1, dtypes.half) for j in range(i//2)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
-
-    for i in [2, 4, 8]:
-      vec = UOp(Ops.STACK, dtypes.half,
-                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(vec, var, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
-
-    for i in [2, 4, 8]:
-      var = UOp.variable(f'tmp{i}', 0, 1, dtypes.half)
-      vec = UOp(Ops.STACK, dtypes.half,
-                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
-      acc = UOp.variable('acc', 0, 1, dtypes.half)
-      wmma = UOp(Ops.WMMA, src=(var, vec, acc))
-      uops = to_uops_list([wmma])
-      self.assertEqual(uops[-2], wmma)  # -2 to skip SINK
-
   def test_cast_alu_fold(self):
     d0 = UOp.param(0, dtypes.bool, (1,))
     d1 = UOp.param(1, dtypes.int, (1,))
