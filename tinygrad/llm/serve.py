@@ -68,8 +68,7 @@ class Handler(HTTPRequestHandler):
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
-               f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     yield chunk({"role":"assistant", "content":""})
@@ -107,14 +106,23 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
+    request_st = time.perf_counter()
+    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  ")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+    body_t = time.perf_counter()
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+    json_t = time.perf_counter()
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
+      render_t = time.perf_counter()
       ids: list[int] = self.server.tok.encode(rendered)
+      tokenize_t = time.perf_counter()
+      stderr_log(f"prep:{(tokenize_t-request_st)*1e3:5.0f} ms "
+                 f"(body {(body_t-request_st)*1e3:.0f}, json {(json_t-body_t)*1e3:.0f}, "
+                 f"template {(render_t-json_t)*1e3:.0f}, tokenize {(tokenize_t-render_t)*1e3:.0f})  {colored('--', 'BLACK')}  ")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
