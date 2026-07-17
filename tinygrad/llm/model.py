@@ -201,8 +201,10 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
-                                   dtype="float16", device=x.device)
+      # Decode uses fixed-size KV buckets. Unwritten entries must be zero: masking happens after QK, so values left
+      # uninitialized by Tensor.empty can inject NaNs before the mask is applied.
+      self.cache_kv = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
+                                   dtype="float16", device=x.device).contiguous()
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -432,13 +434,16 @@ class Transformer:
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       remaining = len(tokens) - start_pos
-      use_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and start_pos > 0 and remaining >= chunk_size and chunk_size % 64 == 0 and \
+      can_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and start_pos > 0 and remaining >= chunk_size and chunk_size % 64 == 0 and \
         not self.has_recurrent_block
-      if use_flash:
+      if can_flash:
         device = str(getattr(self.blk[0], "cache_kv").device)
-        use_flash = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
+        can_flash = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
+      use_flash = can_flash and start_pos % 64 == 0
       sp = v_start_pos.bind(start_pos)
-      nt = chunk_size if use_flash else v_toks.bind(min(chunk_size, remaining))
+      # The flash kernel requires its cached prefix to start on a 64-token tile. Cache reuse can resume at any
+      # token, so process one short generic chunk to reach the next tile boundary before entering flash prefill.
+      nt = chunk_size if use_flash else v_toks.bind(min(64 - start_pos % 64, remaining) if can_flash else min(chunk_size, remaining))
       inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
       out = (self(inp, sp, temp, use_flash=True) if use_flash else self(inp, sp, temp)).realize()
       start_pos += nt if isinstance(nt, int) else nt.val
