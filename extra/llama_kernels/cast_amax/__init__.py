@@ -68,6 +68,6 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   axis = xw13.uop.axis if isinstance(xw13.device, tuple) else None
   fp8_out  = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,      xw13.device, axis)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
-  fp8_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, xw13, amax_state, grad_amax_state, next_grad_amax_state,
-                                     fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
+  fp8_out, amax_out, *_ = Tensor.custom_kernel(fp8_out, amax_out, xw13, amax_state, grad_amax_state, next_grad_amax_state,
+                                                fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
   return fp8_out
