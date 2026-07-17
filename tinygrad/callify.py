@@ -180,6 +180,8 @@ buffer_view = UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER, name="buf"), UPat.cvar("off
 def replace_input_view(ctx:AllocCtx, b:UOp, buf:UOp, offset=None):
   # do not buffer view when a buffer is used multiple times
   if len(ctx.consumer_map[buf]) > 1 and not disk_like(buf): return None
+  # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
+  if any(d.startswith(("WEBGPU", "CL")) for d in ((buf.device,) if isinstance(buf.device, str) else buf.device)): return None
   return replace_input_buffer(ctx, UOp(Ops.SLICE, b.dtype, (buf, UOp.const(dtypes.index, 0) if offset is None else offset), b.numel()))
 
 pm_finalize_call = PatternMatcher([
