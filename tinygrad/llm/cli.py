@@ -161,12 +161,13 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
-    tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      ids: list[int] = tok.encode(self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True))
+      # render and tokenize
+      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
+      ids: list[int] = self.server.tok.encode(rendered)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
@@ -219,7 +220,7 @@ def main():
       env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
       env.globals['eos_token'] = tok.decode([tok.eos_id])
       template = env.from_string(ct)
-    except ImportError: stderr_log("warning: jinja2 is not installed, the model's chat template is disabled")
+    except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
   if args.warmup or args.serve:
