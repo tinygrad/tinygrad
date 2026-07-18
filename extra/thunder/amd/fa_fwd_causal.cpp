@@ -188,7 +188,11 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     const int head_idx = (blockIdx.x % ATTN_H_KV) * GROUP_SIZE + (blockIdx.x / ATTN_H_KV);
     const int batch_idx = blockIdx.z;
     const int head_idx_kv = head_idx / GROUP_SIZE;
-    const int block_tile_idx = blockIdx.y;
+    constexpr int grid_tiles = (ATTN_N / Q_BLOCK_SIZE + NUM_WARPS - 1) / NUM_WARPS;
+    constexpr int grid_chunk = 4;
+    const int chunk_pair = blockIdx.y / (2 * grid_chunk), chunk_offset = blockIdx.y % grid_chunk;
+    const int block_tile_idx = blockIdx.y % (2 * grid_chunk) < grid_chunk ? chunk_pair * grid_chunk + chunk_offset :
+      grid_tiles - (chunk_pair + 1) * grid_chunk + chunk_offset;
     const int tile_idx = block_tile_idx * NUM_WARPS + warpid();
     const int stagger = warpid() / 4;
     const int lane = laneid();
