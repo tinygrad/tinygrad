@@ -109,103 +109,103 @@ class HCQDepsTracker(DepsTracker):
   def _key(buf:Any) -> tuple[Any, int, int]:
     return (buf.arg.slot, 0, buf.max_numel() * buf.dtype.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
 
-def _dedup_deps(dep_lanes:list[tuple[tuple, int, int]], devices:tuple[str, ...], queue:str) -> dict[tuple, list[int|None]]:
-  # same-queue ops are fifo-ordered
+def _get_call_bufs_by_lane(call:UOp, devices:tuple[str, ...]) -> list[list[Any]]:
+  refs = get_call_arg_uops(call)
+  return [[b if b.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs] for lane in range(len(devices))]
+
+def _get_deps(ctx:DepsTracker, bufs_by_lane:list[list[Any]], write, key:tuple[tuple[str, ...], str, int]) -> list[tuple[tuple, int, int]]:
+  dep_lanes:list[tuple[tuple, int, int]] = []
+  for lane, bufs in enumerate(bufs_by_lane):
+    dep_lanes += [(dep, dlane, lane) for dep, dlane in ctx.access_resources(bufs, write if write is not None else range(len(bufs)), (key, lane))]
+  return dep_lanes
+
+def _build_wait_cmds(dep_lanes:list[tuple[tuple, int, int]], devices:tuple[str, ...], queue:str) -> tuple[list[UOp], set[int]]:
+  # opt1: same-queue ops are fifo-ordered
   if devices[0].split(":")[0] in {"AMD", "QCOM"} or queue.startswith("COPY"):
     dep_lanes = [(dep, dlane, lane) for dep, dlane, lane in dep_lanes if (dep[0][dlane], dep[1]) != (devices[lane], queue)]
 
-  # keep latest dep per (dep device, queue, cur lane)
+  # opt2: keep latest dep per (dep device, queue, cur lane)
   latest = {((dep[0][dlane], dep[1]), lane): (dep, dlane) for dep, dlane, lane in sorted(dep_lanes, key=lambda x: x[0][2])}
   deps:dict[tuple, list[int|None]] = collections.defaultdict(lambda: [None]*len(devices))
   for (_, lane), (dep, dlane) in latest.items(): deps[dep][lane] = dlane
-  return deps
 
-# deps are tracked per (devices, queue, tag) owner
-def _get_call_deps(ctx:DepsTracker, call:UOp, devices:tuple[str, ...], queue:str, tag:int, dev_bufs:dict[str, dict[int, Any]]) -> dict[tuple, list[int|None]]:
-  refs = get_call_arg_uops(call)
-  outs, _ = get_call_outs_ins(call)
-
-  dep_lanes:list[tuple[tuple, int, int]] = []
-  for lane, d in enumerate(devices):
-    lane_refs = [b if b.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs]
-    for b in lane_refs:
-      for bd in to_tuple(b.device): dev_bufs[bd][id(b)] = b
-    for dep, dlane in ctx.access_resources(lane_refs, outs, ((devices, queue, tag), lane)): dep_lanes.append((dep, dlane, lane))
-  return _dedup_deps(dep_lanes, devices, queue)
-
-def _get_waits_based_on_deps(deps:dict[tuple, list[int|None]], devices:tuple[str, ...]) -> list[UOp]:
   waits = []
   for (ddevs, dqueue, dtag), lanes in deps.items():
     sig = make_mstack([make_signal(d if dl is None else ddevs[dl], queue=dqueue, sentinel=dl is None) for dl, d in zip(lanes, devices)])
     val = make_mstack([make_signal_value(d if dl is None else ddevs[dl], queue=dqueue) for dl, d in zip(lanes, devices)])
     waits.append((sig.index(zero:=UOp.const(dtypes.int, 0)).load() >= val.index(zero) + dtag).wait())
-  return waits
+  return waits, {dtag for _, _, dtag in deps}
 
-def _to_hcq_call(call:UOp, devices:tuple[str, ...], queue:str, waits:list[UOp], store:UOp|None) -> UOp:
-  info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), devices, queue)
-  cmds = [*waits, call.replace(arg=replace(call.arg, aux=info))] + ([store] if store is not None else [])
-  return UOp.custom_function("hcq", make_submit(*cmds, devs=devices, queue=queue).sink()).call(name="hcq", aux=info)
+def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[tuple[tuple[str, ...], str]],
+                      tracker:HCQDepsTracker) -> tuple[list[UOp], set[int]]:
+  # collect all buffers which belong to devices
+  dev_bufs:dict[str, dict[int, Any]] = collections.defaultdict(dict)
+  for call, devices in batch:
+    for b in itertools.chain.from_iterable(_get_call_bufs_by_lane(call, devices)):
+      for bd in to_tuple(b.device): dev_bufs[bd][id(b)] = b
 
-def _build_finalizers(batch_info:list[tuple[tuple[str, ...], str]], tracker:HCQDepsTracker, dev_bufs:dict[str, dict[int, Any]]) -> tuple[list[UOp], set[int]]:
   zero, n, finalizers, waited = UOp.const(dtypes.int, 0), len(batch_info), [], set()
-  for _, g in itertools.groupby(sorted(dedup([d for devs, _ in batch_info for d in devs])), key=lambda d: d.split(":")[0]):
-    devs = tuple(g)
+  for _, devgroup in itertools.groupby(sorted(dedup([d for devs, _ in batch_info for d in devs])), key=lambda d: d.split(":")[0]):
+    devs = tuple(devgroup)
 
-    # finalize all buffers accesses to one signal: the finalizer writes every buffer of its device, so it deps on all accesses to them
-    dep_lanes:list[tuple[tuple, int, int]] = []
-    for lane, d in enumerate(devs):
-      bufs = list(dev_bufs[d].values())
-      fin_deps = tracker.access_resources(bufs, list(range(len(bufs))), ((devs, "COMPUTE:0", n), lane))
-      dep_lanes += [(dep, dlane, lane) for dep, dlane in fin_deps if dep[2] < n] # other lanes' finalizer writes are not real deps
-    deps = _dedup_deps(dep_lanes, devs, "COMPUTE:0")
-    waited |= {dtag for _, _, dtag in deps}
+    # to finalize the batch, sync all accesses from other devices to buffers that belong to this device
+    fin_deps = [dl for dl in _get_deps(tracker, [list(dev_bufs[d].values()) for d in devs], None, key=(devs, "COMPUTE:0", n)) if dl[0][2] < n]
+    waits, cur_waited = _build_wait_cmds(fin_deps, devs, "COMPUTE:0")
+    waited |= cur_waited
 
     # wait the syncs, store the device epoch; value bumps are a separate call: no lane may bump until every lane has patched its waits
-    tl = make_signal_value(devs)
-    submit = make_submit(*_get_waits_based_on_deps(deps, devs), make_signal(devs).store(tl.index(zero)), devs=devs, queue="COMPUTE:0")
+    submit = make_submit(*waits, make_signal(devs).store((tl:=make_signal_value(devs)).index(zero)), devs=devs, queue="COMPUTE:0")
     upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), n) for qn in dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)])]
     bump = UOp.barrier(*[s.index(zero, dtype=s.dtype).store(s.index(zero) + inc) for s, inc in upd])
     finalizers += [UOp.custom_function("hcq", b.sink()).call(aux=HCQInfo("hcq_finalizer", Estimates(), devs, "COMPUTE:0")) for b in (submit, bump)]
   return finalizers, waited
 
 def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
-  queues = ["COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0" for call, _ in batch]
+  batch_info = [(devices, "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0") for call, devices in batch]
 
-  deps_tracker, dev_bufs = HCQDepsTracker(), collections.defaultdict(dict)
-  deps = [_get_call_deps(deps_tracker, call, devices, queue, tag, dev_bufs) for tag, ((call, devices), queue) in enumerate(zip(batch, queues))]
-  finalizers, fin_waited = _build_finalizers([(devices, queue) for (_, devices), queue in zip(batch, queues)], deps_tracker, dev_bufs)
+  # schedule deps
+  waited:set[int] = set()
+  deps_tracker = HCQDepsTracker()
+  call_waits:list[list[UOp]] = []
+  for tag, ((call, _), (devices, queue)) in enumerate(zip(batch, batch_info)):
+    deps = _get_deps(deps_tracker, _get_call_bufs_by_lane(call, devices), get_call_outs_ins(call)[0], key=(devices, queue, tag))
+    cmds, cur_waited = _build_wait_cmds(deps, devices, queue)
+    call_waits.append(cmds)
+    waited |= cur_waited
 
-  waited = set(dtag for d in deps for (_, _, dtag) in d) | fin_waited
+  # build finalizers
+  finalizers, finalizer_waited = _build_finalizers(batch, batch_info, deps_tracker)
+  waited |= finalizer_waited
 
-  zero = UOp.const(dtypes.int, 0)
+  src = []
+  for tag, ((call, _), (devices, queue), cmds) in enumerate(zip(batch, batch_info, call_waits)):
+    # first queue use, sync prior device work with main signal
+    if batch_info.index((devices, queue)) == tag:
+      epoch = (make_signal(devices).index(0).load() >= make_signal_value(devices).index(0) - 1).wait()
+      cmds = [UOp(Ops.BARRIER), epoch] + cmds
 
-  seen:set[tuple[tuple[str, ...], str]] = set()
-  src:list[UOp] = []
-  for tag, ((call, devices), queue) in enumerate(zip(batch, queues)):
-    waits = _get_waits_based_on_deps(deps[tag], devices)
-    # first use of these devices on this queue: wait for their global timeline epoch, so the batch orders after all prior batches
-    if (key:=(devices, queue)) not in seen:
-      seen.add(key)
-      epoch = (make_signal(devices).index(zero).load() >= make_signal_value(devices).index(zero) - 1).wait()
-      waits = [UOp(Ops.BARRIER, dtypes.void), epoch] + waits
-    store = make_signal(devices, queue=queue).store(make_signal_value(devices, queue=queue).index(zero) + tag) if tag in waited else None
-    src.append(_to_hcq_call(call, devices, queue, waits, store))
+    # signal queue timeline if someone waits for us
+    store = make_signal(devices, queue=queue).store(make_signal_value(devices, queue=queue).index(0) + tag) if tag in waited else None
+
+    # and make hcq call
+    info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), devices, queue)
+    cmds = [*cmds, call.replace(arg=replace(call.arg, aux=info))] + ([store] if store is not None else [])
+    src.append(UOp.custom_function("hcq", make_submit(*cmds, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
   return src + finalizers
 
 def split_hcq_batches(l:UOp) -> UOp:
   srcs:list[UOp] = []
   batch:list[tuple[UOp, tuple[str, ...]]] = []
   for call in l.src:
-    if (hcq_devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is None:
-      srcs, batch = srcs + _finalize_batch(batch) + [call], []
-    else: batch.append((call, to_tuple(hcq_devs)))
+    if (devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is not None: batch.append((call, to_tuple(devs)))
+    else: srcs, batch = srcs + _finalize_batch(batch) + [call], []
   return l.replace(src=tuple(srcs + _finalize_batch(batch)))
 pm_split_hcq_batches = PatternMatcher([(UPat(Ops.LINEAR, name="l"), split_hcq_batches)])
 
 # *****************
 # 3. merge into queues
 
-def _merged_hcq_call(calls:list[UOp]) -> UOp:
+def _merged_hcq_call(calls:list[UOp]) -> UOp: # TODO: simplify?
   if len(calls) == 1: return calls[0]
   info = replace(calls[0].arg.aux, estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()))
   cmds = [cmd for c in calls for cmd in get_submit(c).src[0].src]
