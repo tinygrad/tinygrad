@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, ParamArg, graph_rewrite, track_rewrites
-from tinygrad.helpers import VIZ, pluralize, all_int
+from tinygrad.helpers import VIZ, pluralize, all_int, count
 
 @dataclass
 class AllocCtx:
@@ -10,6 +10,7 @@ class AllocCtx:
   bases: set[UOp] = field(default_factory=set)
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
+  offset_counts: dict[UOp, count] = field(default_factory=dict)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -52,15 +53,14 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
-def _make_buffer_view(src:UOp) -> UOp|None:
+def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
   if (cv := src.contiguous_view()) is None or (cv[0].numel() == src.numel() and cv[1] == 0): return None
   buf, offset = cv
-  offset = UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.max_numel() - (size:=src.numel() * src.element_size() // buf.element_size())).bind(cv[1])
-  # TODO: unique names
-  view = UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.index, size)))
-  return view.bitcast(src.dtype).reshape(src.shape)
+  name = f"buf{buf.arg.slot}_offset{next(ctx.offset_counts.setdefault(buf, count()))}"
+  offset = UOp.variable(name, 0, buf.max_numel() - (size:=src.numel() * src.element_size() // buf.element_size())).bind(offset)
+  return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.index, size))).bitcast(src.dtype).reshape(src.shape)
 
-def contiguous_mops_to_view(c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx: AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK(VARIABLE) when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -69,7 +69,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   # no symbolic shape
   if not all_int(c.shape): return None
 
-  if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+  if buf.op is not Ops.MULTI and (view := _make_buffer_view(ctx, src)) is not None:
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create a per-shard buffer offset
@@ -77,7 +77,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
-    if (view := _make_buffer_view(resolved.src[0])) is None: return None
+    if (view := _make_buffer_view(ctx, resolved.src[0])) is None: return None
     return view.multi(resolved.arg)
 
   return None
@@ -205,7 +205,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
