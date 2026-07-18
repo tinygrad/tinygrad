@@ -15,9 +15,11 @@ class GLMConfig:
   vocab_size: int
   max_context: int
   intermediate_size: int
-  num_experts: int
-  num_token_experts: int
+  num_exp: int
+  num_exp_per_tok: int
+  routed_scaling_fact: float
   moe_intermediate_size: int
+  norm_topk_prob: bool
   hidden_act: str
   head_dim: int
   num_heads: int
@@ -26,7 +28,6 @@ class GLMConfig:
   norm_eps: float
   idx_head_dim: int
   idx_num_heads: int
-  idx_topk: int
   idx_topk: int
   layers: list[LayerType]
   indexer_type: list[IndexerType]
@@ -134,19 +135,38 @@ class GLMAttention():
 
 class GLMMoeGateTopK():
   def __init__(self, config: GLMConfig):
-    pass
+    # NOTE: we have only one group in GLM so not taking that into consideration
+    self.num_exp, self.num_exp_per_token, self.dim = config.num_exp ,config.num_exp_per_tok, config.dim
+    self.routed_scaling_fact = config.routed_scaling_fact
+    self.weight = Tensor.empty(self.num_exp, self.dim)
+    self.exp_score_corretion_bias = Tensor.empty(self.num_exp)
+
+  # x: (B, S, dim)
+  def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    router_logits = x @ self.weight.transpose() # (B, S, dim) @ (dim, E) => (B, S, E)
+    scores = router_logits.sigmoid() # (B, S, E)
+    scores_for_choice = scores + self.exp_score_corretion_bias # (B, S, E)
+    topk_idx = scores_for_choice.topk(self.num_exp_per_token, -1)[1] # (B, S, K)
+    topk_weights = scores.gather(-1,topk_idx)
+
+    # Normalizing the weights
+    denominator = topk_weights.sum(-1, keepdim=True)
+    topk_weights = topk_weights / (denominator + 1e-20)
+    topk_weights = topk_weights * self.routed_scaling_fact
+
+    return router_logits, topk_weights, topk_idx
 
 class GLMMoeExperts():
   def __init__(self, config: GLMConfig):
-    self.num_experts = config.num_experts
-    self.gate_up_proj = Tensor.empty(config.num_experts, 2 * config.moe_intermediate_size, config.dim)
-    self.down_proj = Tensor.empty(config.num_experts, config.dim, config.moe_intermediate_size)
+    self.num_experts = config.num_exp
+    self.gate_up_proj = Tensor.empty(config.num_exp, 2 * config.moe_intermediate_size, config.dim)
+    self.down_proj = Tensor.empty(config.num_exp, config.dim, config.moe_intermediate_size)
 
   # x : (B, S, dim) topk_idx: (B, S, k) topk_weigths: (B, S, k)
   def forward(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor): 
     # gate, up: (B, S, K, I)
     gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose(-1, -2)).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I) => (B,S, K, 1, 2I)
-    x = gate.silu() * up # (B, S, K, I)
+    x = (gate.silu() * up).contiguous() # (B, S, K, I)
     x = (x.unsqueeze(-2) @ self.down_proj[topk_idx].transpose(-1, -2)).squeeze(-2) # (B, S, K, 1, I) @ (B, S, K, I, dim) => (B, S, K, 1, dim)
     x = x * topk_weights.unsqueeze(-1) # (B, S, K, dim)
     return x.sum(axis=-2) # (B, S, dim)
