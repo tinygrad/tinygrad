@@ -139,7 +139,7 @@ __global__ __launch_bounds__(512, GEMM_N == 28672 ? 1 : 2) void hk_fp8_atb_gemm(
     RT_C cD;
 
     int wgid = blockIdx.x;
-    const int WGM = 4;
+    const int WGM = N == 14336 ? 6 : 4;
     wgid = chiplet_transform_chunked(wgid, total_blocks_needed, NUM_XCDS, 32);
 
     const int num_wgid_in_group = WGM * blocks_per_col;
