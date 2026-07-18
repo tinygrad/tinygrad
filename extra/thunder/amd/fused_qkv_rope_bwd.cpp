@@ -23,7 +23,7 @@ using namespace kittens;
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV;
 constexpr int HALF_D = ATTN_D / 2;
 constexpr int PACKED_H = ATTN_H_KV * (GROUP_SIZE + 2);
-constexpr int HEADS_PER_WG = 1;
+constexpr int HEADS_PER_WG = ATTN_D == 128 && GROUP_SIZE % 2 == 0 ? 2 : 1;
 constexpr int KV_PARTIALS = GROUP_SIZE / HEADS_PER_WG;
 constexpr int NUM_WARPS = 4;
 constexpr int TILE_N = 16;

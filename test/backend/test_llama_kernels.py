@@ -324,7 +324,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
-    PARTIALS = 4
+    PARTIALS = 2
     GROUP = H // H_KV
     freqs_cis = self.freqs_cis()
     dq = self.rand_bf16(B, N, H, D)

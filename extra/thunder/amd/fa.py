@@ -56,7 +56,7 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   dq_native, dk_partial, dv_partial = dq.base, unwrap_partial(dk), unwrap_partial(dv)
   if dq_native.op is not Ops.AFTER or dk_partial is None or dv_partial is None: return None
   B, N, H, D, H_KV = dq.shape[0], dq.shape[1], dq.shape[2], dq.shape[3], dk.shape[2]
-  heads_per_wg = 1
+  heads_per_wg = 2 if D == 128 and (H // H_KV) % 2 == 0 else 1
   partials = (H // H_KV) // heads_per_wg
   if dq_native.shape != (B, H, N, D) or dk_partial.shape != (B * partials, N, H_KV, D) or dv_partial.shape != dk_partial.shape: return None
   return dq_native, dk_partial, dv_partial
@@ -123,7 +123,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
-    HEADS_PER_WG = 1
+    HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
     dk_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xk, axis=shard_axis)
     dv_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xv, axis=shard_axis)
 
@@ -271,7 +271,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
 
   BLOCK_SIZE_KV = 256
   GROUP_SIZE = H // H_KV
-  HEADS_PER_WG = 1
+  HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
   NUM_WARPS = 4
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (H // HEADS_PER_WG, N // BLOCK_SIZE_KV, B)
