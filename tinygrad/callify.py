@@ -55,9 +55,9 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
 def _make_buffer_view(src:UOp) -> UOp|None:
   if (cv := src.contiguous_view()) is None or (cv[0].numel() == src.numel() and cv[1] == 0): return None
   buf, offset = cv
-  size = UOp.const(dtypes.index, src.numel() * src.element_size() // buf.element_size())
+  offset = UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.max_numel() - (size:=src.numel() * src.element_size() // buf.element_size())).bind(cv[1])
   # TODO: unique names
-  view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, UOp.const(dtypes.index, buf.numel())).bind(offset), size))
+  view = UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.index, size)))
   return view.bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
