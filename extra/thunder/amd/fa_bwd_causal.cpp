@@ -28,7 +28,7 @@ constexpr int ATTN_H_KV = 8; // number of key/value heads (for GQA)
 #endif
 
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
-constexpr int HEADS_PER_WG = (ATTN_D == 128 && GROUP_SIZE % 2 == 0) ? 2 : 1;
+constexpr int HEADS_PER_WG = 1;
 
 #ifndef ATTN_N
 constexpr int ATTN_N = 1024; // sequence length
@@ -1333,18 +1333,15 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
 
     // 9. for 1 <= i <= T_r (1024 / 32 = 32)  
     for (int i = 1; i < num_steps - 1; ++i, tic ^= 1, toc ^= 1) {
-      const int last_head_offset = (i - 1) >= num_steps_per_head;
-      const int last_q_head_idx = last_head_offset + first_q_head;
-      const int last_q_seq_idx = i - 1 - last_head_offset * num_steps_per_head + first_step;
+      const int last_q_head_idx = first_q_head;
+      const int last_q_seq_idx = i - 1 + first_step;
 
-      const int head_offset = i >= num_steps_per_head;
-      const int q_head_idx = head_offset + first_q_head;
-      const int q_seq_idx = i - head_offset * num_steps_per_head + first_step;
+      const int q_head_idx = first_q_head;
+      const int q_seq_idx = i + first_step;
       const int q_pos = q_seq_idx * STEP_QO;
 
-      const int next_head_offset = (i + 1) >= num_steps_per_head;
-      const int next_q_head_idx = next_head_offset + first_q_head;
-      const int next_q_seq_idx = i + 1 - next_head_offset * num_steps_per_head + first_step;
+      const int next_q_head_idx = first_q_head;
+      const int next_q_seq_idx = i + 1 + first_step;
 
       // dot slice 0
       {

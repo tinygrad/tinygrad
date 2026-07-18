@@ -10,6 +10,13 @@ def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
   if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
   else: np.testing.assert_allclose(cmp.numpy(), ref.numpy(), **kwargs)
 
+def assert_relative_close(test:unittest.TestCase, cmp:Tensor, ref:Tensor, tolerance:float) -> None:
+  if Device.DEFAULT == "NULL":
+    Tensor.realize(cmp, ref)
+    return
+  error = ((cmp.float() - ref.float()).square().sum() / ref.float().square().sum()).sqrt().item()
+  test.assertLess(error, tolerance, f"relative L2 error {error} exceeds {tolerance}")
+
 class TestFA(unittest.TestCase):
   def setUp(self):
     arch = Device[Device.DEFAULT].renderer.target.arch
@@ -121,6 +128,57 @@ class TestFA(unittest.TestCase):
     assert_allclose(q.grad, q_ref.grad, atol=4e-2, rtol=2e-2)
     assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
     assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+
+  def test_fast_fa_llama_local_shape(self):
+    Tensor.manual_seed(42)
+
+    # Llama 3.1 8B shards 32 Q heads and 8 KV heads over 8 devices.
+    B, N, H, H_KV, D = 2, 8192, 4, 1, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      do = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v, do)
+
+    out = flash_attention(q, k, v, is_causal=True)[0]
+    out.backward(do)
+    Tensor.realize(out, q.grad, k.grad, v.grad)
+
+    with Context(DEBUG=0):
+      q_ref, k_ref, v_ref = q.detach().clone(), k.detach().clone(), v.detach().clone()
+      Tensor.realize(q_ref, k_ref, v_ref)
+    ref = q_ref.transpose(1, 2).scaled_dot_product_attention(k_ref.transpose(1, 2), v_ref.transpose(1, 2),
+      is_causal=True, enable_gqa=True).transpose(1, 2)
+    ref.backward(do)
+    Tensor.realize(ref, q_ref.grad, k_ref.grad, v_ref.grad)
+
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=5e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_relative_close(self, q.grad, q_ref.grad, 8e-3)
+    assert_relative_close(self, k.grad, k_ref.grad, 8e-3)
+    assert_relative_close(self, v.grad, v_ref.grad, 8e-3)
+
+  def test_fast_fa_online_softmax_rescaling(self):
+    Tensor.manual_seed(42)
+    B, N, H, H_KV, D = 2, 8192, 4, 1, 128
+
+    q = Tensor.cat(Tensor.ones(B, N, H, 1), Tensor.zeros(B, N, H, D-1), dim=-1).cast(dtypes.bfloat16).contiguous()
+    slope = D**0.5 * 8.0 / (N - 1)
+    k0 = (Tensor.arange(N).reshape(1, N, 1, 1) * slope).expand(B, N, H_KV, 1)
+    k = Tensor.cat(k0, Tensor.zeros(B, N, H_KV, D-1), dim=-1).cast(dtypes.bfloat16).contiguous()
+    v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+    Tensor.realize(q, k, v)
+
+    out = flash_attention(q, k, v, is_causal=True)[0].float()
+    ref = q.transpose(1, 2).scaled_dot_product_attention(k.transpose(1, 2), v.transpose(1, 2),
+      is_causal=True, enable_gqa=True).float().transpose(1, 2)
+    Tensor.realize(out, ref)
+
+    assert_relative_close(self, out, ref, 1e-2)
 
   def test_fast_fa_bwd_dp(self):
     Tensor.manual_seed(42)
