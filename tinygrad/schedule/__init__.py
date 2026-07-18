@@ -79,10 +79,27 @@ def create_schedule(sched_sink:UOp) -> UOp:
             in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
+    # A CALL that directly consumes a COPY inserts a cross-queue wait before itself. Continue newly unlocked work
+    # past a queued synchronization point while its peer copies run, but bound the delay by the COPY fan-in so the
+    # communication consumer cannot starve or keep its inputs alive for the rest of the graph.
+    def is_copy(parent:UOp) -> bool:
+      call = parent.src[0] if parent.op is Ops.END else parent
+      return call.op is Ops.CALL and call.src[0].op is Ops.COPY
+    copy_parents: dict[UOp, set[UOp]] = {}
+    for parent, childs in children.items():
+      if is_copy(parent):
+        for child in childs: copy_parents.setdefault(child, set()).add(parent)
+    copy_children = set(copy_parents)
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
+    continuation: deque[UOp] = deque()
+    bypassed: dict[UOp, int] = {}
     linearized: list[UOp] = []
-    while len(queue):
-      rk = queue.popleft()
+    while len(queue) or len(continuation):
+      if len(continuation) and len(queue) and queue[0] in copy_children and bypassed.get(queue[0], 0) < len(copy_parents[queue[0]]):
+        rk = continuation.popleft()
+        bypassed[queue[0]] = bypassed.get(queue[0], 0) + 1
+      elif len(continuation) and (not len(queue) or queue[0] not in copy_children): rk = continuation.popleft()
+      else: rk = queue.popleft()
       if rk.op is Ops.LINEAR:
         linearized.extend(rk.src)
       else:
@@ -92,7 +109,9 @@ def create_schedule(sched_sink:UOp) -> UOp:
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0:
+          if x not in copy_children and len(queue) and queue[0] in copy_children: continuation.append(x)
+          else: queue.append(x)
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
