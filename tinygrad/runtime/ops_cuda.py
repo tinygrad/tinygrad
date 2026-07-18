@@ -103,6 +103,7 @@ class CUDADevice(Compiled):
     self.cu_device = init_c_var(cuda.CUdevice, lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(cuda.CUcontext, lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
+    check(cuda.cuDriverGetVersion(ctypes.byref(driver_version := ctypes.c_int())))
 
     for dev in CUDADevice.devices:
       check(cuda.cuDeviceCanAccessPeer(ctypes.byref(val := ctypes.c_int()), self.cu_device, dev.cu_device))
@@ -117,8 +118,9 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
+    # cuGraphInstantiate_v2 (used by CUDAGraph) needs a CUDA 11.0+ driver; disable graphs on older drivers.
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
-                     None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
+                     None if (MOCKGPU or driver_version.value < 11000) else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(ctypes.byref(x)))).value
 

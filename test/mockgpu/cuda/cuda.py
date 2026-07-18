@@ -140,6 +140,10 @@ def cuDeviceComputeCapability(major, minor, dev: int) -> int:
   minor._obj.value = 5
   return orig_cuda.CUDA_SUCCESS
 
+def cuDriverGetVersion(version) -> int:
+  version._obj.value = 12000
+  return orig_cuda.CUDA_SUCCESS
+
 def cuDeviceCanAccessPeer(canAccessPeer, dev: int, peerDev: int) -> int:
   canAccessPeer._obj.value = 1  # Always allow peer access in simulation
   return orig_cuda.CUDA_SUCCESS
