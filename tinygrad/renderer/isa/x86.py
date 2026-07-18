@@ -784,6 +784,7 @@ class X86Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
+    if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
