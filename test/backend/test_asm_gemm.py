@@ -295,6 +295,8 @@ class TestGemmLlama(unittest.TestCase):
   def test_fp8_atb_slow_shape(self):
     run_fp8_atb_gemm(M=6144, N=4096, K=16384, benchmark=True)
 
+  def test_fp8_atb_w13(self): run_fp8_atb_gemm(M=4096, N=28672, K=16384)
+
   def test_fp8_ab_speed(self):
     M, N, K, iters = getenv("M", 16384), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)
     a = Tensor.empty(M, K, dtype=FP8_DTYPE).realize()
