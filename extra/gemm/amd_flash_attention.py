@@ -4,10 +4,10 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import GlobalCounters, Context
 import math
 
-BLOCK_M, BLOCK_N = 64, 64
+BLOCK_M, BLOCK_N = 32, 32
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-WAVES_M, WAVES_N = 4, 1
+WAVES_M, WAVES_N = 2, 2
 LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
 WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
@@ -49,7 +49,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
     f"D={D} must be divisible by WMMA_K={WMMA_K} and LANES_PER_WAVE_N={LANES_PER_WAVE_N}"
   assert BLOCK_M % (WAVES_M * WMMA_M) == 0 and BLOCK_N % LANES_PER_WAVE_N == 0
   TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
-  TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
+  # Each N wave computes the same score tile, then owns a disjoint slice of D for P@V.
+  TN = BLOCK_N // LANES_PER_WAVE_N
   TD = D // (WAVES_N * LANES_PER_WAVE_N)
   SCALE = 1.0 / math.sqrt(D)
 
@@ -69,7 +70,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
 
   # LDS allocation: slot 0 = Q then P (shared), slot 1 = K then V
   # TODO: the memory planner should be able to find this reuse
-  ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
+  Q_ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
+  KV_ELEMS_PER_THREAD = BLOCK_N * D // THREADS_PER_BLOCK
   QP_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
   KV_lds = UOp.placeholder((BLOCK_N, D + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :D]
 
@@ -89,11 +91,11 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
 
   # load Q + K into LDS (Q reloaded each iteration since P overwrites slot 0)
   Q_lds = QP_lds[:, :D]
-  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
-    q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
-  load_k = UOp.range(ELEMS_PER_THREAD, 90, AxisType.LOOP)
-  K_store = KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid, load_k].store(
-    k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*ELEMS_PER_THREAD + load_k]).end(load_k)
+  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(
+    q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
+  load_k = UOp.range(KV_ELEMS_PER_THREAD, 90, AxisType.LOOP)
+  K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(
+    k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k]).end(load_k)
   qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
   Q_lds = Q_lds.after(qk_load_barrier)
   KV_lds_k = KV_lds.after(qk_load_barrier)
@@ -106,7 +108,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   tn1 = UOp.range(TN, 201, AxisType.LOOP)
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
-  k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
+  k_frag = KV_lds_k.reshape(TN, WMMA_N, D // WMMA_K, WMMA_K)[tn1, lane_n, k_qk]
   qk = UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), *WMMA_ARG)
   qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
   S_reg = S_reg.after(qk_done)
@@ -144,9 +146,9 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
   # write P = exp(S - m_ij) to P_lds (reuses slot 0, Q no longer needed)
-  P_lds = QP_lds[:, :BLOCK_N]
-  P_write = P_lds.reshape(WAVES_M, TM, LANES_PER_WAVE_M, 1, WAVES_N, TN, LANES_PER_WAVE_N, 1)
-  P_write = P_write.permute((0, 4, 2, 6, 1, 3, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
+  P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
+  P_write = P_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
+  P_write = P_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
   P_store = P_write[tid].store(S_reg.cast(dtypes.half))
 
   # -- online softmax correction --
@@ -171,9 +173,9 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   # It reuses K's slot and must wait for QK WMMA to finish reading that slot.
   V_lds = UOp.placeholder((D, BLOCK_N + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
   V_copy = V_lds.after(qk_done).permute(1, 0)
-  load_v = UOp.range(ELEMS_PER_THREAD, 390, AxisType.LOOP)
-  V_store = V_copy.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid, load_v].store(
-    v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*ELEMS_PER_THREAD + load_v]).end(load_v)
+  load_v = UOp.range(KV_ELEMS_PER_THREAD, 390, AxisType.LOOP)
+  V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(
+    v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v]).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
   V_lds = V_lds.after(pv_barrier)
@@ -185,7 +187,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   tm2 = UOp.range(TM // WMMA_ACC, 401, AxisType.LOOP)
   tn2 = UOp.range(TD, 402, AxisType.LOOP)
   pv_frag = pv_acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
-  p_frag = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
+  p_frag = P_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
   pv = UOp.wmma(p_frag, v_frag, pv_frag.after(k_pv), *WMMA_ARG)
   pv_done = pv_frag.store(pv).end(tm2, tn2).end(k_pv)

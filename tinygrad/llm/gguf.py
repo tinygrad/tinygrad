@@ -1,7 +1,8 @@
-import functools, io, pathlib, re, struct
+import functools, io, pathlib, re, struct, weakref
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -20,7 +21,14 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
-def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
+_quantized_tensors:weakref.WeakKeyDictionary[UOp, tuple[UOp, int]] = weakref.WeakKeyDictionary()
+
+def get_ggml_quantization(tensor:Tensor) -> tuple[Tensor, int]|None:
+  if (meta:=_quantized_tensors.get(tensor.uop)) is None: return None
+  packed, ggml_type = meta
+  return Tensor(packed), ggml_type
+
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int, contiguous:bool=True) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
@@ -35,14 +43,14 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   if (dtype := _GGML_NATIVE.get(ggml_type)) is not None:
     return t[:dtype.itemsize * n].contiguous().bitcast(dtype)
 
-  def q_to_uint8(t: Tensor, b: int) -> Tensor:
-    # TODO: rewrite with arange?
-    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-    return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, rounding_mode="trunc").bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+  def q_to_uint8(t:Tensor, b:int) -> Tensor:
+    shift_tensor, bitmask = Tensor.stack(*[Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b)]), 0xff >> (8-b)
+    return t.unsqueeze(-1).expand((*t.shape, 8//b)).div(shift_tensor, rounding_mode="trunc").bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
+    if contiguous: blocks = blocks.contiguous()
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -146,7 +154,14 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  state_dict = {}
+  for name, dims, typ, off in t_infos:
+    n, shape = prod(dims), tuple(reversed(dims))
+    decoded = ggml_data_to_tensor(data:=tensor[data_start + off:], n, typ).reshape(*shape)
+    if typ in _GGML_QUANT:
+      block_size, type_size = _GGML_QUANT[typ]
+      _quantized_tensors[decoded.uop] = (data[:n//block_size*type_size].uop, typ)
+    state_dict[name] = decoded
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:

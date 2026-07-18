@@ -130,7 +130,7 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, enable_thinking:bool=False) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -152,7 +152,7 @@ def main():
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--beam", type=int, help="Kernel optimization beam width (serving default: 2)")
+  parser.add_argument("--beam", type=int, help="Kernel optimization beam width")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
@@ -160,8 +160,8 @@ def main():
   model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
-        f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {model.parameter_count:,} params, "
+        f"max context {model.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -182,7 +182,7 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    beam = args.beam if args.beam is not None else BEAM.value or (2 if args.serve else 0)
+    beam = args.beam if args.beam is not None else BEAM.value
     print(f"warming serving JITs with BEAM={beam}")
     with Context(DEBUG=max(DEBUG.value, 1), BEAM=beam):
       model.warmup()

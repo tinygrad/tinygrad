@@ -17,6 +17,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid in (999,))
 
     cls.mock_model = Mock()
+    cls.mock_model.max_context = 4
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
@@ -129,6 +130,16 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
 
+  def test_context_length_error(self):
+    from openai import BadRequestError
+    self.mock_tok.encode.return_value = [200, 201, 202, 203]
+    try:
+      with self.assertRaises(BadRequestError) as err:
+        self.client.chat.completions.create(model="test-model", messages=[{"role":"user", "content":"too long"}])
+      self.assertEqual(err.exception.code, "context_length_exceeded")
+    finally:
+      self.mock_tok.encode.return_value = [200, 201, 202]
+
   def test_max_tokens_streaming(self):
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
     stream = self.client.chat.completions.create(
@@ -170,6 +181,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok.is_end = Mock(return_value=False)
 
     cls.mock_model = Mock()
+    cls.mock_model.max_context = 4
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
     from tinygrad.llm.serve import LLMServer
