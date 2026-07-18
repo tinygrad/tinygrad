@@ -122,8 +122,6 @@ class GLMDSAIndexer():
     topk = int(min(self.idx_topk, index_scores.shape[-1]))
     return index_scores.topk(topk, dim=-1)[1].cast(dtypes.int32)
 
-
-
 class GLMAttention():
   def __init__(self, config: GLMConfig):
     proj_out = config.head_dim * config.num_heads
@@ -140,9 +138,18 @@ class GLMMoeGateTopK():
 
 class GLMMoeExperts():
   def __init__(self, config: GLMConfig):
-    self.gate_proj = Tensor.empty(config.num_experts, 2 * config.moe_intermediate_size, config.dim)
-    self.down_proj = Tensor.empty(config.num_experts, config.dim,)
-  pass
+    self.num_experts = config.num_experts
+    self.gate_up_proj = Tensor.empty(config.num_experts, 2 * config.moe_intermediate_size, config.dim)
+    self.down_proj = Tensor.empty(config.num_experts, config.dim, config.moe_intermediate_size)
+
+  # x : (B, S, dim) topk_idx: (B, S, k) topk_weigths: (B, S, k)
+  def forward(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor): 
+    # gate, up: (B, S, K, I)
+    gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose(-1, -2)).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I) => (B,S, K, 1, 2I)
+    x = gate.silu() * up # (B, S, K, I)
+    x = (x.unsqueeze(-2) @ self.down_proj[topk_idx].transpose(-1, -2)).squeeze(-2) # (B, S, K, 1, I) @ (B, S, K, I, dim) => (B, S, K, 1, dim)
+    x = x * topk_weights.unsqueeze(-1) # (B, S, K, dim)
+    return x.sum(axis=-2) # (B, S, dim)
 
 class GLMMoeLayer():
   def __init__(self, config: GLMConfig):
@@ -178,7 +185,6 @@ class GLMModel():
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.rotary_embedding = GLMRope()
     pass
-
 
 #TODO: try to get rid of this import
 from tokenizers import Tokenizer
