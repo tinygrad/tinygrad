@@ -33,7 +33,7 @@ constexpr int SLICE_QO = 32;
 constexpr int DOT_SLICE_QO = 16;
 constexpr int WARP_SIZE_KV = 64; // warp size for KV
 
-#define NUM_WARPS 4
+#define NUM_WARPS 8
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
 
 using G = kittens::group<NUM_WARPS>;

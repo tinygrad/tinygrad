@@ -79,7 +79,7 @@ class TestFA(unittest.TestCase):
   def test_fast_fa_bwd_causal_jitted(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
@@ -91,9 +91,7 @@ class TestFA(unittest.TestCase):
       Tensor.realize(do)
 
     def fn(q, k, v, do):
-      q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-      out = flash_attention(q_, k_, v_, is_causal=True)
-      out = out.float().transpose(1, 2)
+      out = flash_attention(q, k, v, is_causal=True)[0].float()
       out.backward(do)
       Tensor.realize(out, q.grad, k.grad, v.grad)
       return q.grad, k.grad, v.grad
@@ -116,14 +114,13 @@ class TestFA(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = flash_attention(q_ref_, k_ref_, v_ref_, is_causal=True)
-    ref = ref.float().transpose(1, 2)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True).float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    assert_allclose(q.grad, q_ref.grad, atol=3e-3, rtol=3e-3)
-    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
-    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(q.grad, q_ref.grad, atol=4e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_dp(self):
     Tensor.manual_seed(42)

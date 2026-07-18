@@ -239,7 +239,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, *args:UOp, device:str, arch:st
   if has_layer_num: compile_args.append("-DLAYER_SCALE=1")
 
   DOT_SLICE_QO = 16
-  NUM_WARPS = 4
+  NUM_WARPS = 8
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (B, H, N // (DOT_SLICE_QO * NUM_WARPS))
   lsz = (NUM_THREADS, 1, 1)
