@@ -158,7 +158,10 @@ def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return None
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  for bufs, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    # determine view offset into source buffer (if it exists)
+    if (offset := next((u.expr for u in ast.toposort(lambda u: u.op is not Ops.RANGE) if u.op is Ops.PARAM and u.shape == ()), None)) is not None:
+      bufs[1] = bufs[1].view(bufs[0].nbytes // bufs[1].dtype.itemsize, bufs[1].dtype, ctx.var_vals[offset] * bufs[1].dtype.itemsize)
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
       if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
