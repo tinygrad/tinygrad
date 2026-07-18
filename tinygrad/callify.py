@@ -57,7 +57,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   buf, offset = cv
   size = UOp.const(dtypes.index, src.numel() * src.element_size() // buf.element_size())
   # TODO: unique names
-  view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.numel()).bind(offset), size))
+  view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, UOp.const(dtypes.index, buf.numel())).bind(offset), size))
   return view.bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
