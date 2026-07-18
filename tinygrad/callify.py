@@ -50,7 +50,15 @@ def replace_contig_with_store_after(u:UOp):
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
+
+def _make_buffer_view(src:UOp) -> UOp|None:
+  if (cv := src.contiguous_view()) is None or cv[1] == 0: return None
+  buf, offset = cv
+  size = UOp.const(dtypes.index, src.numel() * src.element_size() // buf.element_size())
+  # TODO: unique names
+  view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.numel()).bind(offset), size))
+  return view.bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK(VARIABLE) when movement ops collapse to a contiguous range."""
@@ -61,25 +69,16 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   # no symbolic shape
   if not all_int(c.shape): return None
 
-  if buf.op is not Ops.MULTI and (cv := src.contiguous_view()) is not None:
-    buf, offset = cv
-    size = UOp.const(dtypes.index, src.numel() * src.element_size() // buf.element_size())
-    # TODO: unique names
-    view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.max_numel()).bind(offset), size))
-    view = view.bitcast(src.dtype).reshape(src.shape)
-    return c.replace(src=(view,), dtype=buf.dtype) if c.op is Ops.COPY else view
+  if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+    return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create a per-shard buffer offset
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
-    local = resolved.src[0]
-    if (cv := local.contiguous_view()) is None: return None
-    buf, offset = cv
-    size = UOp.const(dtypes.index, local.numel() * local.element_size() // buf.element_size())
-    view = UOp(Ops.SHRINK, buf.dtype, (buf, UOp.variable(f"buf{buf.arg.slot}_offset", 0, buf.max_numel()).bind(offset), size))
-    return view.bitcast(local.dtype).reshape(local.shape).multi(resolved.arg)
+    if (view := _make_buffer_view(resolved.src[0])) is None: return None
+    return view.multi(resolved.arg)
 
   return None
 
