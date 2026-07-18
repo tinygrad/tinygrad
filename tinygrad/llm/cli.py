@@ -1,10 +1,9 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
+import sys, argparse, codecs, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker, getenv
-from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -89,8 +88,6 @@ models = {
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
 }
 
-# *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
-
 class FallbackTemplate:
   # minimal jinja2.Template-compatible chat template without jinja2, no tool calling support
   def __init__(self, tok:SimpleTokenizer): self.tok = tok
@@ -125,67 +122,7 @@ class FallbackTemplate:
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
 
-class Handler(HTTPRequestHandler):
-  server: LLMServer
-  def log_request(self, code='-', size='-'): pass
-  def do_GET(self):
-    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
-    else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    model, tok = self.server.model, self.server.tok
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
-               f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
-    out: list[int] = []
-    finish_reason = "stop"
-    st = time.perf_counter()
-    dec = tok.stream_decoder()
-    for next_id in model.generate(ids, temperature=temperature):
-      if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if tok.is_end(next_id): break
-      out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
-      if max_tokens is not None and len(out) >= max_tokens:
-        finish_reason = "length"
-        break
-    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-    if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    et = time.perf_counter()
-    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
-
-  def do_POST(self):
-    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
-    if DEBUG >= 1: print(json.dumps(body, indent=2))
-    if self.path == "/v1/chat/completions":
-      # render and tokenize
-      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
-      ids: list[int] = self.server.tok.encode(rendered)
-
-      # reply
-      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
-      if body.get("stream"): self.stream_json(chunks)
-      else:
-        out, finish_reason = [], "stop"
-        for c in chunks:
-          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
-          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
-        self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
-    else:
-      raise RuntimeError(f"unhandled path {self.path}")
-
-class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:jinja2.Template|FallbackTemplate):
-    self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
-    super().__init__(server_address, Handler)
+from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
