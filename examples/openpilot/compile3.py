@@ -65,6 +65,30 @@ def compile(onnx_file):
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
     assert gated_read_image_count == allowed_gated_read_image, f"different gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_RPT", 1):
+    from extra.gemm.qcom_openpilot_vision_fp16 import patch_fp32_rpt
+    if (patched:=patch_fp32_rpt(run_onnx_jit)): print(f"repeat-packed {patched} QCOM vision kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_SCHEDULE", 1):
+    from extra.gemm.qcom_openpilot_schedule_projection import patch_projection
+    if (patched:=patch_projection(run_onnx_jit)): print(f"rescheduled {patched} QCOM vision kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_FULL_RPT", 1):
+    from extra.gemm.qcom_openpilot_inverse_full_rpt import patch_model as patch_full_rpt
+    if (patched:=patch_full_rpt(run_onnx_jit)): print(f"fully repeat-packed {patched} QCOM vision kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_DEDUPE", 1):
+    from extra.gemm.qcom_openpilot_dedupe_head import dedupe_identical_calls
+    if (removed:=dedupe_identical_calls(run_onnx_jit)): print(f"deduplicated {len(removed)} QCOM kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_PACK_CONV", 1):
+    from extra.gemm.qcom_openpilot_pack_conv_weights import patch_conv
+    if (patched:=patch_conv(run_onnx_jit)): print(f"packed weights for {patched} QCOM convolution kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_LEVEL_SCHEDULE", 1):
+    from extra.gemm.qcom_openpilot_level_schedule import schedule_levels
+    if (moved:=schedule_levels(run_onnx_jit)): print(f"rescheduled {moved} QCOM kernels by dependency level")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_BATCH_HEAD", 1):
+    from extra.gemm.qcom_openpilot_batch_head import batch_head
+    if (combined:=batch_head(run_onnx_jit)): print(f"batched {combined} groups of QCOM head kernels")
+  if Device.DEFAULT.startswith("QCOM") and getenv("OPENPILOT_QCOM_INPUT_PACK", 1):
+    from extra.gemm.qcom_openpilot_input_pack import patch_input_pack
+    if (patched:=patch_input_pack(run_onnx_jit)): print(f"vectorized {patched} QCOM input kernel")
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
   mdl_sz = os.path.getsize(onnx_file)
@@ -72,7 +96,7 @@ def compile(onnx_file):
   print(f"mdl size is {mdl_sz/1e6:.2f}M")
   print(f"pkl size is {pkl_sz/1e6:.2f}M")
   print("**** compile done ****")
-  return inputs, test_val
+  return run_onnx_jit, inputs, test_val
 
 def test_vs_compile(run, inputs, test_val=None):
 
@@ -142,9 +166,10 @@ if __name__ == "__main__":
     test_vs_compile(pickle_loaded, inputs)
   else:
     onnx_file = fetch(OPENPILOT_MODEL)
-    inputs, outputs = compile(onnx_file)
+    pickle_loaded, inputs, outputs = compile(onnx_file)
 
-    with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+    if OUTPUT != os.devnull:
+      with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
     test_vs_compile(pickle_loaded, inputs, outputs)
     if getenv("SELFTEST"):
