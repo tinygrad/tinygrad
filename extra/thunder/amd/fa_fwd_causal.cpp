@@ -74,6 +74,19 @@ __device__ inline void exp2(rt_base<T, layout, shape> &dst, const rt_base<T, lay
 
 }
 
+constexpr float RESCALE_THRESHOLD = 8.0f;
+
+template<typename RV>
+__device__ __forceinline__ bool max_within_rescale_threshold(const RV& prev, const RV& cur) {
+    bool within = true;
+    #pragma unroll
+    for (int o = 0; o < RV::outer_dim; ++o) {
+        #pragma unroll
+        for (int i = 0; i < RV::inner_dim; ++i) within &= float(cur.data[o][i]) - float(prev.data[o][i]) <= RESCALE_THRESHOLD;
+    }
+    return __all(within);
+}
+
 template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using qo_tile = rt<T, Q_BLOCK_SIZE, D, L, S>;
 template<int D, typename T=bf16, typename L=col_l, typename S=rt_16x32_s> using qo_tile_transposed = rt<T, D, Q_BLOCK_SIZE, L, S>;
 template<int D, typename T=bf16, typename L=row_l, typename S=rt_32x16_s> using kv_tile = rt<T, KV_BLOCK_SIZE, D, L, S>;
@@ -197,6 +210,19 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     const int stagger = warpid() / 4;
     const int lane = laneid();
 
+    const bf16* k_base = (bf16*)&g.Kg[{batch_idx, 0, head_idx_kv, 0}];
+    const bf16* v_base = (bf16*)&g.Vg[{batch_idx, 0, head_idx_kv, 0}];
+    const int k_row_stride = g.Kg.template stride<1>() * sizeof(bf16);
+    const int v_row_stride = g.Vg.template stride<1>() * sizeof(bf16);
+    i32x4 k_srsrc = make_srsrc(k_base, k_row_stride * ATTN_N, k_row_stride);
+    i32x4 v_srsrc = make_srsrc(v_base, v_row_stride * ATTN_N, v_row_stride);
+
+    constexpr int elem_per_warp = (16 / sizeof(bf16)) * kittens::WARP_THREADS;
+    const uint32_t k_lds_0 = __builtin_amdgcn_readfirstlane((uint32_t)(uintptr_t)&k_smem[0].data[warpid() * elem_per_warp]);
+    const uint32_t k_lds_1 = __builtin_amdgcn_readfirstlane((uint32_t)(uintptr_t)&k_smem[1].data[warpid() * elem_per_warp]);
+    const uint32_t v_lds_0 = __builtin_amdgcn_readfirstlane((uint32_t)(uintptr_t)&v_smem[0].data[warpid() * elem_per_warp]);
+    const uint32_t v_lds_1 = __builtin_amdgcn_readfirstlane((uint32_t)(uintptr_t)&v_smem[1].data[warpid() * elem_per_warp]);
+
     const int num_tiles = ATTN_N / KV_BLOCK_SIZE;
     const int max_tile_idx = block_tile_idx * NUM_WARPS + NUM_WARPS - 1;
     const int max_q_end_pos = (max_tile_idx + 1) * Q_BLOCK_SIZE;
@@ -223,7 +249,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
     zero(o_reg);
     zero(norm_vec);
-    zero(scale_vec);
+    ones(scale_vec);
 
     using T = typename st_bf<KV_BLOCK_SIZE, ATTN_D, st_32x32_s>::dtype;
     constexpr int bytes_per_thread = st_32x32_s::template bytes_per_thread<T>();
@@ -235,7 +261,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     G::prefill_swizzled_offsets<1, false>(k_smem[0], g.Kg, swizzled_offsets_K);
     G::prefill_swizzled_offsets<1, false>(v_smem[0], g.Vg, swizzled_offsets_V);
 
-    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_0);
     __builtin_amdgcn_s_waitcnt(0);
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
@@ -247,9 +273,9 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     transpose(q_reg_transposed, q_reg);
 
     // All warps then collaboratively load in the first slice of V (V0) and the second slice of K (K1) into shared memory
-    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_1);
     // All warps then load in the first slice of K (K0)
-    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, 0, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_0);
     load(k_reg, k_smem[0]);
     __builtin_amdgcn_sched_barrier(0);
     asm volatile("s_waitcnt lgkmcnt(0)");
@@ -272,12 +298,10 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     col_max(max_vec, att_block[0]);
 
     copy(max_vec_prev, max_vec);
-    exp2(scale_vec, scale_vec);
 
     sub_col(att_block[0], att_block[0], max_vec);
     exp2(att_block[0].tiles[0][0], att_block[0].tiles[0][0]);
     __builtin_amdgcn_sched_barrier(0);
-    mul_col(o_reg, o_reg, scale_vec);
 
     if (stagger) {
         __builtin_amdgcn_sched_barrier(0);
@@ -288,13 +312,15 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     // All warps then load in the second slice of K (K1)
     load(k_reg, k_smem[1]);
     // All warps then collaboratively load in the third slice of K (K2) into shared memory
-    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[0], g.Kg, {batch_idx, 2, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_0);
     // All warps then collaboratively load in the second slice of V (V1) into shared memory
-    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_1);
     asm volatile("s_waitcnt lgkmcnt(0)");
     asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
+
+    bool pending_scale = false;
 
     // hot loop
     for (int j = 3; j < max_num_tiles - 1; j += 2) {
@@ -305,7 +331,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
         //      Finish softmax for QK0
         exp2(att_block[0].tiles[1][0], att_block[0].tiles[1][0]);
-        mul(norm_vec, norm_vec, scale_vec);
+        if (pending_scale) mul(norm_vec, norm_vec, scale_vec);
         col_sum(norm_vec, att_block[0], norm_vec);
         copy(att_block_bf16, att_block[0]);
         att_block_bf16_in = *reinterpret_cast<attn_tile< bf16, col_l, rt_16x32_4_s>*>(&att_block_bf16);
@@ -317,7 +343,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
         // Cluster 1:
         //      Load K3 into shared
-        G::load<1, false>(k_smem[1], g.Kg, {batch_idx, j, head_idx_kv, 0}, swizzled_offsets_K);
+        G::load<1, false>(k_smem[1], g.Kg, {batch_idx, j, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_1);
         //      Load V0 into registers
         load(v_reg, v_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -329,18 +355,23 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         // Cluster 2:
         //      A0V0
         __builtin_amdgcn_s_setprio(1);
-        mma_AtB(o_reg, v_reg, att_block_bf16_in, o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 0), subtile_inplace<16>(att_block_bf16_in, 0), o_reg);
         //      Partial softmax for QK1
         col_max(max_vec, att_block[1], max_vec_prev);
-        sub(scale_vec, max_vec_prev, max_vec);
-        copy(max_vec_prev, max_vec);
-        exp2(scale_vec, scale_vec);
+        sched_barrier_pairs<4, 5, 2>();
+        if ((pending_scale = !max_within_rescale_threshold(max_vec_prev, max_vec))) {
+            sub(scale_vec, max_vec_prev, max_vec);
+            exp2(scale_vec, scale_vec);
+            mul_col(o_reg, o_reg, scale_vec);
+            copy(max_vec_prev, max_vec);
+        } else copy(max_vec, max_vec_prev);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 1), subtile_inplace<16>(att_block_bf16_in, 1), o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 2), subtile_inplace<16>(att_block_bf16_in, 2), o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 3), subtile_inplace<16>(att_block_bf16_in, 3), o_reg);
         sub_col(att_block[1], att_block[1], max_vec);
         exp2(att_block[1].tiles[0][0], att_block[1].tiles[0][0]);
-        sched_barrier_pairs<10, 5, 2>();
+        sched_barrier_pairs<6, 5, 2>();
         sched_barrier_exp_pairs<6, 3, 2>();
-        __builtin_amdgcn_sched_barrier(0);
-        mul_col(o_reg, o_reg, scale_vec);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
@@ -348,7 +379,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
         // Cluster 3:
         //      Load V2 into shared
-        G::load<1, false>(v_smem[0], g.Vg, {batch_idx, j - 1, head_idx_kv, 0}, swizzled_offsets_V);
+        G::load<1, false>(v_smem[0], g.Vg, {batch_idx, j - 1, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_0);
         //      Load K2 into registers
         load(k_reg, k_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -365,7 +396,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
         //      Finish softmax for QK1
         exp2(att_block[1].tiles[1][0], att_block[1].tiles[1][0]);
-        mul(norm_vec, norm_vec, scale_vec);
+        if (pending_scale) mul(norm_vec, norm_vec, scale_vec);
         col_sum(norm_vec, att_block[1], norm_vec);
         copy(att_block_bf16, att_block[1]);
         att_block_bf16_in = *reinterpret_cast<attn_tile<bf16, col_l, rt_16x32_4_s>*>(&att_block_bf16);
@@ -378,7 +409,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
         // Cluster 5:
         //      Load K4 into shared
-        G::load<1, false>(k_smem[0], g.Kg, {batch_idx, j + 1, head_idx_kv, 0}, swizzled_offsets_K);
+        G::load<1, false>(k_smem[0], g.Kg, {batch_idx, j + 1, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_0);
         //      Load V1 into registers
         load(v_reg, v_smem[1]);
         if constexpr (causal) {
@@ -396,18 +427,23 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         // Cluster 6:
         //      A1V1
         __builtin_amdgcn_s_setprio(1);
-        mma_AtB(o_reg, v_reg, att_block_bf16_in, o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 0), subtile_inplace<16>(att_block_bf16_in, 0), o_reg);
         //      Partial softmax for QK2
         col_max(max_vec, att_block[0], max_vec_prev);
-        sub(scale_vec, max_vec_prev, max_vec);
-        copy(max_vec_prev, max_vec);
-        exp2(scale_vec, scale_vec);
+        sched_barrier_pairs<4, 5, 4>();
+        if ((pending_scale = !max_within_rescale_threshold(max_vec_prev, max_vec))) {
+            sub(scale_vec, max_vec_prev, max_vec);
+            exp2(scale_vec, scale_vec);
+            mul_col(o_reg, o_reg, scale_vec);
+            copy(max_vec_prev, max_vec);
+        } else copy(max_vec, max_vec_prev);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 1), subtile_inplace<16>(att_block_bf16_in, 1), o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 2), subtile_inplace<16>(att_block_bf16_in, 2), o_reg);
+        mma_AtB(o_reg, subtile_inplace<16>(v_reg, 3), subtile_inplace<16>(att_block_bf16_in, 3), o_reg);
         sub_col(att_block[0], att_block[0], max_vec);
         exp2(att_block[0].tiles[0][0], att_block[0].tiles[0][0]);
-        sched_barrier_pairs<10, 5, 4>();
+        sched_barrier_pairs<6, 5, 4>();
         sched_barrier_exp_pairs<6, 3, 4>();
-        __builtin_amdgcn_sched_barrier(0);
-        mul_col(o_reg, o_reg, scale_vec);
         __builtin_amdgcn_s_setprio(0);
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
@@ -415,7 +451,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
         // Cluster 7:
         //      Load V3 into shared
-        G::load<1, false>(v_smem[1], g.Vg, {batch_idx, j, head_idx_kv, 0}, swizzled_offsets_V);
+        G::load<1, false>(v_smem[1], g.Vg, {batch_idx, j, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_1);
         //      Load K3 into registers
         load(k_reg, k_smem[1]);
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -433,7 +469,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
     //      Finish softmax for QK2
     exp2(att_block[0].tiles[1][0], att_block[0].tiles[1][0]);
-    mul(norm_vec, norm_vec, scale_vec);
+    if (pending_scale) mul(norm_vec, norm_vec, scale_vec);
 
     col_sum(norm_vec, att_block[0], norm_vec);
     copy(att_block_bf16, att_block[0]);
@@ -446,7 +482,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
     // Cluster 1:
     //      Load K5 into shared
-    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_K);
+    G::load<1, false>(k_smem[1], g.Kg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_K, k_srsrc, k_base, k_lds_1);
     //      Load V2 into registers
     load(v_reg, v_smem[0]);
     if constexpr (causal) {
@@ -483,7 +519,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
     // Cluster 3:
     //      Load V4 into shared
-    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, max_num_tiles - 2, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[0], g.Vg, {batch_idx, max_num_tiles - 2, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_0);
     //      Load K4 into registers
     load(k_reg, k_smem[0]);
     asm volatile("s_waitcnt lgkmcnt(0)");
@@ -545,7 +581,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
 
     // Cluster 7:
     //      Load V5 into shared
-    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_V);
+    G::load<1, false>(v_smem[1], g.Vg, {batch_idx, max_num_tiles - 1, head_idx_kv, 0}, swizzled_offsets_V, v_srsrc, v_base, v_lds_1);
     //      Load K5 into registers
     load(k_reg, k_smem[1]);
     asm volatile("s_waitcnt lgkmcnt(0)");
