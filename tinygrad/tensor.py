@@ -179,6 +179,7 @@ class Tensor(RandMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    if any(t.dtype in dtypes.weaks for t in (self,)+lst): raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -256,6 +257,7 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).data()
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     buf = self._buffer()
@@ -279,6 +281,7 @@ class Tensor(RandMixin):
     print(t.tolist())
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).tolist()
     # TODO: remove half once minimum python supports it
     if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
     if 0 in self.shape:
@@ -296,6 +299,7 @@ class Tensor(RandMixin):
     print(repr(t.numpy()))
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).numpy()
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()

@@ -30,8 +30,7 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(t.dtype, weak)
       self.assertEqual(t.data().itemsize, strong.itemsize)
       self.assertEqual(t.numpy().dtype.itemsize, strong.itemsize)
-      realized = t.clone("CPU").realize()
-      self.assertEqual((realized.dtype, realized.uop.buffer.dtype), (strong, strong))
+      with self.assertRaises(RuntimeError): t.clone("CPU")
     with patch.object(dtypes, "default_int", dtypes.int64):
       self.assertEqual(Tensor.const(dtypes.weakint, 3).numpy().dtype.itemsize, dtypes.int64.itemsize)
 
@@ -146,6 +145,29 @@ class TestWeakStorageBoundary(unittest.TestCase):
       f.write(bytes(8))
       f.flush()
       with self.assertRaises(RuntimeError): Tensor(pathlib.Path(f.name), dtype=dtypes.weakint)
+
+class TestWeakMaterializationEntries(unittest.TestCase):
+  # everything that creates storage from a weak value raises
+  def test_reads_commit_storage_raises(self):
+    for weak, value, strong in ((dtypes.weakint, 3, dtypes.default_int), (dtypes.weakfloat, 0.5, dtypes.default_float)):
+      def weak_val():
+        return Tensor([True], device="CPU").where(Tensor.const(weak, value), Tensor.const(weak, value))
+      self.assertEqual(weak_val().dtype, weak)
+      self.assertEqual(weak_val().to("CPU").dtype, weak)
+      self.assertEqual(weak_val().data().format, strong.fmt)
+      self.assertEqual(weak_val().numpy().dtype.itemsize, strong.itemsize)
+      self.assertEqual(weak_val().tolist(), [value])
+      self.assertEqual(weak_val().cast(strong).realize().uop.buffer.dtype, strong)
+      for entry in (lambda t: t.contiguous(), lambda t: t.realize(), lambda t: t.clone(),
+                    lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
+        with self.assertRaises(RuntimeError): entry(weak_val())
+
+  def test_empty_reads_commit(self):
+    for weak, strong in ((dtypes.weakint, dtypes.default_int), (dtypes.weakfloat, dtypes.default_float)):
+      empty = Tensor.const(weak, 0).reshape(1).shrink(((0, 0),))
+      self.assertEqual(empty.data().format, strong.fmt)
+      self.assertEqual(empty.numpy().dtype.itemsize, strong.itemsize)
+      self.assertEqual(empty.tolist(), [])
 
 class TestWeakSpec(unittest.TestCase):
   def test_weak_operand_allowed(self):
