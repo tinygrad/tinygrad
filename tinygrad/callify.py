@@ -53,7 +53,7 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  if (cv := src.contiguous_view()) is None or cv[1] == 0: return None
+  if (cv := src.contiguous_view()) is None or (cv[0].numel() == src.numel() and cv[1] == 0): return None
   buf, offset = cv
   size = UOp.const(dtypes.index, src.numel() * src.element_size() // buf.element_size())
   # TODO: unique names
