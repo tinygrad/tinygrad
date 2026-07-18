@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ProgramInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -322,9 +322,31 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
   return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
+def contiguous_index_source(idx:UOp, shape:tuple[sint, ...], ranges:tuple[UOp, ...]) -> UOp|None:
+  if idx.src[0].op is Ops.SLICE or len(idx.src) != 2 or idx.src[0].shape != (prod(shape),) or len(ranges) != len(shape): return None
+  linear_idx, stride = UOp.const(dtypes.index, 0), cast(sint, 1)
+  for size, ridx in reversed(tuple(zip(shape, ranges))):
+    linear_idx, stride = linear_idx + ridx * stride, stride * size
+  def term_keys(x:UOp) -> list[bytes]:
+    terms = (y.ssimplify() for y in x.split_uop(Ops.ADD))
+    return sorted(y.key if isinstance(y, UOp) else repr(y).encode() for y in terms if not (isinstance(y, int) and y == 0))
+  idx_terms, linear_terms = term_keys(idx.src[1]), term_keys(linear_idx)
+  return idx.src[0].reshape(shape) if idx_terms == linear_terms else None
+
+def is_program_output(after:UOp) -> bool:
+  if after.op is not Ops.AFTER: return False
+  for call in after.src[1:]:
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.PROGRAM or not isinstance(info:=call.src[0].arg, ProgramInfo): continue
+    for slot in set(info.outs)-set(info.ins):
+      if slot in info.globals and call.src[1+info.globals.index(slot)].buf_uop is after.src[0].buf_uop: return True
+  return False
+
 def remove_noop_bufferize(idx,b2):
-  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.SLICE: return None
-  return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
+  if idx.src[0].op is Ops.SLICE: return None
+  if idx.src[1:] == b2.src[1:]: return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
+  # A flattened contiguous INDEX and its multidimensional ranges address the same buffer. Keep the
+  # already-materialized source instead of copying it into a shape-only STAGE.
+  return contiguous_index_source(idx, b2.shape, b2.src[1:])
 
 def remove_noop_mselect_bufferize(m:UOp):
   if len(m.src) != 1 or (b:=m.src[0]).op is not Ops.STAGE or len(b.src) < 2: return None
@@ -413,6 +435,16 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
+
+  # An opaque PROGRAM already wrote its output buffer. A following full identity CONTIGUOUS is only
+  # a scheduling boundary, so preserve the AFTER dependency and reuse the program's output storage.
+  source = x.src[0].src[0] if x.src[0].op is Ops.CONTIGUOUS and len(x.src[0].src) == 1 else None
+  if source is not None and source.op is Ops.INDEX and is_program_output(source.src[0]):
+    source_rngs = sorted(source.ranges, key=lambda r: r.arg)
+    if all(r.src[0].op is Ops.CONST for r in source_rngs):
+      source_shape = tuple(r.src[0].arg for r in source_rngs)
+      if prod(source_shape) == size and (direct:=contiguous_index_source(source, source_shape, tuple(source_rngs))) is not None:
+        return direct.reshape((size,))
 
   # AFTER: add END to the existing STORE, return buffer with kernel dependency
   if (after:=x.src[0]).op is Ops.AFTER:
