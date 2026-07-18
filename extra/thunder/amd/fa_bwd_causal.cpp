@@ -75,7 +75,11 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   const int q_head_idx_fixed = blockIdx.x * HEADS_PER_WG;  // First query head handled by this workgroup.
   const int kv_head_idx = q_head_idx_fixed / GROUP_SIZE;
   const int q_head_in_group = q_head_idx_fixed % GROUP_SIZE;
-  const int seq_idx = blockIdx.y;
+  constexpr int grid_tiles = ATTN_N / BLOCK_SIZE_KV;
+  constexpr int grid_chunk = 4;
+  const int chunk_pair = blockIdx.y / (2 * grid_chunk), chunk_offset = blockIdx.y % grid_chunk;
+  const int seq_idx = blockIdx.y % (2 * grid_chunk) < grid_chunk ? chunk_pair * grid_chunk + chunk_offset :
+    grid_tiles - (chunk_pair + 1) * grid_chunk + chunk_offset;
   const int batch_idx = blockIdx.z;
   const int first_q_head = q_head_idx_fixed;
 
