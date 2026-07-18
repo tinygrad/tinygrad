@@ -327,6 +327,15 @@ class TestAssign(unittest.TestCase):
       self.assertEqual(y.tolist(), [11.0])
       self.assertEqual(x.tolist(), [5.0])
 
+  def test_assign_view_corealize_order_independent(self):
+    for reader_first in (True, False):
+      x = Tensor([1, 2], dtype=dtypes.int).contiguous().realize()
+      reader = x + 10
+      writer = x[:1].assign(Tensor([9], dtype=dtypes.int))
+      Tensor.realize(reader, writer) if reader_first else Tensor.realize(writer, reader)
+      self.assertEqual(reader.tolist(), [11, 12])
+      self.assertEqual(x.tolist(), [9, 2])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)
