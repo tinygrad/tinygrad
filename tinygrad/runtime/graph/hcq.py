@@ -9,6 +9,15 @@ from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 from tinygrad.runtime.ops_rdma import RDMACopyQueue
 
 class HCQGraph(MultiGraphRunner):
+  MIN_COPY_OVERLAP_SIZE = 512 << 20
+
+  @staticmethod
+  def _copy_producer_calls(linear:UOp) -> set[UOp]:
+    def call_args(call:UOp) -> tuple[UOp, ...]: return tuple(x for x in call.src[1:] if x.op is not Ops.BIND)
+    copy_sources = {call_args(call)[1].buf_uop for call in linear.src if call.src[0].op is Ops.COPY}
+    return {call for call in linear.src if call.src[0].op is Ops.PROGRAM and
+            any(call_args(call)[i].buf_uop in copy_sources for i in call.src[0].arg.outs)}
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.devices = list({cast(HCQCompiled, Device[b.device]) for (_,_,bufs,_) in self.calls for b in bufs})
@@ -48,7 +57,9 @@ class HCQGraph(MultiGraphRunner):
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
     self.ji_schedule: dict[int, tuple[HCQCompiled, HWQueue, list, list, HCQSignal, int|None]] = {}
 
-    self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: unwrap(dev.hw_compute_queue_t)() for dev in self.devices}
+    self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: unwrap(dev.new_graph_compute_queue(0)) for dev in self.devices}
+    self.aux_comp_queues: dict[HCQCompiled, list[HWQueue]] = {
+      dev: ([q] if (q:=dev.new_graph_compute_queue(1)) is not None else []) for dev in self.devices}
     self.copy_queues: dict[tuple[HCQCompiled, int], HWQueue] = {} # lazy allocation, keyed by (device, queue_idx)
     self.rdma_queues: dict[tuple[HCQCompiled, HCQCompiled], RDMACopyQueue] = {} # lazy allocation, keyed by device pair
     self.num_copy_queues: int = getenv("HCQ_NUM_SDMA", min(len(self.devices), 8) if ALL2ALL >= 1 else 1)
@@ -77,8 +88,12 @@ class HCQGraph(MultiGraphRunner):
     self.last_j: dict[HWQueue, int|None] = collections.defaultdict(lambda: None)
     self.queue_access: dict[HWQueue, dict[HWQueue, int|None]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
     self.dev_access: dict[HWQueue, set[HCQCompiled]] = collections.defaultdict(set)
+    copy_producers = self._copy_producer_calls(self.linear)
+    self.call_feeds_copy = [call in copy_producers for call in self.call_uops]
+    self.copy_producer_queue: dict[HCQCompiled, HWQueue|None] = collections.defaultdict(lambda: None)
 
-    for dev, queue in self.comp_queues.items(): self.dev_access[queue].add(dev)
+    for dev in self.devices:
+      for queue in self._dev_compute_queues(dev): self.dev_access[queue].add(dev)
 
     self.input_replace_map: dict[HCQCompiled, set[tuple[int, int]]] = collections.defaultdict(set)
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
@@ -100,7 +115,7 @@ class HCQGraph(MultiGraphRunner):
       if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], {k: 0 for k in ast.arg.runtimevars}])
 
       if runtime is not None:
-        enqueue_queue = self.comp_queues[enqueue_dev]
+        enqueue_queue = self._select_compute_queue(enqueue_dev, bufs, ast.arg.outs)
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
         rdma_key = (cast(HCQCompiled, Device[bufs[0].device]).rdma_dev(), enqueue_dev.rdma_dev())
@@ -129,6 +144,10 @@ class HCQGraph(MultiGraphRunner):
           enqueue_dev, out_signal, j, is_copy=is_xfer)
 
       self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if runtime is not None else (j + 1))
+      if runtime is not None:
+        copied_output_size = max((buf.nbytes for i,buf in enumerate(bufs) if i in ast.arg.outs), default=0)
+        should_overlap = self.call_feeds_copy[j] and copied_output_size >= self.MIN_COPY_OVERLAP_SIZE
+        self.copy_producer_queue[enqueue_dev] = enqueue_queue if should_overlap else None
 
       # Collect profile information if profiling is enabled.
       if PROFILE:
@@ -150,14 +169,21 @@ class HCQGraph(MultiGraphRunner):
     # Build hardware queues.
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
+    # The primary queue joins each auxiliary compute queue before completing the graph.
+    for dev in self.devices:
+      for queue in self.aux_comp_queues[dev]:
+        if (last_j:=self.last_j[queue]) is not None: self.ji_schedule[last_j] = self.ji_schedule[last_j][:5] + (last_j + 1,)
+
     # Create variable timeline signals for each device.
     timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{self.dev_name(dev)}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
     self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{self.dev_name(dev)}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
     self.virt_timeline_signals = {dev: unwrap(dev.signal_t)(HCQBuffer(timeline_sigaddrs[dev], 16),owner=dev,is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
-      self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
-                           .wait(self.kick_signals[dev.peer_group], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
+      for queue in self._dev_compute_queues(dev):
+        queue.memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
+             .wait(self.kick_signals[dev.peer_group], self.kickoff_var)
+      self.comp_queues[dev].signal(self.signals[dev], self.kickoff_var)
 
     for j, ((dev_idx, ast, bufs, _), runtime) in enumerate(zip(self.calls, self.runtimes)):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
@@ -210,6 +236,9 @@ class HCQGraph(MultiGraphRunner):
       if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
     for dev in self.devices:
+      for queue in self.aux_comp_queues[dev]:
+        if (last_j:=self.last_j[queue]) is not None:
+          self.comp_queues[dev].wait(self.signals[queue], last_j + 1)
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
         for copy_q in self._dev_copy_queues(dep_dev):
           if copy_q in self.signals: self.comp_queues[dev].wait(self.signals[copy_q], unwrap(self.last_j[copy_q]) + 1)
@@ -218,7 +247,20 @@ class HCQGraph(MultiGraphRunner):
       for copy_q in self._dev_copy_queues(dev): copy_q.bind(dev)
 
     self.last_timeline: dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
-    self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
+    self.queue_signals_to_reset = [self.signals[q] for dev in self.devices for q in self._dev_compute_queues(dev) if q in self.signals] + \
+                                  [self.signals[q] for q in self.copy_queues.values() if q in self.signals]
+
+  def _select_compute_queue(self, dev:HCQCompiled, bufs:list[Buffer], outs:list[int]) -> HWQueue:
+    if not self.aux_comp_queues[dev]: return self.comp_queues[dev]
+    rdeps = self.deps.get_resource_dependencies(bufs, outs)
+    if (producer_queue:=self.copy_producer_queue[dev]) is not None:
+      self.copy_producer_queue[dev] = None
+      return self.comp_queues[dev] if producer_queue is not self.comp_queues[dev] else self.aux_comp_queues[dev][0]
+    aux_deps = [(q, val) for q,val in rdeps if q in self.aux_comp_queues[dev]]
+    if aux_deps: return max(aux_deps, key=lambda x:x[1])[0]
+    if any(q in self.copy_queues.values() for q,_ in rdeps):
+      return min(self.aux_comp_queues[dev], key=lambda q:cast(int, self.last_j[q]) if self.last_j[q] is not None else -1)
+    return self.comp_queues[dev]
 
   def _resolve_deps(self, bufs, outs, enqueue_queue, enqueue_dev, out_signal, j, is_copy, rdma_qp=None):
     rdeps = self._access_resources(bufs, outs, (enqueue_queue, j + 1))
@@ -259,6 +301,7 @@ class HCQGraph(MultiGraphRunner):
     return sync_signals, opt_deps, rdeps
 
   def _dev_copy_queues(self, dev): return [q for (d, _), q in self.copy_queues.items() if d == dev]
+  def _dev_compute_queues(self, dev): return [self.comp_queues[dev], *self.aux_comp_queues[dev]]
 
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     # Map input buffers
@@ -287,7 +330,8 @@ class HCQGraph(MultiGraphRunner):
     for q in self.rdma_queues.values(): q.submit(q.dev, hcq_var_vals)
 
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.device_vars.get(dev, {}))
+      hcq_var_vals_local = hcq_var_vals|self.device_vars.get(dev, {})
+      for compute_queue in self._dev_compute_queues(dev): compute_queue.submit(dev, hcq_var_vals_local)
       for copy_queue in self._dev_copy_queues(dev): copy_queue.submit(dev, hcq_var_vals_local)
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 import functools, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, zero_scalar, dname_of
 
@@ -25,8 +26,8 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_next:UOp,
                   arg=KernelInfo(f"fused_silu_mul_bwd_w13_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_bwd_w13.cpp", n_elems, hidden,
                          ["-DLAYER_SCALE=1"] if layer_num is not None else [], num_wg=bwd_num_wg)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
+             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1), ins=tuple(range(2, 6+(layer_num is not None)))))
 
 @functools.cache
 def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:UOp,
@@ -46,8 +47,8 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:
                     arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden,
                          ["-DLAYER_SCALE=1"] if layer_num is not None else [])
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
+             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1), ins=tuple(range(2, 4 if layer_num is None else 7))))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   src = kernel.src[1:]
