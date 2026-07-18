@@ -292,6 +292,8 @@ class TestGemmLlama(unittest.TestCase):
 
   def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 384)
 
+  def test_fp8_w13_trio(self): verify_asm_gemm(1, 16384, 28672, 4096, dtype=FP8_DTYPE)
+
   def test_fp8_atb_slow_shape(self):
     run_fp8_atb_gemm(M=6144, N=4096, K=16384, benchmark=True)
 
