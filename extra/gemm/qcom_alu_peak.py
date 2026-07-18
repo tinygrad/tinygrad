@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Adreno 630 FP16 MAD throughput benchmark."""
-import argparse, ctypes
+import argparse, ctypes, struct
 
 from tinygrad import Device, dtypes
 from tinygrad.device import Buffer
@@ -98,12 +98,22 @@ def build_alu_shader(dev, threads, groups, rpt, loops, unroll, independent, r1):
     return assemble(instrs), loop_end - loop_start, hregs, None, unroll * groups * width * 2
 
 
-def build_gemm_pattern_shader(dev, threads, loops, rows, ncols, unroll, order, bmode, r1):
+def gemm_check_inputs(rows, ncols):
+    a = [[((row * 3 + kk) % 4 + 1) / 8 for kk in range(4)] for row in range(rows)]
+    b = [[[[((col * 7 + kk * 3 + lane) % 4 + 1) / 8 for lane in range(4)] for kk in range(4)] for col in range(ncols)]][0]
+    return a, b
+
+
+def half_raw(value):
+    return struct.unpack('<H', struct.pack('<e', value))[0]
+
+
+def build_gemm_pattern_shader(dev, threads, loops, rows, ncols, unroll, order, bmode, r1, check_pattern=False, store_group=0):
     if loops != 1: raise ValueError('gemm-pattern is a one-shot ALU body benchmark; use --loops 1 so loop-control regs do not clobber A/B sources')
     if rows not in (4, 8): raise ValueError('rows must be 4 or 8')
     if ncols < 1: raise ValueError('ncols must be positive')
     instrs = prologue_4x2(dev, threads)
-    instrs += [MOV_S32('r6.z', 0, sy=True), MOV_H_IMM('hr0.x', 0x3c00)]
+    instrs += [MOV_S32('r6.z', 0, sy=True)]
 
     # A lives in hr0..hr(rows-1). B either reuses one 4-texel column group or
     # allocates one 4-texel group per output col4. Accumulators start at hr16 to
@@ -113,10 +123,18 @@ def build_gemm_pattern_shader(dev, threads, loops, rows, ncols, unroll, order, b
     b_groups = ncols if bmode == 'percol' else 1
     b_end = b_base + b_groups * 16
     acc0 = max(_hreg('hr16.x'), ((b_end + 3) // 4) * 4)
-    emit_mov_h_block(instrs, 1, rows * 4, 0)
-    emit_mov_h_block(instrs, b_base, b_end, 0)
-    instrs += [MOV_H_IMM(acc0, 0), MOV_H(acc0 + 1, acc0, rpt=2)]
-    emit_mov_h_block(instrs, acc0 + 4, acc0 + rows * ncols * 4, acc0)
+    if check_pattern:
+        check_a, check_b = gemm_check_inputs(rows, ncols)
+        for row in range(rows):
+            for kk in range(4): instrs.append(MOV_H_IMM(a_base + row * 4 + kk, half_raw(check_a[row][kk])))
+        for col in range(b_groups):
+            for kk in range(4):
+                for lane in range(4): instrs.append(MOV_H_IMM(b_base + col * 16 + kk * 4 + lane, half_raw(check_b[col][kk][lane])))
+    else:
+        instrs.append(MOV_H_IMM('hr0.x', 0x3c00))
+        emit_mov_h_block(instrs, 1, rows * 4, 0)
+        emit_mov_h_block(instrs, b_base, b_end, 0)
+    for lane in range(acc0, acc0 + rows * ncols * 4): instrs.append(MOV_H_IMM(lane, 0))
     hregs = (max(b_end, acc0 + rows * ncols * 4) + 3) // 4
 
     loop_start = len(instrs)
@@ -154,7 +172,12 @@ def build_gemm_pattern_shader(dev, threads, loops, rows, ncols, unroll, order, b
     ]
     loop_end = len(instrs)
     instrs.append(BR(loop_start - loop_end))
-    store_output(instrs, 'r7.x', 'r7.y', acc0)
+    if check_pattern:
+        # The per-column B register bank aliases the donor prologue's r7 output
+        # coordinates. Every lane computes the same diagnostic tile, so use one
+        # common output address and bit-check the selected accumulator vector.
+        instrs += [MOV_S32('r7.x', 0), MOV_S32('r7.y', 0), NOP(rpt=2)]
+    store_output(instrs, 'r7.x', 'r7.y', acc0 + store_group * 4)
     instrs.append(END())
     return assemble(instrs), loop_end - loop_start, hregs, None, unroll * rows * ncols * 4 * 4 * 2
 
@@ -166,7 +189,8 @@ def run(args):
     if args.compiler_pattern:
         shader, loop_instrs, hregs, fregs, flops_per_thread_loop = build_compiler_pattern_shader(dev, args.threads, args.loops, args.pairs, args.store)
     elif args.gemm_pattern:
-        shader, loop_instrs, hregs, fregs, flops_per_thread_loop = build_gemm_pattern_shader(dev, args.threads, args.loops, args.rows, args.ncols, args.unroll, args.order, args.bmode, args.r1)
+        shader, loop_instrs, hregs, fregs, flops_per_thread_loop = build_gemm_pattern_shader(
+            dev, args.threads, args.loops, args.rows, args.ncols, args.unroll, args.order, args.bmode, args.r1, args.check_gemm)
     else:
         shader, loop_instrs, hregs, fregs, flops_per_thread_loop = build_alu_shader(dev, args.threads, args.groups, args.rpt, args.loops, args.unroll, args.independent, args.r1)
         width = args.rpt + 1
@@ -186,9 +210,10 @@ def run(args):
         mode, args.r1, args.rows, args.ncols, args.bmode, args.order, args.groups, args.rpt, args.rpt + 1, args.unroll, args.pairs, fregs, hregs, reg_count, wave_pairs, loop_instrs, len(shader)//8, asm.count('mad.f16'), asm.count('(rpt3)mad.f16')))
     if args.disasm: print(asm)
 
-    a_img, b_img = dtypes.imageh((M, K4)), dtypes.imageh((K4*4, N//4))
     a, b, c = make_bufs(dev)
-    prg = dev.runtime('gemm_h', lib, [[(0, a_img)], [(1, b_img)], [(2, dtypes.half.ptr())]])
+    # Runtime buffer metadata now carries image shape separately from the scalar dtype.
+    buf_dtypes = [((0, dtypes.half, (M, K4, 4)),), ((0, dtypes.half, (K4*4, N//4, 4)),), ((0, dtypes.half, None),)]
+    prg = dev.runtime('gemm_h', lib, buf_dtypes=buf_dtypes)
     tile_m = (args.threads // 32) * 4
     gs, ls = (8, M // tile_m, 1), (args.threads, 1, 1)
     for _ in range(5): prg(a._buf, b._buf, c._buf, global_size=gs, local_size=ls, wait=True)
@@ -197,9 +222,34 @@ def run(args):
         t = prg(a._buf, b._buf, c._buf, global_size=gs, local_size=ls, wait=True)
         if t: times.append(t)
     best = min(times)
+    median = sorted(times)[len(times) // 2]
     total_threads = gs[0] * gs[1] * args.threads
     flops = total_threads * args.loops * flops_per_thread_loop
-    print('%.1f GFLOPS  (%.3f ms)' % (flops / best / 1e9, best * 1e3))
+    print('%.1f GFLOPS best (%.3f ms), %.1f GFLOPS median (%.3f ms), flops=%d runs=%d' %
+          (flops / best / 1e9, best * 1e3, flops / median / 1e9, median * 1e3, flops, len(times)))
+    if args.check_gemm:
+        if not args.gemm_pattern or args.bmode != 'percol' or args.loops != 1:
+            raise ValueError('--check-gemm requires --gemm-pattern --bmode percol --loops 1')
+        check_a, check_b = gemm_check_inputs(args.rows, args.ncols)
+        checked = 0
+        for group in range(args.rows * args.ncols):
+            check_shader, _, check_hregs, _, _ = build_gemm_pattern_shader(
+                dev, args.threads, args.loops, args.rows, args.ncols, args.unroll, args.order, args.bmode, args.r1,
+                check_pattern=True, store_group=group)
+            check_lib = inject(envelope, img_off, img_sz, reg_off, check_shader, fregs=fregs, hregs=check_hregs)
+            check_prg = dev.runtime('gemm_h', check_lib, buf_dtypes=buf_dtypes)
+            check_prg(a._buf, b._buf, c._buf, global_size=gs, local_size=ls, wait=True)
+            raw = c.copyout(memoryview(bytearray(c.nbytes))).cast('H')
+            row, col = divmod(group, args.ncols)
+            expected = [half_raw(args.unroll * sum(check_a[row][kk] * check_b[col][kk][lane] for kk in range(4))) for lane in range(4)]
+            bad = next((i for i, value in enumerate(raw[:4]) if value != expected[i]), None)
+            if bad is not None:
+                got = struct.unpack('<e', struct.pack('<H', raw[bad]))[0]
+                want = struct.unpack('<e', struct.pack('<H', expected[bad]))[0]
+                raise RuntimeError('GEMM CHECK FAIL group=%d index=%d got=%r expected=%r' % (group, bad, got, want))
+            checked += 4
+        print('GEMM CHECK PASS groups=%d scalar_outputs=%d bit_exact=true shape_per_thread=%dx%dx%d' %
+              (args.rows * args.ncols, checked, args.rows, args.ncols * 4, args.unroll * 4))
 
 
 if __name__ == '__main__':
@@ -213,6 +263,7 @@ if __name__ == '__main__':
     parser.add_argument('--r1', action='store_true', help='auto-increment mad.f16 source1 across repeat lanes')
     parser.add_argument('--compiler-pattern', action='store_true', help='use the vec16 OpenCL peak MAD source/destination pattern')
     parser.add_argument('--gemm-pattern', action='store_true', help='use true GEMM-style acc=A_scalar*B_half4+acc MADs')
+    parser.add_argument('--check-gemm', action='store_true', help='use nonuniform exact inputs and bit-check every GEMM accumulator')
     parser.add_argument('--rows', type=int, choices=(4, 8), default=4)
     parser.add_argument('--ncols', type=int, default=4)
     parser.add_argument('--bmode', choices=('reuse', 'percol'), default='reuse')

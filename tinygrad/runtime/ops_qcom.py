@@ -14,7 +14,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
-BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
+BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO, BUFTYPE_IBO_RW = 0, 1, 2, 3
 
 @functools.cache
 def dcache_flush():
@@ -54,7 +54,15 @@ class QCOMSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Sleep only for timeline signals. Do it immediately to free cpu.
     if self.is_timeline and self.owner is not None:
-      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
+      # A finite slice lets HCQ's outer timeout observe a wedged kernel. This is
+      # especially important for hardware beam search, where invalid schedules
+      # are expected and must be rejected instead of blocking in ioctl forever.
+      timeout = getenv("QCOM_WAIT_SLICE_MS", 0xffffffff)
+      try:
+        kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(
+          self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=timeout)
+      except OSError:
+        if timeout == 0xffffffff: raise
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
@@ -84,7 +92,6 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
     if self.dev.gpu_id[:2] < (7, 3):
       self.cmd(mesa.CP_EVENT_WRITE, qreg.cp_event_write_0(event=mesa.CACHE_FLUSH_TS), *data64_le(signal.value_addr), lo32(value))
-      self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
@@ -121,6 +128,7 @@ class QCOMComputeQueue(HWQueue):
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     self.bind_args_state(args_state)
+    threadsize = mesa.THREAD128 if getenv("THREAD128") else mesa.THREAD64
 
     def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
@@ -128,22 +136,25 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(mesa.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=mesa.RM6_COMPUTE))
     self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, qreg.a6xx_sp_update_cntl(cs_state=True, cs_uav=True))
     self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, 0x0)
-    self.reg(mesa.REG_A6XX_SP_CS_TSIZE, qreg.a6xx_sp_cs_tsize(0x80)) # is this right? mesa uses 1
-    self.reg(mesa.REG_A6XX_SP_CS_USIZE, qreg.a6xx_sp_cs_usize(0x40)) # mesa also uses 1
+    self.reg(mesa.REG_A6XX_SP_CS_TSIZE, qreg.a6xx_sp_cs_tsize(getenv("QCOM_TSIZE", 0x80))) # mesa uses 1
+    self.reg(mesa.REG_A6XX_SP_CS_USIZE, qreg.a6xx_sp_cs_usize(getenv("QCOM_USIZE", 0x40))) # mesa uses 1
     self.reg(mesa.REG_A6XX_SP_MODE_CNTL, qreg.a6xx_sp_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL,
                                                                 constant_demotion_enable=prg.NIR))
     self.reg(mesa.REG_A6XX_SP_PERFCTR_SHADER_MASK, qreg.a6xx_sp_perfctr_shader_mask(cs=True))
     self.reg(mesa.REG_A6XX_TPL1_MODE_CNTL, qreg.a6xx_tpl1_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
     self.reg(mesa.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.cmd(mesa.CP_WAIT_FOR_IDLE)
+    # CP_RUN_OPENCL snapshots the programmed compute state. Graph command
+    # streams can therefore program the next dispatch without draining all
+    # preceding shader work; retain the conservative wait as an escape hatch.
+    if getenv("QCOM_EXEC_WAIT", 0): self.cmd(mesa.CP_WAIT_FOR_IDLE)
 
     self.reg(mesa.REG_A6XX_SP_CS_NDRANGE_0,
              qreg.a6xx_sp_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
-             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_sp_cs_wge_cntl(threadsize=mesa.THREAD64),
+             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_sp_cs_wge_cntl(threadsize=threadsize),
              cast_int(global_size[0], ceil=True), cast_int(global_size[1], ceil=True), cast_int(global_size[2], ceil=True))
 
     self.reg(mesa.REG_A6XX_SP_CS_CNTL_0,
-             qreg.a6xx_sp_cs_cntl_0(threadsize=mesa.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
+             qreg.a6xx_sp_cs_cntl_0(threadsize=threadsize, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_cntl_1(constantrammode=mesa.CONSTLEN_256, shared_size=prg.shared_size), # should this be CONSTLEN_512?
              0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
@@ -156,9 +167,8 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_SHADER, state_src=mesa.SS6_INDIRECT,
                                                              state_block=mesa.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
-
-    self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_sp_cs_const_config(constlen=1024 // 4, enabled=True))
-
+    self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
+             qreg.a6xx_sp_cs_const_config(constlen=1024 // 4, enabled=True))
     self.reg(mesa.REG_A6XX_SP_CS_PVT_MEM_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_stack_offset(prg.hw_stack_offset))
     self.reg(mesa.REG_A6XX_SP_CS_INSTR_SIZE, qreg.a6xx_sp_cs_instr_size(prg.image_size // 4))
 
@@ -187,12 +197,16 @@ class QCOMComputeQueue(HWQueue):
     if prg.NIR:
       self.reg(mesa.REG_A6XX_SP_CS_CONST_CONFIG_0,
                qreg.a6xx_sp_cs_const_config_0(wgidconstid=prg.wgid, wgsizeconstid=prg.wgsz, wgoffsetconstid=0xfc, localidregid=prg.lid),
-               qreg.a6xx_sp_cs_wge_cntl(linearlocalidregid=0xfc, threadsize=mesa.THREAD64))
+               qreg.a6xx_sp_cs_wge_cntl(linearlocalidregid=0xfc, threadsize=threadsize))
       self.cmd(mesa.CP_EXEC_CS, 0,
-               qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
+               qreg.cp_exec_cs_1(ngroups_x=cast_int(global_size[0], ceil=True)),
+               qreg.cp_exec_cs_2(ngroups_y=cast_int(global_size[1], ceil=True)),
+               qreg.cp_exec_cs_3(_ngroups_z=cast_int(global_size[2], ceil=True)))
     else: self.cmd(mesa.CP_RUN_OPENCL, 0)
 
-    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
+    # Dispatches in one command stream share a coherent UCHE and the queue's final signal performs
+    # the writeback needed by host/cross-queue consumers. Keep the old per-kernel flush as a debug escape hatch.
+    if getenv("QCOM_KERNEL_FLUSH"): self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     return self
 
 class QCOMArgsState(HCQArgsState):
@@ -218,7 +232,10 @@ class QCOMArgsState(HCQArgsState):
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
       pitch = shape[1] * 4 * imgdt.itemsize
-      fmt = mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
+      fmt = (mesa.FMT6_8_8_8_8_SNORM if imgdt == dtypes.int8 else
+             mesa.FMT6_8_8_8_8_UNORM if imgdt == dtypes.uint8 else
+             mesa.FMT6_32_32_32_32_UINT if imgdt == dtypes.uint32 else
+             mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT)
       return [qreg.a6xx_tex_const_0(fmt=fmt) if ibo else qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=fmt),
               qreg.a6xx_tex_const_1(width=shape[1], height=shape[0]),
               qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=ctz(pitch)-6), 0, *data64_le(buf.va_addr),
@@ -304,10 +321,11 @@ class QCOMProgram(HCQProgram):
       if length == 0: break
       binfos.append((offset_words * 4, typ))
       bdoff += length
-    self.buf_offs = [off for off,typ in binfos if typ not in {BUFTYPE_TEX, BUFTYPE_IBO}]
+    self.buf_offs = [off for off,typ in binfos if typ not in {BUFTYPE_TEX, BUFTYPE_IBO, BUFTYPE_IBO_RW}]
 
     # Setting correct offsets to textures/ibos.
-    self.tex_cnt, self.ibo_cnt = sum(typ is BUFTYPE_TEX for _,typ in binfos), sum(typ is BUFTYPE_IBO for _,typ in binfos)
+    self.tex_cnt = sum(typ == BUFTYPE_TEX for _,typ in binfos)
+    self.ibo_cnt = sum(typ in {BUFTYPE_IBO, BUFTYPE_IBO_RW} for _,typ in binfos)
     self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
 
     if _read_lib(lib, 0xb0) != 0: # check if we have constants.
@@ -319,7 +337,9 @@ class QCOMProgram(HCQProgram):
 
     # Registers info
     reg_desc_off = _read_lib(lib, 0x34)
-    self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
+    # The high bit is the ELF merged/separate-register-file flag, not part of
+    # the register count programmed into SP_CS_CNTL or the occupancy estimate.
+    self.fregs, self.hregs = (_read_lib(lib, reg_desc_off + off) & 0x7fffffff for off in (0x14, 0x18))
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:

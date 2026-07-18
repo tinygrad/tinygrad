@@ -24,12 +24,19 @@ INT_LOW = getenv("INT_LOW", 0)
 INT_HIGH = getenv("INT_HIGH", 10)
 
 if __name__ == "__main__":
+  exact = getenv("EXACT", 0) != 0
+  seed = getenv("SEED", 0)
   def init_matrix(rows, cols):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed + rows*1000003 + cols)
     # NOTE: numpy does not support bfloat16
     if (np_dtype := _to_np_dtype(dtype_in)) is None: np_dtype = np.float32
     if dtype_in in dtypes.ints:
       return Tensor(rng.integers(INT_LOW, INT_HIGH, (rows, cols), dtype=np_dtype)).realize()
+    if exact:
+      # With K<=1024 these products and their sums are exactly representable in
+      # FP16, making this a strict semantic check rather than a loose error test.
+      values = rng.integers(-1, 2, (rows, cols), dtype=np.int8).astype(np.float16) * np.float16(1/32)
+      return Tensor(values).cast(dtype_in).realize()
     return Tensor(rng.random((rows, cols), dtype=np.float32).astype(np_dtype)-0.5).cast(dtype_in).realize()
 
   a, b = init_matrix(M, K), init_matrix(K, N)
@@ -46,6 +53,12 @@ if __name__ == "__main__":
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()
+  if exact and dtype_in is dtypes.half and acc_dtype is dtypes.half:
+    wrong = np.flatnonzero(res.reshape(-1).view(np.uint16) != ref.astype(np.float16).reshape(-1).view(np.uint16))
+    err = np.abs(res.astype(np.float32)-ref)
+    print(f"EXACT CHECK outputs={res.size} bad_count={wrong.size} max_abs={float(err.max()):.9g} mean_abs={float(err.mean()):.9g}")
+    if wrong.size: raise AssertionError(f"exact FP16 GEMM mismatch at flat index {int(wrong[0])}")
+    raise SystemExit(0)
   try:
     np.testing.assert_allclose(res, ref, rtol=RTOL, atol=ATOL)
   except AssertionError as e:

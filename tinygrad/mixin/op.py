@@ -8,10 +8,12 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, argsort, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
-from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
+from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO, getenv
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint, UOp
+
+_IMAGE_CONV_COUNT = 0
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -1470,7 +1472,18 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Self, bias:Self|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Self:
-    dtsz = 2 if FLOAT16 else 4
+    global _IMAGE_CONV_COUNT
+    precision_index, _IMAGE_CONV_COUNT = _IMAGE_CONV_COUNT, _IMAGE_CONV_COUNT + 1
+    if (precision_period:=getenv("OPENPILOT_PRECISION_PERIOD", 0)): precision_index %= precision_period
+    mixed_precision = bool(getenv("OPENPILOT_MIXED_PRECISION"))
+    fp16_weight_indices = {int(x) for x in getenv("OPENPILOT_FP16_WEIGHT_INDICES", "").split(",") if x}
+    fp16_activation_indices = {int(x) for x in getenv("OPENPILOT_FP16_ACTIVATION_INDICES", "").split(",") if x}
+    fp16_weight = bool(FLOAT16) if not mixed_precision else precision_index in fp16_weight_indices
+    fp16_activation = bool(FLOAT16) if not mixed_precision else precision_index in fp16_activation_indices
+    if getenv("OPENPILOT_PRECISION_DEBUG"):
+      print(f"image_conv2d precision_index={precision_index} input={self.shape} weight={weight.shape} "
+            f"fp16_weight={fp16_weight} fp16_activation={fp16_activation}")
+    dtsz = 2 if fp16_activation else 4
 
     (bs,_,_,_), (cout,cin,H,W) = self.shape, weight.shape
     assert isinstance(cin, int) and isinstance(cout, int)
@@ -1520,8 +1533,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     else: x, w = pad_align(x, 2), pad_align(w, 1)
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-    if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
-    else: x, w = x.contiguous(), w.contiguous()
+    x = x.cast(dtypes.half).contiguous().cast(dtypes.float) if fp16_activation else x.contiguous()
+    w = w.cast(dtypes.half).contiguous().cast(dtypes.float) if fp16_weight else w.contiguous()
 
     # undo alignment hacks
     if bank_conflict: x, w = x[:, :, :, :, :cin // 4, :], w[:, :, :cin // 4, ...]

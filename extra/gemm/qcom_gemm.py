@@ -23,7 +23,7 @@ def wi(buf, l, h, lo):
     struct.pack_into('<I', buf, o, lo)
     struct.pack_into('<I', buf, o+4, h)
 
-def patch_kernel(lib):
+def patch_kernel(lib, strip_sync=True, merge_pairs=True, max_groups=-1):
     """Strip redundant (sy) and convert eligible MAD groups to (rpt3)."""
     lib = bytearray(lib)
     io = struct.unpack_from('<I', lib, 0xc0)[0]
@@ -32,17 +32,18 @@ def patch_kernel(lib):
     t = isz // 8
 
     # Strip all (sy) except the first on mad.f16 instructions
-    first_sy = False
-    for i in range(t):
-        h, lo = ri(s, i)
-        if (h >> 24) in (0x63, 0x73) and ((h >> 24) & 0xF) == 3 and (h >> 28) == 7:
-            if first_sy:
-                wi(s, i, (h & 0x0FFFFFFF) | 0x60000000, lo)
-            else:
-                first_sy = True
+    if strip_sync:
+        first_sy = False
+        for i in range(t):
+            h, lo = ri(s, i)
+            if (h >> 24) in (0x63, 0x73) and ((h >> 24) & 0xF) == 3 and (h >> 28) == 7:
+                if first_sy:
+                    wi(s, i, (h & 0x0FFFFFFF) | 0x60000000, lo)
+                else:
+                    first_sy = True
 
     # Convert groups of 4 scalar MADs to (rpt3)
-    i = 0
+    i = packed_groups = 0
     while i < t - 3:
         h0, l0 = ri(s, i)
         if not ((h0 >> 24) in (0x63, 0x73) and ((h0 >> 24) & 0xF) == 3):
@@ -62,17 +63,20 @@ def patch_kernel(lib):
             s2j = ((hj >> 16) & 0xFF) * 2 + (((hj >> 8) & 0xFF) >> 7)
             if rj != 0 or s1j != s1 or dj != d0+j or s2j != s2+j or s3j != d0+j:
                 ok = False; break
-        if ok:
+        if ok and (max_groups < 0 or packed_groups < max_groups):
             rb = ((h0 >> 8) & 0x80) | 3
-            wi(s, i, (h0 & 0xFFFF00FF) | (rb << 8), l0 | 0x20000000)
+            # Repeat needs relative src2 as well as relative dst/src3. Without bit 15,
+            # every output lane incorrectly reuses the first weight component.
+            wi(s, i, (h0 & 0xFFFF00FF) | (rb << 8), l0 | 0x20008000)
             for j in range(1, 4):
                 wi(s, i+j, 0, 0)
+            packed_groups += 1
             i += 4
         else:
             i += 1
 
     # Merge (rpt1)+(rpt1) into (rpt3)
-    for i in range(t - 1):
+    for i in range(t - 1) if merge_pairs else ():
         h0, l0 = ri(s, i); h1, l1 = ri(s, i+1)
         if h0 == 0 or h1 == 0: continue
         if not ((h0 >> 24) in (0x63, 0x73) and ((h0 >> 24) & 0xF) == 3): continue

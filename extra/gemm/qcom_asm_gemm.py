@@ -78,11 +78,11 @@ def make_bufs():
     return a, b, c
 
 def bench(lib, gs, ls, label, flops=2*1024*1024*1024, iters=20):
-    a_img = dtypes.imageh((M, K//4))
-    b_img = dtypes.imageh((K, N//4))
     a, b, c = make_bufs()
     try:
-        prg = dev.runtime('gemm_h', lib, [[(0, a_img)], [(1, b_img)], [(2, dtypes.half.ptr())]])
+        prg = dev.runtime('gemm_h', lib, buf_dtypes=[((0, dtypes.half, (M, K//4, 4)),),
+                                                     ((1, dtypes.half, (K, N//4, 4)),),
+                                                     ((2, dtypes.half, None),)])
         for _ in range(5):
             prg(a._buf, b._buf, c._buf, global_size=gs, local_size=ls, wait=True)
         times = []

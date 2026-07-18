@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse, math, re, time
 from dataclasses import replace
 
+import numpy as np
+
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.realize import compile_linear, run_linear, time_call
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler
-from extra.gemm.ir3asm import ADD_S, BR, COV_F16F32, ISAM_F16, ISAM_F32, JUMP, MAD_F16, MAD_F32, MOV_F32, NOP, SHL_B, disasm
+from extra.gemm.ir3asm import ADD_S, BR, COV_F16F32, ISAM_F16, ISAM_F32, JUMP, MAD_F16, MAD_F32, MOV_F32, MOV_H, NOP, SHL_B, disasm
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -1020,6 +1022,228 @@ def patch_rpt3_n512_default(image: bytes) -> bytes:
   out += [BR(2, inv=False), JUMP(loop_start - (br_idx + 1))]
   out += instrs[114:132]
   out += [NOP()] * (len(instrs) - len(out))
+  return b"".join(out)
+
+
+def patch_openpilot_target5_rpt3(image: bytes) -> bytes:
+  """Vectorize the 16-output FP32 accumulator in r_48_128_4_4_96_4.
+
+  The four lanes of r13..r16 hold the four activation/image channels for one
+  output block.  This preserves the original texture loads and fused residual
+  stores, changing only the reduction register layout inside the kernel.
+  """
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  if len(instrs) != 139: raise RuntimeError(f"openpilot target5 expects 139 instructions, got {len(instrs)}")
+  if instrs[39] != ISAM_F32("r6.x", "r11.y", 2, 0):
+    raise RuntimeError(f"unexpected target5 activation load at 39: {instrs[39].hex()}")
+
+  comps = "xyzw"
+  # Existing setup zeroes r13.x through r16.z. Complete the contiguous bank.
+  out = instrs[:16] + [MOV_F32("r16.w", "r12.z")]
+  loop_start = len(out)
+  out += instrs[16:40]
+  avecs, weights = ("r6", "r2", "r3", "r5"), ("r7", "r4", "r1", "r0")
+  first = True
+  for kc, avec in enumerate(avecs):
+    for block, weight in enumerate(weights):
+      out.append(MAD_F32(f"r{13+block}.x", f"{weight}.{comps[kc]}", f"{avec}.x", f"r{13+block}.x",
+                         rpt=3, sy=first, r=True))
+      first = False
+  out += instrs[104:109]
+  br_idx = len(out)
+  out.append(BR(loop_start-br_idx))
+
+  # The compiler-derived fused residual/store tail expects its original scalar
+  # accumulator order. Stage through dead texture registers to avoid overlap.
+  for block in range(4):
+    for row in range(4): out.append(MOV_F32(f"r{block}.{comps[row]}", f"r{13+block}.{comps[row]}"))
+  old_accs = ("r12.z", "r13.x", "r13.y", "r13.z", "r13.w", "r14.x", "r14.y", "r14.z",
+              "r14.w", "r15.x", "r15.y", "r15.z", "r15.w", "r16.x", "r16.y", "r16.z")
+  for row in range(4):
+    for block in range(4): out.append(MOV_F32(old_accs[row*4+block], f"r{block}.{comps[row]}"))
+  out += instrs[110:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"target5 patch overflow: {len(out)} > {len(instrs)}")
+  return b"".join(out)
+
+
+def patch_openpilot_target46_rpt3(image: bytes) -> bytes:
+  """Vectorize the existing contiguous accumulators in target families 4/6."""
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  if len(instrs) != 222: raise RuntimeError(f"openpilot target4/6 expects 222 instructions, got {len(instrs)}")
+  if instrs[22] != ISAM_F32("r6.x", "r9.z", 0, 0):
+    raise RuntimeError(f"unexpected target4/6 activation load at 22: {instrs[22].hex()}")
+  # Current compiler output already uses the scalar-plus-rpt2 first block and
+  # rpt3 for the other three blocks. Treating its nonlinear output tail as the
+  # old scalar loop epilogue skips most of K and silently corrupts the model.
+  if (instrs[44] == MAD_F32("r13.w", "r7.x", "r5.x", "r13.w", sy=True, r=True) and
+      instrs[45] == MAD_F32("r14.y", "r7.x", "r5.y", "r14.y", rpt=2, r=True)):
+    return image
+
+  out, loop_start = instrs[:44], 20
+  comps, weights = "xyzw", ("r5", "r2", "r3", "r4")
+  first = True
+  # r13.w plus r14.yzw form the first logical four-vector with r14.x occupied
+  # by loop control. Keep the first lane scalar and repeat over the other three.
+  for kc, weight in enumerate(weights):
+    # CAT3's (r) mode advances src2, src3, and dst together. Put the activation
+    # scalar in src1 so that only the weight and accumulator lanes advance.
+    out.append(MAD_F32("r13.w", f"r7.{comps[kc]}", f"{weight}.x", "r13.w", sy=first, r=True))
+    first = False
+    out.append(MAD_F32("r14.y", f"r7.{comps[kc]}", f"{weight}.y", "r14.y", rpt=2, r=True))
+  # The remaining three output blocks are already full contiguous vectors.
+  for acc, activation in (("r15.x", "r6"), ("r16.x", "r1"), ("r17.x", "r0")):
+    for kc, weight in enumerate(weights):
+      out.append(MAD_F32(acc, f"{activation}.{comps[kc]}", f"{weight}.x", acc, rpt=3, r=True))
+  out += instrs[108:113]
+  br_idx = len(out)
+  out.append(BR(loop_start-br_idx))
+  out += instrs[114:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"target4/6 patch overflow: {len(out)} > {len(instrs)}")
+  return b"".join(out)
+
+
+def patch_openpilot_target46_f16_rpt3(image: bytes) -> bytes:
+  """Repeat-pack the three contiguous accumulator blocks in native-FP16 target 4/6.
+
+  Mesa scalarizes all 16 half accumulators.  The first block occupies a gapped
+  register layout and is left alone; the remaining three are contiguous half4
+  vectors and can use CAT3 repeat mode without changing reduction order.
+  """
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  asm = disasm(image)
+  if len(instrs) != 223 or asm.count("mad.f16") != 64:
+    raise RuntimeError(f"native target4/6 expects 223 instructions and 64 mad.f16, got {len(instrs)} and {asm.count('mad.f16')}")
+
+  # Move the gapped first block into the otherwise unused hr20.x/y lanes. This
+  # makes all four output vectors contiguous without increasing max_half_reg.
+  instrs[16:21] = [MOV_H("hr20.x", "hr19.z", rpt=3), MOV_H("hr21.x", "hr19.z", rpt=3),
+                   MOV_H("hr22.x", "hr19.z", rpt=3), MOV_H("hr23.x", "hr19.z", rpt=3), NOP()]
+  mads = []
+  first = True
+  for acc, activation in (("hr20.x", "hr7"), ("hr21.x", "hr6"), ("hr22.x", "hr1"), ("hr23.x", "hr0")):
+    for component, weight in zip("xyzw", ("hr5.x", "hr2.x", "hr3.x", "hr4.x")):
+      mads.append(MAD_F16(acc, f"{activation}.{component}", weight, acc, rpt=3, sy=first, r=True))
+      first = False
+
+  loop_start = 21
+  out = instrs[:45] + mads + instrs[109:114]
+  branch_index = len(out)
+  out.append(BR(loop_start-branch_index))
+  # The compiler epilogue expects the old gapped first-block layout.
+  out += [MOV_H("hr19.z", "hr20.x"), MOV_H("hr19.w", "hr20.y")] + instrs[115:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"native target4/6 FP16 patch overflow: {len(out)} > {len(instrs)}")
+  return b"".join(out)
+
+
+def patch_openpilot_target2_rpt3(image: bytes) -> bytes:
+  """Vectorize target2's four 4-wide output blocks and restore its tail layout."""
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  if len(instrs) != 139: raise RuntimeError(f"openpilot target2 expects 139 instructions, got {len(instrs)}")
+  if instrs[39] != ISAM_F32("r6.x", "r11.y", 2, 0):
+    raise RuntimeError(f"unexpected target2 weight load at 39: {instrs[39].hex()}")
+
+  # Keep address/control setup, but use four contiguous accumulator vectors.
+  out = instrs[:12]
+  for acc in ("r13.x", "r14.x", "r15.x", "r16.x"): out.append(MOV_F32(acc, "r12.z", rpt=3))
+  loop_start = len(out)
+  out += instrs[16:40]
+  activations, weights = ("r7", "r4", "r1", "r0"), ("r6", "r2", "r3", "r5")
+  first = True
+  for block, activation in enumerate(activations):
+    for kc, weight in enumerate(weights):
+      out.append(MAD_F32(f"r{13+block}.x", f"{activation}.{'xyzw'[kc]}", f"{weight}.x", f"r{13+block}.x",
+                         rpt=3, sy=first, r=True))
+      first = False
+  out += instrs[104:109]
+  br_idx = len(out)
+  out.append(BR(loop_start-br_idx))
+
+  # The fused image-add/store tail consumes the compiler's original ordering.
+  # Stage through dead texture registers so overlapping moves cannot clobber data.
+  for block in range(4):
+    for lane, comp in enumerate("xyzw"): out.append(MOV_F32(f"r{block}.{comp}", f"r{13+block}.{comp}"))
+  old_accs = ("r12.z", "r13.x", "r13.y", "r13.z", "r13.w", "r14.x", "r14.y", "r14.z",
+              "r14.w", "r15.x", "r15.y", "r15.z", "r15.w", "r16.x", "r16.y", "r16.z")
+  for lane in range(4):
+    for block in range(4): out.append(MOV_F32(old_accs[lane*4+block], f"r{block}.{'xyzw'[lane]}"))
+  out += instrs[110:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"target2 patch overflow: {len(out)} > {len(instrs)}")
+  return b"".join(out)
+
+
+def patch_openpilot_target7_rpt3(image: bytes) -> bytes:
+  """Vectorize target7's 16 accumulators, preserving its transposed store tail."""
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  if len(instrs) != 149: raise RuntimeError(f"openpilot target7 expects 149 instructions, got {len(instrs)}")
+  if instrs[45] != ISAM_F32("r6.x", "r9.z", 1, 0):
+    raise RuntimeError(f"unexpected target7 weight load at 45: {instrs[45].hex()}")
+  # Recent QCOM compiler builds already emit this exact rpt3 loop while keeping
+  # the old padded image length. Reinterpreting its store tail as scalar-loop
+  # control creates a nonterminating shader, so leave the existing vector form.
+  if instrs[46] == MAD_F32("r13.z", "r7.x", "r6.x", "r13.z", rpt=3, sy=True, r=True): return image
+
+  out, loop_start = instrs[:46], 22
+  activations, weights = ("r7", "r4", "r1", "r0"), ("r6", "r2", "r3", "r5")
+  accs = ("r13.z", "r14.z", "r15.z", "r16.z")
+  first = True
+  for acc, activation in zip(accs, activations):
+    for kc, weight in enumerate(weights):
+      out.append(MAD_F32(acc, f"{activation}.{'xyzw'[kc]}", f"{weight}.x", acc, rpt=3, sy=first, r=True))
+      first = False
+  out += instrs[110:116]
+  br_idx = len(out)
+  out.append(BR(loop_start-br_idx))
+
+  for block, acc in enumerate(accs):
+    acc_base = (13*4+2, 14*4+2, 15*4+2, 16*4+2)[block]
+    for lane, comp in enumerate("xyzw"):
+      src_reg, src_comp = divmod(acc_base+lane, 4)
+      out.append(MOV_F32(f"r{block}.{comp}", f"r{src_reg}.{'xyzw'[src_comp]}"))
+  old_accs = tuple(f"r{idx//4}.{'xyzw'[idx%4]}" for idx in range(13*4+2, 17*4+2))
+  for lane in range(4):
+    for block in range(4): out.append(MOV_F32(old_accs[lane*4+block], f"r{block}.{'xyzw'[lane]}"))
+  out += instrs[117:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"target7 patch overflow: {len(out)} > {len(instrs)}")
+  return b"".join(out)
+
+
+def patch_openpilot_target9_rpt3(image: bytes) -> bytes:
+  """Vectorize target9's first projection while retaining its fused second tail."""
+  instrs = [image[i:i+8] for i in range(0, len(image), 8)]
+  if len(instrs) != 163: raise RuntimeError(f"openpilot target9 expects 163 instructions, got {len(instrs)}")
+  if instrs[44] != ISAM_F32("r5.x", "r9.z", 3, 0):
+    raise RuntimeError(f"unexpected target9 weight load at 44: {instrs[44].hex()}")
+
+  # r13.y remains loop state; move the accumulator bank to aligned r14..r17.
+  out = instrs[:17]
+  for acc in ("r14.x", "r15.x", "r16.x", "r17.x"): out.append(MOV_F32(acc, "r13.x", rpt=3))
+  loop_start = len(out)
+  out += instrs[21:45]
+  activations, weights = ("r7", "r6", "r1", "r0"), ("r5", "r2", "r3", "r4")
+  first = True
+  for block, activation in enumerate(activations):
+    for kc, weight in enumerate(weights):
+      out.append(MAD_F32(f"r{14+block}.x", f"{activation}.{'xyzw'[kc]}", f"{weight}.x", f"r{14+block}.x",
+                         rpt=3, sy=first, r=True))
+      first = False
+  out += instrs[109:115]
+  br_idx = len(out)
+  out.append(BR(loop_start-br_idx))
+
+  for block in range(4):
+    for lane, comp in enumerate("xyzw"): out.append(MOV_F32(f"r{block}.{comp}", f"r{14+block}.{comp}"))
+  old_accs = ("r13.x", "r14.y", "r15.y", "r16.y", "r13.z", "r14.z", "r15.z", "r16.z",
+              "r13.w", "r14.w", "r15.w", "r16.w", "r14.x", "r15.x", "r16.x", "r17.x")
+  for lane in range(4):
+    for block in range(4): out.append(MOV_F32(old_accs[lane*4+block], f"r{block}.{'xyzw'[lane]}"))
+  out += instrs[116:]
+  out += [NOP()] * (len(instrs)-len(out))
+  if len(out) != len(instrs): raise RuntimeError(f"target9 patch overflow: {len(out)} > {len(instrs)}")
   return b"".join(out)
 
 
@@ -2144,8 +2368,8 @@ def patch_linear(linear: UOp, patch: str) -> tuple[UOp, int, str, dict[str, int|
   main_idx = find_main_call(linear)
   call = linear.src[main_idx]
   prg = call.src[0]
-  new_lib, asm, meta = patch_lib(prg.src[4].arg, patch)
-  new_prg = prg.replace(src=prg.src[:4] + (prg.src[4].replace(arg=new_lib),))
+  new_lib, asm, meta = patch_lib(prg.src[-1].arg, patch)
+  new_prg = prg.replace(src=prg.src[:-1] + (prg.src[-1].replace(arg=new_lib),))
   new_call = call.replace(src=(new_prg, *call.src[1:]))
   return linear.replace(src=tuple(new_call if i == main_idx else c for i, c in enumerate(linear.src))), main_idx, asm, meta
 
@@ -2169,28 +2393,52 @@ def parse_local_size(s: str) -> tuple[int, int, int]:
   return parts
 
 
-def make_matmul(n: int, dtype, acc_dtype, ones: bool):
-  make = Tensor.ones if ones else Tensor.empty
-  a = make(n, n, dtype=dtype).realize()
-  b = make(n, n, dtype=dtype).realize()
+def make_matmul(n: int, dtype, acc_dtype, ones: bool, random_check: bool):
+  if random_check:
+    rng = np.random.default_rng(0)
+    a_np = rng.uniform(-0.25, 0.25, (n, n)).astype(np.dtype(dtype.fmt))
+    b_np = rng.uniform(-0.25, 0.25, (n, n)).astype(np.dtype(dtype.fmt))
+    # Keep the compiler graph identical to the known patched all-ones graph.  Constructing
+    # tensors from numpy changes the schedule and therefore the generated IR3 kernel shape.
+    # The inputs are already realized, so replacing their contents cannot be undone by the
+    # output schedule and still exercises the exact same complete GEMM kernel.
+    a, b = Tensor.ones(n, n, dtype=dtype).realize(), Tensor.ones(n, n, dtype=dtype).realize()
+    a._buffer().copyin(memoryview(a_np).cast("B"))  # noqa: SLF001 - benchmark input injection
+    b._buffer().copyin(memoryview(b_np).cast("B"))  # noqa: SLF001 - benchmark input injection
+  else:
+    make = Tensor.ones if ones else Tensor.empty
+    a, b = make(n, n, dtype=dtype).realize(), make(n, n, dtype=dtype).realize()
   c = a.matmul(b, dtype=acc_dtype)
-  return c, compile_linear(c.schedule_linear())
+  expected = a_np.astype(np.float32) @ b_np.astype(np.float32) if random_check else None
+  return c, compile_linear(c.schedule_linear()), expected
 
 
 def flat_tensor_data(t: Tensor):
-  return t._buffer().as_memoryview().cast(t.dtype.base.fmt)  # noqa: SLF001 - debug harness
+  return t._buffer().as_memoryview().cast(t.dtype.fmt)  # noqa: SLF001 - debug harness
 
 
 def check_all_ones(c: Tensor, n: int) -> bool:
   data = flat_tensor_data(c)
   expected = float(n)
-  atol = 1e-3 if c.dtype.base is dtypes.float32 else 1.0
+  atol = 1e-3 if c.dtype is dtypes.float32 else 1.0
   for i, x in enumerate(data):
     if abs(float(x) - expected) > atol:
       print(f"CHECK FAIL expected={expected} first_mismatch idx={i} got={float(x)}")
       return False
   print(f"CHECK PASS all {len(data)} outputs are {expected}")
   return True
+
+
+def check_random(c: Tensor, expected: np.ndarray) -> bool:
+  got = c.numpy().astype(np.float32)
+  delta = np.abs(expected-got)
+  tolerance = 2e-3 if c.dtype is dtypes.float16 else 1e-4
+  limit = tolerance + tolerance*np.abs(expected)
+  bad = int(np.count_nonzero(delta > limit))
+  passed = bad == 0
+  print(f"RANDOM CHECK outputs={got.size} max_abs={float(delta.max()):.9g} mean_abs={float(delta.mean()):.9g} "
+        f"bad_count={bad} rtol={tolerance:g} atol={tolerance:g} allclose={passed}")
+  return passed
 
 
 def print_meta(main_name: str, meta: dict[str, int|bool]):
@@ -2229,7 +2477,7 @@ def dtype_from_arg(name: str):
 
 def run(args):
   dtype, acc_dtype = dtype_from_arg(args.dtype), dtype_from_arg(args.acc_dtype)
-  c, linear = make_matmul(args.n, dtype, acc_dtype, ones=args.check)
+  c, linear, expected = make_matmul(args.n, dtype, acc_dtype, ones=args.check, random_check=args.random_check)
   patched, main_idx, asm, meta = patch_linear(linear, args.patch)
   if args.main_local is not None:
     patched = override_main_local(patched, main_idx, parse_local_size(args.main_local))
@@ -2243,6 +2491,9 @@ def run(args):
   elif args.check:
     run_linear(patched, jit=True, wait=True, update_stats=False)
     if not check_all_ones(c, args.n): raise SystemExit(1)
+  elif args.random_check:
+    run_linear(patched, jit=True, wait=True, update_stats=False)
+    if not check_random(c, expected): raise SystemExit(1)
   if args.bench: bench_main(patched, main_idx, args.n, args.warmup, args.iters)
   if args.bench_full: bench_full(patched, args.n, args.warmup, args.iters)
 
@@ -2254,6 +2505,7 @@ if __name__ == "__main__":
   parser.add_argument("--acc-dtype", choices=("none", "float", "half"), default="float")
   parser.add_argument("--patch", default="noop")
   parser.add_argument("--check", action="store_true")
+  parser.add_argument("--random-check", action="store_true")
   parser.add_argument("--bench", action="store_true")
   parser.add_argument("--bench-full", action="store_true")
   parser.add_argument("--stats-run", action="store_true")

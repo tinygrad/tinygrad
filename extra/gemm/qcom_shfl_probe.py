@@ -69,18 +69,20 @@ def store_u32(instrs, row_reg, col_reg, data_reg):
 def emit_linear_addr(instrs, idx_reg, byte_base=0, join=False):
     instrs.append(SHL_B('r0.y', idx_reg, 2, jp=join, ss=join, nop=3 if join else 0))
     if byte_base:
-        instrs += [MOV_S32('r0.z', byte_base), ADD_S_REG('r0.y', 'r0.y', 'r0.z')]
+        instrs += [MOV_S32('r0.z', byte_base), NOP(rpt=2), ADD_S_REG('r0.y', 'r0.y', 'r0.z'), NOP(rpt=16)]
     instrs += [
         ADD_U('r2.x', 'c20.x', 'r0.y'),
+        NOP(rpt=16),
         CMPS_U_LT('r6.w', 'r2.x', 'c20.x'),
         SHR_B('r6.y', 'r0.y', 31),
+        NOP(rpt=16),
         SAD_S32('r2.y', 'c20.y', 'r6.y', 'r6.w', nop=3),
     ]
 
 
 def store_u32_linear(instrs, idx_reg, data_reg, byte_base=0, join=False):
     emit_linear_addr(instrs, idx_reg, byte_base, join=join)
-    instrs += [STG_U32('r2.x', data_reg), NOP()]
+    instrs += [NOP(rpt=16), STG_U32('r2.x', data_reg, sy=True), NOP(rpt=16)]
 
 
 def build_semantics_shader(dev, threads):
@@ -116,8 +118,10 @@ def build_semantics_shader(dev, threads):
 def build_quad_semantics_shader(dev, threads):
     instrs = prologue(dev, threads)
     instrs += [
-        MOV_F32('r8.x', 'r0.x'),
-        MOV_F32('r12.x', 'r8.x'),
+        # Recover lid=(row-tile lane)*32+column lane from persistent coordinates.
+        SHR_B('r12.x', 'r7.x', 2), AND_B('r12.x', 'r12.x', 3), SHL_B('r12.x', 'r12.x', 5),
+        AND_B('r12.y', 'r7.y', 31), ADD_S_REG('r12.x', 'r12.x', 'r12.y'), NOP(rpt=2),
+        MOV_F32('r8.x', 'r12.x'),
         MOV_S32('r10.x', 0),
         QUAD_BRCST('r11.x', 'r8.x', 'r10.x', typ=3),
         QUAD_BRCST('r13.x', 'r8.x', 'r10.x', typ=3, sy=True),
@@ -252,9 +256,9 @@ def make_runtime(dev, shader, threads, disasm_shader=False):
     if disasm_shader:
         print(disasm(shader))
     print('shader_instrs=%d bytes=%d envelope_bytes=%d' % (len(shader)//8, len(shader), isz))
-    lib = inject(envelope, io, isz, ro, shader, fregs=16, hregs=16)
-    a_img, b_img = dtypes.imageh((M, K//4)), dtypes.imageh((K, N//4))
-    return dev.runtime('gemm_h', lib, [[(0, a_img)], [(1, b_img)], [(2, dtypes.half.ptr())]])
+    lib = inject(envelope, io, isz, ro, shader, fregs=16, hregs=16, mergedregs=False)
+    return dev.runtime('gemm_h', lib, buf_dtypes=[((0, dtypes.half, (M, K//4, 4)),),
+                       ((1, dtypes.half, (K, N//4, 4)),), ((2, dtypes.half, None),)])
 
 
 def make_bufs(dev):
@@ -280,12 +284,14 @@ def run_semantics(args):
     prg = make_runtime(dev, shader, args.threads, args.disasm)
     a, b, c = make_bufs(dev)
     prg(a._buf, b._buf, c._buf, global_size=(1, 1, 1), local_size=(args.threads, 1, 1), wait=True)
+    copied = bytearray(c.nbytes)
+    c.copyout(memoryview(copied))
     names = mode_names if args.shfl_modes or args.quad_map else ['src   ', 'qbc0  ', 'sqbc0 ', 'qbc1  ', 'qbc2  ', 'qbc3  '] if args.quad_only else ['src   ', 'rdn0  ', 'rdn1  ', 'rdn2  ', 'rdn4  ', 'rdn8  ', 'rdn16 ', 'xor16 ', 'qbc0  ', 'qbc1  ', 'qbc2  ', 'qbc3  ']
-    vals = [[read_u32_linear(c, case * args.threads + lane) for lane in range(32)] for case in range(len(names))]
+    vals = [[struct.unpack_from('<I', copied, (case * args.threads + lane)*4)[0] for lane in range(32)] for case in range(len(names))]
     for name, row_vals in zip(names, vals):
         print('%s: %s' % (name, ' '.join('%02d' % (v & 0xff) for v in row_vals)))
     if args.quad_map:
-        mv = c.as_memoryview()
+        mv = copied
         for case, name in enumerate(names):
             nz = []
             base = case * args.threads
