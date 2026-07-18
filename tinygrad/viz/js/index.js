@@ -735,6 +735,7 @@ async function renderProfiler(path, opts) {
     }
   }
 
+  let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
@@ -743,6 +744,11 @@ async function renderProfiler(path, opts) {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    const newRect = rect(canvas);
+    if (lastCanvasRect != null && lastCanvasRect.width > 0) {
+      zoomLevel = d3.zoomIdentity.translate(zoomLevel.x+lastCanvasRect.left-newRect.left, 0).scale(zoomLevel.k*lastCanvasRect.width/width);
+    }
+    lastCanvasRect = { left:newRect.left, width };
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
