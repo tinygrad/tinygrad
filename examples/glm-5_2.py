@@ -94,7 +94,7 @@ class GLMDSAIndexer():
     self.weights_proj_idx = nn.Linear(config.dim, self.idx_num_heads, bias=False)
     self.softmax_scale = self.idx_head_dim ** -0.5
 
-  def forward(self, x: Tensor, q_resid: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, step_t: list[int], to_write: list[int], attention_mask: Tensor):
+  def __call__(self, x: Tensor, q_resid: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, step_t: list[int], to_write: list[int], attention_mask: Tensor):
     assert x.shape[0] == len(step_t) == len(to_write) == q_resid.shape[0], "error in batch dim"
     q_idx = self.q_up_proj_idx(q_resid) # (B, S, H*HD)
     q_idx = q_idx.reshape(*q_idx.shape[:-1], self.idx_num_heads, self.idx_head_dim) # (B, S, H, HD)
@@ -133,6 +133,9 @@ class GLMAttention():
 
     self.attn_output = nn.Linear(proj_out, config.dim, bias=config.attn_bias)
 
+  def __call__(self):
+    pass
+
 class GLMMoeGateTopK():
   def __init__(self, config: GLMConfig):
     # NOTE: we have only one group in GLM so not taking that into consideration
@@ -142,7 +145,7 @@ class GLMMoeGateTopK():
     self.exp_score_corretion_bias = Tensor.empty(self.num_exp)
 
   # x: (B, S, dim)
-  def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+  def __call__(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     router_logits = x @ self.weight.transpose() # (B, S, dim) @ (dim, E) => (B, S, E)
     scores = router_logits.sigmoid() # (B, S, E)
     scores_for_choice = scores + self.exp_score_corretion_bias # (B, S, E)
@@ -163,7 +166,7 @@ class GLMMoeExperts():
     self.down_proj = Tensor.empty(config.num_exp, config.dim, config.moe_intermediate_size)
 
   # x : (B, S, dim) topk_idx: (B, S, k) topk_weigths: (B, S, k)
-  def forward(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor): 
+  def __call__(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor): 
     # gate, up: (B, S, K, I)
     gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose(-1, -2)).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I) => (B,S, K, 1, 2I)
     x = (gate.silu() * up).contiguous() # (B, S, K, I)
@@ -184,7 +187,7 @@ class GLMMLPLayer():
     self.up_proj = nn.Linear(config.dim, config.intermediate_size, bias=False)
     self.down_proj = nn.Linear(config.intermediate_size, config.dim, bias=False)
 
-  def forward(self, x: Tensor) -> Tensor:
+  def __call__(self, x: Tensor) -> Tensor:
     return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
 
 
