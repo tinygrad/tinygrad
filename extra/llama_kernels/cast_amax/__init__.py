@@ -37,17 +37,13 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:
   n_elems = xw13.shape[0] * xw13.shape[1] * hidden
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   mem = n_elems * 2 * 2 + n_elems + 4
-  if layer_num is None:
-    sink = UOp.sink(fp8_out.base, amax_out, xw13.base, amax_state.base, threads, workgroups,
-                    arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
-  else:
-    sink = UOp.sink(fp8_out.base, amax_out.base, xw13.base, amax_state.base, grad_amax_state.base, next_grad_amax_state.base,
-                    layer_num.base, threads, workgroups,
-                    arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
+  sink = UOp.sink(fp8_out.base, amax_out.base, xw13.base, amax_state.base,
+                  *((grad_amax_state.base, next_grad_amax_state.base, layer_num.base) if layer_num is not None else ()), threads, workgroups,
+                  arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden,
                          ["-DLAYER_SCALE=1"] if layer_num is not None else [])
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   src = kernel.src[1:]

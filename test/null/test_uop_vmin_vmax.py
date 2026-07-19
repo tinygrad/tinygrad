@@ -127,6 +127,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x.vmin, 0)
     self.assertEqual(x.vmax, 10 >> 2)
 
+  def test_vmin_vmax_cast_unsigned(self):
+    # a fitting source keeps exact bounds: no wrap can occur
+    self.assertEqual(UOp.variable('x', 5, 10).cast(dtypes.uint8)._min_max, (5, 10))
+    # a possibly-negative or too-large source can wrap: conservative
+    self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
+    self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1

@@ -24,10 +24,6 @@ constexpr float FP8_MAX = 448.0f;
 static_assert(N_ELEMS % VEC == 0, "N_ELEMS must be divisible by VEC");
 static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC (so VEC loads don't straddle block boundary)");
 
-__forceinline__ __device__ float atomicMaxOfNonNegative(float* addr, float value) {
-  return __int_as_float(atomicMax(reinterpret_cast<int32_t*>(addr), __float_as_int(value)));
-}
-
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_cast_amax_w13(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, N_ELEMS
@@ -94,5 +90,5 @@ fused_silu_mul_cast_amax_w13(
     __syncthreads();
   }
 
-  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMaxOfNonNegative(amax_out_layer, sdata[0]);
+  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMax(reinterpret_cast<int32_t*>(amax_out_layer), __float_as_int(sdata[0]));
 }

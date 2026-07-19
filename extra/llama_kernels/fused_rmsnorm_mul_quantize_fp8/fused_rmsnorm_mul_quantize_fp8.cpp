@@ -37,10 +37,6 @@
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
 
-__forceinline__ __device__ float atomicMaxOfNonNegative(float* addr, float value) {
-  return __int_as_float(atomicMax(reinterpret_cast<int32_t*>(addr), __float_as_int(value)));
-}
-
 static_assert(N_ELEMS % HIDDEN == 0, "N_ELEMS must be a multiple of HIDDEN");
 static_assert(HIDDEN % (THREADS_PER_WG * VEC) == 0, "HIDDEN must be divisible by THREADS_PER_WG*VEC");
 
@@ -172,5 +168,5 @@ fused_rmsnorm_mul_quantize_fp8(
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMaxOfNonNegative(amax_out_layer, sdata[0]);
+  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMax(reinterpret_cast<int32_t*>(amax_out_layer), __float_as_int(sdata[0]));
 }

@@ -24,10 +24,6 @@ constexpr float FP8_MAX = 448.0f;
 static_assert(N_ELEMS % VEC == 0, "N_ELEMS must be divisible by VEC");
 static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC");
 
-__forceinline__ __device__ float atomicMaxOfNonNegative(float* addr, float value) {
-  return __int_as_float(atomicMax(reinterpret_cast<int32_t*>(addr), __float_as_int(value)));
-}
-
 // fused silu*mul backward, two outputs in a single HBM pass:
 //   1) fp8  grad_xw13_fp8  — delayed-scale quantize using grad_amax_state (mailbox to matmul bwd)
 //   2) fp32 grad_amax_next — scalar |grad_xw13| via global atomic max
@@ -112,5 +108,7 @@ fused_silu_mul_bwd_w13(
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0 && sdata[0] > *grad_amax_next_layer) atomicMaxOfNonNegative(grad_amax_next_layer, sdata[0]);
+  if (tid == 0 && sdata[0] > *grad_amax_next_layer) {
+    atomicMax(reinterpret_cast<int32_t*>(grad_amax_next_layer), __float_as_int(sdata[0]));
+  }
 }
