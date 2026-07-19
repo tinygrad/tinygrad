@@ -1040,8 +1040,16 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     reader = x + 10
     x[:1].assign(Tensor([9], dtype=dtypes.int32))
     Tensor.realize(reader, x)
-    np.testing.assert_equal(reader.numpy(), np.array([11, 12], dtype=np.int32))
-    np.testing.assert_equal(x.numpy(), np.array([9, 2], dtype=np.int32))
+    self.assertEqual(reader.tolist(), [11, 12])
+    self.assertEqual(x.tolist(), [9, 2])
+
+  def test_slice_assign_does_not_rewrite_view_wrapped_reader(self):
+    x = Tensor([1, 2], dtype=dtypes.int32).contiguous().realize()
+    reader = (x + 10).reshape(1, 2)
+    x[:1].assign(Tensor([9], dtype=dtypes.int32))
+    Tensor.realize(reader, x)
+    self.assertEqual(reader.tolist(), [[11, 12]])
+    self.assertEqual(x.tolist(), [9, 2])
 
 class TestAfterCachePatterns(unittest.TestCase):
   def test_double_store_after(self):

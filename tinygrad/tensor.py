@@ -16,12 +16,11 @@ from tinygrad.callify import transform_to_call
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, visitor:Callable[[UOp], bool]|None=None) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, extra_filter:Callable[[UOp], bool]|None=None) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {node: True for node in applied_map}
-    if visitor is None:
-      def visitor(node: UOp) -> bool: return any(in_scope.get(s, False) for s in node.src)
+    def visitor(node: UOp) -> bool: return any(in_scope.get(s, False) for s in node.src) and (extra_filter is None or extra_filter(node))
     scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
@@ -234,7 +233,7 @@ class Tensor(RandMixin):
       assigned_ib = ib.after(assign)
       preserves_view = {Ops.PERMUTE, Ops.FLIP, Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.INDEX, Ops.STACK, Ops.BITCAST,
                         Ops.RANGE, Ops.END, Ops.AFTER, Ops.GROUP, Ops.SINK, Ops.DETACH}
-      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", visitor=lambda node: node.op in preserves_view)
+      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", extra_filter=lambda node: node.op in preserves_view)
     else:
       # simple assign
       self.uop = assign
