@@ -3,6 +3,7 @@ import math, functools
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import polyN
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.uop.symbolic import xpow
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
@@ -253,16 +254,6 @@ def xlog2(d:UOp) -> UOp:
   r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
   return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
-
-def xpow(base:UOp, exponent:UOp) -> UOp:
-  # start with b ** e = exp2(e * log2(b))
-  ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
-  # negative base: nan for non-integer exponent, negate for odd integer exponent
-  non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
-  is_odd = (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool)
-  neg_base = non_int.where(ret.const_like(math.nan), is_odd.where(-ret, ret))
-  # fix 0 ** 0 = 1
-  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), (base < 0).where(neg_base, ret))
 
 @functools.cache
 def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:

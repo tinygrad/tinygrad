@@ -6,9 +6,6 @@ from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invali
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 
-# TODO: symbolic shouldn't be importing from codegen
-from tinygrad.codegen.decomp.transcendental import xpow
-
 # pattern matchers that strictly clean up movement ops
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
@@ -445,6 +442,16 @@ pm_clean_up_group_sink = PatternMatcher([
     lambda root: UOp(root.op, src=tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), arg=root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
+
+def xpow(base:UOp, exponent:UOp) -> UOp:
+  # start with b ** e = exp2(e * log2(b))
+  ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
+  # negative base: nan for non-integer exponent, negate for odd integer exponent
+  non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
+  is_odd = (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool)
+  neg_base = non_int.where(ret.const_like(math.nan), is_odd.where(-ret, ret))
+  # fix 0 ** 0 = 1
+  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), (base < 0).where(neg_base, ret))
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
