@@ -1035,6 +1035,13 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     for v, s in zip(views, shapes):
       np.testing.assert_allclose(v.numpy(), np.ones(s))
 
+  def test_slice_assign_to_shared_buffer(self):
+    x = Tensor([1, 2], dtype=dtypes.int32).contiguous().realize()
+    reader = x + 10
+    x[:1].assign(Tensor([9], dtype=dtypes.int32))
+    Tensor.realize(reader, x)
+    np.testing.assert_equal(reader.numpy(), np.array([11, 12], dtype=np.int32))
+    np.testing.assert_equal(x.numpy(), np.array([9, 2], dtype=np.int32))
 
 class TestAfterCachePatterns(unittest.TestCase):
   def test_double_store_after(self):

@@ -16,11 +16,12 @@ from tinygrad.callify import transform_to_call
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, visitor:Callable[[UOp], bool]|None=None) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
-    in_scope: dict[UOp, bool] = {}
-    def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
+    in_scope: dict[UOp, bool] = {node: True for node in applied_map}
+    if visitor is None:
+      def visitor(node: UOp) -> bool: return any(in_scope.get(s, False) for s in node.src)
     scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
@@ -231,7 +232,9 @@ class Tensor(RandMixin):
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
       assigned_ib = ib.after(assign)
-      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign")
+      preserves_view = {Ops.PERMUTE, Ops.FLIP, Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.INDEX, Ops.STACK, Ops.BITCAST,
+                        Ops.RANGE, Ops.END, Ops.AFTER, Ops.GROUP, Ops.SINK}
+      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", visitor=lambda node: node.op in preserves_view)
     else:
       # simple assign
       self.uop = assign
