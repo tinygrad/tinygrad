@@ -1,11 +1,14 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
+from typing import cast
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes
+from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops, KernelInfo, AxisType
 
+@functools.cache
 def _q8_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
   x = x.flatten()
   token, group = UOp.range(quant.shape[0], 0), UOp.range(in_features // 32, 1)
@@ -41,8 +44,10 @@ def _amd_wave_sum(value:UOp, lane:UOp, lane_count:int) -> UOp:
       arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
   return value
 
-def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int=0) -> UOp:
-  token_tile = 4 if out.shape[0] % 4 == 0 else 1
+@functools.cache
+def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.index)
+  token_tile = 8 if out.shape[0] % 8 == 0 else 1
   token_block, output = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features, 1)
   tokens = tuple(token_block * token_tile + i for i in range(token_tile))
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
@@ -71,11 +76,28 @@ def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fea
 
 class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
-    super().__init__(in_features, out_features, bias)
+    # GGUF loading replaces every LLM weight. Lazy zeros avoid constructing hundreds of random-init graphs first,
+    # while keeping directly-created test models deterministic and valid.
+    self.weight = Tensor.zeros(out_features, in_features)
+    self.bias = Tensor.zeros(out_features) if bias else None
     self.in_features, self.out_features = in_features, out_features
     self.ggml_type:int|None = None
+    self._raw_uop:UOp|None = None
+    self._raw_offset_uop:UOp|None = None
+    self._raw_offset_words:int|None = None
   def set_quantized(self, packed:Tensor, ggml_type:int):
     self.weight, self.ggml_type = packed.flatten(), ggml_type
+    self._raw_uop = self._raw_offset_uop = self._raw_offset_words = None
+  def _prepare_packed(self):
+    raw, raw_offset = self.weight.uop, 0
+    while raw.op in (Ops.BITCAST, Ops.RESHAPE): raw = raw.src[0]
+    while raw.op is Ops.SHRINK:
+      raw_offset += raw.src[1].arg * raw.dtype.itemsize
+      raw = raw.src[0]
+    assert raw_offset % 4 == 0 and raw.dtype == dtypes.uint8
+    self._raw_uop = raw
+    self._raw_offset_words = raw_offset // 4
+    self._raw_offset_uop = Tensor([self._raw_offset_words], dtype=dtypes.uint64, device=self.weight.device).realize().uop
   def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]|None:
     return _q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
       if self.ggml_type == 8 and str(self.weight.device).startswith("AMD") else None
@@ -84,31 +106,29 @@ class Linear(nn.Linear):
       tokens = int(x.numel()) // self.in_features
       xq, xd = prepared if prepared is not None else _q8_quantize(x, tokens, self.in_features)
       out = Tensor.empty(tokens, self.out_features, dtype=dtypes.float32, device=x.device)
-      raw, raw_offset = self.weight.uop, 0
-      while raw.op in (Ops.BITCAST, Ops.RESHAPE): raw = raw.src[0]
-      while raw.op is Ops.SHRINK:
-        raw_offset += raw.src[1].arg * raw.dtype.itemsize
-        raw = raw.src[0]
-      assert raw_offset % 4 == 0 and raw.dtype == dtypes.uint8
-      srcs = (out.uop, raw, xq.uop, xd.uop)
+      if self._raw_uop is None: self._prepare_packed()
+      assert self._raw_uop is not None and self._raw_offset_uop is not None
+      srcs = (out.uop, self._raw_uop, xq.uop, xd.uop, self._raw_offset_uop)
       params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-      params[1] = params[1].replace(dtype=dtypes.uint32, src=(params[1].src[0] * raw.dtype.itemsize // 4,),
+      params[1] = params[1].replace(dtype=dtypes.uint32, src=(params[1].src[0] * self._raw_uop.dtype.itemsize // 4,),
                                     arg=replace(params[1].arg, dtype=dtypes.uint32))
-      kernel = _q8_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, raw_offset // 4).call(*srcs)
+      kernel = _q8_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0]).call(*srcs)
       out = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], self.out_features)
       return out if self.bias is None else out + self.bias
     return super().__call__(x)
 
 def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
                           out_features:int, in_features:int, ggml_type:int, routes_per_input:int) -> UOp:
-  route, output = UOp.range(out.shape[0], 0), UOp.range(out_features, 1)
+  output_tile = 8 if ggml_type == 21 else 4 if ggml_type == 14 else 2
+  route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // output_tile, 1)
+  outputs = tuple(output_block * output_tile + i for i in range(output_tile))
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
   lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
   expert, xidx = sel[route].cast(dtypes.index), route // routes_per_input
   type_size = _GGML_QUANT[ggml_type][1]
   expert_size = out_features * in_features // 256 * type_size
 
-  def group_dot(group:UOp) -> UOp:
+  def group_dot(group:UOp, output:UOp) -> UOp:
     block, subgroup = group // 8, group % 8
     base = expert * expert_size + output * (in_features // 256 * type_size) + block * type_size
     dot = UOp.const(dtypes.int32, 0)
@@ -116,15 +136,16 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
       for word_idx in range(8):
         qi = raw[base + 2 + subgroup * 8 + word_idx].cast(dtypes.uint16) + \
           (((raw[base + 66 + subgroup] >> word_idx) & 1).cast(dtypes.uint16) << 8)
-        word, signs = UOp.const(dtypes.uint32, 0), raw[base + 74 + subgroup * 4 + word_idx // 2]
+        signs = raw[base + 74 + subgroup * 4 + word_idx // 2]
+        sign_mask = UOp.const(dtypes.uint32, 0)
         for byte_idx in range(4):
-          sign = ((signs >> (word_idx % 2 * 4 + byte_idx)) & 1).ne(0).where(-1, 1).cast(dtypes.int8)
-          byte = (lut[qi.cast(dtypes.index) * 4 + byte_idx] * sign).cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32)
-          word = word | (byte << (8 * byte_idx))
+          negative = ((signs >> (word_idx % 2 * 4 + byte_idx)) & 1).cast(dtypes.uint32)
+          sign_mask = sign_mask | (negative * 0xff << (8 * byte_idx))
+        word = (lut[qi.cast(dtypes.index)] ^ sign_mask) + (sign_mask & 0x01010101)
         dot = _amd_dp4a(word, xq[xidx, group, word_idx], dot)
       scale_shift = (4 * (subgroup % 2)).cast(dtypes.uint8)
       scale = 1 + 2 * ((raw[base + 106 + subgroup // 2] >> scale_shift) & 15).cast(dtypes.float32)
-    else:  # IQ4_XS
+    elif ggml_type == 23:  # IQ4_XS
       for word_idx in range(8):
         word = UOp.const(dtypes.uint32, 0)
         for byte_idx in range(4):
@@ -137,20 +158,39 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
       high_word = raw[base + 2].cast(dtypes.uint16) | (raw[base + 3].cast(dtypes.uint16) << 8)
       scale = ((low.cast(dtypes.uint16) | (((high_word >> (2 * subgroup).cast(dtypes.uint16)) & 3) << 4)).cast(dtypes.uint8).
                bitcast(dtypes.int8)-32).float()
+    else:  # Q6_K
+      dots = [UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 0)]
+      for word_idx in range(8):
+        word = UOp.const(dtypes.uint32, 0)
+        for byte_idx in range(4):
+          pos = subgroup * 32 + word_idx * 4 + byte_idx
+          within = pos % 128
+          low_byte = raw[base + (pos // 128) * 64 + within % 64]
+          low = (low_byte >> ((within // 64) * 4).cast(dtypes.uint8)) & 15
+          high_byte = raw[base + 128 + (pos // 128) * 32 + within % 32]
+          high = (high_byte >> ((within // 32) * 2).cast(dtypes.uint8)) & 3
+          q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
+          word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8 * byte_idx))
+        dots[word_idx // 4] = _amd_dp4a(word, xq[xidx, group, word_idx], dots[word_idx // 4])
+      scales = [raw[base + 192 + subgroup * 2 + i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
+      dbits = raw[base + 208].cast(dtypes.uint16) | (raw[base + 209].cast(dtypes.uint16) << 8)
+      return (dots[0].float() * scales[0] + dots[1].float() * scales[1]) * xd[xidx, group] * dbits.bitcast(dtypes.float16).float()
     dbits = raw[base].cast(dtypes.uint16) | (raw[base + 1].cast(dtypes.uint16) << 8)
     return dot.cast(dtypes.float32) * xd[xidx, group] * dbits.bitcast(dtypes.float16).float() * scale
 
-  value = sum((group_dot((lane + offset).valid(lane + offset < group_count)) for offset in range(0, group_count, lane_count)),
-              UOp.const(dtypes.float32, 0))
-  total = _amd_wave_sum(value, lane, lane_count)
-  return out[route.valid(lane.eq(0)), output].store(total.cast(out.dtype)).end(route, output, lane).sink(
+  values = [sum((group_dot((lane + offset).valid(lane + offset < group_count), output)
+                 for offset in range(0, group_count, lane_count)), UOp.const(dtypes.float32, 0)) for output in outputs]
+  totals = [_amd_wave_sum(value, lane, lane_count) for value in values]
+  stores = [out[route.valid(lane.eq(0)), output].store(total.cast(out.dtype)) for output,total in zip(outputs, totals)]
+  return UOp.group(*stores).end(route, output_block, lane).sink(
     arg=KernelInfo(name=f"expert_q8_{ggml_type}", opts_to_apply=()))
 
 @functools.cache
 def _expert_lut(device:str, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common
   values = [((word >> (8 * i)) & 0xff) for word in ggml_common.iq3s_grid for i in range(4)] if ggml_type == 21 else ggml_common.kvalues_iq4nl
-  return Tensor(values, dtype=dtypes.int8, device=device).contiguous().realize()
+  lut = Tensor(values, dtype=dtypes.uint8 if ggml_type == 21 else dtypes.int8, device=device)
+  return (lut.bitcast(dtypes.uint32) if ggml_type == 21 else lut).contiguous().realize()
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -172,7 +212,7 @@ class ExpertWeights:
   def __call__(self, sel:Tensor, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     ggml_type = self.ggml_type
-    if ggml_type in (21, 23) and str(self.weight.device).startswith("AMD"):
+    if ggml_type in (14, 21, 23) and str(self.weight.device).startswith("AMD"):
       input_count = int(x.numel()) // self.in_features
       routes_per_input = int(sel.numel()) // input_count
       xq, xd = prepared if prepared is not None else self.prepare(x)
@@ -196,14 +236,45 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
+@functools.cache
+def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int) -> UOp:
+  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
+  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
+  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
+  ready = UOp.group(values.after(outer)[lane].store(x[outer, lane]),
+                    indices.after(outer)[lane].store(lane.cast(dtypes.int32))).barrier()
+  for size in (2, 4, 8, 16, 32, 64, 128, 256):
+    for stride in (128, 64, 32, 16, 8, 4, 2, 1)[9-size.bit_length():]:
+      partner = lane ^ stride
+      a_value, b_value = values.after(ready)[lane], values.after(ready)[partner]
+      a_index, b_index = indices.after(ready)[lane], indices.after(ready)[partner]
+      a_first = (a_value < b_value) | (a_value.eq(b_value) & (a_index > b_index))
+      want_first = (lane & stride).eq(0).eq((lane & size).eq(0))
+      take_a = want_first.eq(a_first)
+      ready = UOp.group(values.after(ready)[lane].store(take_a.where(a_value, b_value)),
+                        indices.after(ready)[lane].store(take_a.where(a_index, b_index))).barrier()
+  valid = lane < k
+  src = 256 - k + lane
+  stores = (out[outer, lane.valid(valid)].store(values.after(ready)[src]),
+            sel[outer, lane.valid(valid)].store(indices.after(ready)[src]))
+  return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="topk_256", opts_to_apply=()))
+
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
+  outer = int(x.numel()) // n
+  if n == 256 and outer <= 256 and str(x.device).startswith("AMD"):
+    values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
+    indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
+    values, indices = Tensor.custom_kernel(values, indices, x.reshape(outer, n),
+      fxn=lambda out,sel,x:_topk_256_kernel(out, sel, x, k))[:2]
+    return values.reshape(*x.shape[:-1], k), indices.reshape(*x.shape[:-1], k)
   vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
   cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
     (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+@functools.cache
 def _inverse_unit_lower_kernel(out:UOp, x:UOp, n:int) -> UOp:
   outer_count = 1
   for dim in out.shape[:-2]:
@@ -306,7 +377,7 @@ class FFNBlock:
   def _feed_forward(self, x:Tensor) -> Tensor:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      prepared = self.ffn_gate_exps.prepare(h) if self.ffn_gate_exps.ggml_type in (21, 23) and str(h.device).startswith("AMD") else None
+      prepared = self.ffn_gate_exps.prepare(h) if self.ffn_gate_exps.ggml_type in (14, 21, 23) and str(h.device).startswith("AMD") else None
       logits = self.ffn_gate_inp(x, prepared)
       if hasattr(self, 'exp_probs_b'):
         probs = logits.sigmoid()
@@ -319,7 +390,8 @@ class FFNBlock:
       probs = probs * self.config.routed_scaling_factor
       if prepared is not None:
         flat_sel = sel.flatten().clone()
-        gate, up = self.ffn_gate_exps(flat_sel, h, prepared), self.ffn_up_exps(flat_sel, h, prepared)
+        gate = self.ffn_gate_exps(flat_sel, h, prepared)
+        up = self.ffn_up_exps(flat_sel, h, prepared)
         x_down = self.ffn_down_exps(flat_sel, (gate.silu() * up).contiguous()).reshape(*sel.shape, self.config.dim)
       else: x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
@@ -415,12 +487,13 @@ class TransformerBlock(FFNBlock):
                                             attn_mask=decode_mask, enable_gqa=True)
     elif use_flash:
       from extra.gemm.amd_flash_attention import amd_flash_attention_causal_cached
-      valid_kv_len = ((start_pos.unbind()[0] + 1) if isinstance(start_pos, UOp) else start_pos + 1) if flash_decode else \
-                     (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + T
+      start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
+      valid = valid_len.unbind()[0] if isinstance(valid_len, UOp) else valid_len
+      valid_kv_len, key_limit = start + T, start + valid if valid is not None else None
       q_flat = q.half().reshape(B*self.config.n_heads, T, self.config.head_dim)
       out = Tensor.empty(B*self.config.n_heads, q_flat.shape[1], self.config.head_dim, dtype="float32", device=x.device)
       attn = Tensor.custom_kernel(out, q_flat, assigned_kv,
-        fxn=functools.partial(amd_flash_attention_causal_cached, valid_kv_len=valid_kv_len))[0] \
+        fxn=functools.partial(amd_flash_attention_causal_cached, valid_kv_len=valid_kv_len, key_limit=key_limit))[0] \
         .reshape(B, self.config.n_heads, q_flat.shape[1], -1)
     else:
       mask:Tensor|None
@@ -513,10 +586,11 @@ class GatedDeltaNetBlock(FFNBlock):
     if T == 1:
       x = x.half()
       prepared = self.attn_gate.prepare(x)
-      out_gate = self.attn_gate(x, prepared).reshape(B, 1, self.num_v_heads, self.head_v_dim)
-      beta = self.ssm_beta(x, prepared).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-      alpha = ((self.ssm_alpha(x, prepared).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
-      conv_window = conv_state.cat(self.attn_qkv(x, prepared), dim=1)
+      out_gate, beta, alpha, qkv = self.attn_gate(x, prepared), self.ssm_beta(x), self.ssm_alpha(x), self.attn_qkv(x, prepared)
+      out_gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim)
+      beta = beta.sigmoid().reshape(B, self.num_v_heads, 1, 1)
+      alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
+      conv_window = conv_state.cat(qkv, dim=1)
       conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
       q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
       q = l2norm(q.reshape(B, self.num_k_heads, self.head_k_dim)).repeat(1, self.num_v_heads//self.num_k_heads, 1)
@@ -533,13 +607,14 @@ class GatedDeltaNetBlock(FFNBlock):
     # Batched projections and causal depthwise convolution.
     x = x.half()
     prepared = self.attn_gate.prepare(x)
-    out_gate = self.attn_gate(x, prepared).reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x, prepared).sigmoid().reshape(B, T, self.num_v_heads)
-    log_alpha = ((self.ssm_alpha(x, prepared).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
+    out_gate, beta, alpha, qkv = self.attn_gate(x, prepared), self.ssm_beta(x), self.ssm_alpha(x), self.attn_qkv(x, prepared)
+    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
     if valid_len is not None:
       active = (Tensor.arange(T) < Tensor(valid_len)).reshape(1, T, 1)
       beta, log_alpha = beta * active, log_alpha * active
-    conv_window = conv_state.cat(self.attn_qkv(x, prepared), dim=1)
+    conv_window = conv_state.cat(qkv, dim=1)
     conv_out = functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
@@ -600,6 +675,9 @@ class Transformer:
     self.parameter_count = 0
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._state_checkpoints: list[Tensor] = []
+    self._state_checkpoint_pos = 0
+    self._warming_up = False
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.flash_prefill_jit = TinyJit(functools.partial(self.forward, use_flash=True))
@@ -612,7 +690,7 @@ class Transformer:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk:
       x = block(x, start_pos, use_flash, kv_len, valid_len)
-    last = x[:, -1:] if valid_len is None else x[:, valid_len-1:valid_len]
+    last = x[:, tokens.shape[1]-1:tokens.shape[1]] if valid_len is None else x[:, valid_len-1:valid_len]
     logits = self.output(self.output_norm(last))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if not sample: return logits.argmax(-1, keepdim=True)
@@ -703,6 +781,7 @@ class Transformer:
     model = Transformer(config)
     model.parameter_count = sum(int(weight.numel()) for weight in state_dict.values())
     packed_weights:set[str] = set()
+    packed_linears:list[Linear] = []
     def resolve_owner(path:list[str]):
       obj = model
       for part in path: obj = obj[int(part)] if isinstance(obj, list) else getattr(obj, part)
@@ -712,6 +791,7 @@ class Transformer:
       quantization = get_ggml_quantization(weight)
       if quantization is not None and quantization[1] == 8 and parts[-1] == "weight" and isinstance(owner:=resolve_owner(parts[:-1]), Linear):
         owner.set_quantized(*quantization)
+        packed_linears.append(owner)
         state_dict[name], packed_weights = owner.weight, packed_weights | {name}
       elif len(parts) == 4 and parts[0] == "blk" and parts[2].endswith("_exps") and parts[3] == "weight" and quantization is not None:
         expert_weights = getattr(model.blk[int(parts[1])], parts[2])
@@ -720,10 +800,13 @@ class Transformer:
 
     state_dict = {k:v if k in packed_weights else v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    # Custom kernels need the shared GGUF buffer and byte offset before function tracing disables device access.
+    for linear in packed_linears: linear._prepare_packed()
     expert_types = {getattr(block, name).ggml_type for block in model.blk if hasattr(block, "ffn_gate_exps")
                     for name in ("ffn_gate_exps", "ffn_down_exps")}
     for ggml_type in expert_types:
-      if ggml_type in (21, 23) and str(model.token_embd.weight.device).startswith("AMD"): _expert_lut(str(model.token_embd.weight.device), ggml_type)
+      if ggml_type in (14, 21, 23) and str(model.token_embd.weight.device).startswith("AMD"):
+        _expert_lut(str(model.token_embd.weight.device), ggml_type)
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
@@ -732,7 +815,34 @@ class Transformer:
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
-    return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+    reusable = min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+    # Recurrent state has no token dimension to slice. Roll back to its latest aligned checkpoint so resumed flash
+    # prefill uses the same global chunk boundaries as a full prompt.
+    return self._state_checkpoint_pos if self.has_recurrent_block and reusable == len(self._cached_tokens) else reusable
+
+  def _recurrent_states(self) -> list[Tensor]:
+    return [getattr(block, name) for block in self.blk for name in ("conv_state", "recurrent_state") if hasattr(block, name)]
+
+  def _init_state_checkpoints(self):
+    if not self._state_checkpoints:
+      self._state_checkpoints = [Tensor.zeros_like(state).contiguous().realize() for state in self._recurrent_states()]
+
+  @staticmethod
+  def _copy_state_buffers(pairs:list[tuple[Tensor, Tensor]]):
+    from tinygrad.engine.realize import run_linear
+    calls = []
+    for dest,src in pairs:
+      du, su = UOp.from_buffer(cast(Buffer, dest.uop.buffer)), UOp.from_buffer(cast(Buffer, src.uop.buffer))
+      calls.append(su.param_like(1).copy_to_device(du.device).call(du, su))
+    run_linear(UOp(Ops.LINEAR, src=tuple(calls)), update_stats=False)
+
+  def _save_state_checkpoint(self, pos:int):
+    self._init_state_checkpoints()
+    self._copy_state_buffers(list(zip(self._state_checkpoints, self._recurrent_states())))
+    self._state_checkpoint_pos = pos
+
+  def _restore_state_checkpoint(self):
+    self._copy_state_buffers(list(zip(self._recurrent_states(), self._state_checkpoints)))
 
   def warmup(self, chunk_size:int=256):
     direct_capture = not self.has_recurrent_block and all(isinstance(block, TransformerBlock) for block in self.blk)
@@ -740,21 +850,33 @@ class Transformer:
       device = str(self.token_embd.weight.device)
       direct_capture = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
 
-    # Capture both prefill JITs. Different first tokens prevent the second pass from reusing the first pass's KV cache.
-    recurrent_chunk = min(chunk_size, 192)
-    warm_len = min(recurrent_chunk * 3 + 1 if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
+    # Recurrent prefill has one fixed padded shape with symbolic valid length.
+    recurrent_chunk = min(chunk_size, 128)
+    warm_len = min(recurrent_chunk if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
     if warm_len > 0:
       if direct_capture:
         x = Tensor.zeros(1, 1, self.blk[0].config.dim)
         for block in self.blk: block._init_state(x)
         Tensor.realize(*[state for block in self.blk for state in (getattr(block, "cache_kv"), getattr(block, "freqs_cis"))])
-        self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
+        self.flash_prefill_jit.cnt = 1
         next(self.generate([0] * warm_len, chunk_size=chunk_size))
       elif self.has_recurrent_block:
+        # State creation must happen outside JIT capture: capturing _init_state makes the first real request
+        # reuse initialization buffers instead of the persistent recurrent/KV state.
+        x = Tensor.zeros(1, 1, self.blk[0].config.dim)
+        for block in self.blk: block._init_state(x)
+        states = [getattr(block, name) for block in self.blk for name in ("cache_kv", "freqs_cis", "conv_state", "recurrent_state")
+                  if hasattr(block, name)]
+        Tensor.realize(*states)
+        self._init_state_checkpoints()
+        self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
+        self.rollout_jits[0] = TinyJit(functools.partial(self.forward_recurrent_decode, sample=False))
+        self.rollout_jits[0].cnt = 1
+        self._warming_up = True
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
         next(warm)
         next(warm)
-        next(warm)
+        self._warming_up = False
       else:
         for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
 
@@ -777,10 +899,11 @@ class Transformer:
           result.realize()
 
     if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
+    if self._state_checkpoints: self._save_state_checkpoint(0)
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int=256, temperature:float=0.0):
-    if self.has_recurrent_block: chunk_size = min(chunk_size, 192)
+    if self.has_recurrent_block: chunk_size = min(chunk_size, 128)
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -789,27 +912,42 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32").reshape(1, self.max_context + chunk_size)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
+    if start_pos < len(self._cached_tokens):
+      if self.has_recurrent_block and self._state_checkpoints and start_pos == self._state_checkpoint_pos:
+        self._restore_state_checkpoint()
+      elif resets := [r for b in self.blk for r in b._state_reset_ops()]:
+        Tensor.realize(*resets)
+        if self._state_checkpoints: self._save_state_checkpoint(0)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       remaining = len(tokens) - start_pos
-      can_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and start_pos > 0 and remaining >= chunk_size and chunk_size % 64 == 0
+      recurrent_prefill = self.has_recurrent_block and start_pos < prompt_len
+      can_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and chunk_size % 64 == 0 and \
+                  (recurrent_prefill if self.has_recurrent_block else start_pos > 0 and remaining >= chunk_size)
       if can_flash:
         device = str(self.token_embd.weight.device)
         can_flash = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
-      use_flash = can_flash and start_pos % 64 == 0
+      use_flash = can_flash and (self.has_recurrent_block or start_pos % 64 == 0)
       sp = v_start_pos.bind(start_pos)
-      # The flash kernel requires its cached prefix to start on a 64-token tile. Cache reuse can resume at any
-      # token, so process one short generic chunk to reach the next tile boundary before entering flash prefill.
+      # Dense attention aligns cache reuse to a 64-token flash tile. Recurrent prefill always uses its fixed,
+      # padded chunk shape, and key_limit excludes the padding from attention.
       actual_nt = min(chunk_size, remaining)
       nt = chunk_size if use_flash or self.has_recurrent_block and start_pos < prompt_len else 1 if self.has_recurrent_block else \
            v_toks.bind(min(64 - start_pos % 64, remaining) if can_flash else actual_nt)
       inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
-      valid_len = v_toks.bind(actual_nt) if self.has_recurrent_block and nt == chunk_size else None
-      result = self(inp, sp, temp, use_flash=True, valid_len=valid_len, sample=temperature > 0) if use_flash else \
-               self(inp, sp, temp, valid_len=valid_len, sample=temperature > 0)
+      valid_len = v_toks.bind(actual_nt) if recurrent_prefill else None
+      # Save once immediately before a short final chunk. This is the nearest globally aligned state that can be
+      # reused without changing flash-attention's numerical tile layout.
+      if not self._warming_up and recurrent_prefill and remaining < chunk_size and start_pos % chunk_size == 0:
+        self._save_state_checkpoint(start_pos)
+      if use_flash: result = self(inp, sp, temp, use_flash=True, valid_len=valid_len, sample=temperature > 0)
+      elif valid_len is not None: result = self(inp, sp, temp, valid_len=valid_len, sample=temperature > 0)
+      elif temperature > 0: result = self(inp, sp, temp, sample=True)
+      else: result = self(inp, sp, temp)
       out = result.realize()
       start_pos += actual_nt if self.has_recurrent_block else nt if isinstance(nt, int) else nt.val
+      if not self._warming_up and self.has_recurrent_block and start_pos >= prompt_len and start_pos % chunk_size == 0:
+        self._save_state_checkpoint(start_pos)
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))

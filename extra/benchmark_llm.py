@@ -21,7 +21,6 @@ class Result:
   decode_tokens: int
   time_to_first_token_s: float
   prefill_tokens_per_s: float
-  decode_jit_s: float
   decode_tokens_per_s: float
   decode_p50_ms: float
   decode_p95_ms: float
@@ -45,18 +44,13 @@ def benchmark(model:Transformer, prompt:list[int], decode_tokens:int, chunk_size
   next(gen)
   ttft = time.perf_counter() - begin
 
-  # A bucketed rollout JIT captures on its first two calls at this context size.
-  begin = time.perf_counter()
-  next(gen)
-  next(gen)
-  decode_jit = time.perf_counter() - begin
   decode_times: list[float] = []
   for _ in range(decode_tokens):
     begin = time.perf_counter()
     next(gen)
     decode_times.append(time.perf_counter() - begin)
 
-  return Result(len(prompt), decode_tokens, ttft, len(prompt) / ttft, decode_jit, decode_tokens / sum(decode_times),
+  return Result(len(prompt), decode_tokens, ttft, len(prompt) / ttft, decode_tokens / sum(decode_times),
                 statistics.median(decode_times) * 1e3, percentile(decode_times, 0.95) * 1e3)
 
 
@@ -80,11 +74,7 @@ def main() -> None:
   model, kv = Transformer.from_gguf(path, args.max_context, realize=args.realize)
   vocab_size = len(kv["tokenizer.ggml.tokens"])
 
-  # TinyJit captures on its first two calls. Prime prefill and rollout without leaving a reusable prefix.
-  warm_length = min(max(args.chunk_size * 2, 2), args.max_context - 4)
-  for salt in (0, 10_000):
-    warmup = model.generate(synthetic_prompt(warm_length, vocab_size, salt), chunk_size=args.chunk_size)
-    for _ in range(4): next(warmup)
+  model.warmup(args.chunk_size)
 
   results = [benchmark(model, synthetic_prompt(n, vocab_size, salt=i+1), args.decode_tokens, args.chunk_size)
              for i, n in enumerate(args.prompt_tokens)]
@@ -94,10 +84,9 @@ def main() -> None:
     return
 
   print(f"model={args.model} max_context={args.max_context} chunk_size={args.chunk_size} realize={args.realize}")
-  print(f"{'prompt':>8} {'TTFT':>10} {'prefill':>14} {'decode JIT':>12} {'decode':>14} {'decode p50':>12} {'decode p95':>12}")
+  print(f"{'prompt':>8} {'TTFT':>10} {'prefill':>14} {'decode':>14} {'decode p50':>12} {'decode p95':>12}")
   for result in results:
     print(f"{result.prompt_tokens:8d} {result.time_to_first_token_s:9.3f}s {result.prefill_tokens_per_s:11.1f} t/s "
-          f"{result.decode_jit_s:10.3f}s "
           f"{result.decode_tokens_per_s:11.1f} t/s {result.decode_p50_ms:9.2f} ms {result.decode_p95_ms:9.2f} ms")
 
 

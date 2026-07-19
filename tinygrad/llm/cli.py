@@ -1,8 +1,6 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
-from tinygrad import nn
-from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, BEAM, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
@@ -20,15 +18,15 @@ class SimpleTokenizer:
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
     # 0x323b0 is one past the max codepoint in unicode categories L/N/Z (0x323af is max L)
+    # Compact adjacent codepoints into ranges. Build L/N/Z together: scanning Unicode three times is measurable at server startup.
+    runs: dict[str, list[tuple[int, int]]] = {pre:[] for pre in "LNZ"}
+    for cp in range(0x323b0):
+      if (pre:=unicodedata.category(chr(cp))[0]) not in runs: continue
+      if runs[pre] and cp == runs[pre][-1][1]+1: runs[pre][-1] = (runs[pre][-1][0], cp)
+      else: runs[pre].append((cp, cp))
     def ucat_range(pre:str) -> str:
-      # Compact adjacent codepoints into ranges. Listing every codepoint makes Python's re engine spend seconds matching large prompts.
-      cps = [cp for cp in range(0x323b0) if unicodedata.category(chr(cp)).startswith(pre)]
-      runs: list[tuple[int, int]] = []
-      for cp in cps:
-        if runs and cp == runs[-1][1]+1: runs[-1] = (runs[-1][0], cp)
-        else: runs.append((cp, cp))
       def esc(cp:int) -> str: return f"\\U{cp:08x}"
-      return "".join(esc(st) if st == en else f"{esc(st)}-{esc(en)}" for st,en in runs)
+      return "".join(esc(st) if st == en else f"{esc(st)}-{esc(en)}" for st,en in runs[pre])
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
       f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
@@ -157,11 +155,11 @@ def main():
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
+  model_path = fetch(models.get(args.model, args.model))
+  model, kv = Transformer.from_gguf(model_path, args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {model.parameter_count:,} params, "
-        f"max context {model.max_context} on {nn.state.get_parameters(model)[0].device}")
+  print(f"using model \"{model_name}\" with {model_path.stat().st_size:,} bytes and {model.parameter_count:,} params, "
+        f"max context {model.max_context} on {model.token_embd.weight.device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -184,7 +182,7 @@ def main():
   if args.warmup or args.serve:
     beam = args.beam if args.beam is not None else BEAM.value
     print(f"warming serving JITs with BEAM={beam}")
-    with Context(DEBUG=max(DEBUG.value, 1), BEAM=beam):
+    with Context(DEBUG=DEBUG.value, BEAM=beam):
       model.warmup()
 
   # start server

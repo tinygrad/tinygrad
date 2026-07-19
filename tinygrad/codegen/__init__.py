@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
-import itertools, functools
+import itertools, functools, hashlib, pickle
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, CCACHE, diskcache_get, diskcache_put
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
@@ -466,5 +466,10 @@ to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
   key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
-  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  if (prg:=to_program_cache.get(key)) is None:
+    disk_key = hashlib.sha256(pickle.dumps(key)).digest()
+    if not CCACHE or (prg:=diskcache_get("program", {"key":disk_key})) is None:
+      prg = do_to_program(ast, renderer)
+      if CCACHE: diskcache_put("program", {"key":disk_key}, prg)
+    to_program_cache[key] = prg
   return prg

@@ -151,7 +151,7 @@ class TestTransformerGenerate(unittest.TestCase):
     """Temperature from generate should be passed through to __call__."""
     model = Transformer(TEST_CONFIG)
     captured_temps = []
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       captured_temps.append(float(temperature.item()))
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):

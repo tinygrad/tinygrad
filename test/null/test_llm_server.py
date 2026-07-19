@@ -184,11 +184,9 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_model.max_context = 4
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
+    from tinygrad.llm.cli import FallbackTemplate
     from tinygrad.llm.serve import LLMServer
-    import jinja2
-    # .items() matches tool-aware templates and ensures OpenAI JSON argument strings are normalized before rendering the next turn.
-    template = jinja2.Template("""{% for m in messages %}{{ m.content or '' }}{% for tc in m.tool_calls or [] %}
-      {% for key, value in tc.function.arguments.items() %}{{ key }}={{ value }}{% endfor %}{% endfor %}{% endfor %}""")
+    template = FallbackTemplate(cls.mock_tok)
     cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "tool-model", cls.mock_tok, template)
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)

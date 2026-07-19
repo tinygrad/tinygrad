@@ -2,7 +2,7 @@ from tinygrad import Tensor, UOp, getenv
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import GlobalCounters, Context
-import math
+import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
 WARP_SIZE = 32
@@ -35,7 +35,9 @@ def warp_reduce_sum(val, lane):
     val = val + warp_shfl_xor(val, offset, lane)
   return val
 
-def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:int|UOp|None=None) -> UOp:
+@functools.cache
+def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:int|UOp|None=None,
+                         key_limit:int|UOp|None=None) -> UOp:
   # inputs are q=(B*H, M, D), k/v=(B*H, N, D). For causal attention q is the final M tokens of k/v.
   BH, M, D = q.shape
   physical_n = k.shape[1]
@@ -123,7 +125,9 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
     rn = UOp.range(TN, 251, AxisType.LOOP)
     q_idx = N - M + block_m * BLOCK_M + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
     k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
-    masked = (k_idx <= q_idx).where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))
+    valid = k_idx <= q_idx
+    if key_limit is not None: valid = valid & (k_idx < key_limit)
+    masked = valid.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))
     S_reg = S_reg.after(S_reg[rm, rn].store(masked).end(rm, rn))
 
   # per-thread local row max over TN=4 elements, then warp reduce across 16 lanes
@@ -140,16 +144,20 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
 
   p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
-  rp2 = UOp.range(TN, 291, AxisType.REDUCE)
-  p_local = p_local.after(p_local.store(p_local.after(rp2) + S_reg[:, rp2]).end(rp2))
   ri_ws = UOp.range(TM, 295, AxisType.LOOP)
-  p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
+  # Reduce contiguous 16-key groups independently, matching the ordinary softmax reduction tree.
+  p_sum = p_local.after(p_local[ri_ws].store(
+    sum((warp_reduce_sum(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
 
-  # write P = exp(S - m_ij) to P_lds (reuses slot 0, Q no longer needed)
+  # Preserve the float softmax weights as two half components for the WMMA P@V product.
   P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
+  P_lo_lds = UOp.placeholder((WAVES_N, BLOCK_M, BLOCK_N), dtypes.half, slot=11, addrspace=AddrSpace.LOCAL)
   P_write = P_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
   P_write = P_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
-  P_store = P_write[tid].store(S_reg.cast(dtypes.half))
+  P_lo_write = P_lo_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
+  P_lo_write = P_lo_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
+  p_hi_barrier = UOp.barrier(P_write[tid].store(S_reg.cast(dtypes.half)))
+  P_store = P_lo_write.after(p_hi_barrier)[tid].store(((S_reg-P_write.after(p_hi_barrier)[tid].float()) * 2048).cast(dtypes.half))
 
   # -- online softmax correction --
   beta_i = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
@@ -178,6 +186,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
     v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v]).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
+  P_lo_lds = P_lo_lds.after(pv_barrier)
   V_lds = V_lds.after(pv_barrier)
 
   # -- acc += beta * (P @ V) via WMMA --
@@ -193,9 +202,21 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   pv_done = pv_frag.store(pv).end(tm2, tn2).end(k_pv)
   pv_acc = pv_acc.after(pv_done)
 
+  pv_acc_lo = UOp.placeholder((TM, TD), dtypes.float, slot=12, addrspace=AddrSpace.REG)
+  pv_acc_lo = pv_acc_lo.after(pv_acc_lo.after(n_tile).store(pv_acc_lo.const_like(0))).after(pv_barrier)
+  k_pv_lo = UOp.range(BLOCK_N // WMMA_K, 403, AxisType.REDUCE)
+  tm2_lo = UOp.range(TM // WMMA_ACC, 404, AxisType.LOOP)
+  tn2_lo = UOp.range(TD, 405, AxisType.LOOP)
+  pv_frag_lo = pv_acc_lo.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2_lo, tn2_lo]
+  p_frag_lo = P_lo_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2_lo, lane_n, k_pv_lo]
+  v_frag_lo = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2_lo, lane_n, k_pv_lo]
+  pv_done_lo = pv_frag_lo.store(UOp.wmma(p_frag_lo, v_frag_lo, pv_frag_lo.after(k_pv_lo), *WMMA_ARG)).end(tm2_lo, tn2_lo).end(k_pv_lo)
+  pv_acc_lo = pv_acc_lo.after(pv_done_lo)
+
   ri5 = UOp.range(TM, 410, AxisType.LOOP)
   rj5 = UOp.range(TD, 411, AxisType.LOOP)
-  accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5)
+  accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] *
+    (pv_acc[ri5, rj5] + pv_acc_lo[ri5, rj5] / 2048)).end(ri5, rj5)
 
   # end KV tile loop
   n_tile_end = accumulate.barrier().end(n_tile)
@@ -217,35 +238,39 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
 def amd_flash_attention_causal(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   return _amd_flash_attention(o, q, k, v, causal=True)
 
-def amd_flash_attention_causal_cached(o:UOp, q:UOp, cache_kv:UOp, *, valid_kv_len:int|UOp) -> UOp:
+def amd_flash_attention_causal_cached(o:UOp, q:UOp, cache_kv:UOp, *, valid_kv_len:int|UOp, key_limit:int|UOp|None=None) -> UOp:
   _, B, H_KV, N, D = cache_kv.shape
   k = cache_kv[0].reshape(B*H_KV, N, D)
   v = cache_kv[1].reshape(B*H_KV, N, D)
-  return _amd_flash_attention(o, q, k, v, causal=True, valid_kv_len=valid_kv_len)
+  return _amd_flash_attention(o, q, k, v, causal=True, valid_kv_len=valid_kv_len, key_limit=key_limit)
 
 if __name__ == "__main__":
   B, H, N, D = getenv("B", 1), getenv("H", 32), getenv("N", 1024), getenv("D", 64)
-  q = Tensor.rand(B, H, N, D).cast(dtypes.half)
+  M, causal = getenv("M", N), getenv("CAUSAL", 0)
+  q = Tensor.rand(B, H, M, D).cast(dtypes.half)
   k = Tensor.rand(B, H, N, D).cast(dtypes.half)
   v = Tensor.rand(B, H, N, D).cast(dtypes.half)
-  o = Tensor.empty(B, H, N, D, dtype=dtypes.float)
+  o = Tensor.empty(B, H, M, D, dtype=dtypes.float)
   with Context(DEBUG=0): Tensor.realize(q, k, v)
 
-  q_flat, k_flat, v_flat, o_flat = q.reshape(B*H, N, D), k.reshape(B*H, N, D), v.reshape(B*H, N, D), o.reshape(B*H, N, D)
+  q_flat, k_flat, v_flat, o_flat = q.reshape(B*H, M, D), k.reshape(B*H, N, D), v.reshape(B*H, N, D), o.reshape(B*H, M, D)
   NUM_RUNS = getenv("CNT", 5)
   ets = []
   with Context(DEBUG=2):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
-      tst = Tensor.custom_kernel(o_flat, q_flat, k_flat, v_flat, fxn=amd_flash_attention)[0].realize()
+      tst = Tensor.custom_kernel(o_flat, q_flat, k_flat, v_flat,
+                                 fxn=amd_flash_attention_causal if causal else amd_flash_attention)[0].realize()
       ets.append(GlobalCounters.time_sum_s)
   print(f"best time: {min(ets)*1e3:.2f}ms")
 
   if getenv("VERIFY", 1):
     with Context(DEBUG=0):
-      ref = q.float().scaled_dot_product_attention(k.float(), v.float()).reshape(B*H, N, D).realize()
-      err = (ref - tst).square().mean().item()
-    print(f"mean squared error {err}")
+      mask = Tensor.full((1, 1, M, N), float("-inf"), buffer=False).triu(N-M+1) if causal else None
+      ref = q.float().scaled_dot_product_attention(k.float(), v.float(), attn_mask=mask).reshape(B*H, M, D).realize()
+      diff = (ref - tst).abs()
+      err, max_err = diff.square().mean().item(), diff.max().item()
+    print(f"mean squared error {err}, max error {max_err}")
     if err > 1e-2:
       raise RuntimeError("flash attention is wrong!")
     else:
