@@ -16,11 +16,11 @@ from tinygrad.callify import transform_to_call
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, extra_filter:Callable[[UOp], bool]|None=None) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, extra_filter:Callable[[UOp], bool]=lambda node: True) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {node: True for node in applied_map}
-    def visitor(node: UOp) -> bool: return any(in_scope.get(s, False) for s in node.src) and (extra_filter is None or extra_filter(node))
+    def visitor(node: UOp) -> bool: return any(in_scope.get(s, False) for s in node.src) and extra_filter(node)
     scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
