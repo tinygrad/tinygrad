@@ -233,7 +233,7 @@ class Tensor(RandMixin):
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
       assigned_ib = ib.after(assign)
       preserves_view = {Ops.PERMUTE, Ops.FLIP, Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.INDEX, Ops.STACK, Ops.BITCAST,
-                        Ops.RANGE, Ops.END, Ops.AFTER, Ops.GROUP, Ops.SINK}
+                        Ops.RANGE, Ops.END, Ops.AFTER, Ops.GROUP, Ops.SINK, Ops.DETACH}
       _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", visitor=lambda node: node.op in preserves_view)
     else:
       # simple assign
