@@ -74,6 +74,39 @@ def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fea
   return UOp.group(*stores).end(token_block, output, lane).sink(
     arg=KernelInfo(name="linear_q8", opts_to_apply=()))
 
+@functools.cache
+def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.index)
+  output_tile = 2
+  output_block, lane = UOp.range(out_features // output_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
+  outputs, group_count = tuple(output_block * output_tile + i for i in range(output_tile)), in_features // 32
+  type_size, output_size = _GGML_QUANT[14][1], in_features // 256 * _GGML_QUANT[14][1]
+
+  def group_dot(group:UOp, output:UOp) -> UOp:
+    block, subgroup = group // 8, group % 8
+    base = raw_offset + output * output_size + block * type_size
+    dots = [UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 0)]
+    for word_idx in range(8):
+      word = UOp.const(dtypes.uint32, 0)
+      for byte_idx in range(4):
+        pos = subgroup * 32 + word_idx * 4 + byte_idx
+        within = pos % 128
+        low_byte = raw[base + (pos // 128) * 64 + within % 64]
+        low = (low_byte >> ((within // 64) * 4).cast(dtypes.uint8)) & 15
+        high_byte = raw[base + 128 + (pos // 128) * 32 + within % 32]
+        high = (high_byte >> ((within // 32) * 2).cast(dtypes.uint8)) & 3
+        q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
+        word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8 * byte_idx))
+      dots[word_idx // 4] = _amd_dp4a(word, xq[0, group, word_idx], dots[word_idx // 4])
+    scales = [raw[base + 192 + subgroup * 2 + i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
+    dbits = raw[base + 208].cast(dtypes.uint16) | (raw[base + 209].cast(dtypes.uint16) << 8)
+    return (dots[0].float() * scales[0] + dots[1].float() * scales[1]) * xd[0, group] * dbits.bitcast(dtypes.float16).float()
+
+  totals = [_amd_wave_sum(sum((group_dot((lane + offset).valid(lane + offset < group_count), output)
+                                for offset in range(0, group_count, 32)), UOp.const(dtypes.float32, 0)), lane, 32) for output in outputs]
+  stores = [out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)) for output,total in zip(outputs, totals)]
+  return UOp.group(*stores).end(output_block, lane).sink(arg=KernelInfo(name="linear_q6", opts_to_apply=()))
+
 class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
     # GGUF loading replaces every LLM weight. Lazy zeros avoid constructing hundreds of random-init graphs first,
@@ -88,7 +121,7 @@ class Linear(nn.Linear):
   def set_quantized(self, packed:Tensor, ggml_type:int):
     self.weight, self.ggml_type = packed.flatten(), ggml_type
     self._raw_uop = self._raw_offset_uop = self._raw_offset_words = None
-  def _prepare_packed(self):
+  def _packed_offset(self) -> Tensor:
     raw, raw_offset = self.weight.uop, 0
     while raw.op in (Ops.BITCAST, Ops.RESHAPE): raw = raw.src[0]
     while raw.op is Ops.SHRINK:
@@ -97,12 +130,14 @@ class Linear(nn.Linear):
     assert raw_offset % 4 == 0 and raw.dtype == dtypes.uint8
     self._raw_uop = raw
     self._raw_offset_words = raw_offset // 4
-    self._raw_offset_uop = Tensor([self._raw_offset_words], dtype=dtypes.uint64, device=self.weight.device).realize().uop
+    return Tensor([self._raw_offset_words], dtype=dtypes.uint64, device=self.weight.device)
+  def _prepare_packed(self):
+    self._raw_offset_uop = self._packed_offset().realize().uop
   def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]|None:
     return _q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
-      if self.ggml_type == 8 and str(self.weight.device).startswith("AMD") else None
+      if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") else None
   def __call__(self, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
-    if self.ggml_type == 8 and str(self.weight.device).startswith("AMD"):
+    if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") and (self.ggml_type == 8 or int(x.numel()) == self.in_features):
       tokens = int(x.numel()) // self.in_features
       xq, xd = prepared if prepared is not None else _q8_quantize(x, tokens, self.in_features)
       out = Tensor.empty(tokens, self.out_features, dtype=dtypes.float32, device=x.device)
@@ -110,9 +145,12 @@ class Linear(nn.Linear):
       assert self._raw_uop is not None and self._raw_offset_uop is not None
       srcs = (out.uop, self._raw_uop, xq.uop, xd.uop, self._raw_offset_uop)
       params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-      params[1] = params[1].replace(dtype=dtypes.uint32, src=(params[1].src[0] * self._raw_uop.dtype.itemsize // 4,),
-                                    arg=replace(params[1].arg, dtype=dtypes.uint32))
-      kernel = _q8_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0]).call(*srcs)
+      if self.ggml_type == 8:
+        params[1] = params[1].replace(dtype=dtypes.uint32, src=(params[1].src[0] * self._raw_uop.dtype.itemsize // 4,),
+                                      arg=replace(params[1].arg, dtype=dtypes.uint32))
+        kernel = _q8_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0]).call(*srcs)
+      else:
+        kernel = _q6_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0] * 4).call(*srcs)
       out = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], self.out_features)
       return out if self.bias is None else out + self.bias
     return super().__call__(x)
@@ -475,16 +513,14 @@ class TransformerBlock(FFNBlock):
     #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
     #v = self.cache_kv[1, :, :, 0:start_pos+T, :]
 
-    # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
+    # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_causal = True
     # TODO: this if statement should be removed and it shouldn't generate extra kernels
     flash_decode = resolve(T == 1) and kv_len is not None and str(x.device).startswith("AMD") and self.config.head_dim == 256
     if flash_decode:
       decode_len = self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
-      decode_mask = (Tensor.arange(decode_len) < Tensor(decode_pos)) \
-        .where(0.0, float("-inf")).reshape(1, 1, 1, decode_len)
-      attn = q.scaled_dot_product_attention(assigned_kv[0, :, :, :decode_len], assigned_kv[1, :, :, :decode_len],
-                                            attn_mask=decode_mask, enable_gqa=True)
+      from extra.gemm.amd_flash_attention import amd_flash_attention_decode
+      attn = amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
     elif use_flash:
       from extra.gemm.amd_flash_attention import amd_flash_attention_causal_cached
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
@@ -789,7 +825,7 @@ class Transformer:
     for name, weight in state_dict.items():
       parts = name.split('.')
       quantization = get_ggml_quantization(weight)
-      if quantization is not None and quantization[1] == 8 and parts[-1] == "weight" and isinstance(owner:=resolve_owner(parts[:-1]), Linear):
+      if quantization is not None and quantization[1] in (8, 14) and parts[-1] == "weight" and isinstance(owner:=resolve_owner(parts[:-1]), Linear):
         owner.set_quantized(*quantization)
         packed_linears.append(owner)
         state_dict[name], packed_weights = owner.weight, packed_weights | {name}
@@ -801,7 +837,9 @@ class Transformer:
     state_dict = {k:v if k in packed_weights else v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # Custom kernels need the shared GGUF buffer and byte offset before function tracing disables device access.
-    for linear in packed_linears: linear._prepare_packed()
+    packed_offsets = [linear._packed_offset() for linear in packed_linears]
+    Tensor.realize(*packed_offsets)
+    for linear,offset in zip(packed_linears, packed_offsets): linear._raw_offset_uop = offset.uop
     expert_types = {getattr(block, name).ggml_type for block in model.blk if hasattr(block, "ffn_gate_exps")
                     for name in ("ffn_gate_exps", "ffn_down_exps")}
     for ggml_type in expert_types:
@@ -898,8 +936,12 @@ class Transformer:
           assert isinstance(result, Tensor)
           result.realize()
 
-    if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
-    if self._state_checkpoints: self._save_state_checkpoint(0)
+    if self._state_checkpoints:
+      # Recurrent warmup starts from the zero checkpoint. Restore it directly instead of scheduling state clears and
+      # then copying the same zeros back into the checkpoint.
+      self._restore_state_checkpoint()
+      self._state_checkpoint_pos = 0
+    elif resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int=256, temperature:float=0.0):

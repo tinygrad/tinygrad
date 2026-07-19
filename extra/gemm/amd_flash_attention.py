@@ -5,6 +5,7 @@ from tinygrad.helpers import GlobalCounters, Context
 import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
+DECODE_BLOCK_N = 128
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N = 2, 2
@@ -34,6 +35,94 @@ def warp_reduce_sum(val, lane):
   for offset in [8, 4, 2, 1]:
     val = val + warp_shfl_xor(val, offset, lane)
   return val
+
+def wave_reduce_sum(val, lane):
+  for offset in [16, 8, 4, 2, 1]: val = val + warp_shfl_xor(val, offset, lane)
+  return val
+
+@functools.cache
+def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp, valid_kv_len:int|UOp, max_kv_len:int) -> UOp:
+  _, B, H_KV, N, D = cache_kv.shape
+  _, H, M, _ = q.shape
+  assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % DECODE_BLOCK_N == 0
+  G, CHUNK, DV = H // H_KV, DECODE_BLOCK_N, D // WARP_SIZE
+  block_bhkv = UOp.range(B*H_KV, 0, AxisType.GLOBAL)
+  block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
+  lane = UOp.range(WARP_SIZE, 2, AxisType.LOCAL)
+  b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
+  dims = tuple(lane + i*WARP_SIZE for i in range(DV))
+
+  acc = UOp.placeholder((G, DV), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+  row_max = UOp.placeholder((G,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+  row_sum = UOp.placeholder((G,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+  init = UOp.group(acc.store(acc.const_like(0)), row_max.store(row_max.const_like(-math.inf)), row_sum.store(row_sum.const_like(0)))
+  acc, row_max, row_sum = acc.after(init), row_max.after(init), row_sum.after(init)
+
+  offset = UOp.range(CHUNK, 100, AxisType.REDUCE)
+  key, valid = block_n*CHUNK + offset, block_n*CHUNK + offset < valid_kv_len
+  kvals = tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims)
+  vvals = tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims)
+  updates = []
+  for head in range(G):
+    q_head = kv_head*G + head
+    score = wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, kvals)), UOp.const(dtypes.float, 0)), lane) / math.sqrt(D)
+    new_max = valid.where(row_max[head].maximum(score), row_max[head])
+    alpha = valid.where(((row_max[head]-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 1))
+    beta = valid.where(((score-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 0))
+    updates += [acc[head].store(acc[head]*alpha + UOp.stack(*vvals)*beta),
+                row_sum[head].store(row_sum[head]*alpha + beta), row_max[head].store(new_max)]
+  update = UOp.group(*updates).end(offset)
+  acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
+
+  stores = []
+  for head in range(G):
+    q_head = kv_head*G + head
+    stores += [out[b, q_head, block_n, d].store(acc[head, i]) for i,d in enumerate(dims)]
+    stores += [stats[b, q_head.valid(lane.eq(0)), block_n, 0].store(row_max[head]),
+               stats[b, q_head.valid(lane.eq(0)), block_n, 1].store(row_sum[head])]
+  return UOp.group(*stores).end(lane, block_n, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
+
+@functools.cache
+def _amd_flash_attention_decode_reduce(out:UOp, partial:UOp, stats:UOp, valid_chunks:int|UOp) -> UOp:
+  B, H, _, D = out.shape
+  assert D % WARP_SIZE == 0
+  DV = D // WARP_SIZE
+  block_bh, lane = UOp.range(B*H, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, 1, AxisType.LOCAL)
+  b, head = block_bh // H, block_bh % H
+  dims = tuple(lane + i*WARP_SIZE for i in range(DV))
+
+  row_max = UOp.placeholder((1,), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+  row_max = row_max.after(row_max.store(row_max.const_like(-math.inf)))
+  chunk_max = UOp.range(valid_chunks, 100, AxisType.REDUCE)
+  max_done = row_max.store(row_max.after(chunk_max).maximum(stats[b, head, chunk_max, 0])).end(chunk_max)
+  row_max = row_max.after(max_done)
+
+  numerator = UOp.placeholder((DV,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+  denominator = UOp.placeholder((1,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+  init = UOp.group(numerator.store(numerator.const_like(0)), denominator.store(denominator.const_like(0)))
+  numerator, denominator = numerator.after(init), denominator.after(init)
+  chunk = UOp.range(valid_chunks, 101, AxisType.REDUCE)
+  scale = ((stats[b, head, chunk, 0]-row_max[0])*LOG2E).exp2()
+  update = UOp.group(numerator.store(numerator.after(chunk) + UOp.stack(*(partial[b, head, chunk, d] for d in dims))*scale),
+                     denominator.store(denominator.after(chunk) + stats[b, head, chunk, 1]*scale)).end(chunk)
+  numerator, denominator = numerator.after(update), denominator.after(update)
+  stores = [out[b, head, 0, d].store(numerator[i]/denominator[0]) for i,d in enumerate(dims)]
+  return UOp.group(*stores).end(lane, block_bh).sink(arg=KernelInfo(name="flash_decode_reduce", opts_to_apply=()))
+
+def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int|None=None) -> Tensor:
+  _, B, H_KV, N, D = cache_kv.shape
+  _, H, M, _ = q.shape
+  max_kv_len = N if max_kv_len is None else max_kv_len
+  assert M == 1 and max_kv_len <= N and max_kv_len % DECODE_BLOCK_N == 0
+  chunks = max_kv_len // DECODE_BLOCK_N
+  partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
+  stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
+  partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv,
+    fxn=functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len))[:2]
+  live_chunks = (valid_kv_len+DECODE_BLOCK_N-1)//DECODE_BLOCK_N
+  out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device)
+  return Tensor.custom_kernel(out, partial, stats,
+    fxn=functools.partial(_amd_flash_attention_decode_reduce, valid_chunks=live_chunks))[0]
 
 @functools.cache
 def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:int|UOp|None=None,

@@ -230,6 +230,20 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual([json.loads(tc.function.arguments)["path"] for tc in response.choices[0].message.tool_calls], ["a", "b"])
     self.assertEqual(response.choices[0].finish_reason, "tool_calls")
 
+  def test_multiline_tool_argument_preserves_trailing_newline(self):
+    self.set_output("<tool_call>\n<function=write>\n<parameter=content>\nfirst\nsecond\n\n</parameter>\n"
+                    "<parameter=filePath>\nout.txt\n</parameter>\n</function>\n</tool_call>")
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Write out.txt"}], tools=self.tools())
+    args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+    self.assertEqual(args, {"content":"first\nsecond\n", "filePath":"out.txt"})
+
+  def test_prefilled_reasoning_round_trip(self):
+    self.set_output("reasoning\n</think>\n\nanswer")
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Think"}],
+                                                   extra_body={"enable_thinking":True})
+    self.assertEqual(response.choices[0].message.reasoning_content, "reasoning\n")
+    self.assertEqual(response.choices[0].message.content, "\n\nanswer")
+
   def test_invalid_tool_call_becomes_content(self):
     self.set_output("<tool_call>not a call</tool_call>")
     response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Hello"}], tools=self.tools())
@@ -256,6 +270,70 @@ class TestLLMToolCalls(unittest.TestCase):
     ], tools=self.tools())
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
+
+  def test_tool_turn_remains_a_reusable_prefix_after_next_user_message(self):
+    class Tokenizer:
+      eos_id, eot_id = 0x110000, None
+      def encode(self, text): return [ord(c) for c in text]
+      def stream_decoder(self): return lambda tid=None: "" if tid is None else chr(tid)
+      def is_end(self, token_id): return token_id == self.eos_id
+    class Template:
+      def render(self, messages, tools=None, add_generation_prompt=True, enable_thinking=False, preserve_thinking=False):
+        out = ""
+        for m in messages:
+          content = (m.get("content") or "").strip()
+          if m["role"] == "assistant":
+            reasoning = (m.get("reasoning_content") or "").strip()
+            out += f"<assistant><think>\n{reasoning}\n</think>\n\n{content}"
+            for tc in m.get("tool_calls") or []:
+              fn = tc["function"]
+              out += ("\n\n" if content else "") + f"<tool_call>\n<function={fn['name']}>\n"
+              for name,value in fn["arguments"].items(): out += f"<parameter={name}>\n{value}\n</parameter>\n"
+              out += "</function>\n</tool_call>"
+          else: out += f"<{m['role']}>{content}"
+          out += "</turn>"
+        if add_generation_prompt: out += "<assistant><think>\n" if enable_thinking else "<assistant><think>\n\n</think>\n\n"
+        return out
+    class Model:
+      max_context = 10000
+      def __init__(self):
+        self.cached = []
+        self.outputs = iter(("reasoning\n</think>\n\nChecking now.\n\n<tool_call>\n<function=read>\n"
+                             "<parameter=path>\nsort.c\n</parameter>\n</function>\n</tool_call>",
+                             "finished reasoning\n</think>\n\nfinished."))
+      def get_start_pos(self, ids):
+        return next((i for i,(a,b) in enumerate(zip(ids, self.cached)) if a != b), min(len(ids), len(self.cached)))
+      def generate(self, ids, **kwargs):
+        output = [ord(c) for c in next(self.outputs)]
+        self.cached = ids + output
+        yield from output
+        yield Tokenizer.eos_id
+
+    from tinygrad.llm.serve import LLMServer
+    model = Model()
+    server = LLMServer(('127.0.0.1', 0), model, "prefix-model", Tokenizer(), Template())
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    from openai import OpenAI
+    client = OpenAI(base_url=f"http://127.0.0.1:{server.server_address[1]}/v1", api_key="test")
+    try:
+      messages = [{"role":"user", "content":"Read sort.c"}]
+      first = client.chat.completions.create(model="prefix-model", messages=messages, tools=self.tools(),
+                                             extra_body={"enable_thinking":True})
+      self.assertEqual(first.choices[0].message.reasoning_content, "reasoning\n")
+      self.assertEqual(first.choices[0].message.content, "\n\nChecking now.\n\n")
+      cached_len = len(model.cached)
+      call = first.choices[0].message.tool_calls[0]
+      messages += [{"role":"assistant", "content":first.choices[0].message.content,
+                    "reasoning_content":first.choices[0].message.reasoning_content, "tool_calls":[call.model_dump()]},
+                   {"role":"tool", "tool_call_id":call.id, "content":"file contents"}]
+      second = client.chat.completions.create(model="prefix-model", messages=messages, tools=self.tools(),
+                                              extra_body={"enable_thinking":True})
+      self.assertEqual(second.choices[0].message.content, "\n\nfinished.")
+      self.assertEqual(second.usage.prompt_tokens_details.cached_tokens, cached_len)
+    finally:
+      server.shutdown()
+      server.server_close()
 
 if __name__ == '__main__':
   unittest.main()

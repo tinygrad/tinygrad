@@ -251,5 +251,15 @@ class TestLLMOpenCode(unittest.TestCase):
       self.assertTrue(marker.is_file(), output)
       self.assertEqual(marker.read_text(), "tinygrad-shell-regression")
 
+  def test_multiline_tool_argument_preserves_trailing_newline(self):
+    with tempfile.TemporaryDirectory() as directory:
+      cwd = pathlib.Path(directory)
+      target = cwd / "numbers.txt"
+      target.write_text("replace me\n")
+      output = self.run_opencode(
+        "Read numbers.txt, then use the write tool to replace it with the numbers 1 through 300, one number per line. Do not use bash.", cwd)
+      self.assertRegex(output, r"(?im)^\s*(?:←|→|>)\s*Write\s+numbers\.txt\s*$", "OpenCode did not execute the write tool")
+      self.assertEqual(target.read_text(), "".join(f"{i}\n" for i in range(1, 301)))
+
 
 if __name__ == "__main__": unittest.main()
