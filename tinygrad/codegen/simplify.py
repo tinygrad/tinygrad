@@ -48,14 +48,6 @@ def mark_gated(ctx, idx):
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
-pm_simplify_ranges = PatternMatcher([
-  (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
-  (UPat(Ops.INDEX, name="idx"), mark_gated),
-  # reduce ranges can't be shrunk
-  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
-])
-
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
@@ -63,6 +55,14 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
   return None if ret is x else ret.simplify()
+
+pm_simplify_ranges = PatternMatcher([
+  (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+  (UPat(Ops.INDEX, name="idx"), mark_gated),
+  # reduce ranges can't be shrunk
+  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
+])
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
