@@ -313,8 +313,7 @@ class AM_GFX(AM_IP):
     self._enable_mec()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> int:
-    pipe, queue = idx // 4, idx % 4
-    doorbell = am.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + (idx ^ int(aql))
+    pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
 
     for xcc in range(self.xccs if aql else 1):
       self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)

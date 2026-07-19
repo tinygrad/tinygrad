@@ -460,8 +460,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def hw_compute_queues(self) -> list[tuple[str|None, Callable[[], HWQueue]]]:
     return [(None, self.hw_compute_queue_t)] if self.hw_compute_queue_t is not None else []
-  def new_graph_compute_queue(self, queue_idx:int=0) -> HWQueue|None:
-    return unwrap(self.hw_compute_queue_t)() if queue_idx == 0 and self.hw_compute_queue_t is not None else None
   def hw_copy_queues(self) -> list[tuple[str, Callable[[], HWQueue]]]:
     return [("SDMA:0", self.hw_copy_queue_t)] if self.hw_copy_queue_t is not None else []
 

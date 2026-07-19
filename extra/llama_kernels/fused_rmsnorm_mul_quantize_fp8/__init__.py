@@ -1,8 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, zero_scalar, dname_of, compile_hip
 
@@ -25,8 +24,7 @@ def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
              f"-DEPS_LITERAL={eps_val}f"] + (["-DLAYER_SCALE=1"] if layer_num is not None else [])
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1, 2, 3), ins=tuple(range(4, 7+(layer_num is not None)))))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 @functools.cache
 def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
@@ -44,8 +42,7 @@ def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax
              f"-DEPS_LITERAL={eps_val}f", "-DHAS_RESIDUAL=1"] + (["-DLAYER_SCALE=1"] if layer_num is not None else [])
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1, 2, 3, 4), ins=tuple(range(5, 9+(layer_num is not None)))))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 @functools.cache
 def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,
@@ -68,8 +65,7 @@ def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,
   if layer_num is not None: defines.append("-DLAYER_SCALE=1")
   src = _src_bwd()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1), ins=tuple(range(2, 7+has_h_grad+has_layer_num))))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, layer_num_u, kernel:UOp):
   device = x_u.device

@@ -1,5 +1,4 @@
 import math, pathlib, functools, struct
-from dataclasses import replace
 
 from tinygrad import Device, Tensor
 from tinygrad.dtype import DTypeLike, dtypes
@@ -7,7 +6,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
@@ -29,8 +28,7 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   compile_args = ["-std=c++20", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
                   f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1, 2), ins=(3, 4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
@@ -46,8 +44,7 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
                   f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0,), ins=(1, 2, 3, 4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
@@ -226,8 +223,7 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
   lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1), ins=tuple(range(2, 5+has_sink))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, *args:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int,
@@ -265,9 +261,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, *args:UOp, device:str, arch:st
   lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=tuple(range(2+scale_do)),
-                         ins=tuple(range(2+scale_do, 4+2*scale_do+has_layer_num))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
@@ -299,8 +293,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0, 1, 2), ins=tuple(range(3, 9))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
@@ -330,5 +323,4 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
   lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), outs=(0,), ins=(1,)))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))

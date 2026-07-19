@@ -2,7 +2,7 @@ import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType
 from tinygrad.uop.symbolic import sym
 from test.helpers import to_uops_list
 
@@ -12,12 +12,6 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
-
-class TestProgramInfo(unittest.TestCase):
-  def test_viewed_store_access_mode(self):
-    out = UOp.param(0, dtypes.float, (4,), "NULL").reshape((2, 2))
-    info = ProgramInfo.from_sink(out[0, 0].store(1.0).sink(arg=KernelInfo("viewed_store")))
-    self.assertEqual(info.outs, (0,))
 
 def const_values(u:UOp):
   if u.op is Ops.CONST: return (u.arg,) if not isinstance(u.arg, tuple) else u.arg

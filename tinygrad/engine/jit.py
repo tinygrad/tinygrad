@@ -97,16 +97,12 @@ class DepsTracker:
   @staticmethod
   def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
 
-  def get_resource_dependencies(self, bufs:list[Any], write:list[int]):
+  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
     wait_nodes = []
     for i,buf in enumerate(bufs):
       key, s, e = self._key(buf)
       wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
       if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    return list({id(x):x for x in wait_nodes}.values())
-
-  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
-    wait_nodes = self.get_resource_dependencies(bufs, write)
     for i,buf in enumerate(bufs):
       key, s, e = self._key(buf)
       if i in write:
@@ -118,20 +114,18 @@ class DepsTracker:
           dmap[key] = kept
         self.w_dependency_map[key].append((s, e, new_dependency))
       else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return wait_nodes
+    return list({id(x):x for x in wait_nodes}.values())
 
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
     self.linear = linear.src[0]
     self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
-    self.call_uops: list[UOp] = []
     self.runtimes: list[Any|None] = []
     self.uop_replace: list[list[tuple[int, int]]] = []
     for call in self.linear.src:
       replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
       for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
         self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
-        self.call_uops.append(call)
         self.runtimes.append(get_runtime(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
         self.uop_replace.append(replace)
 

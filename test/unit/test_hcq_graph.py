@@ -1,20 +1,12 @@
 import unittest
 from tinygrad import Device, Tensor
 from tinygrad.engine.jit import TinyJit
-from tinygrad.uop.ops import UOp, Ops, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.graph.hcq import HCQGraph
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.runtime.support.usb import USBMMIOInterface
 from test.mockgpu.usb import MockUSB
-
-class TestHCQScheduling(unittest.TestCase):
-  def test_copy_producers_use_logical_buffers(self):
-    produced, unrelated, dest = (UOp.new_buffer("NULL", 4, dtypes.float) for _ in range(3))
-    program = UOp(Ops.PROGRAM, src=(UOp.sink(),), arg=ProgramInfo(globals=(0,), outs=(0,)))
-    producer, other = program.call(produced), program.call(unrelated)
-    copy = UOp(Ops.COPY, dtypes.float, src=(produced,)).call(dest, produced)
-    self.assertEqual(HCQGraph._copy_producer_calls(UOp(Ops.LINEAR, src=(producer, other, copy))), {producer})
 
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQUnit(unittest.TestCase):
