@@ -291,6 +291,24 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="long")
   def test_emulated_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shl(self):
+    distances = [0, 5, 31, 32, 62]
+    for dtype, values in ((dtypes.int64, [-0x1234, 0x80000001, -1, 0x1234, 1]),
+                          (dtypes.uint64, [0x80000001, 0x80000001, 1, 0xFEDC, 1])):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) << Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x << d for x, d in zip(values, distances)])
+
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shr(self):
+    distances = [0, 5, 31, 32, 63]
+    for dtype, values in ((dtypes.int64, [-(2**40), -1, -(2**50), -(2**40), 0x123456789ABCDEF]),
+                          (dtypes.uint64, [0xFEDCBA9876543210] * len(distances))):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) >> Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x >> d for x, d in zip(values, distances)])
+
   @given(ht.uint8, strat.sampled_from(integer_unary_operations))
   def test_uint8_unary(self, a, op): universal_test_unary(a, dtypes.uint8, op)
 
