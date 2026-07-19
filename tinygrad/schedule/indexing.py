@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.movement import apply_movement_op
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
-from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
+from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink, BufferizeOpts
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
@@ -34,13 +34,6 @@ pm_generate_realize_map = PatternMatcher([
   # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
-
-@dataclass(frozen=True)
-class BufferizeOpts:
-  # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int|None
-  addrspace: AddrSpace = AddrSpace.GLOBAL
-  removable: bool = True
 
 @dataclass
 class IndexingContext:

@@ -27,7 +27,7 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
-from tinygrad.schedule.indexing import BufferizeOpts
+from tinygrad.uop.ops import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None

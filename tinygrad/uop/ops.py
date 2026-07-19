@@ -1117,6 +1117,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
+class BufferizeOpts:
+  # on AddrSpace.LOCAL, device is the id
+  device: str|tuple[str, ...]|int|None
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+  removable: bool = True
+
+@dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
   axis_types: tuple[AxisType, ...] = tuple()
