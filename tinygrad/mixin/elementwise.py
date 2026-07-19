@@ -24,6 +24,8 @@ class ElementwiseMixin(CreationMixin):
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
+    # the shift distance is canonically uint32
+    if op in {Ops.SHL, Ops.SHR}: rhs = rhs.cast(dtypes.uint)
     return lhs.alu(op, rhs)
 
   def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)

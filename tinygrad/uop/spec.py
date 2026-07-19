@@ -67,9 +67,9 @@ spec_shared = PatternMatcher([
    lambda w,x,y: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in (x,y))),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
    lambda x,y: x.dtype == y.dtype or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
-  # and SHL/SHR, the shift distance can be an int
+  # and SHL/SHR, the shift distance is uint
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"),
-   lambda a,x,y: a.dtype == x.dtype and (y.dtype in (x.dtype, dtypes.uint) or y.dtype in dtypes.weaks)),
+   lambda a,x,y: a.dtype == x.dtype and y.dtype == dtypes.uint),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(y.dtype == x.dtype or y.dtype in dtypes.weaks for y in x.src)),
 

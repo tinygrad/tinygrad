@@ -145,7 +145,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
-      assert dtypes.is_int(src[1].dtype), "shift distance must be int"
+      assert src[1].dtype == dtypes.uint, "shift distance must be uint32"
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
@@ -1321,6 +1321,10 @@ class UPat(OpMixin):
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)
+  def _binop(self, op:Ops, x, reverse:bool):
+    if op in {Ops.SHL, Ops.SHR} and not reverse and not isinstance(x, UPat): x = UPat.const(dtypes.uint, x)
+    lhs, rhs = self._broadcasted(x, reverse)
+    return UPat(op, lhs.match_dtype, (lhs, rhs)) if op in {Ops.SHL, Ops.SHR} else lhs.alu(op, rhs)
   def ufix(self, x): return self.const_like(x) if not isinstance(x, UPat) else x
   def __floordiv__(self, x): return self._binop(Ops.FLOORDIV, x, False)
   def __rfloordiv__(self, x): return self._binop(Ops.FLOORDIV, x, True)
@@ -1683,6 +1687,8 @@ def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(Ops.CONST, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
+  (UPat((Ops.SHL, Ops.SHR), dtype=dtypes.index, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y", dtypes.uint))),
+   lambda u,x,y: x.alu(u.op, y).cast(dtypes.index)),
   # Binary can widen the dtype, WHERE cannot
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))),
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),

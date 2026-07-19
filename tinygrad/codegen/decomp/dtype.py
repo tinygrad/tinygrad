@@ -20,6 +20,7 @@ def reindex(idx:UOp, off:int, mul=2) -> UOp:
 def l2i(op: Ops, dt: DType, *uops:UOp):
   zero = UOp.const(dt, 0)
   if len(uops) == 2: a0, a1 = uops
+  elif len(uops) == 3: a0, a1, b0 = uops  # SHL/SHR: the shift distance is a single uint32
   elif len(uops) == 4: a0, a1, b0, b1 = uops
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
@@ -33,12 +34,12 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:
-      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), (b0 & 31).cast(dtypes.uint)
+      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0 & 31
       lo, hi = (a0u << n).bitcast(dt), ((a1u << n) | ((a0u >> 1) >> (31 - n))).bitcast(dt)
       return (b0 >= 32).where(zero, lo), (b0 >= 32).where(lo, hi)
     case Ops.SHR:
-      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), (b0 & 31).cast(dtypes.uint)
-      lo, hi = ((a0u >> n) | ((a1u << 1) << (31 - n))).bitcast(dt), a1 >> (b0 & 31)
+      a0u, a1u, n = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0 & 31
+      lo, hi = ((a0u >> n) | ((a1u << 1) << (31 - n))).bitcast(dt), a1.alu(Ops.SHR, n)  # alu: `>>` sugar would promote int>>uint to long
       fill = a1 >> 31 if dt == dtypes.int else zero  # vacated high word: sign bits when signed, else 0
       return (b0 >= 32).where(hi, lo), (b0 >= 32).where(fill, hi)
     case Ops.ADD: return (low:=a0+b0), (a1 + b1).replace(dtype=dt) + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)).cast(dt)
@@ -55,8 +56,8 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ub0, ub1))[0], ub0), b_neg.where(n[1], ub1)
       q, r = (z:=UOp.const(dtypes.uint, 0), z), (z, z)
       for i in range(63, -1, -1):
-        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(dtypes.uint, 1), z)
-        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(dtypes.uint, i), z)[0] & 1), r[1]
+        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(dtypes.uint, 1))
+        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(dtypes.uint, i))[0] & 1), r[1]
         cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
         q = ((q[0] | shl(cond.cast(dtypes.uint), i % 32), q[1]) if i < 32 else (q[0], q[1] | shl(cond.cast(dtypes.uint), i % 32)))
@@ -137,7 +138,7 @@ pm_long_decomp = PatternMatcher([
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
    l2i(x.op, x.dtype, a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt)) if x.dtype not in l2i_dt and a.tag is None else None),
   (UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
-   l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
+   l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt))
                                        if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag).replace(dtype=l2i_dt[x.dtype]),))),

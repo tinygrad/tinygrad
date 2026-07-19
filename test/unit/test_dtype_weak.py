@@ -5,6 +5,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.spec import spec_tensor
+from tinygrad.helpers import Context
 from tinygrad.nn.state import safe_save
 
 
@@ -173,8 +174,13 @@ class TestWeakSpec(unittest.TestCase):
   def test_weak_operand_allowed(self):
     x = UOp.variable("x", 0, 10, dtypes.int64)
     weak = UOp.const(dtypes.weakint, 3)
-    for u in (x.alu(Ops.ADD, weak), x.alu(Ops.CMPLT, weak), x.alu(Ops.SHL, weak)):
+    for u in (x.alu(Ops.ADD, weak), x.alu(Ops.CMPLT, weak)):
       self.assertIs(spec_tensor.rewrite(u), True)
+    shift = x << weak
+    self.assertEqual(shift.src[1].dtype, dtypes.uint)
+    self.assertIs(spec_tensor.rewrite(shift), True)
+    with Context(SPEC=0): bad_shift = UOp(Ops.SHL, x.dtype, (x, weak))
+    self.assertIs(spec_tensor.rewrite(bad_shift), False)
     gate = UOp.variable("gate", False, True, dtypes.bool)
     self.assertIs(spec_tensor.rewrite(UOp(Ops.WHERE, dtypes.int8, (gate, UOp.const(dtypes.int8, 1), weak))), True)
 

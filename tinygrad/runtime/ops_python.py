@@ -190,7 +190,6 @@ class PythonProgram:
           else: raise NotImplementedError(f"unimplemented tensor core {u.arg}")
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"
-          assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE}, f"dtype mismatch on {u.op}"
           values[u] = [exec_alu(u.op, u.dtype, p) for p in zip(*src_values)]
         assert u in values, u
         i += 1

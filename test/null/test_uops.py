@@ -26,6 +26,21 @@ class TestDTypeFromUOp(unittest.TestCase):
     idx = UOp.range(4, 0)
     self.assertEqual(idx.valid(idx < 4).dtype, dtypes.index)
 
+  def test_shift_distance_is_uint32(self):
+    for op in (Ops.SHL, Ops.SHR):
+      value, distance = UOp.const(dtypes.int8, 1), UOp.const(dtypes.uint, 2)
+      self.assertEqual(dtype_from_uop(op, (value, distance), None), dtypes.int8)
+      with self.assertRaises(AssertionError): dtype_from_uop(op, (value, UOp.const(dtypes.int8, 2)), None)
+
+  def test_shift_construction_promotes_value_and_canonicalizes_distance(self):
+    for op in (Ops.SHL, Ops.SHR):
+      shift = (Tensor([4], dtype=dtypes.int8) << Tensor([1], dtype=dtypes.int16)) if op is Ops.SHL else \
+              (Tensor([4], dtype=dtypes.int8) >> Tensor([1], dtype=dtypes.int16))
+      self.assertEqual(shift.dtype, dtypes.int16)
+      alu = next(u for u in shift.uop.toposort() if u.op is op)
+      self.assertEqual(alu.src[0].dtype, dtypes.int16)
+      self.assertEqual(alu.src[1].dtype, dtypes.uint)
+
   def test_const_dtype_from_value(self):
     self.assertEqual(dtype_from_uop(Ops.CONST, (), True), dtypes.bool)
     self.assertEqual(dtype_from_uop(Ops.CONST, (), 3), dtypes.weakint)

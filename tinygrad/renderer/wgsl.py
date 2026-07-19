@@ -46,8 +46,7 @@ wgsl_matcher = PatternMatcher([
   (UPat.store(UPat.var("b"), UPat.var("var"), UPat.var("gate"), name="s"),
    lambda b,var,gate,s: packed_store(b,var,gate) if is_packed(s) else None),
   (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
-  (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("a") << UPat.var("b"), lambda a,b: (a.bitcast(dtypes.uint32) << b).bitcast(a.dtype) if a.dtype != dtypes.uint32 else None),
   # fix nan check: 'a != a -> is_nan()'
   (UPat.var("a") != UPat.var("a"), is_nan),
   ])
