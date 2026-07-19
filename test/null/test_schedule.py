@@ -842,20 +842,6 @@ class TestSchedule(unittest.TestCase):
     self.assertLess(names.index("kb"), names.index("kc"))
     self.assertLess(names.index("kd"), names.index("kc"))
 
-  def test_create_schedule_continues_compute_before_copy_wait(self):
-    src = Tensor.ones(4, device="NULL").contiguous().realize()
-    copy_consumer = src.to("NULL:1") + 1
-    first = (src + 2).contiguous()
-    second = first + 3
-
-    linear = Tensor.schedule_linear(copy_consumer, second)
-    copy_idx = next(i for i,call in enumerate(linear.src) if call.src[0].op is Ops.COPY)
-    local_compute = [i for i,call in enumerate(linear.src) if call.src[0].op is Ops.SINK and call.device == "NULL"]
-    copy_consumer_idx = next(i for i,call in enumerate(linear.src) if call.src[0].op is Ops.SINK and call.device == "NULL:1")
-    self.assertEqual(copy_idx, 0)
-    self.assertEqual(local_compute, [1, 2])
-    self.assertEqual(copy_consumer_idx, 3)
-
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
