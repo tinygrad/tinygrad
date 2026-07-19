@@ -20,7 +20,14 @@ class SimpleTokenizer:
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
     # 0x323b0 is one past the max codepoint in unicode categories L/N/Z (0x323af is max L)
-    def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(0x323b0) if unicodedata.category(chr(cp)).startswith(pre))
+    # Compact adjacent codepoints into ranges. Listing every codepoint makes Python's re engine spend seconds matching large prompts.
+    def ucat_range(pre:str) -> str:
+      runs: list[list[int]] = []
+      for cp in range(0x323b0):
+        if not unicodedata.category(chr(cp)).startswith(pre): continue
+        if runs and cp == runs[-1][1]+1: runs[-1][1] = cp
+        else: runs.append([cp, cp])
+      return "".join(f"\\U{st:08x}" + (f"-\\U{en:08x}" if en > st else "") for st, en in runs)
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
       f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
