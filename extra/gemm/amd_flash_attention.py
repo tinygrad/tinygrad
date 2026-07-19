@@ -6,6 +6,8 @@ import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
 DECODE_BLOCK_N = 128
+DECODE_HEAD_TILE = 4
+DECODE_WAVES = 4
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N = 2, 2
@@ -46,25 +48,29 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   _, H, M, _ = q.shape
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % DECODE_BLOCK_N == 0
   G, CHUNK, DV = H // H_KV, DECODE_BLOCK_N, D // WARP_SIZE
-  block_bhkv = UOp.range(B*H_KV, 0, AxisType.GLOBAL)
+  assert G % DECODE_HEAD_TILE == 0
+  block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
   block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
-  lane = UOp.range(WARP_SIZE, 2, AxisType.LOCAL)
-  b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
+  lane, wave = UOp.range(WARP_SIZE, 2, AxisType.LOCAL), UOp.range(DECODE_WAVES, 3, AxisType.LOCAL)
+  head_group = block_bhkv % (G//DECODE_HEAD_TILE)
+  bhkv = block_bhkv // (G//DECODE_HEAD_TILE)
+  b, kv_head = bhkv // H_KV, bhkv % H_KV
   dims = tuple(lane + i*WARP_SIZE for i in range(DV))
 
-  acc = UOp.placeholder((G, DV), dtypes.float, slot=0, addrspace=AddrSpace.REG)
-  row_max = UOp.placeholder((G,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  row_sum = UOp.placeholder((G,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+  acc = UOp.placeholder((DECODE_HEAD_TILE, DV), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+  row_max = UOp.placeholder((DECODE_HEAD_TILE,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+  row_sum = UOp.placeholder((DECODE_HEAD_TILE,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
   init = UOp.group(acc.store(acc.const_like(0)), row_max.store(row_max.const_like(-math.inf)), row_sum.store(row_sum.const_like(0)))
   acc, row_max, row_sum = acc.after(init), row_max.after(init), row_sum.after(init)
 
-  offset = UOp.range(CHUNK, 100, AxisType.REDUCE)
-  key, valid = block_n*CHUNK + offset, block_n*CHUNK + offset < valid_kv_len
+  offset = UOp.range(CHUNK//DECODE_WAVES, 100, AxisType.REDUCE)
+  key = block_n*CHUNK + wave*(CHUNK//DECODE_WAVES) + offset
+  valid = key < valid_kv_len
   kvals = tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims)
   vvals = tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims)
   updates = []
-  for head in range(G):
-    q_head = kv_head*G + head
+  for head in range(DECODE_HEAD_TILE):
+    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
     score = wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, kvals)), UOp.const(dtypes.float, 0)), lane) / math.sqrt(D)
     new_max = valid.where(row_max[head].maximum(score), row_max[head])
     alpha = valid.where(((row_max[head]-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 1))
@@ -74,13 +80,25 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   update = UOp.group(*updates).end(offset)
   acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
 
+  partial_acc = UOp.placeholder((DECODE_HEAD_TILE, DECODE_WAVES, D), dtypes.float, slot=3, addrspace=AddrSpace.LOCAL)
+  partial_stats = UOp.placeholder((DECODE_HEAD_TILE, DECODE_WAVES, 2), dtypes.float, slot=4, addrspace=AddrSpace.LOCAL)
+  partial_stores = []
+  for head in range(DECODE_HEAD_TILE):
+    partial_stores += [partial_acc[head, wave, d].store(acc[head, i]) for i,d in enumerate(dims)]
+    partial_stores += [partial_stats[head, wave.valid(lane.eq(0)), 0].store(row_max[head]),
+                       partial_stats[head, wave.valid(lane.eq(0)), 1].store(row_sum[head])]
+  merged = UOp.group(*partial_stores).barrier()
   stores = []
-  for head in range(G):
-    q_head = kv_head*G + head
-    stores += [out[b, q_head, block_n, d].store(acc[head, i]) for i,d in enumerate(dims)]
-    stores += [stats[b, q_head.valid(lane.eq(0)), block_n, 0].store(row_max[head]),
-               stats[b, q_head.valid(lane.eq(0)), block_n, 1].store(row_sum[head])]
-  return UOp.group(*stores).end(lane, block_n, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
+  for head in range(DECODE_HEAD_TILE):
+    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
+    maximum = partial_stats.after(merged)[head, 0, 0].maximum(partial_stats.after(merged)[head, 1, 0])
+    scales = tuple(((partial_stats.after(merged)[head, w, 0]-maximum)*LOG2E).exp2() for w in range(DECODE_WAVES))
+    denominator = sum((partial_stats.after(merged)[head, w, 1]*scales[w] for w in range(DECODE_WAVES)), UOp.const(dtypes.float, 0))
+    stores += [out[b, q_head, block_n, d.valid(wave.eq(0))].store(
+      sum((partial_acc.after(merged)[head, w, d]*scales[w] for w in range(DECODE_WAVES)), UOp.const(dtypes.float, 0))) for d in dims]
+    stores += [stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 0].store(maximum),
+               stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 1].store(denominator)]
+  return UOp.group(*stores).end(lane, wave, block_n, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
 
 @functools.cache
 def _amd_flash_attention_decode_reduce(out:UOp, partial:UOp, stats:UOp, valid_chunks:int|UOp) -> UOp:
@@ -238,15 +256,11 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   p_sum = p_local.after(p_local[ri_ws].store(
     sum((warp_reduce_sum(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
 
-  # Preserve the float softmax weights as two half components for the WMMA P@V product.
+  # Store softmax weights in half for the WMMA P@V product; accumulation remains float.
   P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
-  P_lo_lds = UOp.placeholder((WAVES_N, BLOCK_M, BLOCK_N), dtypes.half, slot=11, addrspace=AddrSpace.LOCAL)
   P_write = P_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
   P_write = P_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
-  P_lo_write = P_lo_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
-  P_lo_write = P_lo_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
-  p_hi_barrier = UOp.barrier(P_write[tid].store(S_reg.cast(dtypes.half)))
-  P_store = P_lo_write.after(p_hi_barrier)[tid].store(((S_reg-P_write.after(p_hi_barrier)[tid].float()) * 2048).cast(dtypes.half))
+  P_store = P_write[tid].store(S_reg.cast(dtypes.half))
 
   # -- online softmax correction --
   beta_i = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
@@ -275,7 +289,6 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
     v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v]).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
-  P_lo_lds = P_lo_lds.after(pv_barrier)
   V_lds = V_lds.after(pv_barrier)
 
   # -- acc += beta * (P @ V) via WMMA --
@@ -291,21 +304,9 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   pv_done = pv_frag.store(pv).end(tm2, tn2).end(k_pv)
   pv_acc = pv_acc.after(pv_done)
 
-  pv_acc_lo = UOp.placeholder((TM, TD), dtypes.float, slot=12, addrspace=AddrSpace.REG)
-  pv_acc_lo = pv_acc_lo.after(pv_acc_lo.after(n_tile).store(pv_acc_lo.const_like(0))).after(pv_barrier)
-  k_pv_lo = UOp.range(BLOCK_N // WMMA_K, 403, AxisType.REDUCE)
-  tm2_lo = UOp.range(TM // WMMA_ACC, 404, AxisType.LOOP)
-  tn2_lo = UOp.range(TD, 405, AxisType.LOOP)
-  pv_frag_lo = pv_acc_lo.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2_lo, tn2_lo]
-  p_frag_lo = P_lo_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2_lo, lane_n, k_pv_lo]
-  v_frag_lo = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2_lo, lane_n, k_pv_lo]
-  pv_done_lo = pv_frag_lo.store(UOp.wmma(p_frag_lo, v_frag_lo, pv_frag_lo.after(k_pv_lo), *WMMA_ARG)).end(tm2_lo, tn2_lo).end(k_pv_lo)
-  pv_acc_lo = pv_acc_lo.after(pv_done_lo)
-
   ri5 = UOp.range(TM, 410, AxisType.LOOP)
   rj5 = UOp.range(TD, 411, AxisType.LOOP)
-  accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] *
-    (pv_acc[ri5, rj5] + pv_acc_lo[ri5, rj5] / 2048)).end(ri5, rj5)
+  accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5)
 
   # end KV tile loop
   n_tile_end = accumulate.barrier().end(n_tile)

@@ -214,6 +214,21 @@ class TestLLMOpenCode(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stdout)
     return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.stdout)
 
+  def chat(self, messages:list[dict], max_tokens:int=4) -> dict:
+    request = urllib.request.Request(self.base_url + "/chat/completions", data=json.dumps({
+      "model":"tinygrad", "messages":messages, "max_tokens":max_tokens, "temperature":0,
+    }).encode(), headers={"Content-Type":"application/json"})
+    with urllib.request.urlopen(request, timeout=120) as response: return json.load(response)
+
+  def test_same_session_reuses_prompt_cache(self):
+    # Use a long stable prefix so reuse remains observable after the model rounds cache positions for its serving JIT.
+    messages = [{"role":"system", "content":"You are a concise assistant. " * 400}, {"role":"user", "content":"Reply OK."}]
+    first = self.chat(messages)
+    messages += [{"role":"assistant", "content":first["choices"][0]["message"].get("content") or ""},
+                 {"role":"user", "content":"Reply OK again."}]
+    second = self.chat(messages)
+    self.assertGreater(second["usage"]["prompt_tokens_details"]["cached_tokens"], 0)
+
   def test_reads_and_correctly_explains_valid_c(self):
     with tempfile.TemporaryDirectory() as directory:
       cwd = pathlib.Path(directory)

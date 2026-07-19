@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
-from tinygrad.helpers import BEAM, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import BEAM, DEBUG, JIT_BATCH_SIZE, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -184,9 +184,11 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    beam = args.beam if args.beam is not None else BEAM.value
+    amd_server = bool(args.serve) and str(model.token_embd.weight.device).startswith("AMD")
+    beam = args.beam if args.beam is not None else 2 if amd_server else BEAM.value
     print(f"warming serving JITs with BEAM={beam}")
-    with Context(DEBUG=DEBUG.value, BEAM=beam):
+    batch_size = 448 if amd_server else JIT_BATCH_SIZE.value
+    with Context(DEBUG=DEBUG.value, BEAM=beam, JIT_BATCH_SIZE=batch_size):
       model.warmup()
 
   # start server
