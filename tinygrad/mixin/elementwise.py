@@ -49,6 +49,7 @@ class ElementwiseMixin(CreationMixin):
     """
     Returns a contiguous tensor.
     """
+    if self.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {self.dtype}")
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
     return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))

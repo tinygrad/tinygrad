@@ -1,4 +1,4 @@
-import ctypes, time, os, builtins, fcntl
+import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV
 from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.autogen import libc
@@ -9,7 +9,7 @@ start = time.perf_counter()
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
                                               "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
-tracked_fds = {}
+tracked_fds: dict[int, typing.Any] = {}
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:
