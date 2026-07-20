@@ -1,7 +1,8 @@
-import unittest
-from tinygrad import Tensor, Device, dtypes, Context
+import time, unittest
+from tinygrad import Tensor, Device, TinyJit, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, hk_fp8_ab_gemm, hk_fp8_atb_gemm, gemm_program_info
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -91,6 +92,113 @@ def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.bfloat16, gpu
 def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
 
+def run_bf16_weight_gemm(M:int, N:int, K:int) -> None:
+  Tensor.manual_seed(0)
+  a = Tensor.randn(M, K, dtype=dtypes.bfloat16).realize()
+  w = Tensor.randn(N, K, dtype=dtypes.bfloat16).realize()
+  out = asm_gemm(a, w.T)
+  out.sum().backward()
+  ref = (a.detach().float() @ w.detach().float().T).cast(dtypes.bfloat16)
+  Tensor.realize(out, a.grad, w.grad, ref)
+  if Device.DEFAULT.startswith("NULL"): return
+  atol, rtol = 2e-1, 1e-2
+  assert out.allclose(ref, atol=atol, rtol=rtol).item(), "forward mismatch"
+  assert a.grad.allclose(w.detach().float().sum(0), atol=atol, rtol=rtol).item(), "grad_a mismatch"
+  assert w.grad.allclose(a.detach().float().sum(0).reshape(1, K).expand(N, K), atol=atol, rtol=rtol).item(), "grad_w mismatch"
+
+def run_fp8_ab_gemm(M:int, N:int, K:int) -> None:
+  Tensor.manual_seed(0)
+  a = (Tensor.rand(M, K) * 4 - 2).cast(FP8_DTYPE).contiguous().realize()
+  b = (Tensor.rand(K, N) * 4 - 2).cast(FP8_DTYPE).contiguous().realize()
+  x_scale = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+  w_scale = Tensor.ones((), dtype=dtypes.float32).contiguous().realize()
+  g_amax = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+  out = hk_fp8_ab_gemm(a, b, x_scale=x_scale, w_scale=w_scale, g_amax=g_amax).realize()
+  ref = (a.float() @ b.float()).cast(dtypes.bfloat16).realize()
+  if Device.DEFAULT.startswith("NULL"): return
+  assert out.float().allclose(ref.float(), atol=2, rtol=1e-2).item(), "fp8 A @ B mismatch"
+
+def run_fp8_atb_gemm(M:int, N:int, K:int, benchmark:bool=False) -> None:
+  """Check the production FP8 AtB shape without paying for a second full-size GEMM."""
+  Tensor.manual_seed(0)
+  # Exactly representable, normal FP8 values avoid architecture-specific FP8 subnormal handling.
+  a = (Tensor.rand(1, K, M) < 0.5).where(-1, 1).cast(FP8_DTYPE).contiguous().realize()
+  b = (Tensor.rand(1, K, N) < 0.5).where(-1, 1).cast(FP8_DTYPE).contiguous().realize()
+
+  @TinyJit
+  def atb(a:Tensor, b:Tensor): return hk_fp8_atb_gemm(a, b).realize()
+
+  out = atb(a, b)
+  # Cover all four accumulator stores, multiple output workgroups, tile edges, and the final tile.
+  samples = tuple((m, n) for m, n in ((0, 0), (64, 32), (128, 0), (0, 128), (248, 248),
+                  (256, 256), (M // 2, N // 2), (M - 8, N - 8)) if m + 8 <= M and n + 8 <= N)
+  got = []
+  for m, n in samples:
+    got.append(out[m:m+8, n:n+8].flatten())
+  got_t = Tensor.cat(*got).realize()
+  if not Device.DEFAULT.startswith("NULL"):
+    import numpy as np
+    out_again = atb(a, b)
+    got_again = Tensor.cat(*(out_again[m:m+8, n:n+8].flatten() for m, n in samples)).float().numpy()
+    got_first = got_t.float().numpy()
+    if not np.array_equal(got_first, got_again):
+      repeat_err = np.max(np.abs(got_first-got_again).reshape(len(samples), 8, 8), axis=(1, 2))
+      raise AssertionError(f"fp8 A.T @ B is nondeterministic, max errors by sample: {dict(zip(samples, repeat_err.tolist()))}")
+    # A CPU float32 dot is intentionally independent of both the custom kernel and tinygrad's GEMM lowering.
+    ref_np = np.stack([a[0, :, m:m+8].float().numpy().T @ b[0, :, n:n+8].float().numpy() for m, n in samples])
+    got_np = got_first.reshape(len(samples), 8, 8)
+    if not np.allclose(got_np, ref_np, atol=2, rtol=0):
+      max_err = np.max(np.abs(got_np-ref_np), axis=(1, 2))
+      missing = {}
+      for idx in np.nonzero(max_err > 2)[0]:
+        m, n = samples[idx]
+        aa, bb = a[0, :, m:m+8].float().numpy(), b[0, :, n:n+8].float().numpy()
+        chunks = np.stack([aa[k:k+128].T @ bb[k:k+128] for k in range(0, K, 128)])
+        missing[(m, n)] = int(np.argmin(np.max(np.abs(chunks - (ref_np[idx]-got_np[idx])), axis=(1, 2))))
+      raise AssertionError(f"fp8 A.T @ B mismatch, max errors by sample: {dict(zip(samples, max_err.tolist()))}, closest missing K tiles: {missing}")
+
+  if benchmark:
+    for _ in range(3): atb(a, b)
+    Device[Device.DEFAULT].synchronize()
+    iters = getenv("ITERS", 20)
+    st = time.perf_counter()
+    for _ in range(iters): atb(a, b)
+    Device[Device.DEFAULT].synchronize()
+    ms = (time.perf_counter() - st) * 1e3 / iters
+    pflops = 2 * M * N * K / (ms * 1e-3) / 1e15
+    print(f"fp8 AtB {M}x{N}x{K}: {ms:.3f} ms, {pflops:.3f} PFLOPS")
+
+class TestGemmProgramInfo(unittest.TestCase):
+  def test_opaque_gemm_accesses(self):
+    c, a, b = (UOp.param(i, dtypes.bfloat16, (16,), "NULL") for i in range(3))
+    sink = UOp.sink(c, a, b, UOp.special(512, "lidx0"), UOp.special(4, "gidx0"), arg=KernelInfo("gemm"))
+    info = gemm_program_info(sink)
+    self.assertEqual(info.globals, (0, 1, 2))
+    self.assertEqual(info.outs, (0,))
+    self.assertEqual(info.ins, (1, 2))
+
+  @unittest.skipUnless(Device.DEFAULT.startswith("NULL") and is_cdna4(), "requires NULL CDNA4")
+  def test_llama_output_uses_physical_weight(self):
+    a = Tensor.empty(1, 256, 4096, dtype=dtypes.bfloat16).realize()
+    w = Tensor.empty(128256, 4096, dtype=dtypes.bfloat16).realize()
+    out = asm_gemm(a, w.T)
+    gemm = next(u for u in out.uop.toposort() if u.op is Ops.CALL)
+    self.assertIs(gemm.src[3], w.uop)
+
+  @unittest.skipUnless(Device.DEFAULT.startswith("NULL") and is_cdna4(), "requires NULL CDNA4")
+  def test_fp8_dgrad_uses_physical_weight(self):
+    a = Tensor.empty(1, 256, 512, dtype=FP8_DTYPE).realize()
+    w = Tensor.empty(512, 512, dtype=FP8_DTYPE).realize()
+    x_scale = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+    w_scale = Tensor.ones((), dtype=dtypes.float32).contiguous().realize()
+    grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().realize()
+    next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32)
+    out = asm_gemm(a, w.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
+    out.sum().backward()
+    gemm = next(u for u in a.grad.uop.toposort() if u.op is Ops.CALL and u.src[0].arg.name.startswith("hk_fp8_ab_gemm"))
+    self.assertIs(gemm.src[3], w.uop)
+
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
 @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
@@ -120,6 +228,7 @@ class TestAsmGEMM(unittest.TestCase):
       self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 256)
+  def test_weight_view(self): run_bf16_weight_gemm(256, 256, 256)
 
   def test_verify_with_numpy(self):
     import numpy as np
@@ -180,6 +289,44 @@ class TestGemmLlama(unittest.TestCase):
     grad_dtype = dtypes.bfloat16 if self.dtype == FP8_DTYPE else self.dtype
     assert z.dtype == dtypes.bfloat16
     assert x.grad.dtype == y.grad.dtype == grad_dtype
+
+  def test_fp8_ab(self): run_fp8_ab_gemm(256, 256, 384)
+
+  def test_fp8_w13_trio(self): verify_asm_gemm(1, 16384, 28672, 4096, dtype=FP8_DTYPE)
+
+  def test_fp8_atb_slow_shape(self):
+    run_fp8_atb_gemm(M=6144, N=4096, K=16384, benchmark=True)
+
+  def test_fp8_atb_w13(self): run_fp8_atb_gemm(M=4096, N=28672, K=16384)
+
+  def test_fp8_atb_w2(self): run_fp8_atb_gemm(M=4096, N=14336, K=16384)
+
+  def test_fp8_ab_speed(self):
+    M, N, K, iters = getenv("M", 16384), getenv("N", 4096), getenv("K", 4096), getenv("ITERS", 10)
+    a = Tensor.empty(M, K, dtype=FP8_DTYPE).realize()
+    b = Tensor.empty(K, N, dtype=FP8_DTYPE).realize()
+
+    @TinyJit
+    def ab(a:Tensor, b:Tensor): return (hk_fp8_ab_gemm(a, b) + 0).realize()
+    @TinyJit
+    def ab_with_transpose(a:Tensor, b:Tensor): return (asm_gemm(a, b) + 0).realize()
+
+    for _ in range(3): ab(a, b)
+    Device[Device.DEFAULT].synchronize()
+    st = time.perf_counter()
+    for _ in range(iters): ab(a, b)
+    Device[Device.DEFAULT].synchronize()
+    ab_ms = (time.perf_counter() - st) * 1e3 / iters
+
+    for _ in range(3): ab_with_transpose(a, b)
+    Device[Device.DEFAULT].synchronize()
+    st = time.perf_counter()
+    for _ in range(iters): ab_with_transpose(a, b)
+    Device[Device.DEFAULT].synchronize()
+    transpose_ms = (time.perf_counter() - st) * 1e3 / iters
+
+    print(f"fp8 AB: {ab_ms:.3f} ms, transpose + ABt: {transpose_ms:.3f} ms, speedup: {transpose_ms/ab_ms:.2f}x")
+    self.assertLess(ab_ms, transpose_ms)
 
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=self.dtype)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336, dtype=self.dtype)

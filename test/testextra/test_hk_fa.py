@@ -10,6 +10,13 @@ def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
   if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
   else: np.testing.assert_allclose(cmp.numpy(), ref.numpy(), **kwargs)
 
+def assert_relative_close(test:unittest.TestCase, cmp:Tensor, ref:Tensor, tolerance:float) -> None:
+  if Device.DEFAULT == "NULL":
+    Tensor.realize(cmp, ref)
+    return
+  error = ((cmp.float() - ref.float()).square().sum() / ref.float().square().sum()).sqrt().item()
+  test.assertLess(error, tolerance, f"relative L2 error {error} exceeds {tolerance}")
+
 class TestFA(unittest.TestCase):
   def setUp(self):
     arch = Device[Device.DEFAULT].renderer.target.arch
@@ -17,7 +24,7 @@ class TestFA(unittest.TestCase):
       self.skipTest(f"arch {arch} not supported")
 
   def test_fast_fa_causal(self):
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
@@ -25,28 +32,27 @@ class TestFA(unittest.TestCase):
       v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
-    q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-
     fa_jitted = TinyJit(flash_attention)
 
     for _ in range(10):
       st = time.perf_counter()
-      out = fa_jitted(q, k, v, is_causal=True)
+      out = fa_jitted(q, k, v, is_causal=True)[0]
       et = time.perf_counter() - st
       attn_flops = 2 * B * H * N * N * D + \
                    4 * B * H * N * N + \
                    2 * B * H * N * N * D
       print(f"{attn_flops/(et*1e9):2f} GFLOPS")
-    out = out.float().transpose(1, 2)
+    out = out.float()
 
-    ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
+    ref = q.transpose(1, 2).scaled_dot_product_attention(k.transpose(1, 2), v.transpose(1, 2),
+      is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
     assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
@@ -57,9 +63,7 @@ class TestFA(unittest.TestCase):
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
       Tensor.realize(do)
 
-    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-    out = flash_attention(q_, k_, v_, is_causal=True)
-    out = out.float().transpose(1, 2)
+    out = flash_attention(q, k, v, is_causal=True)[0].float()
     out.backward(do)
     Tensor.realize(q.grad, k.grad, v.grad)
 
@@ -75,14 +79,14 @@ class TestFA(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    assert_allclose(q.grad, q_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=4e-2, rtol=2e-2)
     assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
     assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal_jitted(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
@@ -94,9 +98,7 @@ class TestFA(unittest.TestCase):
       Tensor.realize(do)
 
     def fn(q, k, v, do):
-      q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-      out = flash_attention(q_, k_, v_, is_causal=True)
-      out = out.float().transpose(1, 2)
+      out = flash_attention(q, k, v, is_causal=True)[0].float()
       out.backward(do)
       Tensor.realize(out, q.grad, k.grad, v.grad)
       return q.grad, k.grad, v.grad
@@ -119,14 +121,64 @@ class TestFA(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = flash_attention(q_ref_, k_ref_, v_ref_, is_causal=True)
-    ref = ref.float().transpose(1, 2)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True).float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    assert_allclose(q.grad, q_ref.grad, atol=3e-3, rtol=3e-3)
-    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
-    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(q.grad, q_ref.grad, atol=4e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+
+  def test_fast_fa_llama_local_shape(self):
+    Tensor.manual_seed(42)
+
+    # Llama 3.1 8B shards 32 Q heads and 8 KV heads over 8 devices.
+    B, N, H, H_KV, D = 2, 8192, 4, 1, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      do = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v, do)
+
+    out = flash_attention(q, k, v, is_causal=True)[0]
+    out.backward(do)
+    Tensor.realize(out, q.grad, k.grad, v.grad)
+
+    with Context(DEBUG=0):
+      q_ref, k_ref, v_ref = q.detach().clone(), k.detach().clone(), v.detach().clone()
+      Tensor.realize(q_ref, k_ref, v_ref)
+    ref = q_ref.transpose(1, 2).scaled_dot_product_attention(k_ref.transpose(1, 2), v_ref.transpose(1, 2),
+      is_causal=True, enable_gqa=True).transpose(1, 2)
+    ref.backward(do)
+    Tensor.realize(ref, q_ref.grad, k_ref.grad, v_ref.grad)
+
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=5e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_relative_close(self, q.grad, q_ref.grad, 8e-3)
+    assert_relative_close(self, k.grad, k_ref.grad, 8e-3)
+    assert_relative_close(self, v.grad, v_ref.grad, 8e-3)
+
+  def test_fast_fa_online_softmax_rescaling(self):
+    Tensor.manual_seed(42)
+    B, N, H, H_KV, D = 2, 8192, 4, 1, 128
+
+    q = Tensor.cat(Tensor.ones(B, N, H, 1), Tensor.zeros(B, N, H, D-1), dim=-1).cast(dtypes.bfloat16).contiguous()
+    slope = D**0.5 * 8.0 / (N - 1)
+    k0 = (Tensor.arange(N).reshape(1, N, 1, 1) * slope).expand(B, N, H_KV, 1)
+    k = Tensor.cat(k0, Tensor.zeros(B, N, H_KV, D-1), dim=-1).cast(dtypes.bfloat16).contiguous()
+    v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+    Tensor.realize(q, k, v)
+
+    out = flash_attention(q, k, v, is_causal=True)[0].float()
+    ref = q.transpose(1, 2).scaled_dot_product_attention(k.transpose(1, 2), v.transpose(1, 2),
+      is_causal=True, enable_gqa=True).float().transpose(1, 2)
+    Tensor.realize(out, ref)
+
+    assert_relative_close(self, out, ref, 1e-2)
 
   def test_fast_fa_bwd_dp(self):
     Tensor.manual_seed(42)

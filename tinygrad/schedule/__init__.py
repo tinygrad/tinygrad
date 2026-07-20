@@ -8,16 +8,30 @@ from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SC
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+  while len(s.src) and (s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.SLICE, Ops.BIND} or
+                        (s.op is Ops.SLICE and s.src[0].op is Ops.INDEX)): s = s.src[0]
   return s
 
 # a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.SLICE: return _states(s.src[0])
   if s.op is Ops.BIND: return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
+
+def _slice_region(s: UOp) -> tuple[UOp, int, int]|None:
+  offset, size = 0, None
+  while True:
+    s = _unwrap_src(s)
+    if s.op is Ops.AFTER: s = s.src[0]
+    elif s.op is Ops.SLICE and s.src[1].op is Ops.CONST:
+      offset += s.src[1].arg * s.src[0].dtype.itemsize
+      if size is None: size = s.arg * s.dtype.itemsize
+      s = s.src[0]
+    else: break
+  return (s.buf_uop, offset, offset+size) if size is not None else None
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
@@ -32,7 +46,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     writes: dict[UOp, list[tuple[UOp, UOp, tuple[UOp, ...]]]] = {}  # buffer -> (AFTER, prior state, new kernels)
-    reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
+    reads: list[tuple[UOp, UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read, access)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
@@ -43,20 +57,23 @@ def create_schedule(sched_sink:UOp) -> UOp:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
         kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
+        read_states = [(st, s) for s in kernel_deps for st in _states(s)]
+        reads += [(u, k, st, access) for st,access in read_states]
         # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        for st in [st for st,_ in read_states] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             for t in _split_after(st)[0]:
               children.setdefault(t, []).append(k)
               in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
-    for u, k, s in reads:
+    for u, k, s, access in reads:
       for a, prev_state, write_kernels in writes.get(s.buf_uop, []):
         if a is u or prev_state is not s: continue
         for t in write_kernels:
+          call = t.src[0] if t.op is Ops.END else t
+          if (rr:=_slice_region(access)) is not None and len(call.src) > 1 and (wr:=_slice_region(call.src[1])) is not None \
+             and (rr[0] is not wr[0] or rr[2] <= wr[1] or wr[2] <= rr[1]): continue
           if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
@@ -79,7 +96,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
-from tinygrad.schedule.memory import memory_plan_rewrite
+from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
@@ -159,5 +176,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  held_bufs = ({b for src in linear_call.src[1:] for b in _collect_bufs(src)} if linear_call.op is Ops.CALL else set())
   return memory_plan_rewrite(linear, held_bufs), var_vals

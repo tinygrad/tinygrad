@@ -53,7 +53,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16
 
     int wgid = (blockIdx.y * gridDim.x) + blockIdx.x;
     const int NUM_WGS = gridDim.x * gridDim.y;
-    const int WGM = 8;
+    const int WGM = 16;
     wgid = chiplet_transform_chunked(wgid, NUM_WGS, NUM_XCDS, 64);
 
     const int num_pid_m = M / BLOCK_SIZE;

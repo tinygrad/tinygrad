@@ -30,6 +30,9 @@
 #ifndef HAS_RESIDUAL
 #define HAS_RESIDUAL 0
 #endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
@@ -52,7 +55,11 @@ fused_add_rmsnorm_mul_quantize_fp8(
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ residual,        // bf16, ROWS*HIDDEN — added into x before rmsnorm
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state       // fp32 scalar or n_layers
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
 #else
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
@@ -63,7 +70,11 @@ fused_rmsnorm_mul_quantize_fp8(
     float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN (per-hidden scale)
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state       // fp32 scalar or n_layers
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
 #endif
   __shared__ float sdata[THREADS_PER_WG];
@@ -71,7 +82,13 @@ fused_rmsnorm_mul_quantize_fp8(
   const int tid = threadIdx.x;
   const int wg  = blockIdx.x;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+#if LAYER_SCALE
+  const int layer = layer_num[0];
+#else
+  const int layer = 0;
+#endif
+  float* amax_out_layer = amax_out + layer;
+  const float scale = FP8_MAX / (static_cast<float>(amax_state[layer]) + 1e-8f);
   const float inv_hidden = 1.0f / static_cast<float>(HIDDEN);
   float local_max = 0.0f;
 
@@ -151,5 +168,5 @@ fused_rmsnorm_mul_quantize_fp8(
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0 && sdata[0] > *amax_out) atomicMax(reinterpret_cast<int32_t*>(amax_out), __float_as_int(sdata[0]));
+  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMax(reinterpret_cast<int32_t*>(amax_out_layer), __float_as_int(sdata[0]));
 }

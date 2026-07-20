@@ -464,7 +464,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
-    for s in self.src: ret.update(s.ranges)
+    # A hardware-slice store is a whole-buffer state transition. Its ranges belong to the write, not the AFTER value.
+    slice_stores = self.op is Ops.AFTER and all(s.op is Ops.STORE and
+      (s.src[0].op is Ops.SLICE or (s.src[0].op is Ops.INDEX and s.src[0].src[0].op is Ops.SLICE)) for s in self.src[1:])
+    for s in self.src[:1] if slice_stores else self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
@@ -811,7 +814,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.SLICE}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
@@ -824,9 +827,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
+    if self.op is Ops.SLICE and self.src[0].op is not Ops.INDEX: return self
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and (s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK, Ops.SLICE} or
+                          (s.op is Ops.SLICE and s.src[0].op is Ops.INDEX)): s = s.src[0]
     return s
 
   def contiguous_view_offset(self) -> int|None:
@@ -834,16 +839,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     from tinygrad.schedule.rangeify import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
+    if not self.can_buffer_view(): return None
+
+    idx = self.flatten().index(UOp.range(self.numel(), 0))
+    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
+    return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
+
+  def can_buffer_view(self) -> bool:
     # WEBGPU and CL do not support views.
     # WEBGPU requires that minUniformBufferOffsetAlignment be at least 32 bytes: https://gpuweb.github.io/gpuweb/#adapter-capability-guarantees
     # CL 1.1 provides the clCreateSubBuffer API, but at the time of writing, relevant CL runtimes (rusticl, adreno, nvidia, amd) do not provide
     # reasonable values for CL_DEVICE_MEM_BASE_ADDR_ALIGN. cl_ext_buffer_device_address could potentially help, but this extension is not provided
     # by relevant CL runtimes at time of writing.
-    if any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)): return None
-
-    idx = self.flatten().index(UOp.range(self.numel(), 0))
-    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
-    return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
+    return not any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device))
 
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""

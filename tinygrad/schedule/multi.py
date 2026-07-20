@@ -1,7 +1,7 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, resolve
 from tinygrad.dtype import dtypes
-from tinygrad.schedule.allreduce import handle_allreduce
+from tinygrad.schedule.allreduce import handle_allreduce, create_allreduce_function
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
@@ -76,11 +76,20 @@ def reduce_multi(root:UOp, multi:UOp):
     # allreduce in pre-cast dtype when sum_acc_dtype promoted from bf16/half
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
-      return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
+      local_to_reduce = multi.src[0].src[0].reshape(local.shape) if all(resolve(s == 1) for s in multi.src[0].shape[:num_axes]) \
+                        else local.cast(orig_dtype)
+      return local_to_reduce.allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   new_axis = multi.axis - num_axes if multi.axis is not None else None
   return multi.src[0]._rop(op, tuple(range(num_axes))).multi(axis=new_axis)
+
+def allreduce_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
+  if output is not target: return None
+  while src.op in {Ops.RESHAPE, Ops.CAST}: src = src.src[0]
+  if src.op is not Ops.ALLREDUCE or output.numel() != src.numel(): return None
+  ret = create_allreduce_function(src.src[0], src, output.reshape(src.shape))
+  return ret.reshape(output.shape) if ret is not None else None
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
@@ -155,6 +164,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), allreduce_store),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), expand_multi),
   (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), pad_multi),

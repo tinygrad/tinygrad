@@ -1490,7 +1490,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       Tensor.realize(*nn.state.get_parameters(opt))
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 12)
 
   def test_adam_conv_fuse(self):
     with Context(TRAINING=1):

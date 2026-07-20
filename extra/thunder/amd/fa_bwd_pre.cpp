@@ -21,13 +21,19 @@ constexpr int ATTN_N = 1024; // sequence length
 #ifndef ATTN_D
 constexpr int ATTN_D = 128; // dimension
 #endif
+#ifndef SCALE_DO
+#define SCALE_DO 0
+#endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 constexpr int STEP_QO = 64; // block size for QO
 constexpr int BLOCK_SIZE_KV = 256; // block size for KV
 constexpr int SLICE_QO = 32;
 constexpr int DOT_SLICE_QO = 16;
 constexpr int WARP_SIZE_KV = 64; // warp size for KV
 
-#define NUM_WARPS 4
+#define NUM_WARPS 8
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
 
 using G = kittens::group<NUM_WARPS>;
@@ -55,7 +61,18 @@ template<int D> struct attn_prep_globals {
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 1)
-__global__ void attend_prep_ker(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf16 *dO_ptr) {
+__global__ void attend_prep_ker(float *delta_ptr, bf16 *dq_ptr
+#if SCALE_DO
+    , bf16 *scaled_dO_ptr
+#endif
+    , bf16 *O_ptr, bf16 *dO_ptr
+#if SCALE_DO
+    , float *amax_state_ptr
+#if LAYER_SCALE
+    , int *layer_num
+#endif
+#endif
+) {
     gl<float, -1, -1, -1, -1> delta{delta_ptr, ATTN_B, ATTN_H, 1, ATTN_N};
     gl<bf16, -1, -1, -1, -1> dQg{dq_ptr, ATTN_B, ATTN_H, ATTN_N, ATTN_D};
     gl<bf16, -1, -1, -1, -1> Og{O_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
@@ -76,6 +93,19 @@ __global__ void attend_prep_ker(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf1
     load<1>(O,  g.Og,  {batch_idx, seq_idx * NUM_WARPS + warpid, head_idx, 0});
     copy(O_float, O);
     copy(dO_float, dO);
+#if SCALE_DO
+#if LAYER_SCALE
+    const int layer = layer_num[0];
+#else
+    constexpr int layer = 0;
+#endif
+    const float do_scale = 448.0f / (amax_state_ptr[layer] + 1e-8f);
+    mul(dO_float, dO_float, do_scale);
+    copy(dO, dO_float);
+    gl<bf16, -1, -1, -1, -1> scaled_dOg{scaled_dO_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+    store<1>(scaled_dOg, dO, {batch_idx, seq_idx * NUM_WARPS + warpid, head_idx, 0});
+    copy(dO_float, dO);
+#endif
 
     // Δ_i = row_sum(dO ⊙ O)
     mul(dO_float, dO_float, O_float);
@@ -88,4 +118,15 @@ __global__ void attend_prep_ker(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf1
     store<2>(dQg, dQ_zero, {batch_idx, head_idx, seq_idx * NUM_WARPS + warpid, 0});
 }
 
-template __global__ void attend_prep_ker<ATTN_D>(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf16 *dO_ptr);
+template __global__ void attend_prep_ker<ATTN_D>(float *delta_ptr, bf16 *dq_ptr
+#if SCALE_DO
+    , bf16 *scaled_dO_ptr
+#endif
+    , bf16 *O_ptr, bf16 *dO_ptr
+#if SCALE_DO
+    , float *amax_state_ptr
+#if LAYER_SCALE
+    , int *layer_num
+#endif
+#endif
+);

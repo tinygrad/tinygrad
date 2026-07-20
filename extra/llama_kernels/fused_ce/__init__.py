@@ -1,10 +1,29 @@
-import functools
+import functools, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.renderer import Estimates
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
+from extra.llama_kernels import compile_hip, dname_of
+
+@functools.cache
+def _custom_fused_ce_loss_fwd_amd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
+                                  vocab:int, rows:int, label_smoothing:float) -> UOp:
+  assert (rows, vocab, label_smoothing) == (16384, 128256, 0.0)
+  threads = 1024
+  tid, row = UOp.special(threads, "lidx0"), UOp.special(rows, "gidx0")
+  sink = UOp.sink(loss_out.base, max_out.base, lse_out.base, logits.base, targets.base, tid, row,
+                  arg=KernelInfo(f"fused_ce_loss_fwd_{rows}_{vocab}", estimates=Estimates(ops=6*rows*vocab, mem=4*rows*vocab)))
+  src = (pathlib.Path(__file__).parent / "fused_ce_fwd.cpp").read_text()
+  lib = compile_hip(src, [f"-DROWS={rows}", f"-DVOCAB={vocab}", f"-DTHREADS={threads}"])
+  info = ProgramInfo.from_sink(sink)
+  info = replace(info, outs=info.globals[:3], ins=info.globals[3:])
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=info)
 
 @functools.cache
 def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
-                              vocab:int, rows:int, seq:int, label_smoothing:float) -> UOp:
+                              vocab:int, rows:int, seq:int, label_smoothing:float, device=None) -> UOp:
+  if dname_of(device) in ("AMD", "HIP") and (rows, vocab, label_smoothing) == (16384, 128256, 0.0):
+    return _custom_fused_ce_loss_fwd_amd(loss_out, max_out, lse_out, logits, targets, vocab, rows, label_smoothing)
   row = UOp.range(rows, 0)
   b = row // seq
   s = row % seq
@@ -90,7 +109,7 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
     rows_per_dev = rows
     seq_per_dev = SEQ
   targets_flat = targets.reshape(-1).cast(dtypes.int32)
-  fxn = functools.partial(_custom_fused_ce_loss_fwd, vocab=VOCAB, rows=rows_per_dev, seq=seq_per_dev,
+  fxn = functools.partial(_custom_fused_ce_loss_fwd, vocab=VOCAB, rows=rows_per_dev, seq=seq_per_dev, device=logits.device,
                           label_smoothing=label_smoothing)
   loss_out, max_out, lse_out, *_ = Tensor.custom_kernel(
     loss_out, max_out, lse_out, logits, targets_flat,

@@ -14,6 +14,9 @@
 #ifndef THREADS_PER_WG
 #define THREADS_PER_WG 256
 #endif
+#ifndef LAYER_SCALE
+#define LAYER_SCALE 0
+#endif
 
 constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
@@ -26,7 +29,13 @@ fused_silu_mul_cast_amax_w13(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, N_ELEMS
     float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ xw13,            // bf16, 2*N_ELEMS
-    const float*          __restrict__ amax_state)      // fp32 scalar
+    const float*          __restrict__ amax_state,      // fp32 scalar or n_layers
+    const float*          __restrict__ grad_amax_state_unused,
+    const float*          __restrict__ next_grad_amax_state_unused
+#if LAYER_SCALE
+    , const int*        __restrict__ layer_num
+#endif
+)
 {
   __shared__ float sdata[THREADS_PER_WG];
 
@@ -35,7 +44,13 @@ fused_silu_mul_cast_amax_w13(
   const int gid = wg * THREADS_PER_WG + tid;
   const int stride_elems = NUM_WG * THREADS_PER_WG * VEC;
 
-  const float scale = FP8_MAX / (static_cast<float>(*amax_state) + 1e-8f);
+#if LAYER_SCALE
+  const int layer = layer_num[0];
+#else
+  const int layer = 0;
+#endif
+  float* amax_out_layer = amax_out + layer;
+  const float scale = FP8_MAX / (static_cast<float>(amax_state[layer]) + 1e-8f);
   float local_max = 0.0f;
 
   // grid-stride over 8-element groups
@@ -75,5 +90,5 @@ fused_silu_mul_cast_amax_w13(
     __syncthreads();
   }
 
-  if (tid == 0 && sdata[0] > *amax_out) atomicMax(reinterpret_cast<int32_t*>(amax_out), __float_as_int(sdata[0]));
+  if (tid == 0 && sdata[0] > *amax_out_layer) atomicMax(reinterpret_cast<int32_t*>(amax_out_layer), __float_as_int(sdata[0]));
 }
