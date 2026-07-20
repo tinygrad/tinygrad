@@ -266,6 +266,26 @@ class TestLLMOpenCode(unittest.TestCase):
       self.assertTrue(marker.is_file(), output)
       self.assertEqual(marker.read_text(), "tinygrad-shell-regression")
 
+  def test_does_not_repeat_identical_failed_shell_call(self):
+    with tempfile.TemporaryDirectory() as directory:
+      cwd = pathlib.Path(directory)
+      command = "clang -x c /dev/null -fsyntax-only -mllvm -tinygrad-definitely-invalid-option=1"
+      output = self.run_opencode(
+        f"Run `{command}` exactly once with the shell tool. After it fails, do not retry it; explain that the option is unsupported.", cwd)
+      self.assertIn("Unknown command line argument", output)
+      self.assertLessEqual(output.count(command), 1, output)
+
+  def test_stops_when_benchmark_goal_is_met(self):
+    with tempfile.TemporaryDirectory() as directory:
+      cwd = pathlib.Path(directory)
+      benchmark = cwd / "benchmark.sh"
+      benchmark.write_text("#!/bin/sh\necho 'Sorted 1000000 integers in 8.300 ms'\n")
+      benchmark.chmod(0o755)
+      output = self.run_opencode(
+        "Use the shell tool to run ./benchmark.sh. Keep optimizing until it reports under 10 ms, then stop immediately.", cwd)
+      self.assertIn("8.300 ms", output)
+      self.assertLessEqual(output.count("$ ./benchmark.sh"), 1, output)
+
   def test_multiline_tool_argument_preserves_trailing_newline(self):
     with tempfile.TemporaryDirectory() as directory:
       cwd = pathlib.Path(directory)
