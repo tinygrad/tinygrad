@@ -39,7 +39,6 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
     else:
       new_src.append(create_graph_call(current_batch))
-      max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
     current_batch, current_batch_devs = [], []
 
