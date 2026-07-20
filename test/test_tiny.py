@@ -39,14 +39,17 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(N).contiguous().sum()
     self.assertEqual(out.item(), N)
 
-  def test_gemm(self, N=getenv("GEMM_N", 64)):
-    a = Tensor.ones(N,N).contiguous()
-    b = Tensor.eye(N).clone()
+  def test_gemm(self, N=getenv("GEMM_N", 64), dtype=dtypes.float):
+    a = Tensor.ones(N,N, dtype=dtype).contiguous()
+    b = Tensor.eye(N, dtype=dtype).clone()
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
         self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
-    self.assertEqual(out.dtype, dtypes.float)
+    self.assertEqual(out.dtype, dtype)
+
+  @unittest.skipIf(Device.DEFAULT == "DSP", "half is broken on DSP")
+  def test_hgemm(self): self.test_gemm(dtype=dtypes.half)
 
   def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(1,N).contiguous()

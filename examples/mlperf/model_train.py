@@ -1462,6 +1462,8 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    for nxt in fp8_next_amax: nxt.assign(0)
+    for nxt in fp8_next_grad_amax: nxt.assign(0)
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)

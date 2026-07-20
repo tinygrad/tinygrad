@@ -1,7 +1,7 @@
 import unittest, gc
 import numpy as np
-from tinygrad.helpers import polyN, is_numpy_ndarray, disable_gc
-from tinygrad.tensor import Tensor
+from tinygrad.helpers import polyN, disable_gc
+from tinygrad.tensor import Tensor, is_numpy_ndarray
 
 class TestPolyN(unittest.TestCase):
   def test_tensor(self):

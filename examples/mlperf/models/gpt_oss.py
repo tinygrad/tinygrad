@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, quantize_mxfp8
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
@@ -39,8 +39,11 @@ def quant_dequant_mx(x:Tensor) -> Tensor:
   fxn = _quant_dequant_fwd_fxn(x.as_param(0).uop, x.device)
   return Tensor(UOp.maketuple(fxn.uop).call(x.uop, grad_fxn=_quant_dequant_bwd).gettuple(0))
 
+def _mx_scale(e8:Tensor) -> Tensor:
+  return _mx_block_scale(e8) if e8.ndim == 2 else _mx_block_scale_3d(e8)
+
 def _dequant_fwd(w_q:Tensor, w_scale:Tensor) -> Tensor:
-  return w_q.cast(dtypes.bfloat16) * _mx_block_scale(w_scale)
+  return w_q.cast(dtypes.bfloat16) * _mx_scale(w_scale)
 
 @functools.cache
 def _dequant_fwd_fxn(wq_p, ws_p, device):
@@ -48,7 +51,7 @@ def _dequant_fwd_fxn(wq_p, ws_p, device):
 
 def _dequant_bwd(grad:UOp, call:UOp) -> tuple:
   w_scale = Tensor(call.src[2])
-  return ((Tensor(grad).cast(dtypes.bfloat16) * _mx_block_scale(w_scale).cast(dtypes.bfloat16)).uop, None)
+  return ((Tensor(grad).cast(dtypes.bfloat16) * _mx_scale(w_scale).cast(dtypes.bfloat16)).uop, None)
 
 def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)

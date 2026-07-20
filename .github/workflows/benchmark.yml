@@ -521,6 +521,8 @@ jobs:
       run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
     - name: openpilot run_pickle 0.10.1 driving_vision
       run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_run_pickle RUN_PICKLE=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py
+    - name: Test copy speeds
+      run: SIZE=64e6 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py TestDevCopySpeeds
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})

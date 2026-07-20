@@ -70,6 +70,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   nn.state.safe_save({'t':t}, "test.safetensor")
   ```
   """
+  if any(v.dtype in dtypes.weaks for v in tensors.values()): raise ValueError("safe_save requires concrete dtypes")
   headers, offset = {}, 0
   if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():

@@ -1,10 +1,10 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
+from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.mixin.rand import RandMixin
@@ -33,6 +33,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
       t.uop = ns
 
 # **** Tensor helper functions ****
+
+def is_numpy_ndarray(x) -> "TypeGuard[numpy.ndarray]": return str(type(x)) == "<class 'numpy.ndarray'>"
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -75,22 +77,21 @@ class Tensor(RandMixin):
       data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
       data = UOp.const(_dtype or dtypes.from_py(data), data)
-    elif isinstance(data, bytes): data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
-    elif isinstance(data, (list, tuple)):
-      if _dtype is None:
-        if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): _dtype = dtypes.bool
-        else: _dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      data = UOp._frompy(data, _dtype, _device)
-    elif is_numpy_ndarray(data):
-      import numpy as np
-      assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == ():
-        data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
-      else:
+    elif is_numpy_ndarray(data) and data.shape == ():
+      data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
+    else:
+      if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
+      if isinstance(data, bytes): data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
+      elif isinstance(data, (list, tuple)):
+        if _dtype is None:
+          if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): _dtype = dtypes.bool
+          else: _dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
+        data = UOp._frompy(data, _dtype, _device)
+      elif is_numpy_ndarray(data):
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
-    elif isinstance(data, pathlib.Path):
-      _dtype = _dtype or dtypes.uint8
-      data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
+      elif isinstance(data, pathlib.Path):
+        _dtype = _dtype or dtypes.uint8
+        data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
 
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -178,6 +179,7 @@ class Tensor(RandMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    if any(t.dtype in dtypes.weaks for t in (self,)+lst): raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -205,14 +207,16 @@ class Tensor(RandMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
+    if self.dtype in dtypes.weaks: raise RuntimeError("cannot assign into a weak tensor; it has no storage")
     is_disk = isinstance(self.device, str) and self.device.startswith(("DISK", "TINYFS"))
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
     x = x._broadcast_to(self.shape)
+    if x.dtype in dtypes.weaks: x = x.cast(least_upper_dtype(self.dtype, x.dtype))
+    if x.dtype != self.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
     if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
       raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
-    if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -238,7 +242,7 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.cast(self.dtype).contiguous()
+    x = self.cast(strong_dtype(self.dtype)).contiguous()
     if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
@@ -253,12 +257,14 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).data()
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    fmt = self.dtype.fmt
-    assert fmt is not None, f"no fmt dtype for {self.dtype}"
+    buf = self._buffer()
+    fmt = buf.dtype.fmt
+    assert fmt is not None, f"no fmt dtype for {buf.dtype}"
     assert fmt != "e" or sys.version_info >= (3, 12)
-    return self._data().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
+    return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
   def tolist(self) -> PyConst|list[Any]:
@@ -275,8 +281,13 @@ class Tensor(RandMixin):
     print(t.tolist())
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).tolist()
     # TODO: remove half once minimum python supports it
     if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
+    if 0 in self.shape:
+      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
+      return _tolist(self.shape)
     return self.data().tolist()
 
   def numpy(self) -> 'numpy.ndarray':
@@ -288,6 +299,7 @@ class Tensor(RandMixin):
     print(repr(t.numpy()))
     ```
     """
+    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).numpy()
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
@@ -445,7 +457,10 @@ class Tensor(RandMixin):
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
-    if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
+    if self.dtype in dtypes.weaks: raise RuntimeError("cannot setitem into a weak tensor; it has no storage")
+    if isinstance(v, Tensor):
+      if v.dtype in dtypes.weaks: v = v.cast(least_upper_dtype(self.dtype, v.dtype))
+      if v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):

@@ -848,6 +848,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor << 0, lambda: (ten << 0).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor << 2, lambda: (ten << 2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor << 31, lambda: (ten << 31).cast(dtypes.int32), forward_only=True)
+    helper_test_op([], lambda: tor << torch.tensor([0,2,4]).int(),
+                   lambda: (ten << Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__lshift__(2), lambda: ten.__lshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_left_shift(2), lambda: ten.lshift(2).cast(dtypes.int32), forward_only=True)
 
@@ -859,6 +861,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 0, lambda: (ten >> 0).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor >> 2, lambda: (ten >> 2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
+    helper_test_op([], lambda: tor >> torch.tensor([0,2,4]).int(),
+                   lambda: (ten >> Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
@@ -870,6 +874,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor << 2, lambda: ten << 2, forward_only=True)
     helper_test_op([], lambda: tor << 8, lambda: ten << 8, forward_only=True)
     helper_test_op([], lambda: tor << 31, lambda: ten << 31, forward_only=True)
+    helper_test_op([], lambda: tor << torch.tensor([0,2,8,31]).int(), lambda: ten << Tensor([0,2,8,31], dtype=dtypes.int), forward_only=True)
 
   def test_rshift_signed(self):
     data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
@@ -879,6 +884,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 2, lambda: ten >> 2, forward_only=True)
     helper_test_op([], lambda: tor >> 8, lambda: ten >> 8, forward_only=True)
     helper_test_op([], lambda: tor >> 31, lambda: ten >> 31, forward_only=True)
+    helper_test_op([], lambda: tor >> torch.tensor([0,2,8,31]).int(), lambda: ten >> Tensor([0,2,8,31], dtype=dtypes.int), forward_only=True)
 
   def test_idiv_shift_rewrite_negative(self):
     a = Tensor(-5).div(2, rounding_mode="trunc").item()

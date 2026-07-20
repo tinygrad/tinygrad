@@ -1,6 +1,6 @@
 import unittest, math, struct, operator
 from tinygrad import Tensor, Device
-from tinygrad.dtype import DTYPES_DICT, dtypes, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
+from tinygrad.dtype import DTYPES_DICT, dtypes, Invalid, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 
 from tinygrad.helpers import getenv
 from hypothesis import given, settings, strategies as strat
@@ -57,6 +57,7 @@ class TestHelpers(unittest.TestCase):
 
   def test_from_py(self):
     assert dtypes.from_py(True) == dtypes.bool
+    assert dtypes.from_py(Invalid) == dtypes.bool
     assert dtypes.from_py(2) == dtypes.default_int
     assert dtypes.from_py(3.0) == dtypes.default_float
     assert dtypes.from_py([]) == dtypes.default_float

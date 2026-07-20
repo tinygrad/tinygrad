@@ -367,9 +367,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA:
-        in0, in1, out0 = self.arg[6]
         wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
-        return wmma_b + (prod([x for _,x in out0]),)
+        return wmma_b + (self.src[2].shape[-1],)
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
@@ -601,12 +600,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
   @staticmethod
-  def wmma(a:UOp, b:UOp, acc:UOp, arg:tuple[tuple[int, int, int], str, int]):
-    dims, device, threads = arg
-    dtype_in, dtype_out = a.dtype, acc.dtype
-    tc_upcast_axes = tuple(((i, s.shape[-1]),) for i,s in enumerate((a, b, acc)))
-    name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
-    return UOp(Ops.WMMA, src=(a, b, acc), arg=(name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ()))
+  def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tc_upcast_axes=None):
+    # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
+    return UOp(Ops.WMMA, src=(a, b, acc), arg=(dims, a.dtype, device, threads, tc_upcast_axes))
   def _rop(self, op:Ops, axis:tuple[int, ...]):
     # NOTE: we don't allow reduce on 1s axis
     axis = tuple(sorted(axis))
@@ -708,6 +704,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
+    if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
     return UOp(Ops.COPY, src=(inp,), arg=device)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, src=(self,), arg=arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs)
@@ -762,6 +759,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+    if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     slot = next(UOp.unique_num) if num is None else num
     return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(slot, dtype, device=device))
   @staticmethod
@@ -791,7 +789,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     device = device or self.device
     ret = self.empty_like(device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
-    return ret.after(ret.store(src))
+    return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
@@ -1031,9 +1029,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.INDEX: return self.src[0]._min_max
-    # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
-    if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.index,):
-      return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+    if self.op is Ops.CAST:
+      # a cast to unsigned keeps exact bounds when the source fits
+      # TODO: can do more based on new dtype window
+      if dtypes.is_unsigned(self.dtype) and 0 <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0]._min_max
+      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.index,):
+        return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property
@@ -1088,6 +1089,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None,
             addrspace=AddrSpace.GLOBAL, axis:int|None=None):
+    if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     if shape is not None and axis is not None and isinstance(device, tuple):
       shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)

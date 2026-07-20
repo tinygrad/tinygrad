@@ -60,7 +60,7 @@ def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]
   acc_load = acc_after[N_inner_loop, M_inner_loop]
 
   # do WMMA
-  out = UOp.wmma(Ar[M_inner_loop], Br[N_inner_loop], acc_load, ((16, 16, 32), 'AMD', 64))
+  out = UOp.wmma(Ar[M_inner_loop], Br[N_inner_loop], acc_load, (16, 16, 32), 'AMD', 64)
 
   # store back the acc
   acc_store = acc[N_inner_loop, M_inner_loop].store(out)

@@ -128,6 +128,11 @@ def _mx_block_scale(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
   return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, scale_K*32)
 
+def _mx_block_scale_3d(e8:Tensor) -> Tensor:
+  # batched (E, rows, scale_K) dequant scale 2^(e8-127) broadcast to (E, rows, scale_K*32)
+  E, rows, scale_K = e8.shape
+  return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(E, rows, scale_K, 1).expand(E, rows, scale_K, 32).reshape(E, rows, scale_K*32)
+
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 def _asm_gemm_report():
@@ -275,10 +280,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
       elif getenv("FUSED_GRAD_QUANTIZE", 0):
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
         g_amax = grad_amax_t
-        g_fp8, _, new_grad_amax, _ = quantize_fp8_delayed(g_t, g_amax)
-        store_effect = next_grad_amax_state.store(new_grad_amax.uop)
-        assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
-        g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
+        g_fp8, _ = quantize_fp8_delayed(g_t, g_amax, Tensor(next_grad_amax_state, device=a.device))
       else:
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
         g_amax = grad_amax_t

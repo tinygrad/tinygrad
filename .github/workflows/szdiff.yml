@@ -14,12 +14,15 @@ jobs:
     outputs:
       branchstat: ${{ steps.brstat.outputs.stat}}
     steps:
-      - name: Check code from PR branch 
+      - name: Check code from PR branch
         uses: actions/checkout@v6
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          # PR code is only inspected with git rev-list, never executed
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
       - name: Check whether branch is up-to-date
         id: brstat
         run: |
@@ -51,6 +54,9 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
+          # PR code is only line-counted by master's sz.py, never executed
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
         # the base default to tinygrad master and cannot be other fork branch for security purpose
       - name: Checkout code from tinygrad master
         uses: actions/checkout@v6

@@ -53,7 +53,7 @@ class Estimates:
       elif u.op in GroupOp.ALU and u not in excluded:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
+        flops += 2 * prod(u.arg[0]) // u.arg[3] * mults
     return Estimates(flops, lds, sum(mem.values()))
 
 class Renderer:

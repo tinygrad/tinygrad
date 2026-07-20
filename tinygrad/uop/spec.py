@@ -61,13 +61,15 @@ spec_shared = PatternMatcher([
   (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
    lambda s: all_same([x.shape for x in s.src]) and all(x.dtype == s.dtype for x in s.src)),
 
-  # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype == y.dtype),
-  # and SHL/SHR, the shift distance can be an int
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
+  # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
+  # a weak dtype matches any dtype (TODO: make python scalars weak consts)
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(), UPat())),
+   lambda w: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in w.src[1:])),
+  (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
+   lambda x,y: x.dtype == y.dtype or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype or None),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
+  (UPat(GroupOp.ALU, name="x"), lambda x: all(y.dtype == x.dtype or y.dtype in dtypes.weaks for y in x.src)),
 
   # CAST
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
@@ -122,7 +124,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
 
   # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
