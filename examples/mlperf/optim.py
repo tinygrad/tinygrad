@@ -67,7 +67,7 @@ class GradAccClipAdamW(Optimizer):
     total_norm = (Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt() / self.grad_acc).contiguous()
     grad_scale = (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0) / self.grad_acc
     for i, g in enumerate(grads):
-      if not self._can_fuse_fp8_update(i): g.assign((g * grad_scale).cast(g.dtype))
+      if not self._can_fuse_fp8_update(i) and not self._can_fuse_bf16_update(i): g.assign((g * grad_scale).cast(g.dtype))
     self.b1_t *= self.b1
     self.b2_t *= self.b2
 
@@ -84,6 +84,16 @@ class GradAccClipAdamW(Optimizer):
         master.replace(master_new)
         weight.replace(weight_new)
         weight._next_inv_scale.replace(next_inv_new)
+        self.m[i].replace(m_new)
+        self.v[i].replace(v_new)
+      elif self._can_fuse_bf16_update(i):
+        assert master is not None
+        from extra.llama_kernels.fused_bf16_adamw import fused_bf16_adamw
+        master_new, weight_new, m_new, v_new = fused_bf16_adamw(
+          master, weight, self.m[i], self.v[i], grad, grad_scale.to(master.device), self.lr.to(master.device), self.b1_t, self.b2_t,
+          b1=self.b1, b2=self.b2, eps=self.eps, wd=self.wd if weight.ndim >= 3 else 0.0)
+        master.replace(master_new)
+        weight.replace(weight_new)
         self.m[i].replace(m_new)
         self.v[i].replace(v_new)
       else:
@@ -105,6 +115,10 @@ class GradAccClipAdamW(Optimizer):
     layer_elems = prod(self.master_params[i].uop.shard_shape) // self.master_params[i].shape[0]
     return (not self.fused and self.params[i].dtype == dtypes.fp8e4m3 and not MXFP8 and not IMMEDIATE_SCALE and not self.zero and
             self.master_params[i].device == self.params[i].device and layer_elems in (16_777_216, 25_165_824, 58_720_256, 117_440_512))
+
+  def _can_fuse_bf16_update(self, i:int) -> bool:
+    return (self.master_params is not None and not self.fused and self.params[i].dtype == dtypes.bfloat16 and not self.zero and
+            self.master_params[i].device == self.params[i].device and self.params[i].shape in ((128256, 4096), (1, 128256, 4096)))
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
     grads = list(grads)
@@ -142,7 +156,7 @@ class GradAccClipAdamW(Optimizer):
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
-    if master is not None: new_w = master.assign(new_w)
+    if master is not None: master.assign(new_w)
     if self.zero and not (MXFP8 and t.dtype in dtypes.fp8s): new_w = self._zero_gather(new_w)
     # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
     offloaded = master is not None and master.device != t.device

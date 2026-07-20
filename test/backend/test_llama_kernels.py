@@ -181,6 +181,40 @@ class TestFusedFP8AdamW(unittest.TestCase):
       self.assertLessEqual((weight_diff != 0).sum().item(), 1, "too many FP8 boundary differences")
       self.assertTrue(next_inv.allclose(next_inv_ref, atol=1e-8, rtol=1e-6).item(), "next scale mismatch")
 
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT.split(":")[0] == "AMD", "requires hipcc to compile and amd device to run")
+class TestFusedBF16AdamW(unittest.TestCase):
+  def test_update(self):
+    from extra.llama_kernels.fused_bf16_adamw import fused_bf16_adamw
+    for wd in (0.0, 0.1):
+      with self.subTest(wd=wd):
+        Tensor.manual_seed(0)
+        shape, b1, b2, eps = (2, 4096), 0.9, 0.95, 1e-5
+        master = (Tensor.rand(*shape) * 0.2 - 0.1).contiguous().realize()
+        weight = master.cast(dtypes.bfloat16).contiguous().realize()
+        m = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+        v = (Tensor.rand(*shape) * 0.01).cast(dtypes.bfloat16).contiguous().realize()
+        grad = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+        grad_scale = Tensor([0.5], dtype=dtypes.float32).contiguous().realize()
+        lr = Tensor([0.001], dtype=dtypes.float32).contiguous().realize()
+        b1_t, b2_t = Tensor([b1], dtype=dtypes.float32).realize(), Tensor([b2], dtype=dtypes.float32).realize()
+
+        master_ref, m_ref, v_ref = master.clone().realize(), m.clone().realize(), v.clone().realize()
+        scaled_grad = (grad.float() * grad_scale).cast(dtypes.bfloat16).float()
+        m_ref = b1 * m_ref.float() + (1.0 - b1) * scaled_grad
+        v_ref = b2 * v_ref.float() + (1.0 - b2) * scaled_grad.square()
+        update = lr * ((m_ref / (1.0 - b1_t)) / ((v_ref / (1.0 - b2_t)).sqrt() + eps))
+        master_ref = master_ref - update - lr * wd * master_ref
+        weight_ref = master_ref.cast(dtypes.bfloat16)
+
+        master, weight, m, v = fused_bf16_adamw(master, weight, m, v, grad, grad_scale, lr, b1_t, b2_t,
+                                                b1=b1, b2=b2, eps=eps, wd=wd)
+        Tensor.realize(master, weight, m, v, master_ref, weight_ref, m_ref, v_ref)
+        with Context(DEBUG=0):
+          self.assertTrue(m.allclose(m_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "first moment mismatch")
+          self.assertTrue(v.allclose(v_ref.cast(dtypes.bfloat16), atol=6.2e-5, rtol=0).item(), "second moment mismatch")
+          self.assertTrue(master.allclose(master_ref, atol=2e-6, rtol=2e-6).item(), "master mismatch")
+          self.assertTrue(weight.allclose(weight_ref, atol=0, rtol=0).item(), "weight mismatch")
+
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedAddRMSNorm(unittest.TestCase):
   def test_llama31_8b_forward(self):
