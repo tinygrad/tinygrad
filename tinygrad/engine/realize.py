@@ -175,6 +175,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, resolve_params(call, ctx.input_uops))):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
+    for peer in {b.device for i,b in zip(ast.arg.globals, prg_bufs) if i in ast.arg.ins and b.device != device}: Device[peer].synchronize()
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:

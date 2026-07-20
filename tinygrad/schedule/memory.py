@@ -20,7 +20,14 @@ LaneKey = tuple[str, int]
 
 def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   if NO_MEMORY_PLANNER: return linear
-  if held_bufs is None: held_bufs = set()
+  held_bufs = set() if held_bufs is None else set(held_bufs)
+
+  # Peer compute arguments must remain standalone: Buffer.get_buf maps a view's entire base allocation on the
+  # executing device, so suballocating a small peer argument would map the whole memory-planner arena.
+  for si in linear.src:
+    if si.src[0].op not in {Ops.SINK, Ops.PROGRAM} or not isinstance(si.device, str): continue
+    for src in si.src[1:]:
+      if isinstance(src.device, str) and src.device != si.device: held_bufs.update(_collect_bufs(src))
 
   # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}

@@ -17,7 +17,10 @@ class HCQGraph(MultiGraphRunner):
     self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)
 
     # Replace input buffers with variables.
-    self.hcq_bufs = [[b._buf for b in bufs] for (_,_,bufs,_) in self.calls]
+    self.hcq_bufs = []
+    for j, ((_,_,bufs,_), runtime) in enumerate(zip(self.calls, self.runtimes)):
+      replaced = {pos for pos,_ in self.uop_replace[j]}
+      self.hcq_bufs.append([b._buf if runtime is None or pos in replaced else b.get_buf(runtime.dev.device) for pos,b in enumerate(bufs)])
     self.input_replace_to_var: dict[tuple[int, int], Variable] = {}
 
     for j, replace in enumerate(self.uop_replace):
@@ -166,6 +169,7 @@ class HCQGraph(MultiGraphRunner):
       if PROFILE: self.prof_signals += [enqueue_dev.new_signal(value=0) for _ in range(2)]
 
       for sig, val in sync_signals + deps: enqueue_queue.wait(sig, val)
+      if runtime is not None and any(bufs[i].device != enqueue_dev.device for i in ast.arg.ins): enqueue_queue.memory_barrier()
 
       # Encode waits and start profile timestamp (if needed).
       if PROFILE and j * 2 in self.prof_signal_is_used: enqueue_queue.timestamp(self.prof_signals[j * 2])
@@ -279,9 +283,11 @@ class HCQGraph(MultiGraphRunner):
     # Update buffers
     for j, replace in enumerate(self.uop_replace):
       dev_idx = self.calls[j][0]
+      runtime = self.runtimes[j]
       for pos, iidx in replace:
         buf = b.bufs[dev_idx] if isinstance(b:=input_uops[iidx].buffer, MultiBuffer) else b
-        hcq_var_vals[self.input_replace_to_var[(j,pos)].expr] = buf._buf.va_addr
+        mapped = buf.get_buf(runtime.dev.device) if runtime is not None else buf._buf
+        hcq_var_vals[self.input_replace_to_var[(j,pos)].expr] = mapped.va_addr
 
     for (var, qp) in self.rdma_vars.values(): hcq_var_vals[var.expr] = qp.head
     for q in self.rdma_queues.values(): q.submit(q.dev, hcq_var_vals)
