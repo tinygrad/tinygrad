@@ -161,7 +161,6 @@ norecursedirs = [
   ".git",
 ]
 timeout = 300
-timeout_method = "thread"
 timeout_func_only = true
 testpaths = ["test"]
 filterwarnings = [
