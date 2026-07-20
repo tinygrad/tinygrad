@@ -81,7 +81,6 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
@@ -113,6 +112,7 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
+    from tinygrad.schedule.rangeify import get_kernel_graph
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[cache_key] = linear
   else:
