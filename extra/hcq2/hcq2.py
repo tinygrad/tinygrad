@@ -377,7 +377,7 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat
 
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
-@track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+@track_rewrites(lambda linear,ret,input_uops=None,jit=False: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
 
@@ -468,7 +468,7 @@ hcq_link_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 def link_cache_key(a:UOp): return a.key, to_tuple(a.device)
 pm_link_cache = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: hcq_link_cache.get(link_cache_key(a)))])
 
-@track_rewrites(lambda _,jit,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+@track_rewrites(lambda _,ret,jit=False: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, jit=False) -> UOp:
   cacheable = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
                if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}

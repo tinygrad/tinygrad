@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, enum, functools, mmap, threading, array
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le, Context
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -184,8 +184,9 @@ class CPUDevice(HCQCompiled):
 
   def _ensureworkers(self, cnt:int):
     if self.worker_rt is None:
-      call, prg = build_worker(self.RING_SZ, self.renderer)
-      self._worker_bufs = [s.buffer for s in hcq_link(UOp(Ops.LINEAR, src=(call,))).src[0].src[1:]]
+      with Context(TRACK_MATCH_STATS=0):
+        call, prg = build_worker(self.RING_SZ, self.renderer)
+        self._worker_bufs = [s.buffer for s in hcq_link(UOp(Ops.LINEAR, src=(call,))).src[0].src[1:]]
       bufs = dict(zip((unwrap_after(s).tag for s in call.src[1:]), self._worker_bufs))  # tag -> resolved buffer
       self.sys_view, self.ring_view = bufs["sys"]._buf.cpu_view().view(fmt='Q'), bufs["ring"]._buf.cpu_view().view(fmt='Q')
       self.sys_view[0] = 0  # tail starts empty (worker's head also starts at 0)
