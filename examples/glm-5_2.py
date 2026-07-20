@@ -10,6 +10,7 @@ LayerType = Literal["dense", "sparse"]
 IndexerType = Literal["full", "shared"]
 @dataclass(frozen=True)
 class GLMConfig:
+  max_batch: int
   dim: int
   layers: list[LayerType]
   norm_eps: float
@@ -20,29 +21,26 @@ class GLMConfig:
   num_exp_per_tok: int
   routed_scaling_fact: float
   moe_intermediate_size: int
-  norm_topk_prob: bool
-  hidden_act: str
   attn_dim: int
   attn_heads: int
-  attn_rope_dim: int
   q_latent_dim: int
   kv_latent_dim: int
-  attn_rot_dim: int
   norm_eps: float
-  idx_head_dim: int
-  idx_num_heads: int
+  idx_attn_dim: int
+  idx_heads: int
   idx_topk: int
-  indexer_type: list[IndexerType]
-  rope_dim: int
+  indexers: list[IndexerType]
+  attn_rope_dim: int
+  rope_theta: float
 
 # KV cache Sparse MLA(DSA)
 class DSAKVCache:
-  def __init__(self, layers: int, indexers: list[IndexerType], max_context: int, latent_dim: int, idx_k_cache_dim: int, max_batch: int):
+  def __init__(self, layers: int, indexers: list[IndexerType], max_context: int, latent_dim: int, idx_latent_dim: int, max_batch: int):
     self.layers, self.max_context, self.attn_latent_dim = layers, max_context, latent_dim
-    self.idx_k_cache_dim, self.max_batch, self.indexer_type = idx_k_cache_dim, max_batch, indexers
+    self.idx_k_cache_dim, self.max_batch, self.indexer_type = idx_latent_dim, max_batch, indexers
     self.full_to_slot = {i: s  for s, i in enumerate([i for i, v in enumerate(indexers) if v == "full"])}
     self.store_attn = Tensor.empty(layers, max_batch, max_context, latent_dim)
-    self.store_attn_idx = Tensor.empty(indexers.count("full"), max_batch, max_context, idx_k_cache_dim)
+    self.store_attn_idx = Tensor.empty(indexers.count("full"), max_batch, max_context, idx_latent_dim)
 
   CacheSegment = Literal["attention", "indexer"]
   # This expects the shape (B, T, d)
@@ -86,7 +84,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, start_pos: list[int], to_write: list[
 
 class GLMDSAIndexer():
   def __init__(self, layer:int, config:GLMConfig):
-    self.idx_num_heads, self.idx_head_dim, self.qk_rope_head_dim = config.idx_num_heads, config.idx_head_dim, config.attn_rope_dim
+    self.idx_num_heads, self.idx_head_dim, self.attn_rope_dim = config.idx_heads, config.idx_attn_dim, config.attn_rope_dim
     self.layer, self.idx_topk = layer, config.idx_topk
     self.q_up_proj_idx = nn.Linear(config.q_latent_dim, self.idx_num_heads * self.idx_head_dim, bias=False)
     self.wk_idx = nn.Linear(config.dim, self.idx_head_dim, bias=False)
@@ -98,10 +96,10 @@ class GLMDSAIndexer():
     assert x.shape[0] == len(step_t) == len(to_write) == q_latent.shape[0], "error in batch dim"
     q_idx = self.q_up_proj_idx(q_latent) # (B, S, H*HD)
     q_idx = q_idx.reshape(*q_idx.shape[:-1], self.idx_num_heads, self.idx_head_dim) # (B, S, H, HD)
-    q_rot_idx, q_pass_idx = q_idx[..., :self.qk_rope_head_dim], q_idx[..., self.qk_rope_head_dim:]
+    q_rot_idx, q_pass_idx = q_idx[..., :self.attn_rope_dim], q_idx[..., self.attn_rope_dim:]
 
     k_idx = self.k_norm_idx(self.wk_idx(x)).unsqueeze(2) # (B, S, HD) -> (B, S, 1, HD)
-    k_rot_idx, k_pass_idx = k_idx[..., :self.qk_rope_head_dim], k_idx[...,self.qk_rope_head_dim:]
+    k_rot_idx, k_pass_idx = k_idx[..., :self.attn_rope_dim], k_idx[...,self.attn_rope_dim:]
 
     q_rot_idx, k_rot_idx = apply_rope(q_rot_idx, position_embeddings, step_t, to_write), apply_rope(k_rot_idx, position_embeddings, step_t, to_write)
     q_idx, k_idx = q_rot_idx.cat(q_pass_idx), k_rot_idx.cat(k_pass_idx).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
@@ -126,7 +124,7 @@ class GLMDSAIndexer():
     return index_scores.topk(topk, dim=-1)[1].cast(dtypes.int32)
 
 # TODO: make this cleaner, maybe use abs positions in a Tensor instead of step_t and to_write
-def create_attention_mask(step_t: list[int], to_write: list[int], longest_seq: int) -> Tensor:
+def create_causal_attn_mask(step_t: list[int], to_write: list[int], longest_seq: int) -> Tensor:
     longest_input_seqs = max(to_write)
     seq_pos = Tensor.stack(*[Tensor([s + s_i for s_i in range(w)]).pad((None, (0, longest_input_seqs - w)), value=dtypes.float.max) for s, w in zip(step_t, to_write)]) # (B, S_inp)
     query_ok = seq_pos < Tensor([s + w for s, w in zip(step_t, to_write)]).unsqueeze(-1) # (B, S_inp)
@@ -135,51 +133,52 @@ def create_attention_mask(step_t: list[int], to_write: list[int], longest_seq: i
     valid = ((keys_arange <= seq_pos.unsqueeze(-1)) & key_ok) & query_ok.unsqueeze(-1) # (B, S_inp, longest_seq)
     return valid.where(0, dtypes.float.min)
 
-def basic_attention(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, topk_idx: Tensor, attn_heads: int, attn_dim: int) -> tuple[Tensor, Tensor]:
-    batch, queries, keys, values = queries.shape[0], queries.permute(0, 2, 1, 3), keys.permute(0, 2, 1, 3), values.permute(0, 2, 1, 3)
-    topk_idx_inv = Tensor.ones_like(attn_mask).scatter(-1, topk_idx, 0)
-    attn_mask = attn_mask.masked_fill(topk_idx_inv.bool(), dtypes.float.min) # (B, S_inp, S_longest)
-
+def basic_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, attn_heads: int, attn_dim: int, batch: int):
     attn_weights = ((queries @ keys.transpose(-1, -2)) + attn_mask.unsqueeze(1)) * (attn_dim ** -0.5) # (B, attn_head, S_inp, S_longest)
     attn_weights = attn_weights.softmax(-1) # (B, attn_head, S_inp, S_longest)
     attn_output = attn_weights @ values # (B, attn_head, S_inp, attn_dim)
     attn_output = attn_output.permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
-    attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contigous() # (B, S_inp, attn_head * attn_dim)
+    attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contiguous() # (B, S_inp, attn_head * attn_dim)
     return attn_weights, attn_output
 
+def perform_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, topk_idx: Tensor, attn_heads: int, attn_dim: int) -> tuple[Tensor, Tensor]:
+    batch, queries, keys, values = queries.shape[0], queries.permute(0, 2, 1, 3), keys.permute(0, 2, 1, 3), values.permute(0, 2, 1, 3)
+    topk_idx_inv = Tensor.ones_like(attn_mask).scatter(-1, topk_idx, 0)
+    attn_mask = attn_mask.masked_fill(topk_idx_inv.bool(), dtypes.float.min) # (B, S_inp, S_longest)
+    return basic_attn(queries, keys, values, attn_mask, attn_heads, attn_dim, int(batch))
 
 class GLMAttention():
   def __init__(self, config: GLMConfig, layer: int):
-    self.attn_dim, self.attn_rot_dim, self.kv_latent_dim, self.attn_heads, self.layer = config.attn_dim, config.attn_rot_dim, config.kv_latent_dim, config.attn_heads, layer
+    self.attn_dim, self.attn_rope_dim, self.kv_latent_dim, self.attn_heads, self.layer = config.attn_dim, config.attn_rope_dim, config.kv_latent_dim, config.attn_heads, layer
     self.q_down_proj = nn.Linear(config.dim, config.q_latent_dim, bias=False)
     self.q_norm = nn.RMSNorm(config.q_latent_dim)
     self.q_up_proj = nn.Linear(config.q_latent_dim, config.attn_heads * config.attn_dim, bias=False)
 
-    self.kv_down_proj = nn.Linear(config.dim, config.kv_latent_dim + config.attn_rot_dim, bias=False)
+    self.kv_down_proj = nn.Linear(config.dim, config.kv_latent_dim + config.attn_rope_dim, bias=False)
     self.kv_norm = nn.RMSNorm(config.kv_latent_dim)
-    self.kv_up_proj = nn.Linear(config.kv_latent_dim, config.attn_heads * ((config.attn_dim - config.attn_rot_dim) + config.attn_dim))
+    self.kv_up_proj = nn.Linear(config.kv_latent_dim, config.attn_heads * ((config.attn_dim - config.attn_rope_dim) + config.attn_dim))
 
     self.o_proj = nn.Linear(config.attn_heads * config.attn_dim, config.dim, bias=False)
 
-    self.indexer = GLMDSAIndexer(layer, config) if config.indexer_type[layer] == "full" else None
+    self.indexer = GLMDSAIndexer(layer, config) if config.indexers[layer] == "full" else None
 
   # x: (B, S, dim)
   def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None):
     batch, orig_seq = x.shape[:-1]
     q_latent = self.q_norm(self.q_down_proj(x)) # (B, S, q_lat)
-    q_pass, q_rot = self.q_up_proj(q_latent).reshape(batch, orig_seq, -1, self.attn_dim).split([self.attn_dim - self.attn_rot_dim, self.attn_rot_dim], dim=-1)
+    q_pass, q_rot = self.q_up_proj(q_latent).reshape(batch, orig_seq, -1, self.attn_dim).split([self.attn_dim - self.attn_rope_dim, self.attn_rope_dim], dim=-1)
 
     cached_kv = self.kv_down_proj(x)
-    kv_common, k_pre_rot= cached_kv.split([self.kv_latent_dim, self.attn_rot_dim], dim=-1)
-    k_pre_rot = k_pre_rot.reshape(batch, orig_seq, 1, self.attn_rot_dim)
+    kv_common, k_pre_rot= cached_kv.split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
+    k_pre_rot = k_pre_rot.reshape(batch, orig_seq, 1, self.attn_rope_dim)
     q_rot, k_rot = apply_rope(q_rot, position_embeddings, step_t, to_write), apply_rope(k_pre_rot, position_embeddings, step_t, to_write)
 
-    kv_common, k_rot = kv_cache.update_cache(self.layer, step_t, to_write, kv_common.cat(k_rot.squeeze(2)), "attention").split([self.kv_latent_dim, self.attn_rot_dim], dim=-1)
+    kv_common, k_rot = kv_cache.update_cache(self.layer, step_t, to_write, kv_common.cat(k_rot.squeeze(2)), "attention").split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
     longest_seq = kv_common.shape[1] # Now this becomes the longest seq in this set of batches that came from kv_cache
     k_rot = k_rot.unsqueeze(2)
 
     # k_pass: (B, S_longest, attn_dim - attn_rot_dim) values: (B, S_longest, attn_dim)
-    k_pass, values = self.kv_up_proj(self.kv_norm(kv_common)).reshape(batch, longest_seq, self.attn_heads, -1).split([self.attn_dim - self.attn_rot_dim, self.attn_dim], dim=-1)
+    k_pass, values = self.kv_up_proj(self.kv_norm(kv_common)).reshape(batch, longest_seq, self.attn_heads, -1).split([self.attn_dim - self.attn_rope_dim, self.attn_dim], dim=-1)
     
     k_rot = k_rot.expand(*k_pass.shape[:-1], -1)
 
@@ -187,19 +186,16 @@ class GLMAttention():
     keys = k_pass.cat(k_rot, dim=-1) # (B, S_longest, attn_head, attn_dim)
     
     # creating the attention mask after kv cache fills in old keys as well
-    attn_mask = create_attention_mask(step_t, to_write, int(longest_seq)) # (B, S_inp, S_longest)
+    attn_mask = create_causal_attn_mask(step_t, to_write, int(longest_seq)) # (B, S_inp, S_longest)
 
     if self.indexer is not None:
-      #TODO:: Double check is this the right way to put mask, it will have the shape of the biggest sequence
       topk_idx = self.indexer(x, q_latent, position_embeddings, kv_cache, step_t, to_write, attn_mask) # (B, S_inp, K)
     else:
       assert prev_idx_topk is not None, "previous idx topk should come for shared idx layers"
       topk_idx = prev_idx_topk
 
-    topk_idx_inv = Tensor.ones_like(attn_mask).scatter(-1, topk_idx, 0)
-    attn_mask = attn_mask.masked_fill(topk_idx_inv.bool(), dtypes.float.min) # (B, S_inp, S_longest)
-    attn_weights, attn_output = basic_attention(queries, keys, values, attn_mask, topk_idx, self.attn_heads, self.attn_dim)
-    attn_ouput_up_proj = self.o_proj(attn_output) # (B, dim)
+    attn_weights, attn_output = perform_attn(queries, keys, values, attn_mask, topk_idx, self.attn_heads, self.attn_dim)
+    attn_ouput_up_proj = self.o_proj(attn_output) # (B, S_inp, dim)
     return attn_ouput_up_proj, attn_weights, topk_idx
 
 class GLMMoeGateTopK():
@@ -243,12 +239,17 @@ class GLMMoeExperts():
 class GLMMoeLayer():
   def __init__(self, config: GLMConfig):
     self.experts = GLMMoeExperts(config)
-    self.gate = GLMMoeGateTopK(config)
+    self.selector = GLMMoeGateTopK(config)
+    self.shared_expert = GLMMLPLayer(config)
 
-  def __call__(self):
-    pass
+  # x: (B, S, dim)
+  def __call__(self, x: Tensor) -> Tensor:
+    residual = x
+    _, topk_weights, topk_idx = self.selector(x)
+    x = self.experts(x, topk_idx, topk_weights)
+    x = x + self.shared_expert(residual)
+    return x
 
-# Done
 class GLMMLPLayer():
   def __init__(self, config: GLMConfig):
     self.gate_proj = nn.Linear(config.dim, config.intermediate_size, bias=False)
@@ -258,52 +259,101 @@ class GLMMLPLayer():
   def __call__(self, x: Tensor) -> Tensor:
     return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
 
-
 class GLMBlock():
   def __init__(self, config: GLMConfig, layer: int):
     self.input_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.self_attn = GLMAttention(config)
+    self.self_attn = GLMAttention(config, layer)
     if config.layers[layer] == "dense":
       self.block_layer = GLMMLPLayer(config)
     else:
-      self.block_layer = GLMMoeLayer()
+      self.block_layer = GLMMoeLayer(config)
     self.post_attn_layer_norm = nn.RMSNorm(config.dim, config.norm_eps)
 
-  def __call__(self):
-    pass
+  def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
+    residual = x
+    x = self.input_layernorm(x)
+    x, _, topk_idx = self.self_attn(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
+    x = x + residual
+
+    residual = x
+    x = self.post_attn_layer_norm(x)
+    x = self.block_layer(x)
+    x = x + residual
+    return x, topk_idx
 
 class GLMModel():
   def __init__(self, config: GLMConfig):
+    self.max_context, self.rope_theta, self.attn_rope_dim, self.indexers, self.kv_latent_dim = config.max_context, config.rope_theta, config.attn_rope_dim, config.indexers, config.kv_latent_dim
+    self.idx_attn_dim, self.max_batch, self.rope_dim = config.idx_attn_dim, config.max_batch, config.attn_rope_dim
     self.embedding = nn.Embedding(config.vocab_size, config.dim)
     self.layers = [GLMBlock(config, i) for i in range(len(config.layers))]
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.rotary_embedding = GLMRope()
+    self.lm_head = nn.Linear(config.dim, config.vocab_size)
 
-  def __call__(self):
-    pass
-    
+  def __call__(self, input_toks: Tensor, step_t: list[int], to_write: list[int]) -> Tensor:
+    x = self.embedding(input_toks)
+    batch = input_toks.shape[0]
+    assert batch <= self.max_batch, "batch size is bigger than max_batch"
+    position_embeddings = precompute_freqs_cis(batch, self.attn_rope_dim, self.max_context, self.rope_theta)
+    kv_cache = DSAKVCache(len(self.layers), self.indexers, self.max_context, self.kv_latent_dim + self.rope_dim, self.idx_attn_dim, self.max_batch)
 
-#TODO: try to get rid of this import
+    topk_idx = None
+    for i, glm_block in enumerate(self.layers):
+      x, topk_idx = glm_block(x, position_embeddings, step_t, to_write, kv_cache, topk_idx)
+
+    x = self.norm(x)
+    return self.lm_head(x)
+
+#TODO: try to get rid of this and make own tokenizer with the json
 from tokenizers import Tokenizer
 def load_tokenizer()-> Tokenizer: 
-  #TODO: try to get rid of this and make own tokenizer with the json
   return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
 
-# This has a total of 99)
+# This has total 9 files each approx 50GB
+def load_model(to_load: int = 1):
   model_tensors: dict[str, Tensor] = {}
   for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
   return model_tensors
 
+indexer_types:list[IndexerType] = ["full", "full", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared"]
+layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse"]
+config = GLMConfig (
+  max_batch = 10,
+  dim = 6144,
+  layers = layer_types,
+  norm_eps = 1e-5,
+  vocab_size = 154880,
+  max_context = 100_000,
+  intermediate_size = 12288,
+  num_exp = 256,
+  num_exp_per_tok = 8,
+  routed_scaling_fact = 2.5,
+  moe_intermediate_size = 2048,
+  attn_dim = 64,
+  attn_heads = 32,
+  q_latent_dim = 2048,
+  kv_latent_dim = 512,
+  idx_attn_dim = 128,
+  idx_heads = 32,
+  idx_topk = 2048,
+  indexers = indexer_types,
+  attn_rope_dim = 64,
+  rope_theta = 800000)
+
 if __name__ == "__main__":
-  #TODO: look into making a fast tokenizer
   tokenizer = load_tokenizer()
   model_part_1 = load_model(1)
 
-  # encoded = tokenizer.encode("Hello, my name is risahbh")
-  # print("ids", encoded.ids)
-  # print("tokens", encoded.tokens)
-  #
-  # decoded = tokenizer.decode(encoded.ids)
-  # print(decoded)
+  encoded = tokenizer.encode("Hello, my name is risahbh")
+  print("ids", encoded.ids)
+  print("tokens", encoded.tokens)
 
-  print([x for x in model_part_1.keys() if "layers.0." in x])
+
+  model = GLMModel(config)
+
+  decoded = tokenizer.decode(encoded.ids)
+  print(decoded)
+
+  print(model())
+
+  # print([x for x in model_part_1.keys() if "layers.0." in x])
