@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
@@ -193,34 +193,38 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
     src.append(UOp.custom_function("hcq", make_submit(*cmds, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
   return src + finalizers
 
-def split_hcq_batches(l:UOp) -> UOp:
+def sched_hcq_batches(l:UOp) -> UOp:
   srcs:list[UOp] = []
   batch:list[tuple[UOp, tuple[str, ...]]] = []
   for call in l.src:
     if (devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is not None: batch.append((call, to_tuple(devs)))
     else: srcs, batch = srcs + _finalize_batch(batch) + [call], []
   return l.replace(src=tuple(srcs + _finalize_batch(batch)))
-pm_split_hcq_batches = PatternMatcher([(UPat(Ops.LINEAR, name="l"), split_hcq_batches)])
+pm_sched_hcq_batches = PatternMatcher([(UPat(Ops.LINEAR, name="l"), sched_hcq_batches)])
 
 # *****************
 # 3. merge into queues
 
 def _merged_hcq_call(calls:list[UOp]) -> UOp: # TODO: simplify?
   if len(calls) == 1: return calls[0]
-  info = replace(calls[0].arg.aux, estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()))
+  info = replace(calls[0].arg.aux, name=f"submit {calls[0].arg.aux.queue} ({len(calls)})",
+                 estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()))
   cmds = [cmd for c in calls for cmd in get_submit(c).src[0].src]
   return UOp.custom_function("hcq", make_submit(*cmds, devs=info.device, queue=info.queue).sink()).call(name="hcq", aux=info)
 
 def merge_queues(linear:UOp) -> UOp:
   new_src:list[UOp] = []
   opened_qs:dict[tuple[tuple[str, ...], str], list[UOp]] = {} # (devs, queue) -> list of hcq calls, kept in submit order
+  limits = collections.defaultdict(lambda: JIT_BATCH_SIZE.value)
 
   for call in linear.src:
     if not isinstance(info:=call.arg.aux, HCQInfo) or info.name == "hcq_finalizer": # non-hcq call or finalizer: close all open queues
       new_src += [_merged_hcq_call(opened_qs.pop(k)) for k in list(opened_qs)] + [call]
       continue
 
-    if (old:=opened_qs.pop((info.device, info.queue), None)) is not None: new_rec = old + [call]
+    if (old:=opened_qs.pop(key:=(info.device, info.queue), None)) is not None:
+      if limits[key] and len(old) >= limits[key]: new_src, old, limits[key] = new_src + [_merged_hcq_call(old)], [], limits[key] * 2
+      new_rec = old + [call]
     else:
       # no such queue opened: close every open submit on this queue that shares a device, so submit order is kept
       closing = [k for k in opened_qs if k[1] == info.queue and set(k[0]) & set(info.device)]
@@ -254,7 +258,7 @@ def is_value_known_at_link(val:UOp) -> bool:
   addressed_bufs = [b for g in val.toposort() if g.op is Ops.GETADDR for b in unwrap_mstack(g.buf_uop)]
 
   # addr of input params is not known at link time
-  return not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
+  return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def is_link_patch(p:UOp, jit:bool) -> bool:
   store = p.src[0] if (is_binary_patch:=p.op is Ops.END) else p
@@ -366,11 +370,12 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
 
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
-    # schedule
+    # prep
     linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
     linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
-    linear = graph_rewrite(linear, pm_split_hcq_batches, walk=True, name="split hcq batches")
-    # the ops now live inside the hcq calls' bodies, so restoring input params needs enter_calls
+
+    # schedule
+    linear = graph_rewrite(linear, pm_sched_hcq_batches, walk=True, name="schedule hcq batches")
     linear = linear.substitute({s: p for p, s in back_map.items()}, walk=True, enter_calls=True)
     linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
 
