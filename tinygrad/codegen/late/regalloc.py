@@ -11,7 +11,7 @@ class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = uops, ren, itertools.count()
     self.prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.uops = [u for u in uops if u.op not in PSEUDO_OPS]
+    self.uops = [u for u in uops if u.op not in PSEUDO_OPS|{Ops.BUFFER}]
     self.live_intervals: dict[VRegister, list[int]] = {}
 
     # TODO: handle alignment
@@ -19,6 +19,7 @@ class LinearScanRegallocContext:
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       if u.op is Ops.INDEX and not len(rdefs(u)): return _live_units(u.src[0]) # hack
+      if u.op is Ops.BUFFER and len(rdefs(u)) > 1: return ()
       return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for u in reversed(self.uops):
       pt, defs, uses = self.prgpts[u], _live_units(u), []
@@ -34,19 +35,18 @@ class LinearScanRegallocContext:
     vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons), lis[v][0], lis[v][-1]))
 
     self.pmap: dict[VRegister, tuple[Register,...]] = {}
-    ipmap: dict[Register, VRegister] = {}
-    live_ranges: dict[Vregister, tuple[int,int]] = { v: (iv[0], iv[-1]) for v,iv in lis.items() }
+    vmap: dict[Register, list[VRegister]] = {}
     physical_slots: dict[Register, list[tuple[int, int], ...]] = {}
     spill_offset = 0
 
     # greedy allocate, pick first block of width w in constraints that is free for whole live range
-    def _isfree(pregs:list[Register], v_start:int, v_end:int): return all(not (a < v_end and v_start < b) for r in pregs if r in physical_slots for a,b in physical_slots[r])
+    def _inside(a:VRegister, b:VRegister): return lis[a][0] <= lis[b][-1] and lis[a][-1] >= lis[b][0]
+    def _isfree(v:VRegister, block:list[Register,...]) -> bool: return all(not _inside(v,bv) for r in block if r in vmap for bv in vmap[r])
     for v in vregs:
-      if (block := next((v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1) if _isfree(v._cons[i:i+v.width], *live_ranges[v])), None)):
+      candidates: list[tuple[Register,...]] = [v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1)]
+      if (block := next((b for b in candidates if _isfree(v, b)), None)):
         self.pmap[v] = block
-        for r in block:
-          ipmap[r] = v
-          physical_slots.setdefault(r, []).append(live_ranges[v])
+        for r in block: vmap.setdefault(r, []).append(v)
       else:
         raise NotImplementedError(f"spilling not implemented: {v}")
 
