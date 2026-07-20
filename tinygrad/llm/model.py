@@ -1120,8 +1120,10 @@ class Transformer:
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
-    # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32").reshape(1, self.max_context + chunk_size)
+    # Dense attention needs a symbolic slice into one input buffer. Recurrent prefill instead creates fixed-size
+    # chunk tensors below; allocating its input at max_context makes short requests spend most of their time converting zeros.
+    t = None if self.has_recurrent_block else \
+      Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32").reshape(1, self.max_context + chunk_size)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
     if start_pos < len(self._cached_tokens):
@@ -1146,7 +1148,13 @@ class Transformer:
       actual_nt = min(chunk_size, remaining)
       nt = chunk_size if use_flash or self.has_recurrent_block and start_pos < prompt_len else 1 if self.has_recurrent_block else \
            v_toks.bind(min(64 - start_pos % 64, remaining) if can_flash else actual_nt)
-      inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
+      if self.has_recurrent_block and (start_pos < prompt_len or out is None):
+        assert isinstance(nt, int)
+        inp = Tensor(tokens[start_pos:start_pos+actual_nt] + [0] * (nt-actual_nt), dtype="int32").reshape(1, nt)
+      elif start_pos < prompt_len or out is None:
+        assert t is not None
+        inp = t[:, sp:sp+nt]
+      else: inp = out
       valid_len = v_toks.bind(actual_nt) if recurrent_prefill else None
       # Save once immediately before a short final chunk. This is the nearest globally aligned state that can be
       # reused without changing flash-attention's numerical tile layout.
