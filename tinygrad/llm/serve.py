@@ -17,9 +17,10 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   if (fm := re.match(r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", s, re.DOTALL)):
     args = {}
-    for pm in re.finditer(r"<parameter=([^>]+)>\s*(.*?)\s*</parameter>", fm.group(2), re.DOTALL):
-      try: args[pm.group(1)] = json.loads(pm.group(2))
-      except json.JSONDecodeError: args[pm.group(1)] = pm.group(2)
+    for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", fm.group(2), re.DOTALL):
+      value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
+      try: args[pm.group(1)] = json.loads(value)
+      except json.JSONDecodeError: args[pm.group(1)] = value
     return fm.group(1), args
   return None
 
@@ -68,8 +69,7 @@ class Handler(HTTPRequestHandler):
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
     model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
-               f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     yield chunk({"role":"assistant", "content":""})
@@ -107,6 +107,8 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
+    request_st = time.perf_counter()
+    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  ")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
@@ -115,6 +117,11 @@ class Handler(HTTPRequestHandler):
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True)
       ids: list[int] = self.server.tok.encode(rendered)
+      stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
+      if len(ids) >= self.server.model.max_context:
+        return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
+          f"{self.server.model.max_context}", "type":"invalid_request_error", "param":"messages", "code":"context_length_exceeded"}}).encode(),
+          status_code=400)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
