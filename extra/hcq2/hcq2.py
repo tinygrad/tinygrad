@@ -408,7 +408,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
 
 def hcq_compile_program(sink:UOp, renderer:Renderer, name:str, devs:str|tuple[str, ...]=("CPU",)) -> tuple[UOp, UOp]:
   call = UOp(Ops.CALL, src=(UOp.custom_function("hcq", sink),), arg=CallInfo(name=name, aux=HCQInfo(name, Estimates(), to_tuple(devs), "")))
-  call = graph_rewrite(call, pm_rm_rt_getaddrs, walk=True, name="rt getaddrs", enter_calls=True)
+  call = graph_rewrite(call, pm_rm_rt_uops, walk=True, name="rt uops", enter_calls=True)
   call = graph_rewrite(call, pm_replace_params, walk=True, name="replace params", enter_calls=True)
   return call, to_program(call.src[0].src[0], renderer)
 
