@@ -17,7 +17,7 @@ from tinygrad.uop.ops import sint, Ops, AxisType, KernelInfo, PatternMatcher, UP
 
 class CpuOp(enum.IntEnum): SIGNAL, WAIT, TIMESTAMP, EXEC, QUIT = range(1, 6)
 
-def read_next(ring, head): return ring.index(head).load(), head + UOp.const(dtypes.uint64, 1)
+def read_next(ring, head): return ring.index(head % ring.max_numel()).load(), head + UOp.const(dtypes.uint64, 1)
 
 def make_null_buf(dtype): return make_placeholder("CPU", 1<<30, dtype, name="null_buf", unique=False)
 
