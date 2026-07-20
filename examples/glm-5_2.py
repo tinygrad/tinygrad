@@ -44,23 +44,23 @@ class DSAKVCache:
 
   CacheSegment = Literal["attention", "indexer"]
   # This expects the shape (B, T, d)
-  def update_cache(self, layer: int, start_pos: list[int], to_write: list[int], value: Tensor, segment: CacheSegment) -> Tensor:
+  def update_cache(self, layer: int, step_t: list[int], to_write: list[int], value: Tensor, segment: CacheSegment) -> Tensor:
     B, T, d = value.shape
     assert 1 <= B <= self.max_batch, "batch size is greater than max batch"
     assert 1 <= T <= self.max_context, "tokens more than max context"
-    assert 1 <= len(start_pos) == len(to_write) == B, "list values are wrong"
+    assert 1 <= len(step_t) == len(to_write) == B, f"list values are wrong step_t: {step_t}, {len(step_t)}, to_write: {to_write}, {len(to_write)}, B: {B}"
     assert layer < self.layers, "layer is greater than max_layer"
-    assert all([s + v <= self.max_context for (s, v) in zip(start_pos, to_write)]), "sequence is greater than max_context"
-    max_end_point = max([a+b for a, b in zip(start_pos, to_write)])
+    assert all([s + v <= self.max_context for (s, v) in zip(step_t, to_write)]), "sequence is greater than max_context"
+    max_end_point = max([a+b for a, b in zip(step_t, to_write)])
     if segment == "attention":
       assert d == self.attn_latent_dim, "shape of dim is incorrect"
-      [self.store_attn[layer, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(start_pos, to_write))]
+      [self.store_attn[layer, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(step_t, to_write))]
       return self.store_attn[layer, :B, :max_end_point]
     else:
       assert d == self.idx_k_cache_dim, "shape of dim is incorrect"
       assert self.indexer_type[layer] == "full", "there should be no k value for indexers that are shared"
       slot = self.full_to_slot[layer]
-      [self.store_attn_idx[slot, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(start_pos, to_write))]
+      [self.store_attn_idx[slot, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(step_t, to_write))]
       return self.store_attn_idx[slot, :B, :max_end_point]
 
 @functools.cache
@@ -102,7 +102,7 @@ class GLMDSAIndexer():
     k_rot_idx, k_pass_idx = k_idx[..., :self.attn_rope_dim], k_idx[...,self.attn_rope_dim:]
 
     q_rot_idx, k_rot_idx = apply_rope(q_rot_idx, position_embeddings, step_t, to_write), apply_rope(k_rot_idx, position_embeddings, step_t, to_write)
-    q_idx, k_idx = q_rot_idx.cat(q_pass_idx), k_rot_idx.cat(k_pass_idx).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
+    q_idx, k_idx = q_rot_idx.cat(q_pass_idx, dim=-1), k_rot_idx.cat(k_pass_idx, dim=-1).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
 
     # (B, S_longest, HD)
     # TODO: is this the correct place to store cache
@@ -124,9 +124,10 @@ class GLMDSAIndexer():
     return index_scores.topk(topk, dim=-1)[1].cast(dtypes.int32)
 
 # TODO: make this cleaner, maybe use abs positions in a Tensor instead of step_t and to_write
+# I think I can clean this up
 def create_causal_attn_mask(step_t: list[int], to_write: list[int], longest_seq: int) -> Tensor:
     longest_input_seqs = max(to_write)
-    seq_pos = Tensor.stack(*[Tensor([s + s_i for s_i in range(w)]).pad((None, (0, longest_input_seqs - w)), value=dtypes.float.max) for s, w in zip(step_t, to_write)]) # (B, S_inp)
+    seq_pos = Tensor.stack(*[Tensor([s + s_i for s_i in range(w)]).pad(((0, longest_input_seqs - w)), value=dtypes.float.max) for s, w in zip(step_t, to_write)]) # (B, S_inp)
     query_ok = seq_pos < Tensor([s + w for s, w in zip(step_t, to_write)]).unsqueeze(-1) # (B, S_inp)
     keys_arange = Tensor.arange(longest_seq).unsqueeze(0).unsqueeze(1) # (1, 1, T)
     key_ok = keys_arange < Tensor([s + w for s, w in zip(step_t, to_write)]).unsqueeze(1).unsqueeze(2) # (1, 1, T) (B, 1, 1) => (B, 1, T)
@@ -169,15 +170,15 @@ class GLMAttention():
     q_pass, q_rot = self.q_up_proj(q_latent).reshape(batch, orig_seq, -1, self.attn_dim).split([self.attn_dim - self.attn_rope_dim, self.attn_rope_dim], dim=-1)
 
     cached_kv = self.kv_down_proj(x)
-    kv_common, k_pre_rot= cached_kv.split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
+    kv_common, k_pre_rot= cached_kv.split([self.kv_latent_dim, self.attn_rope_dim], dim=-1) # kv_common: (B, S_inp, kv_latent_dim) k_pre_rot: (B, S_inp, attn_rope_dom)
     k_pre_rot = k_pre_rot.reshape(batch, orig_seq, 1, self.attn_rope_dim)
     q_rot, k_rot = apply_rope(q_rot, position_embeddings, step_t, to_write), apply_rope(k_pre_rot, position_embeddings, step_t, to_write)
 
-    kv_common, k_rot = kv_cache.update_cache(self.layer, step_t, to_write, kv_common.cat(k_rot.squeeze(2)), "attention").split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
+    kv_common, k_rot = kv_cache.update_cache(self.layer, step_t, to_write, kv_common.cat(k_rot.squeeze(2), dim=-1), "attention").split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
     longest_seq = kv_common.shape[1] # Now this becomes the longest seq in this set of batches that came from kv_cache
     k_rot = k_rot.unsqueeze(2)
 
-    # k_pass: (B, S_longest, attn_dim - attn_rot_dim) values: (B, S_longest, attn_dim)
+    # k_pass: (B, S_longest, attn_dim - attn_rope_dim) values: (B, S_longest, attn_dim)
     k_pass, values = self.kv_up_proj(self.kv_norm(kv_common)).reshape(batch, longest_seq, self.attn_heads, -1).split([self.attn_dim - self.attn_rope_dim, self.attn_dim], dim=-1)
     
     k_rot = k_rot.expand(*k_pass.shape[:-1], -1)
@@ -298,8 +299,7 @@ class GLMModel():
     kv_cache = DSAKVCache(len(self.layers), self.indexers, self.max_context, self.kv_latent_dim + self.rope_dim, self.idx_attn_dim, self.max_batch)
 
     topk_idx = None
-    for i, glm_block in enumerate(self.layers):
-      x, topk_idx = glm_block(x, position_embeddings, step_t, to_write, kv_cache, topk_idx)
+    for block in self.layers: x, topk_idx = block(x, position_embeddings, step_t, to_write, kv_cache, topk_idx)
 
     x = self.norm(x)
     return self.lm_head(x)
@@ -315,15 +315,18 @@ def load_model(to_load: int = 1):
   for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
   return model_tensors
 
+testing_start_layer = 2
+testing_end_layer = 4
+
 indexer_types:list[IndexerType] = ["full", "full", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared"]
 layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse"]
 config = GLMConfig (
   max_batch = 10,
   dim = 6144,
-  layers = layer_types,
+  layers = layer_types[testing_start_layer:testing_end_layer],
   norm_eps = 1e-5,
   vocab_size = 154880,
-  max_context = 100_000,
+  max_context = 1_000,
   intermediate_size = 12288,
   num_exp = 256,
   num_exp_per_tok = 8,
@@ -336,9 +339,10 @@ config = GLMConfig (
   idx_attn_dim = 128,
   idx_heads = 32,
   idx_topk = 2048,
-  indexers = indexer_types,
+  indexers = indexer_types[testing_start_layer:testing_end_layer],
   attn_rope_dim = 64,
-  rope_theta = 800000)
+  rope_theta = 800000
+)
 
 if __name__ == "__main__":
   tokenizer = load_tokenizer()
@@ -348,12 +352,13 @@ if __name__ == "__main__":
   print("ids", encoded.ids)
   print("tokens", encoded.tokens)
 
-
   model = GLMModel(config)
+
+  input = Tensor([encoded.ids])
+  output = model(input, [0], [len(encoded.ids)])
+  print(output.tolist())
 
   decoded = tokenizer.decode(encoded.ids)
   print(decoded)
-
-  print(model())
 
   # print([x for x in model_part_1.keys() if "layers.0." in x])
