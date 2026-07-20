@@ -7,6 +7,8 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, CPU_COUN
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 
+def _wmma_name(u:UOp) -> str:
+  return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.scalar().name}"
 
 base_rewrite = PatternMatcher([
   # local/reg buffers
@@ -97,9 +99,6 @@ pm_manual_bf16_cast = PatternMatcher([
 
 def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
   return dedup((u.dtype, u.max_numel()) for u in uops if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None)
-
-def _wmma_name(u:UOp) -> str:
-  return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.scalar().name}"
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_sizes)
 def wmma_args(uops:list[UOp]):
