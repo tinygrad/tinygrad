@@ -811,10 +811,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
+    if self.op in {Ops.STACK, Ops.WMMA, Ops.GROUP} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
       if not len(ad) or not all_same(ad): return None
       return ad[0]
