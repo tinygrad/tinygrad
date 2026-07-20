@@ -240,7 +240,8 @@ class NV_FLCN(NV_IP):
     # On small-BAR systems _alloc_boot_mem returns sysmem-backed buffers, so the Falcon
     # has to DMA from system memory rather than from VRAM through the (too-small) BAR1 window.
     target = 0 if self.nvdev.large_bar else self.nvdev.NV_PFALCON_FBIF_TRANSCFG_TARGET_COHERENT_SYSMEM
-    self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma:=0].update(target=target, mem_type=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_MEM_TYPE_PHYSICAL)
+    xf = self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma:=0]
+    xf.update(target=target, mem_type=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_MEM_TYPE_PHYSICAL)
 
     cmd = self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).encode(write=0, size=self.nvdev.NV_PFALCON_FALCON_DMATRFCMD_SIZE_256B,
       ctxdma=ctx_dma, imem=1, sec=1)
