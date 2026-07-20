@@ -17,19 +17,16 @@ class VRegister:
   name: str
   width: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
+  parent: VRegister|None = None
+  pos: int|None = None
   def __repr__(self): return self.name
-  def sub(self, i:int) -> VSubRegister: return VSubRegister(self, i)
+  def is_sub(self) -> bool: return self.parent is not None
+  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self.width, self._cons, self, i)
 
-@dataclass(frozen=True)
-class VSubRegister: # should this inherit?
-  parent: VRegister
-  pos: int
-  def __repr__(self): return f"{self.parent.name}.{self.pos}"
-
-def rdefs(u:UOp) -> tuple[VRegister|Register|VSubRegister,...]:
+def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.NOOP, Ops.AFTER, Ops.END}: return rdefs(u.src[0])
-  return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister,VSubRegister)))
-def rdef(u:UOp) -> tuple[VRegister|Register|VSubRegister,...]: return rdefs(u)[0]
+  return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister)))
+def rdef(u:UOp) -> tuple[VRegister|Register,...]: return rdefs(u)[0]
 
 class IselContext:
   def __init__(self, sink:UOp):

@@ -3,11 +3,10 @@ from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, VSubRegister, rdefs
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
-
 
 # ---- (UOp, dtype) -> Instruction tables ----
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64" }
@@ -125,7 +124,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.op is Ops.GROUP and (len(x.src) == 0 or x.src[0].op is not Ops.INS): return None
   if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
-  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister|VSubRegister): return None
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   if isinstance(x.tag, tuple): assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
 
   if x.op is Ops.GROUP:
@@ -193,12 +192,12 @@ def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
 def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   alt, gate = x.src[1:] if len(x.src) > 1 else (None,None)
   base, idx = addr.src[:2]
+  # NOTE: the problem with indexing into base with b64 dtypes is that it will interpret it as accessing a subreg??
   if base.addrspace is AddrSpace.REG: 
+    if len(rdefs(base)) == 0: return None # ensure vreg alloc
     # TODO: gated reg load
     assert idx.op is Ops.CONST and gate is None, "gated load on reg BUFFER"
-    # NOTE: the problem with indexing into base with b64 dtypes 
-    # is that it will interpret it as accessing a subreg??
-    if base.dtype.itemsize <= 4: return vmov(base.index(idx))
+    if base.dtype.itemsize <= 4: return vmov(base.index(idx).replace(tag=(rdefs(base)[idx.arg],)))
     else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
   # NOTE: load_i* automatically sign extends, this messes up some of the tests currently ex. i8 bitcast_alt
   imap = {
