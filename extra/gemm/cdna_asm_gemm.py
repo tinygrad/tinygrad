@@ -364,12 +364,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
       elif getenv("FUSED_GRAD_QUANTIZE", 0):
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
         g_amax = grad_amax_t
-        next_grad_amax_t = Tensor(next_grad_amax_state, device=a.device) if layer_num_t is not None else None
-        g_fp8, _, new_grad_amax, _ = quantize_fp8_delayed(g_t, g_amax, amax_out=next_grad_amax_t, layer_num=layer_num_t)
-        if layer_num_t is None:
-          store_effect = next_grad_amax_state.store(new_grad_amax.uop)
-          assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
-          g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
+        g_fp8, _ = quantize_fp8_delayed(g_t, g_amax, Tensor(next_grad_amax_state, device=a.device), layer_num=layer_num_t)
       else:
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
         g_amax = grad_amax_t

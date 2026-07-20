@@ -53,9 +53,10 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
   with Context(DEBUG=0): Tensor.realize(x, amax_state)
 
   if delayed:
-    fp8, inv_scale, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=x.device).realize()
+    fp8, inv_scale = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
     ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
-    Tensor.realize(fp8, inv_scale, new_amax)
+    Tensor.realize(fp8, inv_scale)
     Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax)
   else:
     fp8 = quantize_fp8_scalar(x, amax_state, FP8_DTYPE)
@@ -67,8 +68,8 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
     if delayed:
       assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
-      assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
-        f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
+      assert amax_out.allclose(ref_new_amax, atol=0, rtol=0).item(), \
+        f"amax mismatch: got={amax_out.item()} ref={ref_new_amax.item()} diff={abs(amax_out.item()-ref_new_amax.item())}"
 
 def run_quantize_fp8_layer(shape:tuple[int, ...]) -> None:
   Tensor.manual_seed(0)
@@ -78,7 +79,7 @@ def run_quantize_fp8_layer(shape:tuple[int, ...]) -> None:
   layer_num = Tensor([1], dtype=dtypes.int32).contiguous()
   with Context(DEBUG=0): Tensor.realize(x, amax_state, amax_out, layer_num)
 
-  fp8, _, _, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE, amax_out=amax_out, layer_num=layer_num)
+  fp8, _ = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE, layer_num=layer_num)
   ref_fp8, _, ref_amax = quantize_fp8(x, amax_state=amax_state[1])
   Tensor.realize(fp8, amax_out, ref_fp8, ref_amax)
 
@@ -108,10 +109,11 @@ class TestQuantizeFP8(unittest.TestCase):
     x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
-    fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
-    Tensor.realize(fp8, new_amax)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=devs).realize()
+    fp8, _ = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
+    Tensor.realize(fp8)
     assert fp8.uop.shape == x.uop.shape
-    assert new_amax.shape == ()
+    assert amax_out.shape == ()
 
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):
@@ -223,17 +225,19 @@ class TestFusedAddRMSNorm(unittest.TestCase):
     residual = Tensor.full(shape, 0.125, dtype=dtypes.bfloat16).contiguous()
     weight = Tensor.full((shape[-1],), 0.75, dtype=dtypes.bfloat16).contiguous()
     amax = Tensor.full((), 1.0, dtype=dtypes.float32).contiguous()
-    Tensor.realize(x, residual, weight, amax)
+    amax_out, ref_amax_out = Tensor.zeros((), dtype=dtypes.float32), Tensor.zeros((), dtype=dtypes.float32)
+    Tensor.realize(x, residual, weight, amax, amax_out, ref_amax_out)
 
-    fp8, _, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, weight, amax, eps, FP8_DTYPE)
+    fp8, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, weight, amax, eps, FP8_DTYPE, amax_out)
     ref_h = x + residual
-    ref_fp8, _, ref_x_normed, ref_rrms = fused_rmsnorm_mul_quantize_fp8(ref_h, weight, amax, eps, FP8_DTYPE)
-    Tensor.realize(fp8, h, x_normed, rrms, ref_fp8, ref_h, ref_x_normed, ref_rrms)
+    ref_fp8, ref_x_normed, ref_rrms = fused_rmsnorm_mul_quantize_fp8(ref_h, weight, amax, eps, FP8_DTYPE, ref_amax_out)
+    Tensor.realize(fp8, h, x_normed, rrms, ref_fp8, ref_h, ref_x_normed, ref_rrms, amax_out, ref_amax_out)
 
     with Context(DEBUG=0):
       for got, ref in ((h, ref_h), (x_normed, ref_x_normed), (rrms, ref_rrms)):
         self.assertTrue(got.allclose(ref, atol=2e-2, rtol=2e-2).item())
       self.assertTrue(fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=2e-2, rtol=2e-2).item())
+      self.assertTrue(amax_out.allclose(ref_amax_out, atol=0, rtol=0).item())
 
   def test_backward_with_residual_grad(self):
     shape = (2, 8192, 4096)

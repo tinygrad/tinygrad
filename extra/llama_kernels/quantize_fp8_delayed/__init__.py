@@ -5,7 +5,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, compile_cpp, zero_scalar
+from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, compile_cpp
 
 quantize_bwd_mailbox:weakref.WeakKeyDictionary[UOp, tuple[UOp, UOp, UOp|None]] = weakref.WeakKeyDictionary()
 
@@ -101,29 +101,21 @@ def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   quantize_bwd_mailbox[grad_x.uop] = (gradient, amax_state, layer_num)
   return (None, None, grad_x.uop, None) + ((None,) if layer_num is not None else ())
 
-def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3, amax_out:Tensor|None=None,
-                         layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, UOp|None]:
-  # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling. Returns (fp8, inv_scale, new_amax, store_effect).
+def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, amax_out:Tensor, fp8_dtype=dtypes.fp8e4m3,
+                         layer_num:Tensor|None=None) -> tuple[Tensor, Tensor]:
+  # NOTE: one-pass bf16 -> fp8 quantize with delayed scaling.
   # Fused kernel reads x once and writes fp8 + scalar amax via global atomic max.
-  # store_effect writes new_amax into amax_state's buffer — the caller must thread it into a realized
-  # output via `.after(store_effect)`. Calling `amax_state.assign(new_amax)` inside a grad_fxn does
-  # NOT work because .assign mutates only the temp Tensor's .uop, not the original layer-owned buffer.
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out      = alloc_like(x.shape,  fp8_dtype,      x.device, axis)
   n_elems = prod(x.uop.shard_shape)
   assert n_elems % NUM_WG == 0, f"{n_elems=} must divide over {NUM_WG=}"
-  owned_amax_out = amax_out is None
-  assert layer_num is None or amax_out is not None, "layer-index quantize must write the packed amax buffer, not a scalar temp"
-  amax_out = zero_scalar(x.device) if owned_amax_out else amax_out
   fxn = functools.partial(_custom_quantize_fp8_with_amax, device=x.device)
   args = (fp8_out, amax_out, x, amax_state) if layer_num is None else (fp8_out, amax_out, x, amax_state, layer_num)
   fp8_out, amax_out, *_ = Tensor.custom_kernel(*args, fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
-  new_amax = amax_out
   cur_amax = amax_state if layer_num is None else amax_state[layer_num[0]]
   inv_scale = (cur_amax.float() + 1e-8) / FP8_MAX
-  store_effect = cur_amax.uop.store(new_amax.uop) if owned_amax_out else None
-  return fp8_out, inv_scale, new_amax, store_effect
+  return fp8_out, inv_scale
 
 def quantize_fp8_scalar(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3, layer_num:Tensor|None=None) -> Tensor:
   # NOTE: pure one-pass bf16 -> fp8 quantize with delayed scalar scale. No amax computation.

@@ -3,7 +3,7 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, zero_scalar, dname_of, compile_hip
+from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, dname_of, compile_hip
 
 def _src() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8.cpp").read_text()
 def _src_bwd() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8_bwd.cpp").read_text()
@@ -128,8 +128,8 @@ def _fused_add_bwd(*args, **kwargs):
   return (None, None, None, None, None, grad_h, grad_h, grad_w, None) + ((None,) if layer_num_u is not None else ())
 
 def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype,
-                                   amax_out:Tensor|None=None, layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-  # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, new_amax, x_normed, rrms).
+                                   amax_out:Tensor, layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor]:
+  # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, x_normed, rrms).
   # x_normed + rrms are saved for the rmsnorm backward (also recomputed here from x regs).
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
   assert x.shape[-1] == weight.shape[-1], f"HIDDEN mismatch: x={x.shape}, weight={weight.shape}"
@@ -139,17 +139,16 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   fp8_out      = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,       x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_out     = zero_scalar(x.device) if amax_out is None else amax_out
   fxn = functools.partial(_custom_fwd, dname=dname_of(x.device), eps_val=eps)
   fp8_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
     fp8_out, x_normed_out, rrms_out, amax_out, x, weight, amax_state, *((layer_num,) if layer_num is not None else ()), fxn=fxn, grad_fxn=_fused_bwd)
-  return fp8_out, amax_out, x_normed_out, rrms_out
+  return fp8_out, x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
-                                       eps:float, fp8_dtype, amax_out:Tensor|None=None,
-                                       layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+                                       eps:float, fp8_dtype, amax_out:Tensor,
+                                       layer_num:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   # NOTE: h = x + residual; y_normed = rmsnorm(h); fp8 = quantize(y_normed * weight).
-  # Returns (fp8, new_amax, h, x_normed, rrms). h is also written so downstream can
+  # Returns (fp8, h, x_normed, rrms). h is also written so downstream can
   # reuse it without recomputing x+residual — eliminates the separate residual-add kernel.
   assert x.dtype == dtypes.bfloat16 and residual.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
   assert x.shape == residual.shape
@@ -160,9 +159,8 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
   h_out        = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_out     = zero_scalar(x.device) if amax_out is None else amax_out
   fxn = functools.partial(_custom_fwd_add, dname=dname_of(x.device), eps_val=eps)
   fp8_out, h_out, x_normed_out, rrms_out, amax_out, *_ = Tensor.custom_kernel(
     fp8_out, h_out, x_normed_out, rrms_out, amax_out, x, residual, weight, amax_state, *((layer_num,) if layer_num is not None else ()),
     fxn=fxn, grad_fxn=_fused_add_bwd)
-  return fp8_out, amax_out, h_out, x_normed_out, rrms_out
+  return fp8_out, h_out, x_normed_out, rrms_out
