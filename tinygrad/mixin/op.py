@@ -658,7 +658,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.logsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
+    m = self.max(axis=axis, keepdim=True).detach()
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
@@ -841,7 +841,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
-    x_cummax, _ = x.cummax(-1)
+    x_cummax = x.cummax(-1)[0].detach()
     mask = type(self).ones(last_dim_size, last_dim_size, buffer=False).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)

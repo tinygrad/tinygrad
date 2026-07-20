@@ -84,6 +84,9 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
+  (invalid_pat.where(UPat.var("a"), UPat()), lambda i,a: i.cast(a.dtype)),
+  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i.cast(a.dtype))),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
@@ -344,7 +347,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
 def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
+  return 0 if (res:=parse_valid(v)) is None else sum(-1 for other in valids if res[0] in other.backward_slice_with_self)
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX

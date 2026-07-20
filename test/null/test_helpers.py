@@ -1,6 +1,7 @@
 import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, count, all_same
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, mv_address, count, all_same
+from tinygrad.tensor import is_numpy_ndarray
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.helpers import ceildiv, ansistrip, get_shape
 from tinygrad.tensor import Tensor

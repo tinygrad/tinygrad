@@ -166,9 +166,8 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
-        src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-      else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
+      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+      else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
@@ -216,10 +215,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
 
+  st = time.perf_counter()
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
       if ctx.wait: Device[d].synchronize()
-  return None
+  return time.perf_counter() - st
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([

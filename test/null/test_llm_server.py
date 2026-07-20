@@ -1,4 +1,4 @@
-import unittest, threading, time
+import unittest, threading, time, json
 from unittest.mock import Mock
 
 class TestLLMServer(unittest.TestCase):
@@ -7,12 +7,9 @@ class TestLLMServer(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.mock_tok = Mock()
-    cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
-    cls.mock_tok.end_turn = Mock(return_value=[998])
-    cls.mock_tok.prefix = Mock(return_value=[1])
     cls.mock_tok.preset = "llama3"
     cls.mock_tok.bos_id = 1
     cls.mock_tok.eos_id = 999
@@ -23,9 +20,10 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
-    from tinygrad.llm.cli import LLMServer
+    from tinygrad.llm.cli import FallbackTemplate
+    from tinygrad.llm.serve import LLMServer
 
-    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok)
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok, FallbackTemplate(cls.mock_tok))
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
@@ -149,50 +147,6 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(resp.choices[0].finish_reason, "length")
     self.assertEqual(resp.usage.completion_tokens, 2)
 
-  def test_assistant_prefill(self):
-    """Last assistant message should be treated as prefill (not a completed turn)."""
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
-    captured_ids = []
-    orig_generate = self.mock_model.generate.side_effect
-    def capture_generate(ids, **kwargs):
-      captured_ids.extend(ids)
-      return orig_generate(ids, **kwargs)
-    self.mock_model.generate = Mock(side_effect=capture_generate)
-
-    resp = self.client.chat.completions.create(
-      model="test", messages=[
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Sure"}
-      ], stream=False
-    )
-    # prefill tokens should be in ids: role("assistant") + encode("Sure") but NO end_turn after it
-    # and NO extra role("assistant") appended
-    role_tokens = self.mock_tok.role.call_args_list
-    # last role() call should be for "assistant" (the prefill message), not an extra one
-    self.assertEqual(role_tokens[-1], unittest.mock.call("assistant"))
-    # end_turn should be called once less than role() — the prefill assistant msg doesn't get end_turn
-    # NOTE: this is flaky in random order
-    #self.assertEqual(self.mock_tok.end_turn.call_count, self.mock_tok.role.call_count - 1)
-    self.assertIsNotNone(resp.choices[0].message.content)
-
-  def test_assistant_prefill_not_last(self):
-    """Assistant message that's NOT last should be a normal completed turn."""
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
-    self.mock_tok.role.reset_mock()
-    self.mock_tok.end_turn.reset_mock()
-    self.client.chat.completions.create(
-      model="test", messages=[
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Sure"},
-        {"role": "user", "content": "Continue"}
-      ], stream=False
-    )
-    # all messages get end_turn, plus an extra role("assistant") at the end
-    # roles: user, assistant, user, assistant(generation prompt) = 4 role calls
-    # end_turns: user, assistant, user = 3 end_turn calls (one per message)
-    self.assertEqual(self.mock_tok.end_turn.call_count, 3)
-    self.assertEqual(self.mock_tok.role.call_count, 4)
-
   def test_models_endpoint(self):
     import requests as req
     resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")
@@ -202,6 +156,96 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(len(data["data"]), 1)
     self.assertEqual(data["data"][0]["id"], "test-model")
     self.assertEqual(data["data"][0]["object"], "model")
+
+class TestLLMToolCalls(unittest.TestCase):
+  """Tool calling through the OpenAI-compatible HTTP API."""
+
+  @classmethod
+  def setUpClass(cls):
+    cls.mock_tok = Mock()
+    cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
+    cls.mock_tok.decode = Mock(return_value="")
+    cls.mock_tok.preset = "qwen2"
+    cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
+    cls.mock_tok.is_end = Mock(return_value=False)
+
+    cls.mock_model = Mock()
+    cls.mock_model.get_start_pos = Mock(return_value=0)
+
+    from tinygrad.llm.serve import LLMServer
+    import jinja2
+    # .items() matches tool-aware templates and ensures OpenAI JSON argument strings are normalized before rendering the next turn.
+    template = jinja2.Template("""{% for m in messages %}{{ m.content or '' }}{% for tc in m.tool_calls or [] %}
+      {% for key, value in tc.function.arguments.items() %}{{ key }}={{ value }}{% endfor %}{% endfor %}{% endfor %}""")
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "tool-model", cls.mock_tok, template)
+    cls.port = cls.server.server_address[1]
+    cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+    cls.server_thread.start()
+    time.sleep(0.1)
+
+    from openai import OpenAI
+    cls.client = OpenAI(base_url=f"http://127.0.0.1:{cls.port}/v1", api_key="test")
+
+  @classmethod
+  def tearDownClass(cls):
+    cls.server.shutdown()
+    cls.server.server_close()
+
+  def set_output(self, text:str):
+    pieces = dict(enumerate(text, 1))
+    self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
+
+  @staticmethod
+  def tools():
+    return [{"type":"function", "function":{"name":"read", "description":"Read a file",
+      "parameters":{"type":"object", "properties":{"path":{"type":"string"}}, "required":["path"]}}}]
+
+  def test_streaming_tool_call(self):
+    self.set_output('before<tool_call>{"name":"read","arguments":{"path":"README.md"}}</tool_call>')
+    chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read README.md"}],
+                                                     tools=self.tools(), stream=True))
+    self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual(len(calls), 1)
+    self.assertEqual(calls[0].function.name, "read")
+    self.assertEqual(json.loads(calls[0].function.arguments), {"path":"README.md"})
+    self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
+
+  def test_multiple_xml_tool_calls(self):
+    self.set_output("<tool_call><function=read><parameter=path>\"a\"</parameter></function></tool_call>"
+                    "<tool_call><function=read><parameter=path>\"b\"</parameter></function></tool_call>")
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read a and b"}],
+                                                   tools=self.tools())
+    self.assertEqual([json.loads(tc.function.arguments)["path"] for tc in response.choices[0].message.tool_calls], ["a", "b"])
+    self.assertEqual(response.choices[0].finish_reason, "tool_calls")
+
+  def test_invalid_tool_call_becomes_content(self):
+    self.set_output("<tool_call>not a call</tool_call>")
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Hello"}], tools=self.tools())
+    self.assertEqual(response.choices[0].message.content, "<tool_call>not a call</tool_call>")
+    self.assertIsNone(response.choices[0].message.tool_calls)
+    self.assertEqual(response.choices[0].finish_reason, "stop")
+
+  def test_tool_call_in_reasoning_is_not_executed(self):
+    self.set_output('<think>draft <tool_call>{"name":"wrong","arguments":{}}</tool_call></think>answer')
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Hello"}], tools=self.tools())
+    self.assertEqual(response.choices[0].message.content, "answer")
+    self.assertIsNone(response.choices[0].message.tool_calls)
+    self.assertEqual(response.choices[0].finish_reason, "stop")
+
+  def test_tool_result_round_trip(self):
+    self.set_output('<tool_call>{"name":"read","arguments":{"path":"README.md"}}</tool_call>')
+    first = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Read README.md"}], tools=self.tools())
+    call = first.choices[0].message.tool_calls[0]
+    self.set_output("done")
+    second = self.client.chat.completions.create(model="tool-model", messages=[
+      {"role":"user", "content":"Read README.md"},
+      {"role":"assistant", "content":None, "tool_calls":[call.model_dump()]},
+      {"role":"tool", "tool_call_id":call.id, "content":"file contents"},
+    ], tools=self.tools())
+    self.assertEqual(second.choices[0].message.content, "done")
+    self.assertEqual(second.choices[0].finish_reason, "stop")
 
 if __name__ == '__main__':
   unittest.main()
