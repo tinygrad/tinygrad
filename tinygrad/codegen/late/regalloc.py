@@ -19,7 +19,6 @@ class LinearScanRegallocContext:
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       if u.op is Ops.INDEX and not len(rdefs(u)): return _live_units(u.src[0]) # hack
-      if u.op is Ops.BUFFER and len(rdefs(u)) > 1: return ()
       return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for u in reversed(self.uops):
       pt, defs, uses = self.prgpts[u], _live_units(u), []

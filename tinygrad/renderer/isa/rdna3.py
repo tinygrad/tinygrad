@@ -3,7 +3,7 @@ from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs, rdef
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
@@ -122,8 +122,8 @@ def _vop2(ctx, x:UOp):
 # - should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.op is Ops.GROUP and (len(x.src) == 0 or x.src[0].op is not Ops.INS): return None
-  if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.REG: return None
   if x.dtype is dtypes.void: return None
+  if x.op is Ops.BUFFER and (x.addrspace is not AddrSpace.REG or x.max_numel() > 1): return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   if isinstance(x.tag, tuple): assert x.tag, f"got empty tuple for op: {x.op}, {x.arg}"
 
@@ -137,9 +137,6 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
     cons, width = x.tag, 1
     if isinstance(x.tag[0], tuple): cons, width = x.tag
     defs = [ctx.vreg(x.tag, width=width)]
-  elif x.op is Ops.BUFFER:
-    n = int(x.max_numel() * max(x.dtype.itemsize//4, 1))
-    defs = [make_vgpr(ctx, width=1) for _ in range(n)]
   else:
     # NOTE: reg buffer doesn't actually need contiguous invariant
     n = max(x.dtype.itemsize // 4, 1)
@@ -194,10 +191,9 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   base, idx = addr.src[:2]
   # NOTE: the problem with indexing into base with b64 dtypes is that it will interpret it as accessing a subreg??
   if base.addrspace is AddrSpace.REG: 
-    if len(rdefs(base)) == 0: return None # ensure vreg alloc
     # TODO: gated reg load
     assert idx.op is Ops.CONST and gate is None, "gated load on reg BUFFER"
-    if base.dtype.itemsize <= 4: return vmov(base.index(idx).replace(tag=(rdefs(base)[idx.arg],)))
+    if base.dtype.itemsize <= 4: return vmov(base.index(idx))
     else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
   # NOTE: load_i* automatically sign extends, this messes up some of the tests currently ex. i8 bitcast_alt
   imap = {
@@ -224,16 +220,16 @@ def store(ctx, addr:UOp, x:UOp):
   gate = x.src[2] if len(x.src) > 2 else None
   base, idx = addr.src[:2]
   if base.addrspace is AddrSpace.REG:
-    if len(rdefs(base)) == 0: return None # ensure vreg alloc
-    vregs = rdefs(base)
+    if len(rdefs(base)) == 0: return None
     # keep addr as a control dep so reduce-identity stores re-run inside their ranges
     if base.dtype.itemsize <= 4:
-      mov = vmov(val).replace(tag=(vregs[idx.arg],))
+      mov = vmov(val).replace(tag=rdefs(base))
       return mov.replace(src=mov.src+(addr,))
     else:
       buf = base.src[0] if base.op is Ops.BUFFER else base.src[0].src[0]
       assert buf.arg == 1, f"reg buf of multiple ({buf.arg}) 2 reg values"
-      ms = [vmov(val.index(i)).replace(tag=(vr,)) for i,vr in enumerate(vregs)]
+      vreg = rdef(base)
+      ms = [vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)]
       return UOp.group(*[m.replace(src=m.src+(addr,)) for m in ms])
 
   def _gate(o:UOp): return o.replace(src=o.src + (gate,def_reg(dtypes.uint32,GP_SGPRS))) if gate is not None else o
@@ -481,6 +477,17 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
+buf_slots = {} # hack, belongs in ctx or find cleaner way
+def bufreg(ctx, x:UOp):
+  # we need to rewrite the buffer reference to a scalar buffer
+  # NOTE: for now assume 1 layer deep ex. AFTER
+  buf = x.src[0] if x.src[0].op is Ops.BUFFER else x.src[0].src[0]
+  if buf.max_numel() == 1: return None
+  sbuf = UOp.placeholder((1,), x.dtype, buf_slots.setdefault((buf, x.src[1].arg), next(lane_ctr)), AddrSpace.REG).replace(tag=GP_VGPRS)
+  nbase = sbuf if x.src[0].op is Ops.BUFFER else x.src[0].replace(src=(sbuf,) + x.src[0].src[1:])
+  nx = nbase.index(0)
+  return nx.replace(src=nx.src + x.src[2:])
+
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
@@ -581,8 +588,9 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
+  (UPat(Ops.INDEX, name="x"), lambda ctx,x: None if x.addrspace is not AddrSpace.REG else bufreg(ctx, x)),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.GROUP, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.GROUP, Ops.RANGE, Ops.BUFFER), name="x"), alloc_vregs),
 ])
 
 post_regalloc_matcher = PatternMatcher([
