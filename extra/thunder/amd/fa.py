@@ -94,7 +94,7 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   B_local = B // num_devices if is_dp else B
   H_local = n_heads // num_devices if is_mp else n_heads
   H_KV_local = n_kv_heads // num_devices if is_mp else n_kv_heads
-  assert (B_local, N, H_local, H_KV_local, head_dim) == (2, 8192, 32, 8, 128)
+  assert H_local % H_KV_local == 0 and head_dim % 2 == 0 and head_dim <= 512
   single_device = xqkv.device[0] if isinstance(xqkv.device, tuple) else xqkv.device
   arch = Device[single_device].renderer.target.arch
   axis = 0 if is_dp else 2 if is_mp else None
