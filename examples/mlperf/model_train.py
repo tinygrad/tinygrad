@@ -2089,6 +2089,7 @@ def train_flux():
   SEED = config["SEED"] = getenv("SEED")
   NUM_STEPS = config["NUM_STEPS"] = getenv("NUM_STEPS", 30000)
   BS = config["BS"] = getenv("BS", 16)
+  FREE_INTERMEDIATE = config["FREE_INTERMEDIATE"] = getenv("FREE_INTERMEDIATE")
   BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
   FAKEDATA = getenv("FAKEDATA")
@@ -2271,7 +2272,12 @@ def train_flux():
 
     # eval loop
     if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
-      optim_step.captured.free_intermediates()
+      if FREE_INTERMEDIATE:
+        if minibatch.captured is not None:
+          minibatch.captured.free_intermediates()
+
+        if optim_step.captured is not None:
+          optim_step.captured.free_intermediates()
 
       eval_loss, eval_samples = Tensor.zeros((), device=GPUS), 0
       for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
@@ -2281,6 +2287,8 @@ def train_flux():
 
         if BENCHMARK and (j + 1) == min(BENCHMARK, val_total):
           return
+
+      if FREE_INTERMEDIATE and eval_step.captured is not None: eval_step.captured.free_intermediates()
 
       avg_loss = (eval_loss / eval_samples).float().to("CPU").item()
 
