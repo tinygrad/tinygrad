@@ -161,7 +161,6 @@ norecursedirs = [
   ".git",
 ]
 timeout = 300
-timeout_method = "signal" # thread does not show traceback with pytest-xdist
 timeout_func_only = true
 testpaths = ["test"]
 filterwarnings = [
