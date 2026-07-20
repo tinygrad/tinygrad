@@ -799,11 +799,14 @@ class GatedDeltaNetBlock(FFNBlock):
       k = l2norm(k.reshape(B, self.num_k_heads, self.head_k_dim)).repeat(1, self.num_v_heads//self.num_k_heads, 1)
       v = v.reshape(B, self.num_v_heads, self.head_v_dim)
       q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
-      recurrent_state = initial_state * alpha
-      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      state_dots = initial_state @ k.cat(q, dim=-1)
+      state_k, state_q = state_dots[..., :1] * alpha, state_dots[..., 1:] * alpha
+      delta = (v - state_k) * beta
+      recurrent_state = initial_state * alpha + delta @ k.transpose(-1, -2)
       self.pending_state = (conv_window[:, 1:, :].cast(self.conv_state.dtype).contiguous(),
                             recurrent_state.cast(self.recurrent_state.dtype).contiguous())
-      core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+      core = state_q + delta * (k.transpose(-1, -2) @ q)
+      core_attn_out = self.ssm_norm(core.squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
       return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
     # Batched projections and causal depthwise convolution.
