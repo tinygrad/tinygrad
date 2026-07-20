@@ -22,24 +22,26 @@ def read_next(ring, head): return ring.index(head).load(), head + UOp.const(dtyp
 def make_null_buf(dtype): return make_placeholder("CPU", 1<<30, dtype, name="null_buf", unique=False)
 
 def op_signal(gate, a):
-  return make_null_buf(dtypes.uint32).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).store(a[1].cast(dtypes.uint32)).barrier()
+  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index).valid(gate)
+  return make_null_buf(dtypes.uint32).index(idx).store(a[1].cast(dtypes.uint32)).barrier()
 
 def op_wait(gate, a):
-  # gate the ring args with AFTER so the condition doesn't CSE with the other arms
-  sig = make_null_buf(dtypes.uint32).after(gate).index((a[0].after(gate) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()
-  return (sig >= a[1].after(gate).cast(dtypes.uint32)).wait_until()
+  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index).valid(gate)
+  sig = make_null_buf(dtypes.uint32).index(idx).load(arg="volatile")
+  return ((~gate) | (sig >= a[1].cast(dtypes.uint32))).wait()
 
 def op_timestamp(gate, a):
   ts = UOp.placeholder((2,), dtypes.uint64, slot=4, addrspace=AddrSpace.REG)  # struct timespec { long s; long ns; }
-  call = make_ext_call(libc.dll.clock_gettime, UOp.const(dtypes.int32, 1), ts.index(UOp.const(dtypes.int, 0)), deps=(gate,))
-  val = ts.after(call)[0].load() * UOp.const(dtypes.uint64, 1_000_000_000) + ts.after(call)[1].load()
-  return make_null_buf(dtypes.uint64).after(gate).index((a[0] >> UOp.const(dtypes.uint64, 3)).cast(dtypes.index)).store(val)
+  call = make_ext_call(libc.dll.clock_gettime, UOp.const(dtypes.int32, 1), ts.index(UOp.const(dtypes.int, 0)), gate=gate)
+  val = ts.after(call).index(UOp.const(dtypes.int, 0).valid(gate)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
+        ts.after(call).index(UOp.const(dtypes.int, 1).valid(gate)).load()
+  idx = (a[0] >> UOp.const(dtypes.uint64, 3)).cast(dtypes.index).valid(gate)
+  return make_null_buf(dtypes.uint64).index(idx).store(val)
 
 def op_exec(gate, a):
-  # call the kernel through its function pointer a[0] (gated on the arm's range via AFTER), the rest of the ring entry are its args
-  return UOp(Ops.CALL, dtypes.void, (a[0].after(gate), *a[1:]))
+  return UOp(Ops.CALL, src=(*a, gate))
 
-def op_quit(gate, a): return UOp(Ops.CUSTOM, dtypes.void, (gate,), arg="return;")
+def op_quit(gate, a): return UOp(Ops.CUSTOM, dtypes.void, (gate,), arg="if ({0}) return;")
 
 handlers = {CpuOp.SIGNAL: op_signal, CpuOp.WAIT: op_wait, CpuOp.TIMESTAMP: op_timestamp, CpuOp.EXEC: op_exec, CpuOp.QUIT: op_quit}
 
@@ -48,19 +50,19 @@ def cpu_worker(ring_size=32768, args_cnt=3):
   ring = make_placeholder("CPU", ring_size, dtypes.uint64, name="ring", unique=False)
   head = UOp.placeholder((1,), dtypes.uint64, slot=3, addrspace=AddrSpace.REG)[0].set(0)
 
-  # the top loop is an effectively infinite RANGE (QUIT returns out of it). the extra src orders it after the head reg init
-  loop = UOp.range(2**63-1, 1, AxisType.LOOP, src=(head,))
+  # the top loop is effectively infinite (QUIT returns out of it); the head initialization remains outside the loop.
+  loop = UOp.range(2**31-1, 1, AxisType.LOOP, dtype=dtypes.int)
   head_i, tail_i = head.after(loop), tail.after(loop)
 
   head_val = head_i[0].load()
-  barrier = (tail_i.index(UOp.const(dtypes.int, 0)).load() > head_val).wait_until().barrier()
+  barrier = UOp(Ops.WAIT, src=(tail_i.index(UOp.const(dtypes.int, 0)).load(arg="volatile") > head_val,)).barrier()
 
   ring_b = ring.after(barrier)
   op, head_val = read_next(ring_b, head_val)
   args = [None] * args_cnt
   for i in range(args_cnt): args[i], head_val = read_next(ring_b, head_val)
 
-  arms = [fn(gate:=UOp.range(op.eq(cmd).cast(dtypes.int), 0, AxisType.LOOP), args).end(gate) for cmd, fn in handlers.items()]
+  arms = [fn(op.eq(cmd), args) for cmd, fn in handlers.items()]
 
   advance = head.after(*(x.barrier() for x in arms))[0].store(head_val)
   return advance.barrier().end(loop).sink(arg=KernelInfo(name="cpu_worker"), tag=1)
@@ -105,8 +107,8 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[UOp]|None=None, **kwargs):
-    self.runtimevars = runtimevars or {}
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:tuple[UOp, ...]|None=None, **kwargs):
+    self.runtimevars:tuple[UOp, ...] = runtimevars or ()
 
     LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -173,7 +175,8 @@ class CPUDevice(HCQCompiled):
       (UPat(Ops.PARAM, tag="null_buf"), lambda: cpu_ext_buf(0)),  # base 0: byte-indexes absolute memory
       (UPat(Ops.PARAM, name="b"), cpu_sym_buf),
     ])
-    self.worker_rt, self.workers = None, []
+    self.worker_rt:CPUProgram|None = None
+    self.workers:list[threading.Thread] = []
 
   # no worker spawned yet ⇒ nothing running ⇒ nothing to wait on. guards the re-entrant sync a buffer __del__ fires mid-build (the SIGNAL
   # that would satisfy it is queued behind this very build in _submit, so waiting here would deadlock).
@@ -191,6 +194,7 @@ class CPUDevice(HCQCompiled):
       self.worker_args.cpu_view().view(fmt='Q')[:] = array.array('Q', [b._buf.va_addr for b in self._worker_bufs])
       self.worker_rt = self.runtime(prg.arg.function_name, next(s.arg for s in prg.src if s.op is Ops.BINARY))
 
+    assert self.worker_rt is not None
     while len(self.workers) < cnt:
       self.workers.append(t:=threading.Thread(target=self.worker_rt.fxn, args=(ctypes.c_uint64(self.worker_args.va_addr),), daemon=True))
       t.start()
@@ -198,4 +202,3 @@ class CPUDevice(HCQCompiled):
   def finalize(self):
     for _ in self.workers: CPUComputeQueue()._cmd(CpuOp.QUIT).submit(self)
     for t in self.workers: t.join(timeout=2.0)
-

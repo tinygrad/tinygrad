@@ -58,6 +58,19 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
+def _render_load(ctx, x:UOp, idx:UOp, out:str) -> str:
+  volatile = " volatile" if x.arg == "volatile" else ""
+  return f"  {out} = load{volatile} {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"
+
+def render_load(ctx, x:UOp, idx:UOp) -> str: return _render_load(ctx, x, idx, ctx[x])
+
+def render_gated_load(ctx, x:UOp, idx:UOp, alt:UOp, mask:UOp) -> str:
+  value, label = ctx[x], ctx[x][1:]
+  return "\n".join((f"  br label {value}_entry", f"{label}_entry:",
+                    f"  br i1 {ctx[mask]}, label {value}_load, label {value}_exit", f"{label}_load:",
+                    _render_load(ctx, x, idx, f"{value}_yes"), f"  br label {value}_exit", f"{label}_exit:",
+                    f"  {value} = phi {ldt(x.dtype, x.max_numel())} [{value}_yes, {value}_load], [{ctx[alt]}, {value}_entry]"))
+
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
@@ -67,15 +80,8 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.arg}" if buf.addrspace == AddrSpace.ALU else None),
 
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
-   lambda ctx,x,idx,alt,mask:
-   f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
-   f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
-   f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
-   f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"), render_gated_load),
+  (UPat.var('idx').load(name="x"), render_load),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
    f"  store {ldt(var.dtype, idx.max_numel())} {ctx[var]}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 
@@ -131,19 +137,29 @@ class LLVMRenderer(Renderer):
     if self.args_buf:
       rt, pkd = partition(args, lambda na: na[1].arg.name == 'core_id')
       off = dict(Renderer.param_layout([u for _,u in pkd])[0])
-      kernel = [f"  {n} = load {ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}, ptr getelementptr(i8, ptr %args_buf, i64 {off[u]}), align 8"
-                for n,u in pkd] + kernel
+      loads = [line for n,u in pkd for line in
+               (f"  {n}.addr = getelementptr i8, ptr %args_buf, i64 {off[u]}",
+                f"  {n} = load {ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}, ptr {n}.addr, align 8")]
+      kernel = loads + kernel
       sargs = ", ".join(["ptr %args_buf"] + [f"{ldt(u.dtype)} {n}" for n,u in rt])
     else:
       # NOTE: CPUAllocator promises 0x20 alignment
       sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
         name for name,u in args])
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
-    vc = -1
+    vc, wait_count = -1, 0
+
+    volatile = {u for u in uops if u.op is Ops.LOAD and u.arg == "volatile"}
+    waits = [u for u in uops if u.op is Ops.WAIT]
+    wait_body = {w:[u for u in uops if u in w.src[0].backward_slice_with_self and
+                    any(x in volatile for x in u.backward_slice_with_self) and u.op is not Ops.AFTER and
+                    not (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype))] for w in waits}
+    deferred = {u for body in wait_body.values() for u in body}
 
     local_args: list[str] = []
     name = "test"
@@ -176,6 +192,16 @@ class LLVMRenderer(Renderer):
         if u not in r:
           vc += 1
           r[u] = f"%v{vc}"
+
+        if u in deferred: continue
+        if u.op is Ops.WAIT:
+          kernel += [f"  br label %wait_{wait_count}", f"wait_{wait_count}:"]
+          for wu in wait_body[u]:
+            if (rendered:=self.string_rewrite.rewrite(wu, ctx=r)) is None: raise RuntimeError(f"failed to render {wu.op} in WAIT")
+            kernel.append(rendered)
+          kernel += [f"  br i1 {r[u.src[0]]}, label %wait_exit_{wait_count}, label %wait_{wait_count}", f"wait_exit_{wait_count}:"]
+          wait_count += 1
+          continue
 
         # do the rendering of the llvm ir code
         l: str|None = self.string_rewrite.rewrite(u, ctx=r)

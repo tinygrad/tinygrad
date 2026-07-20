@@ -1,4 +1,4 @@
-from typing import Literal, Callable
+from typing import Literal, Callable, cast
 import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
@@ -18,17 +18,17 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
 
+  # wait
+  (UPat(Ops.WAIT, src=(UPat.var("cond"),)), lambda ctx,cond: f"while (!({ctx[cond]}));"),
+
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
     if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: ctx[x.src[0]] if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
-
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  # WAIT — spin until the boolean condition becomes true
-  (UPat(Ops.WAIT, name="x", src=(UPat(dtype=dtypes.bool),)), lambda ctx,x: f"while (!({ctx[x.src[0]]}));"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
 
   # const
@@ -55,12 +55,9 @@ base_rewrite = PatternMatcher([
                  f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 
   # load/store
-  # a LOAD feeding a WAIT condition is re-evaluated every spin: volatile keeps the compiler from hoisting it out of the loop
-  (UPat(Ops.LOAD, src=(UPat.var('bidx'),), name="x"), lambda ctx,x,bidx:
-   f"(*(volatile {ctx._render_dtype(x.dtype, x.max_numel(), x.addrspace, override_ptr=True)})({ctx[bidx]}))" if x in ctx.wait_loads else None),
-  (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"({ctx.render_access(bidx)})"),
-  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))),
-   lambda ctx,bidx,var,gate: f"({ctx[gate]}?{ctx.render_access(bidx)}:{ctx[var]})"),
+  (UPat(Ops.LOAD, src=(UPat.var('bidx'),), name="x"), lambda ctx,x,bidx: f"({ctx.render_access(bidx, x.arg == 'volatile')})"),
+  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate")), name="x"),
+   lambda ctx,x,bidx,var,gate: f"({ctx[gate]}?{ctx.render_access(bidx, x.arg == 'volatile')}:{ctx[var]})"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"{ctx.render_access(bidx)} = {ctx[var]};"),
 
   # alu/gep
@@ -68,10 +65,11 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
-  # CALL through a function pointer in src[0]: the signature is derived from the return dtype and the src[1:] arg dtypes
-  (UPat(Ops.CALL, src=(UPat(dtype=dtypes.uint64),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"(({ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_dtype(y.dtype) for y in x.src[1:])}))({ctx[x.src[0]]}))" +
-   f"({', '.join(f'({ctx.render_dtype(y.dtype)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype == dtypes.void else "")),
+  # call to function (gated)
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True, name="x"), lambda ctx,x:
+   f"if ({ctx[x.src[-1]]}) ((void(*)({', '.join(ctx.render_dtype(y.dtype) for y in x.src[1:-1])}))({ctx[x.src[0]]}))" +
+   f"({', '.join(f'({ctx.render_dtype(y.dtype)})({ctx[y]})' for y in x.src[1:-1])});"
+   if x.src[0].dtype is not dtypes.void and x.src[-1].dtype is dtypes.bool else None),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
@@ -159,7 +157,7 @@ class CStyleLanguage(Renderer):
     if self.args_buf:
       tmp = (unpck:=self._unpack_args_buf(bufs))[0] + "\n" + tmp
       buftypes = [("args_buf", "void*"), *unpck[1]]
-    else: buftypes = [(name, self._param_type(u, mutable)) for name, (u, mutable) in bufs]
+    else: buftypes = [(name, cast(str, self._param_type(u, mutable))) for name, (u, mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -193,7 +191,8 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name) + suffix
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
-  def render_access(self, u:UOp):
+  def render_access(self, u:UOp, volatile:bool=False):
+    if volatile: return f"*(volatile {self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True)})({self[u]})"
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
       return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
     else: return f"*{self[u]}"
@@ -209,9 +208,6 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    # LOADs feeding a WAIT condition must be re-read every spin, so they render inline (and volatile) instead of being assigned once
-    self.wait_loads = {v for ru in uops if ru.op is Ops.WAIT
-                       for v in ru.src[0].toposort(gate=lambda u: u.op in GroupOp.ALU or u.op in {Ops.CAST, Ops.LOAD}) if v.op is Ops.LOAD}
     # find which PARAMs are stored to with a single toposort
     writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
@@ -247,7 +243,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and (u.src[0].addrspace == AddrSpace.REG or u in self.wait_loads)) or \
+        (u.op is Ops.LOAD and (u.src[0].addrspace == AddrSpace.REG or u.arg == "volatile")) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l

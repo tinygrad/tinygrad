@@ -44,12 +44,6 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
                Ops.COPY: 1, Ops.SLICE: 2, Ops.LINEAR: 0}
 
-# graph-level CALL bodies. a CALL whose src[0] is anything else is a program-level call through a function pointer
-opaque_call_bodies = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
-def is_opaque_call(u) -> bool:
-  # FUNCTION bodies (TUPLE) are always opaque; function pointer CALLs are not, their srcs are regular values
-  return u.op is Ops.FUNCTION or (u.op is Ops.CALL and u.src[0].op in opaque_call_bodies)
-
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
 
@@ -113,14 +107,11 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
-    case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
+    case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.WAIT | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
-    case Ops.CALL:
-      # graph-level CALL of an opaque body is void; a call through a function pointer declares its return dtype
-      return dtypes.void if src[0].op in opaque_call_bodies else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PYLITERAL:
       return dtypes.void
     case Ops.NOOP:
@@ -283,7 +274,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src[1:] if not enter_calls and is_opaque_call(node) else node.src):
+          for s in reversed(node.src if enter_calls or (node.op is Ops.CALL and node.src[0].dtype is not dtypes.void) or \
+                            node.op not in {Ops.CALL, Ops.FUNCTION} else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -302,7 +294,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, type(self.arg).__name__, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 
@@ -578,9 +570,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, src=srcs, **kwargs)
-  def wait(self, src:UOp|ConstType, **kwargs):
-    return UOp(Ops.WAIT, src=(self, self.const_like(src) if not isinstance(src, UOp) else src), **kwargs)
-  def wait_until(self, **kwargs): return UOp(Ops.WAIT, src=(self,), **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -1114,7 +1103,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
-  _OPAQUE_CALL_BODIES = opaque_call_bodies
+  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
@@ -1598,7 +1587,8 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and is_opaque_call(n): self.replace[n.src[0]] = n.src[0]
+        if not self.enter_calls and n.op in {Ops.CALL, Ops.FUNCTION} and \
+           (n.op is Ops.FUNCTION or n.src[0].dtype is dtypes.void): self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1638,7 +1628,8 @@ class RewriteContext:
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and is_opaque_call(new_n): self.replace[new_n.src[0]] = new_n.src[0]
+        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION} and \
+           (new_n.op is Ops.FUNCTION or new_n.src[0].dtype is dtypes.void): self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1697,8 +1688,7 @@ pm_lower_index_dtype = PatternMatcher([
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),
   (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index)), name="u"),
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(x.dtype, y.dtype))),
-  (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index),), allow_any_len=True, name="r"),
-   lambda r,end: r.replace(dtype=end.dtype, src=(end,)+r.src[1:]).cast(dtypes.index)),
+  (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.index)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.index), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.index)),
   # special can only be int32

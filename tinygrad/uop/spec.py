@@ -87,13 +87,17 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER. AFTER on a LOAD gates a value on the extra srcs
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS, Ops.LOAD})),),
+                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
+
+  # CALL in C
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True, name="x"),
+   lambda x: len(x.src) >= 2 and x.src[0].dtype is not dtypes.void and x.src[-1].dtype is dtypes.bool),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
@@ -103,9 +107,6 @@ spec_shared = PatternMatcher([
 
   # WAIT until a condition evaluates to true.
   (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
-
-  # CALL through a function pointer: src[0] is the address, src[1:] are the args
-  (UPat(Ops.CALL, src=(UPat(dtype=dtypes.uint64),), allow_any_len=True, arg=None), lambda: True),
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),

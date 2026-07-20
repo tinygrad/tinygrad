@@ -7,7 +7,7 @@ from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, Co
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, CallInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.dtype import dtypes, truncate, DType
+from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
@@ -66,12 +66,13 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
 # 0.1. external C calls
 
 def sym_addr(sym:str) -> int:
-  assert (addr:=ctypes.cast(getattr(ctypes.CDLL(None), sym), ctypes.c_void_p).value) is not None, f"can't resolve symbol {sym}"
+  addr = ctypes.cast(getattr(ctypes.CDLL(None), sym), ctypes.c_void_p).value
+  assert addr is not None, f"can't resolve symbol {sym}"
   return addr
 
-def make_ext_call(fn, *args:UOp, ret:DType=dtypes.void, deps:tuple[UOp, ...]=()) -> UOp:
+def make_ext_call(fn, *args:UOp, gate:UOp) -> UOp:
   sym = make_placeholder("CPU", 1, dtypes.uint8, name=("sym", fn.__name__), unique=False)
-  return UOp(Ops.CALL, ret, (make_getaddr(sym.after(*deps) if deps else sym, ("CPU",)), *args))
+  return UOp(Ops.CALL, src=(sym, *args, gate))
 
 def make_cmdbuf(lin, devs):
   blob, patches = b'', []
