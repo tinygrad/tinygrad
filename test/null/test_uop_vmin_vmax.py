@@ -409,5 +409,15 @@ class TestDivides(unittest.TestCase):
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3
 
+  def test_divides_variable_multiple_of_exact(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(4)
+    self.assertIsNotNone(result)
+
+  def test_divides_variable_multiple_of_factor(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(2)
+    self.assertIsNotNone(result)
+
 if __name__ == '__main__':
   unittest.main()
