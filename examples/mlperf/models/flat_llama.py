@@ -58,10 +58,14 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
       x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*l_shape, x_q.shape[-1])
       out = x_phys @ (w.cast(dtypes.bfloat16) * _mx_block_scale(w_inv_scale)).T
     return out, x_q
+
   if x_fp8 is None:
-    assert FUSED_INPUT_QUANTIZE and next_amax_x is not None and amax_x is not None
-    from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
-    x_fp8, _ = quantize_fp8_delayed(x, amax_x, next_amax_x, FP8_DTYPE)
+    if FUSED_INPUT_QUANTIZE:
+      from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
+      x_fp8, _ = quantize_fp8_delayed(x, amax_x, next_amax_x, FP8_DTYPE)
+    else:
+      x_fp8, _, new_amax_x = quantize_fp8(x, amax_state=amax_x)
+      next_amax_x.assign(new_amax_x)
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
