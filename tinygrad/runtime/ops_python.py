@@ -6,8 +6,8 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape
-from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile
+from tinygrad.device import Buffer, Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
@@ -134,7 +134,7 @@ class PythonProgram:
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy
-          dims, dtype_in, device, threads = u.arg[1], first_src_dtype, u.arg[4], u.arg[5]
+          dims, dtype_in, device, threads = u.arg[0], first_src_dtype, u.arg[2], u.arg[3]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
           # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
@@ -223,8 +223,13 @@ class PythonRenderer(Renderer):
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
-  def _copyin(self, dest, src:memoryview): dest[:] = src
-  def _copyout(self, dest:memoryview, src): dest[:] = src
+  def _as_buffer(self, src) -> memoryview: return src
+  def _copyin(self, dest, src:memoryview):
+    with cpu_profile("TINY -> PYTHON", f"{self.dev.device}:COPY"): dest[:] = src
+  def _copyout(self, dest:memoryview, src):
+    with cpu_profile("PYTHON -> TINY", f"{self.dev.device}:COPY"): dest[:] = src
+  def map(self, buf:Buffer): return buf.as_memoryview(force_zero_copy=True)
+  def _offset(self, buf:memoryview, size:int, offset:int): return buf[offset:offset+size]
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

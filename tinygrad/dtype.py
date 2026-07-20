@@ -27,8 +27,6 @@ class InvalidType:
     if cls._instance is None: cls._instance = object.__new__(cls)
     return cls._instance
   def __eq__(self, other): return self is other
-  def __lt__(self, other): return self is not other
-  def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
@@ -100,7 +98,7 @@ class dtypes:
   @staticmethod
   def from_py(x) -> DType:
     # NOTE: isinstance(True, int) is True, so bool must be checked before int
-    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, (bool, InvalidType)): return dtypes.bool
     if isinstance(x, float): return dtypes.default_float
     if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
@@ -156,6 +154,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
@@ -164,6 +163,8 @@ if (env_default_float := getenv("DEFAULT_FLOAT", "")):
 
 DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
+def strong_dtype(dtype:DType) -> DType:
+  return dtypes.default_int if dtype == dtypes.weakint else dtypes.default_float if dtype == dtypes.weakfloat else dtype
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support complex type
@@ -208,6 +209,7 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
+  if dt in dtypes.weaks: return dt
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))

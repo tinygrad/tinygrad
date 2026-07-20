@@ -79,9 +79,10 @@ def unroll_axis(ctx:dict[int, int], u:UOp, arg):
   return out.permute(argsort(permute_head+permute_tail))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
-  if u.tag != 1: return None
-  in0, in1, out0 = u.arg[6]
-  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]), tag=None)
+  if u.arg[4] is None: return None
+  in0, in1, out0 = u.arg[4]
+  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]),
+                   arg=(*u.arg[:4], None))
   return unroll_axis(ctx, wmma, out0)
 
 expander2 = PatternMatcher([
@@ -260,6 +261,13 @@ pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
 ])+pm_mops
 
+# float ALUs need a float operand
+# make that cast explicit before the decomps, which expand SIN/LOG2/EXP2 into float polynomials and assert a float operand
+pm_cast_float_alu = PatternMatcher([
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(name="x"),), name="u"),
+   lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -326,6 +334,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
+
+  sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
   # **** decomps ****
 

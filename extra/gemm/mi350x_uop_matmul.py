@@ -6,7 +6,7 @@ os.environ["AMD_LLVM"] = "0"
 from tinygrad import Tensor, Context, dtypes, UOp, GlobalCounters
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops
+from tinygrad.uop.ops import AxisType, KernelInfo
 
 WARP_SIZE = 64
 
@@ -137,8 +137,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     acc_load = acc_after[N_inner_loop, M_inner_loop]
 
     # do WMMA
-    wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-    out = UOp(Ops.WMMA, dtypes.float, (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
+    out = UOp.wmma(Ar[M_inner_loop], Br[N_inner_loop], acc_load, (16, 16, 32), 'AMD', 64)
 
     # store back the acc
     acc_store = acc[N_inner_loop, M_inner_loop].store(out)
@@ -193,8 +192,7 @@ acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
 
 # do the wmma
 acc_load = UOp.stack(*[acc.after(K_loop)[i] for i in range(4)])
-wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-out = UOp(Ops.WMMA, dtypes.float, (A_in, B_in, acc_load), arg=wmma_arg)
+out = UOp.wmma(A_in, B_in, acc_load, (16, 16, 32), 'AMD', 64)
 
 # store back the acc
 acc = acc.after(UOp.group(*[acc[i].store(out.index(i)) for i in range(4)]).end(K_loop))

@@ -31,7 +31,8 @@ class TensorIO(io.RawIOBase, BinaryIO):
   def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
-               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F8_E4M3":dtypes.fp8e4m3, "F8_E5M2":dtypes.fp8e5m2,
+               "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def accept_filename(func: Callable[[Tensor], T]) -> Callable[[Tensor|str|pathlib.Path], T]:
@@ -69,6 +70,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   nn.state.safe_save({'t':t}, "test.safetensor")
   ```
   """
+  if any(v.dtype in dtypes.weaks for v in tensors.values()): raise ValueError("safe_save requires concrete dtypes")
   headers, offset = {}, 0
   if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():

@@ -96,7 +96,7 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    if self.zero: new_w = self._zero_gather(new_w)
+    if self.zero and not (MXFP8 and t.dtype in dtypes.fp8s): new_w = self._zero_gather(new_w)
     # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
     offloaded = master is not None and master.device != t.device
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
@@ -106,6 +106,7 @@ class GradAccClipAdamW(Optimizer):
       if MXFP8:
         from extra.gemm.cdna_asm_gemm import quantize_mxfp8
         w_q, w_e8, _ = quantize_mxfp8(new_w.reshape(-1, new_w.shape[-1]))
+        if self.zero: w_q, w_e8 = self._zero_gather(w_q), self._zero_gather(w_e8)
         new_e8 = w_e8.reshape(t._inv_scale.shape)
         t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
         ret = w_q.reshape(new_w.shape)

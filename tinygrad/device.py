@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
-from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize
 from tinygrad.dtype import DType, _to_np_dtype
@@ -112,7 +112,7 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        self.copyin(memoryview(initial_value))
+        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
@@ -135,10 +135,8 @@ class Buffer:
     if device not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
-      elif self._base is not None:
-        assert hasattr(allocator, "_offset"), "offset function required for view"
-        self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
-      else: self._bufs[device] = allocator._map(self.ensure_allocated()._buf)
+      elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
+      else: self._bufs[device] = allocator.map(self.ensure_allocated())
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
@@ -152,7 +150,6 @@ class Buffer:
     if self._base is not None:
       self._base.ensure_allocated()
       self._base.allocated_views += 1
-      assert hasattr(self.allocator, "_offset"), "offset function required for view"
       self._bufs[self.device] = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._bufs[self.device] = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
@@ -179,9 +176,7 @@ class Buffer:
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
-    if self.is_allocated():
-      buf = bytearray(self.nbytes)
-      self.copyout(memoryview(buf))
+    if self.is_allocated(): buf = bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
@@ -196,26 +191,22 @@ class Buffer:
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and self.options is None:
-      return self.allocator._as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
-    return self.copyout(memoryview(bytearray(self.nbytes)))
+    Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+    return mv
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype))
-  def copyin(self, mv:memoryview):
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_initialized(), "can't copyin to unallocated buffer"
-    self.allocator._copyin(self._buf, mv)
+  def copy_from(self, src:Buffer) -> Buffer:
+    assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
+    assert self.is_initialized() and src.is_initialized(), "copy requires allocated buffers"
+    from tinygrad.engine.realize import run_linear
+    from tinygrad.uop.ops import UOp, Ops
+    du, su = UOp.from_buffer(self), UOp.from_buffer(src)
+    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
     return self
-  def copyout(self, mv:memoryview) -> memoryview:
-    mv = flat_mv(mv)
-    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    assert self.is_initialized(), "can't copyout unallocated buffer"
-    self.allocator._copyout(mv, self._buf)
-    return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
@@ -237,6 +228,8 @@ class Allocator(Generic[DeviceType]):
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
+  def map(self, buf:Buffer): return self._map(buf.ensure_allocated()._buf)
+
   # implemented by the runtime
   def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
   def _free(self, opaque, options:BufferSpec): pass  # if opaque is a Python object, you don't need a free
@@ -245,7 +238,7 @@ class Allocator(Generic[DeviceType]):
   def _map(self, buf): raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   # def _as_buffer(self, src) -> memoryview:
-  # def _offset(self, buf, size:int, offset:int):
+  def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 
