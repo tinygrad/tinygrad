@@ -19,7 +19,7 @@ class CpuOp(enum.IntEnum): SIGNAL, WAIT, TIMESTAMP, EXEC, QUIT = range(1, 6)
 
 def read_next(ring, head): return ring.index(head % ring.max_numel()).load(), head + UOp.const(dtypes.uint64, 1)
 
-def make_null_buf(dtype): return make_placeholder("CPU", 1<<30, dtype, name="null_buf", unique=False)
+def make_null_buf(dtype): return make_placeholder("CPU", (1<<64) // dtype.itemsize, dtype, name="null_buf", unique=False)
 
 def op_signal(gate, a):
   idx = (a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index).valid(gate)
@@ -77,7 +77,7 @@ def cpu_sym_buf(b:UOp) -> Buffer|None:
 
 class CPUComputeQueue(HWQueue):
   def _cmd(self, *entry):
-    self._q.append(entry)
+    self.q(*(entry + (0, 0, 0))[:4])
     return self
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
@@ -91,9 +91,9 @@ class CPUComputeQueue(HWQueue):
   def signal(self, signal, value:sint=0): return self._cmd(CpuOp.SIGNAL, signal.value_addr, value)
   def _submit(self, dev):
     dev._ensureworkers(1)
-    for op, *args in self._q:  # append each fixed 4-u64 entry, then release-publish the new tail via sys[0]
+    for off in range(0, len(self._q), 4):  # append each fixed 4-u64 entry, then release-publish the new tail via sys[0]
       base = dev.sys_view[0] % dev.RING_SZ
-      dev.ring_view[base:base+4] = array.array('Q', (op, *args, 0, 0, 0)[:4])
+      dev.ring_view[base:base+4] = array.array('Q', self._q[off:off+4])
       dev.sys_view[0] += 4
 
 class LVPArgsState(CLikeArgsState):
