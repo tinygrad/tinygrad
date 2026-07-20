@@ -831,7 +831,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def contiguous_view_offset(self) -> int|None:
     """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
-    from tinygrad.schedule.rangeify import pm_mops
+    from tinygrad.uop.movement import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
     # WEBGPU and CL do not support views.
