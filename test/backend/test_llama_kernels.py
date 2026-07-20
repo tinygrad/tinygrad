@@ -143,17 +143,23 @@ class TestMasterWeightUpdate(unittest.TestCase):
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT.split(":")[0] == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedFP8AdamW(unittest.TestCase):
-  def test_llama31_8b_wo(self):
+  def run_update(self, shape:tuple[int, ...], random:bool=False):
     Tensor.manual_seed(0)
-    shape, b1, b2, eps, wd = (2, 4096, 4096), 0.9, 0.95, 1e-5, 0.1
-    master = (Tensor.rand(*shape) * 0.2 - 0.1).contiguous().realize()
-    m = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
-    v = (Tensor.rand(*shape) * 0.01).cast(dtypes.bfloat16).contiguous().realize()
-    grad = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    b1, b2, eps, wd = 0.9, 0.95, 1e-5, 0.1
+    if random:
+      master = (Tensor.rand(*shape) * 0.2 - 0.1).contiguous().realize()
+      m = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+      v = (Tensor.rand(*shape) * 0.01).cast(dtypes.bfloat16).contiguous().realize()
+      grad = (Tensor.rand(*shape) * 0.02 - 0.01).cast(dtypes.bfloat16).contiguous().realize()
+    else:
+      master = Tensor.full(shape, 0.05).contiguous().realize()
+      m = Tensor.full(shape, -0.005, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.full(shape, 0.002, dtype=dtypes.bfloat16).contiguous().realize()
+      grad = Tensor.full(shape, 0.007, dtype=dtypes.bfloat16).contiguous().realize()
     grad_scale = Tensor([0.5], dtype=dtypes.float32).contiguous().realize()
     weight = Tensor.empty(*shape, dtype=dtypes.fp8e4m3).realize()
     next_inv = Tensor.zeros(shape[0], dtype=dtypes.float32).contiguous().realize()
-    inv_scale = Tensor([0.001, 0.002], dtype=dtypes.float32).contiguous().realize()
+    inv_scale = Tensor([0.001 * (i+1) for i in range(shape[0])], dtype=dtypes.float32).contiguous().realize()
     inv_scale_ref = inv_scale.clone().realize()
     lr = Tensor([0.001], dtype=dtypes.float32).contiguous().realize()
     b1_t, b2_t = Tensor([b1], dtype=dtypes.float32).realize(), Tensor([b2], dtype=dtypes.float32).realize()
@@ -182,6 +188,13 @@ class TestFusedFP8AdamW(unittest.TestCase):
       self.assertLessEqual(weight_diff.max().item(), 1.0, "FP8 weight error exceeds one quantization unit")
       self.assertLessEqual((weight_diff != 0).sum().item(), 1, "too many FP8 boundary differences")
       self.assertTrue(next_inv.allclose(next_inv_ref, atol=1e-8, rtol=1e-6).item(), "next scale mismatch")
+
+  def test_values(self): self.run_update((2, 1024, 512), random=True)
+
+  def test_llama31_8b_shapes(self):
+    for name, shape in (("wo", (1, 4096, 4096)), ("wqkv", (1, 6144, 4096)),
+                        ("w2", (1, 4096, 14336)), ("w13", (1, 28672, 4096))):
+      with self.subTest(name=name): self.run_update(shape)
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT.split(":")[0] == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedBF16AdamW(unittest.TestCase):

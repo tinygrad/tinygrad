@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
-NUM_WG, THREADS = 512, 256
+NUM_WG, THREADS = 1024, 256
 
 @functools.cache
 def custom_fused_fp8_adamw(master:UOp, weight:UOp, next_inv:UOp, m:UOp, v:UOp, grad:UOp, grad_scale:UOp,
@@ -22,7 +22,9 @@ def custom_fused_fp8_adamw(master:UOp, weight:UOp, next_inv:UOp, m:UOp, v:UOp, g
                   threads, workgroups, arg=KernelInfo(f"fused_fp8_adamw_{layers}_{layer_elems}",
                   estimates=Estimates(ops=25*layers*layer_elems, mem=19*layers*layer_elems)))
   code = (pathlib.Path(__file__).parent / "fused_fp8_adamw.cpp").read_text()
-  lib = HIPCCCompiler(arch, ["-std=c++20", "-ffast-math", f"-DLAYERS={layers}", f"-DLAYER_ELEMS={layer_elems}",
+  kittens = pathlib.Path(__file__).parents[2]/"thunder"/"amd"/"include"
+  lib = HIPCCCompiler(arch, [f"-I{kittens}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
+                               f"-DLAYERS={layers}", f"-DLAYER_ELEMS={layer_elems}",
                                f"-DBETA1={b1}f", f"-DBETA2={b2}f", f"-DONE_MINUS_BETA1={1.0-b1}f", f"-DONE_MINUS_BETA2={1.0-b2}f",
                                f"-DEPS={eps}f", f"-DWEIGHT_DECAY={wd}f"]).compile_cached(code)
   info = ProgramInfo.from_sink(sink)
