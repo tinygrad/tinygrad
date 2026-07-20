@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.device import Buffer, Device, MultiBuffer
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, graph_rewrite
@@ -66,8 +66,22 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertTrue(all(src.op is Ops.MSELECT and src.src[0].op is Ops.BUFFER for si in peers+broadcasts for src in si.src[1:]))
 
     linear = Tensor.empty(N, 16).shard(ds, axis=0).realize().sum(0).linear_with_vars()[0]
-    self.assertTrue(any(si.src[0].op is Ops.COPY for si in linear.src))
-    self.assertFalse(any(si.src[0].arg.name.startswith("peer_") for si in linear.src if si.src[0].op is not Ops.COPY))
+    self.assertFalse(any(si.src[0].op is Ops.COPY for si in linear.src))
+    self.assertEqual(sum(si.src[0].arg.name == "peer_allreduce_4_4" for si in linear.src), N)
+
+  @Context(PEER_ALLREDUCE=1)
+  def test_schedule_peer_llama_shapes(self):
+    N = 8
+    ds = tuple(f"NULL:{i}" for i in range(N))
+    for width in (4096, 131072):
+      linear = Tensor.empty(N, width).shard(ds, axis=0).realize().sum(0).linear_with_vars()[0]
+      self.assertFalse(any(si.src[0].op is Ops.COPY for si in linear.src))
+      self.assertEqual(sum(si.src[0].arg.name == f"peer_allreduce_{N}_{width//N}" for si in linear.src), N)
+
+    for width in (16777216, 25165824, 58720256, 117440512, 525336576, 536870912):
+      linear = Tensor.empty(N, width).shard(ds, axis=0).realize().sum(0).linear_with_vars()[0]
+      self.assertTrue(any(si.src[0].op is Ops.COPY for si in linear.src))
+      self.assertFalse(any(si.src[0].arg.name.startswith("peer_") for si in linear.src if si.src[0].op is not Ops.COPY))
 
   def test_correct_ring(self):
     with Context(RING=2):
@@ -92,6 +106,38 @@ class TestRingAllReduce(unittest.TestCase):
       ds = tuple(f"CPU:{i+10}" for i in range(N))
       t = make_peer_tensor(range(N), ds)
       self.assertEqual(t.sum(0).item(), N*(N-1)//2)
+
+      width = 32
+      shards = [Tensor(list(range(i*width, (i+1)*width)), device=device).realize() for i,device in enumerate(ds)]
+      t = Tensor(UOp.mstack(*(x.unsqueeze(0).uop for x in shards)).multi(0), device=ds)
+      expected = [N*i + width*N*(N-1)//2 for i in range(width)]
+      out = t.sum(0).realize()
+      for device in ds: Device[device].synchronize()
+      self.assertIsInstance(mb:=out.uop.buf_uop.buffer, MultiBuffer)
+      for shard in mb.bufs: self.assertListEqual(list(shard.as_memoryview().cast("i")), expected)
+
+      shards = [Tensor.full((width,), float(i+1), dtype=dtypes.bfloat16, device=device).realize() for i,device in enumerate(ds)]
+      t = Tensor(UOp.mstack(*(x.unsqueeze(0).uop for x in shards)).multi(0), device=ds)
+      out = t.sum(0).realize()
+      for device in ds: Device[device].synchronize()
+      self.assertIsInstance(mb:=out.uop.buf_uop.buffer, MultiBuffer)
+      for shard in mb.bufs: self.assertListEqual(list(shard.as_memoryview().cast("H")), [0x4120]*width)
+
+  def test_correct_peer_replay(self):
+    N, width = 4, 32
+    ds = tuple(f"CPU:{i+20}" for i in range(N))
+
+    @TinyJit
+    def peer_sum(t): return (t.sum(0)+1).contiguous().realize()
+
+    with Context(PEER_ALLREDUCE=1):
+      for value in range(1, 5):
+        t = (Tensor.arange(N).reshape(N, 1).expand(N, width)+value).clone().realize().shard(ds, axis=0).realize()
+        out = peer_sum(t)
+        for device in ds: Device[device].synchronize()
+        self.assertIsInstance(mb:=out.uop.buf_uop.buffer, MultiBuffer)
+        expected = [N*value + N*(N-1)//2 + 1]*width
+        for shard in mb.bufs: self.assertListEqual(list(shard.as_memoryview().cast("i")), expected)
 
   def test_peer_mapping_freed_once(self):
     src, target = Device["CPU:30"], Device["CPU:31"]
