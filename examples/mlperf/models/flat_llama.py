@@ -37,8 +37,7 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
-           x_fp8:Tensor|None=None,
-           grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
+           x_fp8:Tensor|None=None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
            next_amax_x:Tensor|None=None) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
@@ -58,7 +57,6 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
       x_phys = (x_q.cast(dtypes.bfloat16) * _mx_block_scale(x_e8)).reshape(*l_shape, x_q.shape[-1])
       out = x_phys @ (w.cast(dtypes.bfloat16) * _mx_block_scale(w_inv_scale)).T
     return out, x_q
-
   if x_fp8 is None:
     if FUSED_INPUT_QUANTIZE:
       from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
