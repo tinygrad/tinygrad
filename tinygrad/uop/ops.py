@@ -274,8 +274,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or (node.op is Ops.CALL and node.src[0].dtype is not dtypes.void) or \
-                            node.op not in {Ops.CALL, Ops.FUNCTION} else node.src[1:]):
+          for s in reversed(node.src if enter_calls or node.op not in {Ops.CALL, Ops.FUNCTION} else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -1587,8 +1586,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and n.op in {Ops.CALL, Ops.FUNCTION} and \
-           (n.op is Ops.FUNCTION or n.src[0].dtype is dtypes.void): self.replace[n.src[0]] = n.src[0]
+        if not self.enter_calls and n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1628,8 +1626,7 @@ class RewriteContext:
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION} and \
-           (new_n.op is Ops.FUNCTION or new_n.src[0].dtype is dtypes.void): self.replace[new_n.src[0]] = new_n.src[0]
+        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))

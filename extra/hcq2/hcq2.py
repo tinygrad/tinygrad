@@ -360,7 +360,7 @@ def replace_params(call:UOp) -> UOp|None:
   sub = {unwrap_after(u): UOp.param(i, u.dtype, shape=unwrap_after(u).shape, device=u.device) for i,u in enumerate(c_args)} | \
         {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
-  return call.replace(src=(body.substitute(sub), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
+  return call.replace(src=(body.substitute(sub, enter_calls=True), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
 pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
 # *****************
@@ -436,8 +436,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
 
 def hcq_compile_program(sink:UOp, renderer:Renderer, name:str, devs:str|tuple[str, ...]=("CPU",)) -> tuple[UOp, UOp]:
   call = UOp(Ops.CALL, src=(UOp.custom_function("hcq", sink),), arg=CallInfo(name=name, aux=HCQInfo(name, Estimates(), to_tuple(devs), "")))
-  call = graph_rewrite(call, pm_rm_rt_getaddrs, walk=True, name="rt getaddrs")
-  call = graph_rewrite(call, pm_replace_params, walk=True, name="replace params")
+  call = graph_rewrite(call, pm_rm_rt_getaddrs, walk=True, name="rt getaddrs", enter_calls=True)
+  call = graph_rewrite(call, pm_replace_params, walk=True, name="replace params", enter_calls=True)
   return call, to_program(call.src[0].src[0], renderer)
 
 # *****************

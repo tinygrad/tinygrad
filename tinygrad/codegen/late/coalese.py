@@ -163,4 +163,4 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         full_grp = full_grp[length:]
 
   # apply
-  return sink.substitute(replacements, name="memory coalesing")
+  return sink.substitute(replacements, name="memory coalesing", enter_calls=True)
