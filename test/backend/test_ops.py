@@ -768,6 +768,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
                        lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
 
+  def test_pow_int_base_float_exponent(self):
+    for exponent in (0.5, 1.5, 2.0, -1.0, 0.0):
+      helper_test_op([], lambda: torch.tensor([1, 2, 3, 4], dtype=torch.int) ** exponent,
+                         lambda: Tensor([1, 2, 3, 4], dtype=dtypes.int32) ** exponent, forward_only=True)
+
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
     helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
