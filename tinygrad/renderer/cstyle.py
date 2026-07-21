@@ -597,3 +597,8 @@ class QCOMCLRenderer(OpenCLRenderer):
   def supported_dtypes(self):
     return {d for d in Renderer.supported_dtypes(self)
             if (d != dtypes.float16 or (bool(IMAGE) and bool(FLOAT16))) and d not in dtypes.fp8s+(dtypes.bfloat16,dtypes.double)}
+
+  # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):
+    if dtype == dtypes.bool and addrspace == AddrSpace.GLOBAL: dtype = dtypes.uint8
+    return super()._render_dtype(dtype, sz, addrspace, mutable, override_ptr, shape)

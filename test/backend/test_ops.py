@@ -5,7 +5,6 @@ import torch
 from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
 TINY_BACKEND = getenv("TINY_BACKEND")
@@ -450,7 +449,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))
@@ -468,7 +466,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
     helper_test_op(None, lambda x: x.tril(), vals=[[[True] * 3] * 3], forward_only=True)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
@@ -791,7 +788,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_xor(y), expected=RuntimeError)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -809,7 +805,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_and(y), expected=RuntimeError)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -1229,7 +1224,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[True, False]])
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_argmin(self):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
@@ -1535,7 +1529,6 @@ class TestOps(unittest.TestCase):
   def test_prod_dtype_arg(self):
     with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(dtype="")
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
     helper_test_op([(45,3)], lambda x: x.min())
@@ -1575,7 +1568,6 @@ class TestOps(unittest.TestCase):
   def test_any_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_all(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(), forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[True, True]], forward_only=True)
@@ -2953,7 +2945,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_dim_collapse_int(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim collapse from int
@@ -2964,7 +2955,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_dim_inject_none(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection from None
@@ -2999,7 +2989,6 @@ class TestOps(unittest.TestCase):
                             lambda x: x[Tensor([[0,1,-1],[-1,-2,0]]), Tensor([2,1,-1])])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[((0,),)])
@@ -3011,7 +3000,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,(2,1,0),c,(-2,1,0),e], lambda x: x[i,(2,1,0),k,(-2,1,0),p])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_tuple_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(((0,),),)], lambda x: x[(((0,),),)])
