@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
-from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape
+from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
@@ -125,7 +125,7 @@ class MovementMixin:
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
     n_left = len(new_shape) - len(self.shape)
-    expand_at = tuple(i for i, s in enumerate(self.shape) if resolve(s == 1, default=False) and resolve(new_shape[n_left+i] != 1))
+    expand_at = tuple(i-n_left for i in broadcast_axes(self.shape, new_shape) if i >= n_left)
     kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
     squeezed = self.reshape(tuple(self.shape[i] for i in kept))
     expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))

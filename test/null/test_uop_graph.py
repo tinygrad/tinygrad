@@ -2,7 +2,7 @@ import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes
 from tinygrad.uop.symbolic import sym
 from test.helpers import to_uops_list
 
@@ -706,6 +706,17 @@ class TestUOpBroadcast(unittest.TestCase):
     b = UOp.const(dtypes.float, 2, shape=(1, 1, t))
     c = a + b
     self.assertEqual(c.op, Ops.ADD)
+
+  def test_broadcast_axes(self):
+    t = Variable("t", 1, 10)
+    self.assertEqual(broadcast_axes((4, 8), (4, 8)), ())
+    self.assertEqual(broadcast_axes((8,), (4, 8)), (0,))
+    self.assertEqual(broadcast_axes((), (4, 8)), (0, 1))
+    self.assertEqual(broadcast_axes((3, 1), (4, 3, 8)), (0, 2))
+    self.assertEqual(broadcast_axes((1, 8), (1, 8)), ())
+    self.assertEqual(broadcast_axes((t, 8), (t, 8)), ())
+    self.assertEqual(broadcast_axes((1, 8), (t, 8)), (0,))
+    with self.assertRaises(RuntimeError): broadcast_axes((4, 8), (8,))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -74,6 +74,10 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
       raise IndexError(f"shape mismatch: objects cannot be broadcast to a single shape {shapes}")
     ret.append(rest[0] if rest else 1)
   return tuple(ret)
+def broadcast_axes(src_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[int, ...]:
+  # out axes that are added or expanded
+  if (nleft:=len(out_shape)-len(src_shape)) < 0: raise RuntimeError(f"cannot broadcast {src_shape} into {out_shape}")
+  return tuple(range(nleft)) + tuple(nleft+i for i,s in enumerate(src_shape) if resolve(s == 1, default=False) and resolve(out_shape[nleft+i] != 1))
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
