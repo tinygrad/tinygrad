@@ -39,7 +39,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[info.function_name] = prg.src[2].arg
-    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
+    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + [v.expr if v.expr in info.runtimevars else v for v in info.vars]
     statements.append((info.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
@@ -66,13 +66,16 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   inputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in input_names + list(symbolic_vars.values())]
   outputs = [(name, dtype_map[bufs[name][1]], bufs[name][0]) for name in output_names]
   forward_args = ",".join(f"{dtype}{'*' if name not in symbolic_vars.values() else ''} {name}" for name,dtype,_ in (outputs+inputs if wasm else inputs+outputs))
+  def render_call(name, args, global_size, arg_map=lambda x:x):
+    call = f"{name}((void*[]){{{', '.join(map(arg_map, (x for x in args if x != 'core_id')))}}}{', core_id' if 'core_id' in args else ''});"
+    return f"for (int core_id=0; core_id<{global_size[0]}; core_id++) {call}" if "core_id" in args else call
 
   if not wasm:
     for name,cl in bufs_to_save.items():
       weight = ''.join(["\\x%02X"%x for x in bytes(to_mv(cl._buf.va_addr, cl._buf.size))])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
-    cprog += [f"void net({forward_args}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    cprog += [f"void net({forward_args}) {{"] + [render_call(name, args, global_size) for name, args, global_size, _ in statements] + ["}"]
     return '\n'.join(headers + cprog)
   else:
     if bufs_to_save:
@@ -88,7 +91,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
     cprog += [f"void net({forward_args})"] + ["{"]
     get_weight_ptr = lambda x: f"({dtype_map[bufs_to_save[x][1]]} *)bufs[{buf_to_name[x]['idx']}]" if x in bufs_to_save else x
-    cprog += [f"  {name}({', '.join(map(get_weight_ptr, args))});" for (name, args, _global_size, _local_size) in statements] + ["}"]
+    cprog += ["  "+render_call(name, args, global_size, get_weight_ptr) for name, args, global_size, _ in statements] + ["}"]
     weightMapping = "" if not bufs_to_save else f"""\nconst weightNames = [{", ".join([f'"{weight_name}"' for weight_name in [v["name"] for v in buf_to_name.values()]])}];
 const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index) => [name, index]));\n"""
     top = f"""import {model_name}Module from './{model_name}.js'{weightMapping}"""
