@@ -1101,6 +1101,8 @@ class Transformer:
         states = [getattr(block, name) for block in self.blk for name in ("cache_kv", "freqs_cis", "conv_state", "recurrent_state")
                   if hasattr(block, name)]
         Tensor.realize(*states)
+        if (routes_per_token := next((block.config.num_experts_per_tok for block in self.blk if block.config.num_experts_per_tok), 0)):
+          _identity_routes(str(device), routes_per_token)
         self._init_state_checkpoints()
         self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
         short_decode_len = min(8192, self.max_context)
