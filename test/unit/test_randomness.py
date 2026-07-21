@@ -119,7 +119,7 @@ class TestRandomness(unittest.TestCase):
     self.assertRaises(AssertionError, lambda: Tensor(2).multinomial(1, replacement=False))
     self.assertRaises(AssertionError, lambda: Tensor([1, 9]).multinomial(0, replacement=False))
     def _check_with_torch(w, num_samples, replacement):
-      tiny_res = Tensor(w).multinomial(num_samples, replacement=replacement)
+      tiny_res = Tensor(w).multinomial(num_samples, replacement=replacement).realize()
       torch_res = torch.tensor(w).multinomial(num_samples, replacement=replacement)
       self.assertEqual(tiny_res.shape, torch_res.shape)
       if torch_res.ndim == 1:

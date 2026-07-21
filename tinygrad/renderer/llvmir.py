@@ -35,7 +35,7 @@ def lcast(input_type:DType, output_type:DType):
 
 def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
-            dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8"}
+            dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8", dtypes.int8: "iu8", dtypes.int32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
   N,M,K = wmma.arg[0]
   if cdna:
@@ -44,9 +44,10 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
            f".{N}x{M}x{K}{dt_map[wmma.arg[1]]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
+  args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
+  if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
-    f"{dt_map[wmma.src[0].dtype]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
-      if wmma.dtype != dtypes.float else ")")
+    f"{dt_map[wmma.arg[1]]}(" + ", ".join(args) + (", i1 false)" if wmma.dtype != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
@@ -296,6 +297,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
       ])
     if target.arch in {"gfx1100", "gfx1151"}:
       self.extra_matcher += PatternMatcher([
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.int32), lambda x: x.replace(
+          src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
+          if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
           src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
             for j in range(x.max_numel()*2)))),

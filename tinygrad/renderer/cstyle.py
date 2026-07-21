@@ -107,7 +107,8 @@ def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
   return dedup((u.dtype, u.max_numel()) for u in uops if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None)
 
 def _wmma_name(u:UOp) -> str:
-  return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.scalar().name}"
+  # sanitize spaces in DType.name (int8 = "signed char")
+  return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.scalar().name}".replace(" ", "_")
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_sizes)
 def wmma_args(uops:list[UOp]):
@@ -588,6 +589,11 @@ class HIPRenderer(CStyleLanguage):
       # #define __WMMA_16_16_16_half_half __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
       elif self.tensor_cores == tc.amd_rdna4:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
+      elif dtype_out == dtypes.int32:
+        prefix.append("typedef int wmma_int4 __attribute__((ext_vector_type(4)));\n"+
+          f"static inline __attribute__((device)) int8 __{name}"+"""(signed_char16 a, signed_char16 b, int8 c) {
+  return __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32(true, __builtin_bit_cast(wmma_int4, a),
+    true, __builtin_bit_cast(wmma_int4, b), c, false);\n}""")
       elif dtype_out == dtypes.float:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {

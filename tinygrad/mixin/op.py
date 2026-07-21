@@ -360,11 +360,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _broadcasted(self, y:Self|ConstType|UOp, reverse:bool=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    # ValueError: unsized ptr has shape (-1,) which can't broadcast; RuntimeError: shape mismatch
-    try:
-      out_shape = _broadcast_shape(x.shape, y.shape)
-      x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
-    except (RuntimeError, ValueError): pass
+    out_shape = _broadcast_shape(x.shape, y.shape)
+    x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
     if x.dtype == y.dtype: return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
@@ -842,7 +839,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
     x_cummax = x.cummax(-1)[0].detach()
-    mask = type(self).ones(last_dim_size, last_dim_size, buffer=False).tril()
+    mask = type(self).ones(last_dim_size, last_dim_size, buffer=False, dtype=dtypes.bool).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 

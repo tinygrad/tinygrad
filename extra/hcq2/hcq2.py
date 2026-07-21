@@ -42,7 +42,8 @@ def unwrap_after(uop):
   return uop
 
 def unwrap_mstack(u):
-  return tuple(x for s in u.src for x in unwrap_mstack(s)) if u.op is Ops.MSTACK else (unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,))
+  return tuple(x for s in u.src for x in unwrap_mstack(s)) if u.op is Ops.MSTACK else \
+    (unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,))
 
 def make_getaddr(u, device=None):
   if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM): return u
@@ -85,7 +86,8 @@ def make_cmdbuf(lin, devs):
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
 def make_signal(devs, queue=None, sentinel=False):
-  return make_placeholder(devs, 1, dtypes.uint64, "sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal", unique=False)
+  name = "sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal"
+  return make_placeholder(devs, 1, dtypes.uint64, name, unique=False)
 def make_signal_value(devs, queue=None):
   return make_placeholder(devs, 1, dtypes.uint64, (queue, "timeline_value") if queue else "timeline_value", unique=False)
 
@@ -261,7 +263,8 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
 def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
   if (pm:=Device.get_class(lin.arg[0][0]).pm_lower) is None: return None
   return graph_rewrite(submit, pm, name=f"encode {lin.arg[0]}", enter_calls=True)
-pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), encode_cmdbuf)])
+pm_encode_cmdbufs = PatternMatcher([
+  (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), encode_cmdbuf)])
 
 # *****************
 
@@ -365,9 +368,10 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
       sizes[b.tag] = offs[b] + b.max_numel()
   counts = collections.Counter(b.tag for b in bufs)
   bases = {b.tag:make_placeholder(b.device, sizes[b.tag], b.dtype, b.tag) for b in bufs if counts[b.tag] > 1}
-  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.index, offs.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
+  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.weakint, offs.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
-pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
+pm_pack_placeholders = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
 
 # *****************
 # 8. callify hcq programs
@@ -417,7 +421,8 @@ def hcq_compile_program(sink:UOp, renderer:Renderer, name:str, devs:str|tuple[st
 
 def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value) for dev in to_tuple(buf.device)))
+  return make_mstack(tuple(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value)
+                           for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
 # *****************

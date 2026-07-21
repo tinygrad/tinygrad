@@ -22,11 +22,11 @@ def read_next(ring, head): return ring.index(head % ring.max_numel()).load(), he
 def make_null_buf(dtype): return make_placeholder("CPU", (1<<64) // dtype.itemsize, dtype, name="null_buf", unique=False)
 
 def op_signal(gate, a):
-  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index).valid(gate)
+  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).valid(gate)
   return make_null_buf(dtypes.uint32).index(idx).store(a[1].cast(dtypes.uint32)).barrier()
 
 def op_wait(gate, a):
-  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index).valid(gate)
+  idx = (a[0] >> UOp.const(dtypes.uint64, 2)).valid(gate)
   sig = make_null_buf(dtypes.uint32).index(idx).load(arg="volatile")
   return ((~gate) | (sig >= a[1].cast(dtypes.uint32))).wait()
 
@@ -35,7 +35,7 @@ def op_timestamp(gate, a):
   call = make_ext_call(libc.dll.clock_gettime, UOp.const(dtypes.int32, 1), ts.index(UOp.const(dtypes.int, 0)), gate=gate)
   val = ts.after(call).index(UOp.const(dtypes.int, 0).valid(gate)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
         ts.after(call).index(UOp.const(dtypes.int, 1).valid(gate)).load()
-  idx = (a[0] >> UOp.const(dtypes.uint64, 3)).cast(dtypes.index).valid(gate)
+  idx = (a[0] >> UOp.const(dtypes.uint64, 3)).valid(gate)
   return make_null_buf(dtypes.uint64).index(idx).store(val)
 
 def op_exec(gate, a):
