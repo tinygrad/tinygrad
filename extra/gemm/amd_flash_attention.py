@@ -48,8 +48,10 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DV = H // H_KV, block_n, D // WARP_SIZE
   # Short contexts need more waves to fill the GPU. Long contexts already expose enough chunk-level parallelism, and one
-  # wave avoids the LDS partial merge while giving each workgroup a contiguous KV range to stream.
+  # wave avoids the LDS partial merge while giving each workgroup a contiguous KV range to stream. Updating two tokens at
+  # once halves the accumulator rescale work without increasing register pressure as much as larger groups.
   decode_waves = 4 if max_kv_len <= 8192 else 1
+  decode_group = 1 if max_kv_len <= 8192 else 2
   assert G % DECODE_HEAD_TILE == 0
   block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
   block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
@@ -65,20 +67,22 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   init = UOp.group(acc.store(acc.const_like(0)), row_max.store(row_max.const_like(-math.inf)), row_sum.store(row_sum.const_like(0)))
   acc, row_max, row_sum = acc.after(init), row_max.after(init), row_sum.after(init)
 
-  offset = UOp.range(CHUNK//decode_waves, 100, AxisType.REDUCE)
-  key = block_n*CHUNK + wave*(CHUNK//decode_waves) + offset
-  valid = key < valid_kv_len
-  kvals = tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims)
-  vvals = tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims)
+  offset = UOp.range(CHUNK//decode_waves//decode_group, 100, AxisType.REDUCE)
+  keys = tuple(block_n*CHUNK + wave*(CHUNK//decode_waves) + offset*decode_group + i for i in range(decode_group))
+  valid = tuple(key < valid_kv_len for key in keys)
+  kvals = tuple(tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims) for key in keys)
+  vvals = tuple(tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims) for key in keys)
   updates = []
   for head in range(DECODE_HEAD_TILE):
     q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
-    score = wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, kvals)), UOp.const(dtypes.float, 0)), lane) / math.sqrt(D)
-    new_max = valid.where(row_max[head].maximum(score), row_max[head])
-    alpha = valid.where(((row_max[head]-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 1))
-    beta = valid.where(((score-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 0))
-    updates += [acc[head].store(acc[head]*alpha + UOp.stack(*vvals)*beta),
-                row_sum[head].store(row_sum[head]*alpha + beta), row_max[head].store(new_max)]
+    scores = tuple(wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, key_kvals)),
+                                       UOp.const(dtypes.float, 0)), lane) / math.sqrt(D) for key_kvals in kvals)
+    new_max = row_max[head]
+    for is_valid, score in zip(valid, scores): new_max = new_max.maximum(is_valid.where(score, UOp.const(dtypes.float, -math.inf)))
+    alpha = ((row_max[head]-new_max)*LOG2E).exp2()
+    betas = tuple(is_valid.where(((score-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 0)) for is_valid,score in zip(valid, scores))
+    updates += [acc[head].store(acc[head]*alpha + sum((UOp.stack(*value)*beta for value,beta in zip(vvals, betas)), acc[head].const_like(0))),
+                row_sum[head].store(row_sum[head]*alpha + sum(betas, UOp.const(dtypes.float, 0))), row_max[head].store(new_max)]
   update = UOp.group(*updates).end(offset)
   acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
 
