@@ -49,7 +49,7 @@ def make_getaddr(u, device=None):
   return UOp(Ops.GETADDR, dtypes.uint64, src=(u,), arg=device or to_tuple(u.device)[0])
 
 def make_ins(op, *srcs):
-  return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
+  return UOp(Ops.INS, arg=op, src=tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs))
 
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
   return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "temp")
@@ -133,7 +133,7 @@ def _build_wait_cmds(dep_lanes:list[tuple[tuple, int, int]], devices:tuple[str, 
   for (ddevs, dqueue, dtag), lanes in deps.items():
     sig = make_mstack([make_signal(d if dl is None else ddevs[dl], queue=dqueue, sentinel=dl is None) for dl, d in zip(lanes, devices)])
     val = make_mstack([make_signal_value(d if dl is None else ddevs[dl], queue=dqueue) for dl, d in zip(lanes, devices)])
-    waits.append((sig.index(zero:=UOp.const(dtypes.int, 0)).load() >= val.index(zero) + dtag).wait())
+    waits.append(UOp(Ops.INS, arg="wait", src=(sig, val.index(UOp.const(dtypes.int, 0)) + dtag)))
   return waits, {dtag for _, _, dtag in deps}
 
 def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[tuple[tuple[str, ...], str]],
@@ -154,7 +154,8 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     waited |= cur_waited
 
     # wait the syncs, store the device epoch; value bumps are a separate call: no lane may bump until every lane has patched its waits
-    submit = make_submit(*waits, make_signal(devs).store((tl:=make_signal_value(devs)).index(zero)), devs=devs, queue="COMPUTE:0")
+    store = UOp(Ops.INS, arg="store", src=(make_signal(devs), (tl:=make_signal_value(devs)).index(zero)))
+    submit = make_submit(*waits, store, devs=devs, queue="COMPUTE:0")
     upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), n) for qn in dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)])]
     bump = UOp.barrier(*[s.index(zero, dtype=s.dtype).store(s.index(zero) + inc) for s, inc in upd])
     finalizers += [UOp.custom_function("hcq", b.sink()).call(aux=HCQInfo("hcq_finalizer", Estimates(), devs, "COMPUTE:0")) for b in (submit, bump)]
@@ -181,15 +182,15 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
   for tag, ((call, _), (devices, queue), cmds) in enumerate(zip(batch, batch_info, call_waits)):
     # first queue use, sync prior device work with main signal
     if batch_info.index((devices, queue)) == tag:
-      epoch = (make_signal(devices).index(0).load() >= make_signal_value(devices).index(0) - 1).wait()
-      cmds = [UOp(Ops.BARRIER), epoch] + cmds
-
-    # signal queue timeline if someone waits for us
-    store = make_signal(devices, queue=queue).store(make_signal_value(devices, queue=queue).index(0) + tag) if tag in waited else None
+      epoch = UOp(Ops.INS, arg="wait", src=(make_signal(devices), make_signal_value(devices).index(0) - 1))
+      cmds = [UOp(Ops.INS, arg="barrier", src=()), epoch] + cmds
 
     # and make hcq call
     info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), devices, queue)
-    cmds = [*cmds, call.replace(arg=replace(call.arg, aux=info))] + ([store] if store is not None else [])
+    cmds = [*cmds, call.replace(arg=replace(call.arg, aux=info))]
+
+    # signal queue timeline if someone waits for us
+    if tag in waited: cmds += [UOp(Ops.INS, arg="store", src=(make_signal(devices, queue), make_signal_value(devices, queue).index(0) + tag))]
     src.append(UOp.custom_function("hcq", make_submit(*cmds, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
   return src + finalizers
 
