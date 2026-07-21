@@ -1,7 +1,7 @@
 import unittest, pickle, types, tracemalloc
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters, ContextVar, Context
+from tinygrad.helpers import GlobalCounters, ContextVar, Context, DEV
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -78,6 +78,7 @@ class TestPickle(unittest.TestCase):
     a2:UOp = pickle.loads(s)
     self.assertListEqual(a2.base.realized.as_memoryview().cast("I").tolist(), [0, 1, 2, 3])
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK")
   def test_pickle_oob_ram(self):
     N, M = 8, 10**6
     ts = [Tensor.rand(M, dtype='float32').realize() for _ in range(N)]
