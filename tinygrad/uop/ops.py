@@ -563,8 +563,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ufix(self, x):
     if isinstance(x, UOp): return x
     # float self keeps its dtype for any scalar, int self only for int/Invalid scalars
-    if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.const_like(x)
-    return self.const_like(x, dtypes.from_py(x))
+    dtype = self.dtype if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))) else dtypes.from_py(x)
+    return UOp.const(dtype, x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -581,13 +581,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
-  def alu(self, op, *src:UOp, **kwargs):
-    all_srcs = (self, *src)
-    # broadcast shaped operands to a common shape (None and () are falsy, so only real shapes participate)
-    if (shapes := [s for x in all_srcs if (s:=x._shape)]) and not all_same(shapes):
-      out_shape = _broadcast_shape(*shapes)
-      all_srcs = tuple(x._broadcast_to(out_shape) if x._shape else x for x in all_srcs)
-    return UOp(op, src=all_srcs, **kwargs)
+  def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
@@ -669,10 +663,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
       return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
     if self.op is Ops.PARAM: return self.arg.axis
-    # NOTE: they all have to share an axis, we always choose [-1]
-    if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
-    # STACK adds a leading axis
-    if self.op is Ops.STACK: return axes[-1]+1 if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
+    # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
+    if self.op in GroupOp.ALU.union({Ops.STACK}):
+      return axes[-1] if (axes := dedup([x.axis+len(self.shape)-len(x.shape) for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
     if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
