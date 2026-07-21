@@ -175,9 +175,6 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # EXPAND on scalar -> STACK
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
    lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
-  # INDEX on INDEX is INDEX
-  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
-   lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
 ])
 
 def fix_group_for_reduce(x:UOp):
