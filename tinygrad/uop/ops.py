@@ -1177,9 +1177,10 @@ class ProgramInfo:
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op is Ops.PARAM and u in _rtvars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+    rtvars = tuple(v.expr for v in dedup(_rtvars))
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(v.expr for v in dedup(_rtvars)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+                       rtvars, tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
 
 @dataclass(frozen=True)
 class CallInfo:
