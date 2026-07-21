@@ -78,7 +78,7 @@ class TestPickle(unittest.TestCase):
     a2:UOp = pickle.loads(s)
     self.assertListEqual(a2.base.realized.as_memoryview().cast("I").tolist(), [0, 1, 2, 3])
 
-  @unittest.skipIf(DEV.interface.startswith("MOCK")
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "mock device buffers live in host RAM, not VRAM")
   def test_pickle_oob_ram(self):
     N, M = 8, 10**6
     ts = [Tensor.rand(M, dtype='float32').realize() for _ in range(N)]
