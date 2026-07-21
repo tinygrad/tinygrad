@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, time
+import sys, argparse, codecs, typing, re, unicodedata, json, time, gc
 from typing import TYPE_CHECKING
 from tinygrad.helpers import BEAM, DEBUG, JIT_BATCH_SIZE, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
@@ -188,8 +188,9 @@ def main():
     beam = args.beam if args.beam is not None else 2 if amd_server else BEAM.value
     print(f"warming serving JITs with BEAM={beam}")
     batch_size = 448 if amd_server else JIT_BATCH_SIZE.value
-    with Context(DEBUG=DEBUG.value, BEAM=beam, JIT_BATCH_SIZE=batch_size):
+    with Context(DEBUG=DEBUG.value, BEAM=beam, JIT_BATCH_SIZE=batch_size, PARALLEL_COMPILE=12 if amd_server else 0):
       model.warmup()
+    if args.serve: gc.freeze()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

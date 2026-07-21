@@ -7,7 +7,7 @@ Examples:
 """
 from __future__ import annotations
 
-import argparse, json, statistics, time
+import argparse, gc, json, statistics, time
 from dataclasses import asdict, dataclass
 
 from tinygrad.helpers import fetch
@@ -75,6 +75,7 @@ def main() -> None:
   vocab_size = len(kv["tokenizer.ggml.tokens"])
 
   model.warmup(args.chunk_size)
+  gc.freeze()
 
   results = [benchmark(model, synthetic_prompt(n, vocab_size, salt=i+1), args.decode_tokens, args.chunk_size)
              for i, n in enumerate(args.prompt_tokens)]
