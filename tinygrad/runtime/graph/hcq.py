@@ -25,8 +25,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j, replace in enumerate(self.uop_replace):
       for pos, iidx in replace:
-        src_device_name = self.calls[j][2][pos].device.replace(":", "_")
-        x = self.input_replace_to_var.setdefault((j,pos), UOp.variable(f"inp_{iidx}_{src_device_name}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
+        x = self.input_replace_to_var.setdefault((j,pos), UOp.variable(f"inp_{iidx}_{self.calls[j][0]}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
         self.hcq_bufs[j][pos] = HCQBuffer(x, self.hcq_bufs[j][pos].size) # Create fake buffer with variable
 
     # Allocate kernel args.
@@ -283,12 +282,10 @@ class HCQGraph(MultiGraphRunner):
 
     # Update buffers
     for j, replace in enumerate(self.uop_replace):
+      dev_idx = self.calls[j][0]
       runtime = self.runtimes[j]
       for pos, iidx in replace:
-        if isinstance(b:=input_uops[iidx].buffer, MultiBuffer):
-          captured_device = self.calls[j][2][pos].device
-          buf = next(x for x in b.bufs if x.device == captured_device)
-        else: buf = b
+        buf = b.bufs[dev_idx] if isinstance(b:=input_uops[iidx].buffer, MultiBuffer) else b
         mapped = buf.get_buf(runtime.dev.device) if runtime is not None else buf._buf
         hcq_var_vals[self.input_replace_to_var[(j,pos)].expr] = mapped.va_addr
 

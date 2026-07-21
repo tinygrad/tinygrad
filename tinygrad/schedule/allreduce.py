@@ -1,15 +1,14 @@
 import functools, itertools
 from typing import cast
-from tinygrad.helpers import all_int, all_same, prod, cdiv, DEBUG, RING, ALL2ALL, PEER_ALLREDUCE, getenv
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, PEER_ALLREDUCE, getenv
+from tinygrad.uop.ops import Ops, UOp, KernelInfo
 from tinygrad.dtype import Invalid, dtypes
 
 # *** allreduce implementation ***
-def allreduce_modes(ndev:int, numel:int, op:Ops|None=None) -> tuple[bool, bool, bool]:
+def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool, bool]:
   use_all2all = ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1)
   use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
-  use_peer = PEER_ALLREDUCE >= 1 and op in {None, Ops.ADD} and not use_all2all and not use_ring and (numel == 1 or numel % ndev == 0)
-  return use_peer, use_all2all, use_ring
+  return PEER_ALLREDUCE >= 1 and numel == 1 and not use_all2all and not use_ring, use_all2all, use_ring
 
 def peer_allreduce(buf:UOp, op:Ops, device:str|tuple[str, ...], output:UOp|None=None) -> UOp:
   shape, numel = buf.shape, prod(buf.shape)
@@ -23,44 +22,16 @@ def peer_allreduce(buf:UOp, op:Ops, device:str|tuple[str, ...], output:UOp|None=
     idx = UOp.range(numel, 0)
     return outp.index(idx).store(inp.index(idx)).end(idx).sink(arg=KernelInfo(name)).call(*args)
 
-  if numel == 1:
-    args = tuple(x.reshape((numel,)) for x in (outs[0], *srcs))
-    params = [x.placeholder_like(i) for i,x in enumerate(args)]
-    outp, *inps = params
-    idx = UOp.range(numel, 0)
-    val = functools.reduce(lambda x,y: x.alu(op, y), [x.index(idx) for x in inps])
-    reduce_call = outp.index(idx).store(val).end(idx).sink(arg=KernelInfo(f"peer_allreduce_{len(srcs)}_{numel}")).call(*args)
-    scalar_reduced = outs[0].after(reduce_call)
-    return output.after(reduce_call, *[copy_call(out, scalar_reduced, f"peer_broadcast_{numel}") for out in outs[1:]])
+  args = tuple(x.reshape((numel,)) for x in (outs[0], *srcs))
+  params = [x.placeholder_like(i) for i,x in enumerate(args)]
+  outp, *inps = params
+  idx = UOp.range(numel, 0)
+  val = functools.reduce(lambda x,y: x.alu(op, y), [x.index(idx) for x in inps])
+  reduce_call = outp.index(idx).store(val).end(idx).sink(arg=KernelInfo(f"peer_allreduce_{len(srcs)}_{numel}")).call(*args)
+  reduced = outs[0].after(reduce_call)
 
-  # Each device reduces one equal slice directly from every peer, then writes that disjoint slice into every output.
-  # This keeps the work distributed without a second allgather read phase or routing the result through one device.
-  chunk_size = cast(int, numel) // len(srcs)
-  cpu_launch = all(x.split(":")[0] == "CPU" for x in buf.device)
-
-  def launch_idx(size:int) -> tuple[UOp, UOp, tuple[UOp, ...]]:
-    if cpu_launch:
-      idx = UOp.range(size, 0)
-      return idx, idx < size, (idx,)
-    # Keep gidx explicit for one-workgroup slices; an extent of one folds the SPECIAL away before launch dimensions are collected.
-    wg, tid, lane = UOp.special(max(2, cdiv(size, 2048)), "gidx0"), UOp.special(256, "lidx0"), UOp.range(8, 2, AxisType.UNROLL)
-    idx = (wg*256 + tid)*8 + lane
-    return idx, idx < size, (lane,)
-
-  reduces:list[UOp] = []
-  flat_outs, flat_srcs = tuple(x.reshape((numel,)) for x in outs), tuple(x.reshape((numel,)) for x in srcs)
-  for owner in range(len(srcs)):
-    ordered_outs = (flat_outs[owner], *flat_outs[:owner], *flat_outs[owner+1:])
-    args = (*ordered_outs, *flat_srcs)
-    params = [x.placeholder_like(i) for i,x in enumerate(args)]
-    outps, inps = params[:len(outs)], params[len(outs):]
-    idx, valid, end_ranges = launch_idx(chunk_size)
-    global_idx = idx + owner*chunk_size
-    val = functools.reduce(lambda x,y: x.alu(op, y), [x.index(global_idx.valid(valid)) for x in inps])
-    stores = UOp.group(*(outp.index(global_idx.valid(valid)).store(val) for outp in outps))
-    reduces.append(stores.end(*end_ranges).sink(
-      arg=KernelInfo(f"peer_allreduce_{len(srcs)}_{chunk_size}", opts_to_apply=())).call(*args))
-  return output.after(*reduces)
+  broadcasts = [copy_call(out, reduced, f"peer_broadcast_{numel}") for out in outs[1:]]
+  return output.after(reduce_call, *broadcasts)
 
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
@@ -70,8 +41,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
   # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_peer, use_all2all, use_ring = allreduce_modes(ndev, numel, op)
-  use_peer &= isinstance(device, tuple)
+  use_peer, use_all2all, use_ring = allreduce_modes(ndev, numel)
   if DEBUG >= 2: print(f"{'PEER' if use_peer else 'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} "
                        f"ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
@@ -153,8 +123,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   return UOp.usum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
-  if isinstance(red.arg[1], tuple) and allreduce_modes(len(buf.device), prod(cast(tuple[int, ...], buf.shape)), red.arg[0])[0]:
-    return handle_allreduce(buf, red, output)
+  if allreduce_modes(len(buf.device), prod(cast(tuple[int, ...], buf.shape)))[0]: return handle_allreduce(buf, red, output)
   if output is None: output = UOp.const(red.dtype, Invalid, shape=red.shape).clone(device=red.device)
   to = output.param_like(0)
   src = buf.param_like(1)
