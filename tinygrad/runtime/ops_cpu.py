@@ -42,7 +42,8 @@ class CPUWorker(threading.Thread):
       finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, tid, prg, args_buf_addr): prg.fxn(ctypes.c_uint64(args_buf_addr), ctypes.c_int64(tid) if ARCH_ARM64 else ctypes.c_int32(tid))
+  def _exec(self, tid, prg, args_buf_addr):
+    prg.fxn(ctypes.c_uint64(args_buf_addr), *(((ctypes.c_int64 if ARCH_ARM64 else ctypes.c_int32)(tid),) if 'core_id' in prg.runtimevars else ()))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, tmpl_sig, signal_addr, value):
     tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
@@ -76,8 +77,8 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes, runtimevars:tuple[str, ...]|None=None, **kwargs):
-    self.runtimevars:tuple[str, ...] = runtimevars or ()
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, **kwargs):
+    self.runtimevars = runtimevars or {}
 
     LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
