@@ -1,10 +1,11 @@
-import unittest
+import unittest, threading
 from tinygrad import Tensor, UOp
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.engine.realize import run_linear
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
-from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.ops import Ops, KernelInfo
 
 def wait_loop_kernel(C:UOp) -> UOp:
   N = 10
@@ -42,6 +43,13 @@ def nested_loop_kernel(C:UOp) -> UOp:
   i = i.after(lend.end(r))
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="nested_loop", opts_to_apply=()))
+
+def wait_ext_kernel() -> UOp:
+  sig = UOp.param(0, dtypes.int, (1,), volatile=True)
+  l = UOp.loop(0)
+  v = sig.after(l)[0].load()
+  e = v.end(l, v < 1)
+  return e.sink(arg=KernelInfo(name="wait_ext"))
 
 def two_loops_kernel(C:UOp) -> UOp:
   # two sequential loops on the same counter: ++ until 10, then ++ until 25
@@ -88,6 +96,21 @@ class TestWaitLoop(unittest.TestCase):
     c = Tensor.custom_kernel(c, fxn=nested_loop_kernel)[0]
     c.realize()
     self.assertEqual(c.item(), 12)
+
+  def test_async_wait_ext(self):
+    sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+    try: sig_view = sig_buf.as_memoryview(force_zero_copy=True).cast('i')
+    except (AssertionError, NotImplementedError): self.skipTest(f"{Device.DEFAULT} does not support host-visible buffers")
+    sig_view[0] = 0
+
+    def set_signal():
+      threading.Event().wait(0.3)
+      sig_view[0] = 1
+
+    sync = threading.Thread(target=set_signal, daemon=True)
+    sync.start()
+    run_linear(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf)),)), wait=True)
+    sync.join(timeout=3)
 
   def test_two_sequential_loops(self):
     c = Tensor.empty(1, dtype=dtypes.int)
