@@ -460,8 +460,19 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
-def to_program(ast:UOp, renderer:Renderer) -> UOp:
+def _to_program_key(ast:UOp, renderer:Renderer) -> tuple:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
-  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  return (ast.key, type(renderer).__name__, renderer.target, *[x.value for x in config])
+def _disk_key(key:tuple) -> str:
+  import hashlib
+  return hashlib.sha256(repr((key[0].hex(),)+key[1:]).encode()).hexdigest()
+def to_program(ast:UOp, renderer:Renderer) -> UOp:
+  from tinygrad.helpers import getenv, diskcache_get, diskcache_put
+  key = _to_program_key(ast, renderer)
+  if (prg:=to_program_cache.get(key)) is None:
+    if getenv("PROGRAM_CACHE") and (prg:=diskcache_get("program_v0", _disk_key(key))) is not None:
+      to_program_cache[key] = prg
+      return prg
+    to_program_cache[key] = prg = do_to_program(ast, renderer)
+    if getenv("PROGRAM_CACHE"): diskcache_put("program_v0", _disk_key(key), prg)
   return prg

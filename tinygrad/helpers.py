@@ -384,6 +384,10 @@ CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.
 
 VERSION = 22
 _db_connection = None
+def _reset_db_connection(): # a forked child can't share the parent's sqlite connection, drop it so it reconnects
+  global _db_connection
+  _db_connection = None
+os.register_at_fork(after_in_child=_reset_db_connection)
 def db_connection():
   global _db_connection
   if _db_connection is None:

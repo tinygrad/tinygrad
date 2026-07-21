@@ -111,10 +111,15 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+    from tinygrad.helpers import getenv, diskcache_get, diskcache_put
+    if getenv("SCHEDULE_CACHE") and (dc_ret:=diskcache_get("schedule_v0", cache_key.hex())) is not None:
+      schedule_cache[cache_key] = dc_ret
+      return dc_ret
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[cache_key] = linear
+    if getenv("SCHEDULE_CACHE"): diskcache_put("schedule_v0", cache_key.hex(), linear)
   else:
     # schedule cache hit
     linear = sc_ret
