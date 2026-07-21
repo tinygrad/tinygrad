@@ -506,6 +506,8 @@ def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) 
 # cast i8 -> i16/i32 = bfe
 # NOTE: down casting float to int should round first then reduce precision
 pre_isel_matcher = PatternMatcher([
+  # realize bool const as sgpr mask
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const(dtypes.uint16, (1 << 16) - 1)).replace(dtype=dtypes.uint16)),
   # NOTE: does this not work for int8 alu? Do we need to sign extend or something..
@@ -556,8 +558,6 @@ pre_isel_matcher = PatternMatcher([
 # NOTE: maybe add the range exec mask to end src in pre-regalloc?
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
-  # realize bool const as sgpr mask
-  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat(name="x").bitcast(), lambda x: x),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
