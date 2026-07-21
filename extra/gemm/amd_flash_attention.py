@@ -47,10 +47,9 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   _, H, M, _ = q.shape
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DV = H // H_KV, block_n, D // WARP_SIZE
-  # Short contexts need more waves to fill the GPU. Long contexts already expose enough chunk-level parallelism, and one
-  # wave avoids the LDS partial merge while giving each workgroup a contiguous KV range to stream. Updating two tokens at
-  # once halves the accumulator rescale work without increasing register pressure as much as larger groups.
-  decode_waves = 4 if max_kv_len <= 8192 else 1
+  # One wave avoids an unsafe LDS merge and gives each workgroup a contiguous KV range to stream. At long context, updating
+  # two tokens at once halves the accumulator rescale work without increasing register pressure as much as larger groups.
+  decode_waves = 1
   decode_group = 1 if max_kv_len <= 8192 else 2
   assert G % DECODE_HEAD_TILE == 0
   block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
