@@ -58,7 +58,7 @@ def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
   buf, offset = cv
   name = f"buf{buf.arg.slot}_offset{next(ctx.offset_counts.setdefault(buf, count()))}"
   offset = UOp.variable(name, 0, buf.max_numel() - (size:=src.max_numel() * src.element_size() // buf.element_size())).bind(offset)
-  return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.index, size))).bitcast(src.dtype).reshape(src.shape)
+  return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.weakint, size))).bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(ctx: AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK(VARIABLE) when movement ops collapse to a contiguous range."""
