@@ -91,7 +91,8 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   stores = []
   for head in range(DECODE_HEAD_TILE):
     q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
-    maximum = partial_stats.after(merged)[head, 0, 0].maximum(partial_stats.after(merged)[head, 1, 0])
+    wave_max = tuple(partial_stats.after(merged)[head, w, 0] for w in range(DECODE_WAVES))
+    maximum = wave_max[0].maximum(wave_max[1]).maximum(wave_max[2].maximum(wave_max[3]))
     scales = tuple(((partial_stats.after(merged)[head, w, 0]-maximum)*LOG2E).exp2() for w in range(DECODE_WAVES))
     denominator = sum((partial_stats.after(merged)[head, w, 1]*scales[w] for w in range(DECODE_WAVES)), UOp.const(dtypes.float, 0))
     stores += [out[b, q_head, block_n, d.valid(wave.eq(0))].store(
