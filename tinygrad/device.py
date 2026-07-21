@@ -178,8 +178,7 @@ class Buffer:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
     if self.is_allocated():
-      buf = bytearray(self.as_memoryview())
-      if protocol >= 5: buf = pickle.PickleBuffer(buf)
+      buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
