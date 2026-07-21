@@ -1139,7 +1139,7 @@ class ProgramInfo:
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
   vars: tuple[UOp, ...] = ()
-  runtimevars: tuple[UOp, ...] = ()
+  runtimevars: tuple[str, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
@@ -1179,7 +1179,7 @@ class ProgramInfo:
       if u.op is Ops.PARAM and u in _rtvars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(dedup(_rtvars)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+                       tuple(v.expr for v in dedup(_rtvars)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
 
 @dataclass(frozen=True)
 class CallInfo:
