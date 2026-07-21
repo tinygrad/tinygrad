@@ -11,7 +11,7 @@ from tinygrad.helpers import all_int, argfix, argsort, ceildiv, flatten, flat_to
 from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import sint, UOp
+  from tinygrad.uop.ops import sint
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -354,12 +354,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if mode == "circular": return self._pad_circular(pX)
     if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
     raise NotImplementedError(f"{mode=} is not supported")
-
-  def _broadcasted(self, y:Self|ConstType|UOp, reverse:bool=False) -> tuple[Self, Self]:
-    y = self.ufix(y)
-    x, y = (self, y) if not reverse else (y, self)
-    if x.dtype == y.dtype: return x, y
-    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
     """
