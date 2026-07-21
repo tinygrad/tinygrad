@@ -43,7 +43,9 @@ def cuda_disassemble(lib:bytes, arch:str, ptx=False):
 
 class NVRTCCompiler(Compiler):
   def __init__(self, arch:str, ptx=True, cache_key:str="cuda"):
-    self.ptx, self.arch, self.compile_options = ptx, arch, [f'--gpu-architecture={arch}']
+    # nvrtc < 11.0 only accepts virtual `compute_XX` for --gpu-architecture; it is also the
+    # correct target when emitting PTX. Real `sm_XX` is only needed (and only valid) for CUBIN.
+    self.ptx, self.arch, self.compile_options = ptx, arch, [f'--gpu-architecture={arch.replace("sm_", "compute_") if ptx else arch}']
     self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
