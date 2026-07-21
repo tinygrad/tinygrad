@@ -110,8 +110,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
       if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
         strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
-        try: linear_idx = type(self).usum(*[t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)])
-        except ValueError as err: raise IndexError(f"cannot broadcast indices: {err}") from err
+        linear_idx = type(self).usum(*[t * s for t, s in zip(tensors, strides)])
         valid = type(self).uprod(*[(t >= 0) & (t < s) for t, s in zip(tensors, ishp)])
         pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
         x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
