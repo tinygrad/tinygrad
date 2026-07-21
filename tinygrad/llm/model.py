@@ -312,7 +312,7 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
   prefill = out.shape[0] > routes_per_input
   output_tile = 2 if ggml_type == 21 and not prefill else \
     8 if ggml_type == 21 else 4
-  wave_count = 2 if prefill and ggml_type != 21 else 1
+  wave_count = 2 if prefill else 1
   route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // (output_tile * wave_count), 1)
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
   lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
