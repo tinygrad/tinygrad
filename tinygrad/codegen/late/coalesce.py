@@ -97,16 +97,16 @@ pm_simplify_add_image = PatternMatcher([
   (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
 ])
 
-def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
+def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
   memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
-    # TODO: this should handle images too, it's just memory coalesing
+    # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
-      assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalesing does not support gated loads/stores"
-      assert u.src[0].op is Ops.INDEX, f"memory coalesing should be on INDEX, not {u.src[0].op}"
+      assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
+      assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
@@ -162,4 +162,4 @@ def memory_coalesing(sink:UOp, ctx:Renderer) -> UOp:
         full_grp = full_grp[length:]
 
   # apply
-  return sink.substitute(replacements, name="memory coalesing")
+  return sink.substitute(replacements, name="memory coalescing")

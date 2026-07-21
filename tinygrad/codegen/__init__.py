@@ -24,7 +24,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-from tinygrad.codegen.late.coalesce import memory_coalesing, pm_simplify_add_image
+from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
@@ -315,11 +315,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
 
-  # some coalesing misses without this
+  # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
-  # do memory coalesing (late)
-  sink = memory_coalesing(sink, ren)
+  # do memory coalescing (late)
+  sink = memory_coalescing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
