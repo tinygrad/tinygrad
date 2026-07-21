@@ -294,16 +294,12 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
-  i = ctx.func_args.index(x)
-  # buffer params hold addresses, their value moves as a 64bit int
   dt = dtypes.uint64 if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.GLOBAL else x.dtype
-  # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
-  def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
-  def _stack_arg(disp:int):
-    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp), imm(dtypes.uint8, 8))
-  if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
-  else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
-  # this move "cleanses" the abi register constraint
+  args_buf_reg, runtime_reg = (RCX, RDX) if sys.platform == "win32" else (RDI, RSI)
+  if x.op is Ops.SPECIAL or x.arg.name == "core_id": src = (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(runtime_reg,)),)
+  else:
+    off = dict(ISARenderer.param_layout([u for u in ctx.func_args if u.op is Ops.PARAM and u.arg.name != "core_id"])[0])[x]
+    src = (def_reg(dtypes.uint64, args_buf_reg), UOp(Ops.NOOP), imm(dtypes.int8 if off <= 127 else dtypes.int32, off), imm(dtypes.uint8, dt.itemsize))
   return x.ins(X86Ops.MOV, dtype=dt, src=src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,

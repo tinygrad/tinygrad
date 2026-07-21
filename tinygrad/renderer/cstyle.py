@@ -1,9 +1,9 @@
-from typing import Literal, Callable
+from typing import Literal, Callable, cast
 import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, CPU_COUNT, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, partition, Target, CPU_COUNT, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 
@@ -119,6 +119,7 @@ class CStyleLanguage(Renderer):
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
+  args_buf: bool = False
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
   gep_arr_threshold: int = 4
@@ -137,12 +138,24 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
 
+  def _param_type(self, u:UOp, mutable:bool, scalar_default:str|None=None) -> str|None:
+    if u.addrspace != AddrSpace.GLOBAL: return self.arg_int_prefix if u.dtype == dtypes.int else scalar_default
+    return self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape) + self.buffer_suffix
+
+  def _unpack_args_buf(self, bufs) -> tuple[str, list[tuple[str, str]]]:
+    runtime, packed = partition(bufs, lambda nb: nb[1][0].arg.name == 'core_id')
+    off = dict(Renderer.param_layout([u for _,(u,_) in packed])[0])
+    lines = [f"  {(t:=self._param_type(u, m, 'unsigned long'))} {name} = *(({t}*)((char*)args_buf + {off[u]}));" for name, (u, m) in packed]
+    return "\n".join(lines), [(name, self.arg_int_prefix) for name,_ in runtime]
+
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+self.buffer_suffix \
-                 if u.addrspace == AddrSpace.GLOBAL else self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
+    if self.args_buf:
+      tmp = (unpck:=self._unpack_args_buf(bufs))[0] + "\n" + tmp
+      buftypes = [("args_buf", "void*"), *unpck[1]]
+    else: buftypes = [(name, cast(str, self._param_type(u, mutable))) for name, (u, mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -249,6 +262,7 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
+  args_buf = True
   global_max = (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'

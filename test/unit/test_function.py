@@ -571,7 +571,8 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_program_invalids_not_captured(self):
     # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
     # still must not be captured as an input -- else it is read before the kernel writes it
-    src = "void k(float* restrict data0, float* restrict data1) { for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
+    src = "void k(void* args_buf) { float* data0=*(float**)args_buf; float* data1=*(float**)((char*)args_buf+8); " \
+          "for (int i=0;i<4;i++) data0[i]=data1[i]*2.0f; }"
     lib = Device["CPU"].compiler.compile(src)
     def prog(C:UOp, A:UOp) -> UOp:
       sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))

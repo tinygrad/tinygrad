@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, ARCH_ARM64, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -42,10 +42,7 @@ class CPUWorker(threading.Thread):
       finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, tid, prg, bufs, *args):
-    vals = list(args[bufs:])
-    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine().lower() == "arm64" else ctypes.c_int32, vals))
+  def _exec(self, tid, prg, args_buf_addr): prg.fxn(ctypes.c_uint64(args_buf_addr), ctypes.c_int64(tid) if ARCH_ARM64 else ctypes.c_int32(tid))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, tmpl_sig, signal_addr, value):
     tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
@@ -57,17 +54,19 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    if isinstance(args_state, LVPArgsState):
-      self.bind_args_state(args_state)
-      return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
-    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
+    self.bind_args_state(args_state)
+    return self.cmd(self._exec, prg, args_state.buf.va_addr, threads=(global_size or (1,))[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, type(signal)(signal.base_buf, owner=signal.owner, virt=True), signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
 
-class LVPArgsState(CLikeArgsState):
-  def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
+class CPUArgsState(CLikeArgsState):
+  def __init__(self, buf, prg, bufs, vals=(), prefix=None): super().__init__(buf, prg, bufs, tuple(v for v in vals if v is not None), prefix)
+
+class LVPArgsState(CPUArgsState):
+  def __init__(self, buf, prg, bufs, vals=()):
+    super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + sum(v is not None for v in vals)) * 2])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -113,7 +112,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(LVPArgsState if LVP else CPUArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 256)
 
   @suppress_finalizing
   def __del__(self):

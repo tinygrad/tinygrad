@@ -5,7 +5,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
+from tinygrad.helpers import prod, partition, Target, CPU_COUNT, getenv, OSX
 
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
@@ -123,15 +123,23 @@ base_rewrite = PatternMatcher([
 class LLVMRenderer(Renderer):
   supports_float4 = True
   abi: str | None
+  args_buf: bool = False
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
-    # NOTE: CPUAllocator promises 0x20 alignment
-    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
-      name for name,u in args])
-    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    if self.args_buf:
+      runtime_args, packed_args = partition(args, lambda x: x[1].arg.name == 'core_id')
+      offsets = dict(Renderer.param_layout([u for _, u in packed_args])[0])
+      kernel = [f"  {n}.addr = getelementptr i8, ptr %args_buf, i64 {offsets[u]}" for n, u in packed_args] + \
+               [f"  {n} = load {ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}, ptr {n}.addr, align 8" for n, u in packed_args] + kernel
+      sargs = ", ".join(["ptr %args_buf"] + [f"{ldt(u.dtype)} {n}" for n, u in runtime_args])
+    else:
+      sargs = ", ".join(f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} {n}"
+                        for n, u in args)
+    abi_str = f" {self.abi}" if self.abi else ""
+    return "\n".join((prefix or []) + [f"define{abi_str} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void", "}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, UOp]] = []
@@ -182,6 +190,7 @@ class CPULLVMRenderer(LLVMRenderer):
   has_threads = bool(getenv("THREADS", 1))
   global_max = (CPU_COUNT.value, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
+  args_buf = True
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
