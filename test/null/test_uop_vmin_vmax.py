@@ -371,6 +371,10 @@ class TestConstFactor(unittest.TestCase):
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
+  def test_const_factor_variable_multiple_of(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    self.assertEqual(x.const_factor(), 4)
+
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
