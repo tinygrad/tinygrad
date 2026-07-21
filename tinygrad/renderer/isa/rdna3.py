@@ -640,9 +640,7 @@ def encode(ctx, x:UOp):
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
 from enum import Enum, auto
 class CntType(Enum):
-  DS_CNT = RDNA3Ops.s_waitcnt_lgkmcnt
-  LOAD_CNT = RDNA3Ops.s_waitcnt_vmcnt
-  STORE_CNT = RDNA3Ops.s_waitcnt_vscnt
+  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
 
 def ctp(x:UOp) -> CntType|None:
   if x.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }: return CntType.STORE_CNT if x.dtype is dtypes.void else CntType.LOAD_CNT
@@ -650,26 +648,11 @@ def ctp(x:UOp) -> CntType|None:
   return None
 
 def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
-  total: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
-  outstnd: dict[CntType, int] = { CntType.DS_CNT: 0, CntType.LOAD_CNT: 0, CntType.STORE_CNT: 0 }
-  ddeps: dict[Register, tuple[CntType, int]] = {}
   nuops = []
-
   for u in uops:
-    oprs = u.src
-    if (tp := ctp(u)):
-      if u.dtype is dtypes.void: oprs = oprs[:-1]
-      rs = rdefs(u.src[-1]) if u.dtype is dtypes.void else rdefs(u)
-      for r in rs: ddeps[r] = (tp,outstnd[tp])
-      outstnd[tp] += 1
-      total[tp] += 1
-
-    tosync: dict[CntType, int] = {}
-    for tp,n in [ddeps[r] for s in oprs for r in rdefs(s) if r in ddeps]:
-      tosync[tp] = min(tosync.setdefault(tp, float('inf')), outstnd[tp] - n - 1)
-    for tp,cnt in tosync.items():
-      nuops.append(UOp(Ops.INS, arg=tp.value, src=(const(dtypes.int16, cnt),)))
     nuops.append(u)
+    if (tp := ctp(u)) is not None:
+      nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(dtypes.int16, 0),)))
   return nuops
 
 @dataclass
@@ -704,8 +687,8 @@ class RDNA3Renderer(ISARenderer):
     return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),x))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    nuops = lin.src
-    # nuops = insertwaitcnts(lin.src)
+    # nuops = lin.src
+    nuops = insertwaitcnts(lin.src)
 
     # labels + encode
     pc = 0
