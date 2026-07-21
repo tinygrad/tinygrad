@@ -358,6 +358,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
+    elif device == "METAL": atomic_arg = "atomic_fetch_add_explicit((device atomic_float*){0}, {1}, memory_order_relaxed);"
     else: raise NotImplementedError(f"no atomics for device {device}")
     atomic = UOp(Ops.CUSTOM, src=(grad_weight.index(local_token_id, j_idx), grad_val), arg = atomic_arg)
     return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
