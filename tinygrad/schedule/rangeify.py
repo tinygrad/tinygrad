@@ -19,7 +19,8 @@ import sys
 sys.setrecursionlimit(10000)
 
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
-  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
+  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and (FLOAT16 or getenv("OPENPILOT_MIXED_PRECISION")):
+    x, after = x.src[0], after.cast(dtypes.float)
   while True:
     if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: x, after = x.src[0], after.reshape(x.src[0].shape)

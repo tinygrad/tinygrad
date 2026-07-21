@@ -1,6 +1,6 @@
 import math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, UOp
+from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
@@ -113,11 +113,24 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
+  ast_key = s.ast.key.hex()
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
-  if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
+  disabled_asts = set(getenv("BEAM_DISABLE_AST", "").split(","))-{""}
+  if ast_key not in disabled_asts and not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
     for o in val[len(s.applied_opts):]: ret.apply_opt(o)
     return ret
+  if getenv("BEAM_LOG_KEY"): print(f"BEAM_AST_KEY={ast_key}", flush=True)
+  if getenv("BEAM_SKIP_UNCACHED") or ast_key in disabled_asts or ast_key in set(getenv("BEAM_SKIP_AST", "").split(","))-{""}:
+    # Some drivers cannot preempt every invalid candidate. Allow a precisely
+    # identified AST to retain its heuristic schedule while the remaining
+    # model shapes continue through beam search.
+    fallback = s.copy()
+    if not any(u.op is Ops.STAGE for u in fallback.ast.backward_slice):
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      fallback = hand_coded_optimizations(fallback)
+    if ast_key not in disabled_asts and CACHELEVEL >= 1: diskcache_put("beam_search", key, fallback.applied_opts)
+    return fallback
 
   beam: list[tuple[Scheduler, float]] = [(s, float("inf"))]
   seen_libs = set()
