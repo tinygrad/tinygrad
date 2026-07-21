@@ -108,9 +108,6 @@ spec_shared = PatternMatcher([
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 
-  # WAIT until a condition evaluates to true.
-  (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
-
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
