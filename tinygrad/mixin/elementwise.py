@@ -557,9 +557,7 @@ class ElementwiseMixin(CreationMixin):
     # TODO: int pow
     if not base.is_floating_point() and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
       raise RuntimeError("base needs to be float")
-    ret = base.alu(Ops.POW, exponent)
-    # NOTE: pow(int, float) -> int
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
+    return base.alu(Ops.POW, exponent)
 
   def __pow__(self, x: Self | ConstType) -> Self:
     return self.pow(x)
