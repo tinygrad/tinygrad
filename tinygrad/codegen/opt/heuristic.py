@@ -2,7 +2,7 @@ import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, resolve, AxisType
-from tinygrad.codegen.late.coalese import image_valid_dims
+from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
