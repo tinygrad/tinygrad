@@ -196,6 +196,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     if x.dtype == dtypes.weakint: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    # ranges the consumers iterate that this node broadcasts over
+    ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
+             for i in broadcast_axes(x.shape, c.shape)]
+    broadcast_ending_ranges = list(UOp.sink(*ended).ranges)
+    # fusion decision: REDUCE before the broadcast
+    if x.op is Ops.REDUCE: ending_ranges[x] += broadcast_ending_ranges
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -254,6 +260,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
         out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+    ending_ranges[x] += broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
