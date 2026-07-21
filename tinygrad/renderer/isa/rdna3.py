@@ -477,13 +477,12 @@ def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
   return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
 
-buf_slots = {} # hack, belongs in ctx or find cleaner way
 def bufreg(ctx, x:UOp):
   # we need to rewrite the buffer reference to a scalar buffer
   # NOTE: for now assume 1 layer deep ex. AFTER
   buf = x.src[0] if x.src[0].op is Ops.BUFFER else x.src[0].src[0]
   if buf.max_numel() == 1: return None
-  sbuf = UOp.placeholder((1,), x.dtype, buf_slots.setdefault((buf, x.src[1].arg), next(lane_ctr)), AddrSpace.REG).replace(tag=GP_VGPRS)
+  sbuf = UOp.placeholder((1,), x.dtype, ctx.buf_slots.setdefault((buf, x.src[1].arg), next(lane_ctr)), AddrSpace.REG).replace(tag=GP_VGPRS)
   nbase = sbuf if x.src[0].op is Ops.BUFFER else x.src[0].replace(src=(sbuf,) + x.src[0].src[1:])
   nx = nbase.index(0)
   return nx.replace(src=nx.src + x.src[2:])
