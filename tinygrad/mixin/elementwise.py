@@ -18,9 +18,11 @@ class ElementwiseMixin(CreationMixin):
   def ufix(self, x: 'Self|ConstType|UOp') -> Self:
     return x if isinstance(x, type(self)) else self._wrap_uop(self._uop.ufix(x))
 
-  # implemented in OpMixin
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
-    raise NotImplementedError
+    y = self.ufix(y)
+    x, y = (self, y) if not reverse else (y, self)
+    if x.dtype == y.dtype: return x, y
+    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
