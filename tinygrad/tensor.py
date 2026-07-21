@@ -513,7 +513,7 @@ class Tensor(RandMixin):
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
     else: x, y = self.ufix(x)._broadcasted(y)
     out_shape = _broadcast_shape(self.shape, x.shape)
-    return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
+    return self._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 
   # ***** op wrappers *****
 

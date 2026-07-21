@@ -602,8 +602,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       np.testing.assert_allclose((a+a).numpy(), (b+b).numpy(), rtol=1e-7, atol=1e-3)
       np.testing.assert_equal((a+1).numpy(), (b+1).numpy())
       np.testing.assert_equal((1+a).numpy(), (1+b).numpy())
-      np.testing.assert_allclose((a.where(a+a, a)).numpy(), (b.where(b+b, b)).numpy(), rtol=1e-7, atol=1e-3)
-      np.testing.assert_allclose((a.where(1, 0)).numpy(), (b.where(1, 0)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a.bool().where(a+a, a)).numpy(), (b.bool().where(b+b, b)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a.bool().where(1, 0)).numpy(), (b.bool().where(1, 0)).numpy(), rtol=1e-7, atol=1e-3)
 
       # reduce
       np.testing.assert_allclose(a.max().numpy(), b.max().numpy(), rtol=1e-7, atol=1e-3)

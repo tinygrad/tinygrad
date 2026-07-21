@@ -131,7 +131,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIPROCAL:
       return least_upper_float(src[0].dtype)
     case Ops.WHERE:
-      assert src[0].dtype == dtypes.bool, f"where first arg isn't bool, it's {src[0].dtype}"
+      if src[0].dtype != dtypes.bool: raise RuntimeError(f"where cond must be bool, got {src[0].dtype}")
       return promo_dtype(src[1:])
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
