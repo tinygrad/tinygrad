@@ -307,7 +307,7 @@ def _iq3_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, group
   return dot.cast(dtypes.float32) * xd[xidx, group] * dbits.bitcast(dtypes.float16).float() * scale
 
 @functools.cache
-def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
+def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, route_map:UOp, xq:UOp, xd:UOp, lut:UOp,
                           out_features:int, in_features:int, ggml_type:int, routes_per_input:int) -> UOp:
   prefill = out.shape[0] > routes_per_input
   output_tile = 2 if ggml_type == 21 and not prefill else \
@@ -324,7 +324,7 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
   if ggml_type in (21, 23):
     raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
 
-  expert, xidx = sel[route].cast(dtypes.index), route // routes_per_input
+  expert, xidx = sel[route].cast(dtypes.index), route_map[route].cast(dtypes.index) // routes_per_input
 
   def group_dot(group:UOp, output:UOp) -> UOp:
     block, subgroup = group // 8, group % 8
@@ -412,10 +412,12 @@ class ExpertWeights:
       routes_per_input = int(sel.numel()) // input_count
       xq, xd = prepared if prepared is not None else self.prepare(x)
       flat_sel = sel if len(sel.shape) == 1 else sel.flatten().clone()
+      route_map = _identity_routes(str(x.device), int(sel.numel()))
       out = Tensor.empty(int(sel.numel()), self.out_features, dtype=dtypes.float32, device=x.device)
-      out = Tensor.custom_kernel(out, self.weight, flat_sel, xq, xd, _expert_lut(str(x.device), ggml_type),
-        fxn=lambda out,raw,sel,xq,xd,lut:_packed_expert_kernel(out, raw, sel, xq, xd, lut, self.out_features,
-                                                              self.in_features, ggml_type, routes_per_input))[0]
+      out = Tensor.custom_kernel(out, self.weight, flat_sel, route_map, xq, xd, _expert_lut(str(x.device), ggml_type),
+        fxn=lambda out,raw,sel,route_map,xq,xd,lut:_packed_expert_kernel(out, raw, sel, route_map, xq, xd, lut,
+                                                                        self.out_features, self.in_features, ggml_type,
+                                                                        routes_per_input))[0]
       return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
     if self.ggml_type is None: weight = self.weight[sel]
     else:
@@ -430,6 +432,10 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+
+@functools.cache
+def _identity_routes(device:str, count:int) -> Tensor:
+  return Tensor(list(range(count)), dtype=dtypes.int32, device=device).realize()
 
 @functools.cache
 def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int) -> UOp:
