@@ -89,7 +89,7 @@ class TestPickle(unittest.TestCase):
     def make_fake_buffers():
       for _ in range(N):
         Device[Device.DEFAULT].synchronize()
-        yield pickle.PickleBuffer(bytearray(M*4))
+        yield bytearray(M*4)
     pickle.loads(st, buffers=make_fake_buffers())
     self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
     tracemalloc.stop()

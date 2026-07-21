@@ -33,7 +33,7 @@ def _test_single_value(vals, op, dts):
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype, initial_value=np.array([a], dtype=_to_np_dtype(dtype)).tobytes()) for a,dtype in zip(vals, dts)]
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype, initial_value=bytearray(np.array([a], dtype=_to_np_dtype(dtype)).tobytes())) for a,dtype in zip(vals, dts)]
   run_uops([out], [buf]+buf2)
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 

@@ -7,7 +7,7 @@ from test.helpers import needs_second_gpu
 @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
   def setUp(self):
-    self.buf = Buffer(Device.DEFAULT, 10, dtypes.uint8, initial_value=bytes(range(10)))
+    self.buf = Buffer(Device.DEFAULT, 10, dtypes.uint8, initial_value=bytearray(range(10)))
     self.buf_unalloc = Buffer(Device.DEFAULT, 10, dtypes.uint8)
 
   def test_subbuffer(self):
