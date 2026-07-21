@@ -38,7 +38,6 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(((t_bool + 1) + t_i8).dtype, dtypes.int8)
     self.assertEqual(((t_bool + 1) + t_u16).dtype, dtypes.uint16)
     self.assertEqual((Tensor(3) + t_i8).dtype, dtypes.int8)
-    self.assertEqual(Tensor([2], dtype=dtypes.uint8).pad(((1, 1),), value=1).dtype, dtypes.uint8)
     # zeros/ones are full with a python fill value, so they are weak too (jnp.zeros pins float32; deliberate divergence)
     self.assertEqual((Tensor.zeros(3) + t_f16).dtype, dtypes.float16)
 
@@ -47,6 +46,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((t_i8 + 1).dtype, dtypes.int8)
     self.assertEqual((t_f16 + 0.5).dtype, dtypes.float16)
     self.assertEqual((t_f32 + t_f16).dtype, dtypes.float32)
+    self.assertEqual(Tensor([2], dtype=dtypes.uint8).pad(((1, 1),), value=1).dtype, dtypes.uint8)
 
   @unittest.expectedFailure  # TODO: dot of a weak const tensor defers to the other operand once python scalars are weak consts
   def test_dot_defers_weak(self):
