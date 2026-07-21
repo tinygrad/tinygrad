@@ -132,7 +132,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   _, B, H_KV, N, D = cache_kv.shape
   _, H, M, _ = q.shape
   max_kv_len = N if max_kv_len is None else max_kv_len
-  block_n = 128 if max_kv_len <= 8192 else 512
+  block_n = 128 if max_kv_len <= 8192 else 1024
   assert M == 1 and max_kv_len <= N and max_kv_len % block_n == 0
   chunks = max_kv_len // block_n
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
