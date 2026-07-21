@@ -7,10 +7,27 @@ from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
 from tinygrad.helpers import JIT, DEV, GlobalCounters
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.renderer.isa.x86 import X86Renderer
 
 class TestJit(unittest.TestCase):
+  def test_hcq_custom_kernel_ignores_call_buffer(self):
+    from tinygrad.runtime.graph.hcq import HCQGraph
+    if graph_class(Device[Device.DEFAULT]) is not HCQGraph: self.skipTest("HCQ graph required")
+
+    def copy_kernel(out:UOp, src:UOp, _unused:UOp) -> UOp:
+      idx = UOp.range(out.shape[0], 0, AxisType.GLOBAL)
+      return out[idx].store(src[idx] + 1).end(idx).sink(arg=KernelInfo(name="copy_ignoring_buffer"))
+    @TinyJit
+    def f(src:Tensor, unused:Tensor):
+      out0, out1 = Tensor.empty_like(src), Tensor.empty_like(src)
+      return tuple(x.realize() for x in Tensor.custom_kernel(out0, src, unused, fxn=copy_kernel)[:1] +
+                   Tensor.custom_kernel(out1, src, unused, fxn=copy_kernel)[:1])
+
+    src, unused = Tensor.arange(32).clone().realize(), Tensor.ones(32).realize()
+    for _ in range(3):
+      for out in f(src, unused): np.testing.assert_equal(out.numpy(), np.arange(32) + 1)
+
   def test_simple_jit(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
