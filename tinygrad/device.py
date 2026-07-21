@@ -100,8 +100,8 @@ class MultiBuffer:
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
-               uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
+               initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
@@ -173,7 +173,7 @@ class Buffer:
     elif self._base is not None: self._base.allocated_views -= 1
     self._bufs.clear()
   def __reduce_ex__(self, protocol):
-    buf = None
+    buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
