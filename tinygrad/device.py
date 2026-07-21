@@ -101,7 +101,7 @@ class MultiBuffer:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytearray|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
@@ -112,8 +112,8 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(initial_value)))
-        del initial_value[:]
+        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
