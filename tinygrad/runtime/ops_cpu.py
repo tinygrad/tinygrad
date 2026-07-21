@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, os, ctypes, functools, mmap, threading, array
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -15,12 +15,12 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sint, Ops, AxisType, KernelInfo
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 16, 17, 8192
+MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, 8192
 
 def cpu_program(f):
   @functools.cache
   def wrapped(dev):
-    prg = to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
+    with Context(EMULATED_DTYPES=""): prg = to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
     return CPUProgram(dev, prg.arg.function_name, next(x.arg for x in prg.src if x.op is Ops.BINARY), native=True)
   return wrapped
 
@@ -73,7 +73,7 @@ class CPUComputeQueue(HWQueue):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
 
     args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
-    assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments"
+    assert len(args) <= MAX_ARGS, f"CPU programs support at most {len(args)} > {MAX_ARGS} arguments"
 
     for tid in range(1 if lvp else (global_size or (1,))[0]):
       if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
