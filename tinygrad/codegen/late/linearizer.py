@@ -2,7 +2,7 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
@@ -27,7 +27,7 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
-      case Ops.RANGE: priority = 5    # placing RANGE is good
+      case Ops.RANGE | Ops.LOOP: priority = 5  # placing RANGE/LOOP is good
       case Ops.END: priority = -5     # placing END is bad
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
@@ -66,7 +66,7 @@ class CFGContext:
 
       if u.op in (Ops.END, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END): deps[u][u] = None
+      if u.op in (Ops.RANGE, Ops.LOOP, Ops.END): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
@@ -81,13 +81,13 @@ class CFGContext:
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat((Ops.RANGE, Ops.LOOP), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_split_ends(e:UOp):
-  ret = e.src[0]
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret
+  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.op is Ops.LOOP or x.dtype == dtypes.bool)
+  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret.end(*backedge) if len(backedge) else ret
 
 pm_split_ends = PatternMatcher([
   # split the ends

@@ -79,7 +79,12 @@ spec_shared = PatternMatcher([
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
-  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
+  # LOOP is a bound-less loop header, the arg is an axis id like RANGE but without an AxisType
+  (UPat(Ops.LOOP, dtypes.void, name="l"), lambda l: isinstance(l.arg, tuple) and all(isinstance(ra, int) for ra in l.arg)),
+  # END closes RANGEs
+  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:]) or None),
+  # a LOOP-ended END requires a trailing bool condition for the backedge (loop again while true)
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.LOOP), UPat(dtype=dtypes.bool))), lambda: True),
 
   # PARAM
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),

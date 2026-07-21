@@ -35,6 +35,7 @@ renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
+  (UPat(Ops.LOOP, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx[x.src[0]]),
