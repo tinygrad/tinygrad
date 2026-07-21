@@ -5,7 +5,6 @@ from tinygrad.helpers import GlobalCounters, Context
 import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
-DECODE_BLOCK_N = 128
 DECODE_HEAD_TILE = 4
 DECODE_WAVES = 4
 WARP_SIZE = 32
@@ -43,11 +42,12 @@ def wave_reduce_sum(val, lane):
   return val
 
 @functools.cache
-def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp, valid_kv_len:int|UOp, max_kv_len:int) -> UOp:
+def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp, valid_kv_len:int|UOp, max_kv_len:int,
+                                        block_n:int) -> UOp:
   _, B, H_KV, N, D = cache_kv.shape
   _, H, M, _ = q.shape
-  assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % DECODE_BLOCK_N == 0
-  G, CHUNK, DV = H // H_KV, DECODE_BLOCK_N, D // WARP_SIZE
+  assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
+  G, CHUNK, DV = H // H_KV, block_n, D // WARP_SIZE
   assert G % DECODE_HEAD_TILE == 0
   block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
   block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
@@ -131,13 +131,14 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   _, B, H_KV, N, D = cache_kv.shape
   _, H, M, _ = q.shape
   max_kv_len = N if max_kv_len is None else max_kv_len
-  assert M == 1 and max_kv_len <= N and max_kv_len % DECODE_BLOCK_N == 0
-  chunks = max_kv_len // DECODE_BLOCK_N
+  block_n = 128 if max_kv_len <= 8192 else 512
+  assert M == 1 and max_kv_len <= N and max_kv_len % block_n == 0
+  chunks = max_kv_len // block_n
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv,
-    fxn=functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len))[:2]
-  live_chunks = (valid_kv_len+DECODE_BLOCK_N-1)//DECODE_BLOCK_N
+    fxn=functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n))[:2]
+  live_chunks = (valid_kv_len+block_n-1)//block_n
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device)
   return Tensor.custom_kernel(out, partial, stats,
     fxn=functools.partial(_amd_flash_attention_decode_reduce, valid_chunks=live_chunks))[0]

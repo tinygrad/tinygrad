@@ -686,7 +686,7 @@ class TransformerBlock(FFNBlock):
     # TODO: this if statement should be removed and it shouldn't generate extra kernels
     flash_decode = resolve(T == 1) and kv_len is not None and str(x.device).startswith("AMD") and self.config.head_dim == 256
     if flash_decode:
-      decode_len = self.config.max_context
+      decode_len = kv_len if isinstance(kv_len, int) else self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
       from extra.gemm.amd_flash_attention import amd_flash_attention_decode
       attn = amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
@@ -912,9 +912,9 @@ class Transformer:
     if not sample: return logits.argmax(-1, keepdim=True)
     return (logits / temperature - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def forward_recurrent_decode(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, valid_len:int|UOp|None=None,
-                               sample:bool=False) -> Tensor:
-    return self.forward(tokens, start_pos, temperature, kv_len=start_pos+1, valid_len=valid_len, sample=sample)
+  def forward_recurrent_decode(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, decode_len:int,
+                               valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
+    return self.forward(tokens, start_pos, temperature, kv_len=decode_len, valid_len=valid_len, sample=sample)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, use_flash:bool=False,
                valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
@@ -922,13 +922,14 @@ class Transformer:
     if resolve(tokens.shape[1] == 1):
       pos = start_pos.unbind()[1] if isinstance(start_pos, UOp) else start_pos
       if self.has_recurrent_block:
-        key = 0
+        short_decode_len = min(8192, self.max_context)
+        key = short_decode_len if pos < short_decode_len else self.max_context
       else:
         min_bucket = max(1, getenv("DECODE_BUCKET", 256))
         kv_len = key = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
       rollout_jits = self.sample_rollout_jits if sample else self.rollout_jits
       if key not in rollout_jits:
-        rollout_jits[key] = TinyJit(functools.partial(self.forward_recurrent_decode, sample=sample) if self.has_recurrent_block else
+        rollout_jits[key] = TinyJit(functools.partial(self.forward_recurrent_decode, decode_len=key, sample=sample) if self.has_recurrent_block else
                                     functools.partial(self.forward, kv_len=kv_len, sample=sample))
       jit = rollout_jits[key]
     else:
@@ -1096,12 +1097,23 @@ class Transformer:
         Tensor.realize(*states)
         self._init_state_checkpoints()
         self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
-        self.rollout_jits[0] = TinyJit(functools.partial(self.forward_recurrent_decode, sample=False))
-        self.rollout_jits[0].cnt = 1
+        short_decode_len = min(8192, self.max_context)
+        self.rollout_jits[short_decode_len] = TinyJit(
+          functools.partial(self.forward_recurrent_decode, decode_len=short_decode_len, sample=False))
+        self.rollout_jits[short_decode_len].cnt = 1
         self._warming_up = True
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
         next(warm)
         next(warm)
+        # Long-context decode uses a larger attention partition. Capture it before listening so crossing 8K is seamless.
+        if self.max_context > short_decode_len:
+          self.rollout_jits[self.max_context] = TinyJit(
+            functools.partial(self.forward_recurrent_decode, decode_len=self.max_context, sample=False))
+          self.rollout_jits[self.max_context].cnt = 1
+          long_result = self(Tensor([[0]], dtype="int32", device=device),
+                             UOp.variable("start_pos", 0, self.max_context-1).bind(short_decode_len), Tensor([0.0], device=device))
+          assert isinstance(long_result, Tensor)
+          long_result.realize()
         self._warming_up = False
       else:
         for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
@@ -1185,7 +1197,9 @@ class Transformer:
       else: result = self(inp, sp, temp)
       out = result.realize()
       start_pos += actual_nt if self.has_recurrent_block else nt if isinstance(nt, int) else nt.val
-      if not self._warming_up and self.has_recurrent_block and start_pos >= prompt_len and start_pos % chunk_size == 0:
+      # Generated tool calls are reconstructed by clients and are not guaranteed token-identical on the next request.
+      # Keep the reusable checkpoint at the stable prompt boundary instead of overwriting it inside generated output.
+      if not self._warming_up and self.has_recurrent_block and start_pos == prompt_len and start_pos % chunk_size == 0:
         self._save_state_checkpoint(start_pos)
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue

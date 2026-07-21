@@ -59,6 +59,32 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(toks_shape.val if isinstance(toks_shape, UOp) else toks_shape, 3)
     self.assertEqual(captured_inputs[0][1], 0)
 
+  def test_reconstructed_generated_tail_rolls_back_to_prompt_checkpoint(self):
+    model = Transformer(TransformerConfig(**{**TEST_CONFIG.__dict__, "max_context":1024}))
+    model.has_recurrent_block = True
+    captured_starts = []
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      captured_starts.append(start_pos if isinstance(start_pos, int) else start_pos.val)
+      return Tensor([[42]])
+    def save_checkpoint(pos):
+      model._state_checkpoint_pos = pos
+      model._state_checkpoints = [Tensor([0])]
+
+    with patch.object(Transformer, '__call__', mock_call), patch.object(model, '_save_state_checkpoint', save_checkpoint), \
+         patch.object(model, '_restore_state_checkpoint'):
+      gen = model.generate(list(range(128)), chunk_size=128)
+      for _ in range(300): next(gen)
+      self.assertEqual(model._state_checkpoint_pos, 128)
+
+      # Clients reconstruct structured tool calls, so a long generated tail can differ while the prompt remains stable.
+      reconstructed = model._cached_tokens.copy()
+      reconstructed[200] += 1
+      reconstructed.append(10)
+      captured_starts.clear()
+      next(model.generate(reconstructed, chunk_size=128))
+
+    self.assertEqual(captured_starts[0], 128)
+
   def test_two_prompts_schedule_cache(self):
     """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
     from dataclasses import replace
