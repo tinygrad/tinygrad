@@ -33,15 +33,15 @@ def op_wait(gate, a):
 def op_timestamp(gate, a):
   ts = UOp.placeholder((2,), dtypes.uint64, slot=4, addrspace=AddrSpace.REG)  # struct timespec { long s; long ns; }
   call = make_ext_call(libc.dll.clock_gettime, UOp.const(dtypes.int32, 1), ts.index(UOp.const(dtypes.int, 0)), gate=gate)
-  val = ts.after(call).index(UOp.const(dtypes.int, 0).valid(gate)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
-        ts.after(call).index(UOp.const(dtypes.int, 1).valid(gate)).load()
-  idx = (a[0] >> UOp.const(dtypes.uint64, 3)).valid(gate)
-  return make_null_buf(dtypes.uint64).index(idx).store(val)
+  val = (ts.after(call).index(UOp.const(dtypes.int, 0).valid(gate)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
+         ts.after(call).index(UOp.const(dtypes.int, 1).valid(gate)).load()) if not WIN else UOp.const(dtypes.uint64, 0)
+  return make_null_buf(dtypes.uint64).index((a[0] >> UOp.const(dtypes.uint64, 3)).valid(gate)).store(val)
 
-def op_exec(gate, a):
-  return UOp(Ops.CALL, src=(*a, gate))
+def op_exec(gate, a): return UOp(Ops.CALL, src=(*a, gate))
 
-def op_quit(gate, a): return UOp(Ops.CUSTOM, dtypes.void, (gate,), arg="if ({0}) return;")
+def op_quit(gate, a):
+  fn = getattr(getattr(ctypes, "windll").kernel32, "ExitThread") if WIN else getattr(libc.dll, "pthread_exit")
+  return make_ext_call(fn, UOp.const(dtypes.uint32 if WIN else dtypes.uint64, 0), gate=gate)
 
 handlers = {CpuOp.SIGNAL: op_signal, CpuOp.WAIT: op_wait, CpuOp.TIMESTAMP: op_timestamp, CpuOp.EXEC: op_exec, CpuOp.QUIT: op_quit}
 
@@ -50,7 +50,6 @@ def cpu_worker(ring_size=32768, args_cnt=3):
   ring = make_placeholder("CPU", ring_size, dtypes.uint64, name="ring", unique=False)
   head = UOp.placeholder((1,), dtypes.uint64, slot=3, addrspace=AddrSpace.REG)[0].set(0)
 
-  # the top loop is effectively infinite (QUIT returns out of it); the head initialization remains outside the loop.
   loop = UOp.range(2**31-1, 1, AxisType.LOOP, dtype=dtypes.int)
   head_i, tail_i = head.after(loop), tail.after(loop)
 
@@ -68,7 +67,8 @@ def cpu_worker(ring_size=32768, args_cnt=3):
   return advance.barrier().end(loop).sink(arg=KernelInfo(name="cpu_worker"), tag=1)
 
 def build_worker(ring_size:int, renderer) -> tuple[UOp, UOp]:
-  return hcq_compile_program(cpu_worker(ring_size), ClangRenderer(renderer.target), "cpu_worker")
+  worker_renderer = renderer if isinstance(renderer, (ClangRenderer, CPULLVMRenderer)) else ClangRenderer(renderer.target)
+  return hcq_compile_program(cpu_worker(ring_size), worker_renderer, "cpu_worker")
 
 def cpu_ext_buf(addr:int) -> Buffer: return Buffer("CPU", 1, dtypes.uint8, options=BufferSpec(external_ptr=addr), preallocate=True)
 def cpu_sym_buf(b:UOp) -> Buffer|None:
@@ -126,7 +126,8 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if LVP: lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
+      if LVP and lib.startswith(libc.ELFMAG.encode()):
+        lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
       self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
@@ -138,7 +139,6 @@ class CPUProgram(HCQProgram):
         CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
       else:
         # msync should be a universal POSIX way to do this
-        from tinygrad.runtime.autogen import libc
         libc.msync(ctypes.c_void_p(mv_address(self.mem)), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))

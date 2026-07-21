@@ -1,12 +1,12 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-import sys, struct, functools
+import struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
-from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
+from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target, WIN
 
 # ***** X86 Ops *****
 

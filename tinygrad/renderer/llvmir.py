@@ -1,11 +1,11 @@
-import math, struct, sys
+import math, struct
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, partition, Target, CPU_COUNT, getenv, OSX
+from tinygrad.helpers import prod, partition, Target, CPU_COUNT, getenv, OSX, WIN
 
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
@@ -72,7 +72,17 @@ def render_gated_load(ctx, x:UOp, idx:UOp, alt:UOp, mask:UOp) -> str:
                     _render_load(ctx, x, idx, f"{value}_yes"), f"  br label {value}_exit", f"{label}_exit:",
                     f"  {value} = phi {ldt(x.dtype, x.max_numel())} [{value}_yes, {value}_load], [{ctx[alt]}, {value}_entry]"))
 
+def render_call(ctx, x:UOp) -> str:
+  label, fn, gate = ctx[x][1:], x.src[0], x.src[-1]
+  args = ", ".join(f"{'ptr' if u.addrspace not in {None, AddrSpace.ALU} else ldt(u.dtype, u.max_numel())} {ctx[u]}" for u in x.src[1:-1])
+  cast = [] if fn.addrspace is AddrSpace.GLOBAL else [f"  {ctx[x]} = inttoptr {ldt(fn.dtype)} {ctx[fn]} to ptr"]
+  callee = ctx[fn] if fn.addrspace is AddrSpace.GLOBAL else ctx[x]
+  call_abi = " win64cc" if WIN else ""
+  return "\n".join((f"  br i1 {ctx[gate]}, label %call_{label}, label %call_exit_{label}", f"call_{label}:",
+                    *cast, f"  call{call_abi} void {callee}({args})", f"  br label %call_exit_{label}", f"call_exit_{label}:"))
+
 base_rewrite = PatternMatcher([
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True, name="x"), render_call),
   # memory load/store
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
@@ -155,11 +165,13 @@ class LLVMRenderer(Renderer):
     kernel: list[str] = []
     vc, wait_count = -1, 0
 
-    volatile = {u for u in uops if u.op is Ops.LOAD and u.arg == "volatile"}
-    waits = [u for u in uops if u.op is Ops.WAIT]
-    wait_body = {w:[u for u in uops if u in w.src[0].backward_slice_with_self and
-                    any(x in volatile for x in u.backward_slice_with_self) and u.op is not Ops.AFTER and
-                    not (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype))] for w in waits}
+    def get_wait_body(w:UOp) -> list[UOp]:
+      fresh:set[UOp] = set()
+      for u in w.src[0].toposort(gate=lambda u: u.op is not Ops.AFTER):
+        if (u.op is Ops.LOAD and u.arg == "volatile") or any(s in fresh for s in u.src): fresh.add(u)
+      return [u for u in uops if u in fresh and not (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype))]
+
+    wait_body = {w:get_wait_body(w) for w in uops if w.op is Ops.WAIT}
     deferred = {u for body in wait_body.values() for u in body}
 
     local_args: list[str] = []
@@ -215,7 +227,7 @@ class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
   global_max = (CPU_COUNT.value, 0, 0)
-  abi = 'win64cc' if sys.platform == 'win32' else None
+  abi = 'win64cc' if WIN else None
   args_buf = True    # match ClangRenderer's ABI so CPU runtime can call both uniformly
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))

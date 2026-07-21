@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools, ctypes
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, WIN
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, CallInfo, graph_rewrite, track_rewrites, GroupOp
@@ -67,7 +67,8 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
 # 0.1. external C calls
 
 def sym_addr(sym:str) -> int:
-  addr = ctypes.cast(getattr(ctypes.CDLL(None), sym), ctypes.c_void_p).value
+  lib = getattr(ctypes, "windll").kernel32 if WIN and sym == "ExitThread" else ctypes.CDLL(None)
+  addr = ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value
   assert addr is not None, f"can't resolve symbol {sym}"
   return addr
 
