@@ -313,7 +313,10 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, route_map:UOp, xq:UOp, xd:U
   output_tile = 2 if ggml_type == 21 and not prefill else \
     8 if ggml_type == 21 else 4
   wave_count = 2 if prefill else 1
-  route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // (output_tile * wave_count), 1)
+  if prefill and ggml_type == 21:
+    output_block, route = UOp.range(out_features // (output_tile * wave_count), 0), UOp.range(out.shape[0], 1)
+  else:
+    route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // (output_tile * wave_count), 1)
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
   lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
   wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.index, 0)
@@ -437,13 +440,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
 def _identity_routes(device:str, count:int) -> Tensor:
   return Tensor(list(range(count)), dtype=dtypes.int32, device=device).realize()
 
-@functools.cache
-def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int) -> UOp:
-  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
-  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
-  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
-  ready = UOp.group(values.after(outer)[lane].store(x[outer, lane]),
-                    indices.after(outer)[lane].store(lane.cast(dtypes.int32))).barrier()
+def _topk_256_sort(values:UOp, indices:UOp, next_values:UOp, next_indices:UOp, ready:UOp, lane:UOp) -> tuple[UOp, UOp, UOp]:
   for size in (2, 4, 8, 16, 32, 64, 128, 256):
     for stride in (128, 64, 32, 16, 8, 4, 2, 1)[9-size.bit_length():]:
       partner = lane ^ stride
@@ -452,13 +449,54 @@ def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int) -> UOp:
       a_first = (a_value < b_value) | (a_value.eq(b_value) & (a_index > b_index))
       want_first = (lane & stride).eq(0).eq((lane & size).eq(0))
       take_a = want_first.eq(a_first)
-      ready = UOp.group(values.after(ready)[lane].store(take_a.where(a_value, b_value)),
-                        indices.after(ready)[lane].store(take_a.where(a_index, b_index))).barrier()
+      ready = UOp.group(next_values.after(ready)[lane].store(take_a.where(a_value, b_value)),
+                        next_indices.after(ready)[lane].store(take_a.where(a_index, b_index))).barrier()
+      values, next_values, indices, next_indices = next_values, values, next_indices, indices
+  return values, indices, ready
+
+@functools.cache
+def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int) -> UOp:
+  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
+  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
+  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
+  next_values = UOp.placeholder((256,), x.dtype, 2, addrspace=AddrSpace.LOCAL)
+  next_indices = UOp.placeholder((256,), dtypes.int32, 3, addrspace=AddrSpace.LOCAL)
+  ready = UOp.group(values.after(outer)[lane].store(x[outer, lane]),
+                    indices.after(outer)[lane].store(lane.cast(dtypes.int32))).barrier()
+  values, indices, ready = _topk_256_sort(values, indices, next_values, next_indices, ready, lane)
   valid = lane < k
   src = 256 - k + lane
   stores = (out[outer, lane.valid(valid)].store(values.after(ready)[src]),
             sel[outer, lane.valid(valid)].store(indices.after(ready)[src]))
   return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="topk_256", opts_to_apply=()))
+
+@functools.cache
+def _biased_sigmoid_topk_kernel(out:UOp, sel:UOp, x:UOp, bias:UOp, k:int, normalize:bool) -> UOp:
+  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
+  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
+  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
+  next_values = UOp.placeholder((256,), x.dtype, 2, addrspace=AddrSpace.LOCAL)
+  next_indices = UOp.placeholder((256,), dtypes.int32, 3, addrspace=AddrSpace.LOCAL)
+  score = x[outer, lane].sigmoid() + bias[lane]
+  ready = UOp.group(values.after(outer)[lane].store(score),
+                    indices.after(outer)[lane].store(lane.cast(dtypes.int32))).barrier()
+  _, indices, ready = _topk_256_sort(values, indices, next_values, next_indices, ready, lane)
+  valid = lane < k
+  index = indices.after(ready)[(256 - k + lane).valid(valid)]
+  prob = x[outer, index.cast(dtypes.index)].sigmoid()
+  if normalize:
+    prob = prob / sum((x[outer, indices.after(ready)[256-k+i].cast(dtypes.index)].sigmoid() for i in range(k)),
+                      UOp.const(x.dtype, 0))
+  stores = (out[outer, lane.valid(valid)].store(prob), sel[outer, lane.valid(valid)].store(index))
+  return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="biased_sigmoid_topk_256", opts_to_apply=()))
+
+def biased_sigmoid_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, Tensor]:
+  assert x.shape[-1] == bias.shape[0] == 256
+  outer = int(x.numel()) // 256
+  values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
+  indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
+  return tuple(Tensor.custom_kernel(values, indices, x.contiguous(), bias.contiguous(),
+    fxn=lambda out,sel,x,bias:_biased_sigmoid_topk_kernel(out, sel, x, bias, k, normalize))[:2])  # type: ignore[return-value]
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
@@ -582,10 +620,15 @@ class FFNBlock:
         if self.ffn_gate_exps.ggml_type in (14, 21, 23) and str(h.device).startswith("AMD") else None
       logits = self.ffn_gate_inp(x, prepared)
       if hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-        probs = probs.gather(-1, sel)
-        if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+        if logits.shape[-1] == 256 and str(logits.device).startswith("AMD"):
+          probs, sel = biased_sigmoid_topk(logits, self.exp_probs_b["bias"], self.config.num_experts_per_tok,
+                                           self.config.norm_topk_prob)
+          probs, sel = probs.reshape(*logits.shape[:-1], -1), sel.reshape(*logits.shape[:-1], -1)
+        else:
+          probs = logits.sigmoid()
+          _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+          probs = probs.gather(-1, sel)
+          if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
       else:
         vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
         probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)

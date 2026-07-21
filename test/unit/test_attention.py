@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes
+from tinygrad import Device, Tensor, dtypes
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
@@ -204,13 +204,15 @@ class TestPairwiseTopk(unittest.TestCase):
 
   def test_256_experts_matches_numpy(self):
     rng = np.random.default_rng(42)
-    data = rng.standard_normal((4, 3, 256), dtype=np.float32)
+    data = rng.standard_normal((256, 256) if Device.DEFAULT.startswith("AMD") else (4, 3, 256), dtype=np.float32)
     # Include ties crossing wave boundaries to cover deterministic expert selection.
-    data[:, :, [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
-    vals, sel = pairwise_topk(Tensor(data), 8)
-    expected = np.stack([[np.lexsort((-np.arange(256), row))[-8:] for row in batch] for batch in data])
-    np.testing.assert_equal(sel.numpy(), expected)
-    np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
+    data[..., [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
+    expected = np.apply_along_axis(lambda row:np.lexsort((-np.arange(256), row))[-8:], -1, data)
+    x = Tensor(data)
+    for _ in range(5 if Device.DEFAULT.startswith("AMD") else 1):
+      vals, sel = pairwise_topk(x, 8)
+      np.testing.assert_equal(sel.numpy(), expected)
+      np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
 
 if __name__ == '__main__':
   unittest.main()
