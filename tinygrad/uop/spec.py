@@ -221,7 +221,6 @@ spec_program = PatternMatcher([
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
-
 ])+spec_shared
 
 spec_hcq = PatternMatcher([

@@ -15,7 +15,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sint, Ops, AxisType, KernelInfo
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, 8192
+MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
 def cpu_program(f):
   @functools.cache
@@ -36,13 +36,14 @@ def wait_prog():
 
 @cpu_program
 def timestamp_prog():
-  out, fn = UOp.param(0, dtypes.uint64, (1,)), UOp.param(1, dtypes.uint64, (1,))
-  if WIN: return out.index(UOp.const(dtypes.int, 0)).store(UOp.const(dtypes.uint64, 0))
-  ts = UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
-  call = UOp(Ops.CALL, src=(fn.index(UOp.const(dtypes.int, 0)).load(), UOp.const(dtypes.int, 1), ts.index(UOp.const(dtypes.int, 0))))
-  val = ts.after(call).index(UOp.const(dtypes.int, 0)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
-        ts.after(call).index(UOp.const(dtypes.int, 1)).load()
-  return out.index(UOp.const(dtypes.int, 0)).store(val)
+  if WIN: val = UOp.const(dtypes.uint64, 0)
+  else:
+    fn = UOp.param(1, dtypes.uint64, (1,))
+    ts = UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
+    call = UOp(Ops.CALL, src=(fn.index(UOp.const(dtypes.int, 0)).load(), UOp.const(dtypes.int, 1), ts.index(UOp.const(dtypes.int, 0))))
+    val = ts.after(call).index(UOp.const(dtypes.int, 0)).load() * UOp.const(dtypes.uint64, 1_000_000_000) + \
+          ts.after(call).index(UOp.const(dtypes.int, 1)).load()
+  return UOp.param(0, dtypes.uint64, (1,)).index(UOp.const(dtypes.int, 0)).store(val)
 
 @cpu_program
 def quit_prog():
@@ -108,17 +109,17 @@ class CPUProgram(HCQProgram):
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
-      self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(self.mem, lib, len(lib))
+      self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(self.addr, lib, len(lib))
       ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
       proc = ctypes.windll.kernel32.GetCurrentProcess()
-      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.mem), ctypes.c_size_t(len(lib)))
-      self.fxn = ctypes.CFUNCTYPE(None)(self.mem)
-      self.addr = self.mem
+      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(addr), ctypes.c_size_t(len(lib)))
+      self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
     else:
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
+      self.addr = mv_address(self.mem)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
       if LVP: lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
@@ -129,21 +130,19 @@ class CPUProgram(HCQProgram):
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if CPUProgram.rt_lib is not None:
-        CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      if CPUProgram.rt_lib is not None: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(lib)))
       else:
         # msync should be a universal POSIX way to do this
         from tinygrad.runtime.autogen import libc
-        libc.msync(ctypes.c_void_p(mv_address(self.mem)), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
+        libc.msync(ctypes.c_void_p(self.addr), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
-      self.addr = mv_address(self.mem)
+      self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
 
     super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
-    if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
+    if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUAllocator(HCQAllocator):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
