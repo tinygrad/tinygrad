@@ -1,6 +1,6 @@
 import unittest, pickle, types, tracemalloc
 import numpy as np
-from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp
 
@@ -85,7 +85,10 @@ class TestPickle(unittest.TestCase):
     st = pickle.dumps(ts, protocol=5, buffer_callback=lambda pb: pb.release())
     self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
     tracemalloc.reset_peak()
-    def make_fake_buffers(): yield from (pickle.PickleBuffer(bytearray(M*4)) for _ in range(N))
+    def make_fake_buffers():
+      for _ in range(N):
+        Device[Device.DEFAULT].synchronize()
+        yield pickle.PickleBuffer(bytearray(M*4))
     pickle.loads(st, buffers=make_fake_buffers())
     self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
     tracemalloc.stop()
