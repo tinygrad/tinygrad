@@ -167,8 +167,7 @@ class Buffer:
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
       for dev, mb in self._bufs.items():
-        target = Device[dev]
-        if dev != self.device and (not hasattr(self._buf, "mappings") or target not in self._buf.mappings): target.allocator._unmap(mb)
+        if dev != self.device: Device[dev].allocator._unmap(mb)
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     self._bufs.clear()

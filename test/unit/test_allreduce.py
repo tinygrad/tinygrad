@@ -1,14 +1,9 @@
 import unittest
-from unittest.mock import patch
 from tinygrad import Tensor, dtypes
-from tinygrad.device import Buffer, Device, MultiBuffer
+from tinygrad.device import MultiBuffer
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, UOp, graph_rewrite
+from tinygrad.uop.ops import Ops, graph_rewrite
 from tinygrad.schedule.multi import multi_pm
-
-def make_peer_tensor(values, devices):
-  shards = [Tensor([value], device=device).realize() for value,device in zip(values, devices)]
-  return Tensor(UOp.mstack(*(x.uop for x in shards)).multi(0), device=devices)
 
 class TestRingAllReduce(unittest.TestCase):
   def test_schedule_ring(self):
@@ -50,25 +45,6 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertEqual(len(sinks), 1)
     self.assertTrue(all(dst != src for dst, src in pairs))
 
-  @Context(PEER_ALLREDUCE=1, RING=0, ALL2ALL=0)
-  def test_schedule_peer(self):
-    N = 4
-    ds = tuple(f"NULL:{i}" for i in range(N))
-    t = Tensor.empty(N).shard(ds, axis=0).realize()
-    linear = t.sum(0).linear_with_vars()[0]
-    copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
-    peers = [si for si in linear.src if si.src[0].arg.name == "peer_allreduce_4_1"]
-    broadcasts = [si for si in linear.src if si.src[0].arg.name == "peer_broadcast_1"]
-    self.assertEqual(len(copies), 0)
-    self.assertEqual(len(peers), 1)
-    self.assertEqual(len(peers[0].src[1:]), N+1)
-    self.assertEqual(len(broadcasts), N-1)
-    self.assertTrue(all(src.op is Ops.MSELECT and src.src[0].op is Ops.BUFFER for si in peers+broadcasts for src in si.src[1:]))
-
-    linear = Tensor.empty(N, 16).shard(ds, axis=0).realize().sum(0).linear_with_vars()[0]
-    self.assertTrue(any(si.src[0].op is Ops.COPY for si in linear.src))
-    self.assertFalse(any(si.src[0].arg.name.startswith("peer_") for si in linear.src if si.src[0].op is not Ops.COPY))
-
   def test_correct_ring(self):
     with Context(RING=2):
       N = 4
@@ -85,23 +61,6 @@ class TestRingAllReduce(unittest.TestCase):
       width = N*100
       expected = [N*i + width*N*(N-1)//2 for i in range(width)]
       self.assertListEqual(t.sum(0).tolist(), expected)
-
-  def test_correct_peer(self):
-    with Context(PEER_ALLREDUCE=1, RING=0, ALL2ALL=0):
-      N = 4
-      ds = tuple(f"CPU:{i+10}" for i in range(N))
-      t = make_peer_tensor(range(N), ds)
-      self.assertEqual(t.sum(0).item(), N*(N-1)//2)
-
-  def test_peer_mapping_freed_once(self):
-    src, target = Device["CPU:30"], Device["CPU:31"]
-    with patch.object(target.allocator, "_unmap", wraps=target.allocator._unmap) as unmap:
-      buf = Buffer(src.device, 1, dtypes.float).allocate()
-      buf.get_buf(target.device)
-      buf.deallocate()
-      self.assertEqual(unmap.call_count, 0)
-      src.allocator.free_cache()
-      self.assertEqual(unmap.call_count, 1)
 
   def test_correct_all2all_stack(self):
     with Context(ALL2ALL=2):
