@@ -2262,7 +2262,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
-                fxn(*[c_bufs[g] for g in globals_list])
+                args = (ctypes.c_uint64 * len(globals_list))(*[c_bufs[g].value for g in globals_list])
+                fxn(ctypes.c_uint64(ctypes.addressof(args)), ctypes.c_uint64(0))
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
                   sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
