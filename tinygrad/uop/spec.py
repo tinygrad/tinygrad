@@ -97,6 +97,9 @@ spec_shared = PatternMatcher([
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
+  # call inside programs
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True, name="x"), lambda x: x.src[0].dtype is not dtypes.void),
+
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
 
@@ -218,6 +221,7 @@ spec_program = PatternMatcher([
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+
 ])+spec_shared
 
 spec_hcq = PatternMatcher([

@@ -103,6 +103,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   # collect
   memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
+    if u.op is Ops.LOAD and u.arg == "volatile": continue
     # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
@@ -162,4 +163,4 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         full_grp = full_grp[length:]
 
   # apply
-  return sink.substitute(replacements, name="memory coalescing")
+  return sink.substitute(replacements, name="memory coalescing", enter_calls=True)

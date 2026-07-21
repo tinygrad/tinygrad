@@ -17,6 +17,7 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
+  (UPat(Ops.WAIT, src=(UPat.var("cond"),)), lambda ctx,cond: f"while (!({ctx[cond]}));"),
 
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
@@ -53,15 +54,19 @@ base_rewrite = PatternMatcher([
                  f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"({ctx.render_access(bidx)})"),
-  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))),
-   lambda ctx,bidx,var,gate: f"({ctx[gate]}?{ctx.render_access(bidx)}:{ctx[var]})"),
+  (UPat(Ops.LOAD, src=(UPat.var('bidx'),), name="x"), lambda ctx,x,bidx: f"({ctx.render_access(bidx, x.arg == 'volatile')})"),
+  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate")), name="x"),
+   lambda ctx,x,bidx,var,gate: f"({ctx[gate]}?{ctx.render_access(bidx, x.arg == 'volatile')}:{ctx[var]})"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"{ctx.render_access(bidx)} = {ctx[var]};"),
 
   # alu/gep
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
+
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True, name="x"), lambda ctx,x:
+   f"((void(*)({', '.join(ctx.render_dtype(y.dtype) for y in x.src[1:])}))({ctx[x.src[0]]}))" +
+   f"({', '.join(f'({ctx.render_dtype(y.dtype)})({ctx[y]})' for y in x.src[1:])});"),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
@@ -176,7 +181,8 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name) + suffix
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
-  def render_access(self, u:UOp):
+  def render_access(self, u:UOp, volatile=False):
+    if volatile: return f"*(volatile {self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True)})({self[u]})"
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
       return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
     else: return f"*{self[u]}"
@@ -227,7 +233,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG) or \
+        (u.op is Ops.LOAD and (u.src[0].addrspace == AddrSpace.REG or u.arg == "volatile")) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
