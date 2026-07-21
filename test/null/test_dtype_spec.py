@@ -315,6 +315,19 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
 
+  @given(strat.sampled_from(core_dtypes))
+  def test_pad_scalar(self, dt):
+    t = Tensor.ones(4, dtype=dt)
+    assert t.pad(((1, 1),), value=2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert t.pad(((1, 1),), value=2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert t.pad(((1, 1),), value=True).dtype == dt
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_sort(self, dt):
+    # sort pads with dtype.min/max, a scalar of its own dtype
+    assert Tensor([3, 1, 2], dtype=dt).sort()[0].dtype == dt
+    assert Tensor([3, 1, 2], dtype=dt).sort(descending=True)[0].dtype == dt
+
   @given(strat.sampled_from(dtype_floats))
   def test_int_div_int(self, default_float):
     dtypes.default_float = default_float

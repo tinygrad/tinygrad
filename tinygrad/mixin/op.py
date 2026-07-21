@@ -284,8 +284,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
     base = MovementMixin.pad(X, pads)
     if value == 0: return base
-    if value is not Invalid: base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
-    return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, base.const_like(value))
+    return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, value)
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     # shrink first for negative pads, then wrap the non-negative remainder
