@@ -112,7 +112,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if LVP else CPUArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 256)
+    super().__init__(LVPArgsState if LVP else CPUArgsState, dev, name, kernargs_alloc_size=1024)
 
   @suppress_finalizing
   def __del__(self):

@@ -296,11 +296,11 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   dt = dtypes.uint64 if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.GLOBAL else x.dtype
   args_buf_reg, runtime_reg = (RCX, RDX) if sys.platform == "win32" else (RDI, RSI)
-  if x.op is Ops.SPECIAL or x.arg.name == "core_id": src = (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(runtime_reg,)),)
-  else:
-    off = dict(ISARenderer.param_layout([u for u in ctx.func_args if u.op is Ops.PARAM and u.arg.name != "core_id"])[0])[x]
-    src = (def_reg(dtypes.uint64, args_buf_reg), UOp(Ops.NOOP), imm(dtypes.int8 if off <= 127 else dtypes.int32, off), imm(dtypes.uint8, dt.itemsize))
-  return x.ins(X86Ops.MOV, dtype=dt, src=src)
+  if x.op is Ops.SPECIAL or x.arg.name == "core_id":
+    return x.ins(X86Ops.MOV, dtype=dt, src=(x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(runtime_reg,)),))
+  off = dict(ISARenderer.param_layout([u for u in ctx.func_args if u.op is Ops.PARAM and u.arg.name != "core_id"])[0])[x]
+  return x.ins(X86Ops.MOV, dtype=dt, src=(def_reg(dtypes.uint64, args_buf_reg), UOp(Ops.NOOP),
+                                          imm(dtypes.int8 if off <= 127 else dtypes.int32, off), imm(dtypes.uint8, dt.itemsize)))
 
 GPR_DEST_OPS = {X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,
                  X86Ops.VMOVDm, X86Ops.VMOVQm}
