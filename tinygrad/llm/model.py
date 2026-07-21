@@ -1084,7 +1084,7 @@ class Transformer:
       direct_capture = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
 
     # Recurrent prefill has one fixed padded shape with symbolic valid length.
-    recurrent_chunk = min(chunk_size, 128)
+    recurrent_chunk = min(chunk_size, 256)
     warm_len = min(recurrent_chunk if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
     if warm_len > 0:
       if direct_capture:
@@ -1153,7 +1153,7 @@ class Transformer:
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int=256, temperature:float=0.0):
-    if self.has_recurrent_block: chunk_size = min(chunk_size, 128)
+    if self.has_recurrent_block: chunk_size = min(chunk_size, 256)
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported

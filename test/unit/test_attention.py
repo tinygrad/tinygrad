@@ -202,5 +202,15 @@ class TestPairwiseTopk(unittest.TestCase):
         self.assertEqual(set(sel.numpy()[b, t].tolist()), expected)
         np.testing.assert_allclose(vals.numpy()[b, t], data[b, t][sel.numpy()[b, t]])
 
+  def test_256_experts_matches_numpy(self):
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((4, 3, 256), dtype=np.float32)
+    # Include ties crossing wave boundaries to cover deterministic expert selection.
+    data[:, :, [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
+    vals, sel = pairwise_topk(Tensor(data), 8)
+    expected = np.stack([[np.lexsort((-np.arange(256), row))[-8:] for row in batch] for batch in data])
+    np.testing.assert_equal(sel.numpy(), expected)
+    np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
+
 if __name__ == '__main__':
   unittest.main()
