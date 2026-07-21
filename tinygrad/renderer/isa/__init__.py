@@ -15,13 +15,14 @@ class Register:
 @dataclass(frozen=True)
 class VRegister:
   name: str
-  width: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
+  width: int = 1
+  alignment: int = 1
   parent: VRegister|None = None
   pos: int|None = None
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
-  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self.width, self._cons, self, i)
+  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self._cons, self.width, self.alignment, self, i)
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.NOOP, Ops.AFTER, Ops.END}: return rdefs(u.src[0])
@@ -37,8 +38,8 @@ class IselContext:
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
-  def vreg(self, cons:tuple[Register, ...], width:int=1) -> VRegister:
-    return VRegister(f"vr{next(self.reg_n)}", width, cons if isinstance(cons, tuple) else (cons,))
+  def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
+    return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
 @dataclass
 class PreRegAllocContext:

@@ -158,7 +158,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if x.addrspace is AddrSpace.ALU:
     val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2),))
+  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16

@@ -42,7 +42,7 @@ class LinearScanRegallocContext:
     def _inside(a:VRegister, b:VRegister): return lis[a][0] <= lis[b][-1] and lis[a][-1] >= lis[b][0]
     def _isfree(v:VRegister, block:list[Register,...]) -> bool: return all(not _inside(v,bv) for r in block if r in vmap for bv in vmap[r])
     for v in vregs:
-      candidates: list[tuple[Register,...]] = [v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1)]
+      candidates: list[tuple[Register,...]] = [v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1) if v._cons[i].index % v.alignment == 0]
       if (block := next((b for b in candidates if _isfree(v, b)), None)):
         self.pmap[v] = block
         for r in block: vmap.setdefault(r, []).append(v)
