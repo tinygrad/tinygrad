@@ -6,7 +6,6 @@ import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
 DECODE_HEAD_TILE = 4
-DECODE_WAVES = 4
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N = 2, 2
@@ -48,10 +47,13 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   _, H, M, _ = q.shape
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DV = H // H_KV, block_n, D // WARP_SIZE
+  # Short contexts need more waves to fill the GPU. Long contexts already expose enough chunk-level parallelism, and one
+  # wave avoids the LDS partial merge while giving each workgroup a contiguous KV range to stream.
+  decode_waves = 4 if max_kv_len <= 8192 else 1
   assert G % DECODE_HEAD_TILE == 0
   block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
   block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
-  lane, wave = UOp.range(WARP_SIZE, 2, AxisType.LOCAL), UOp.range(DECODE_WAVES, 3, AxisType.LOCAL)
+  lane, wave = UOp.range(WARP_SIZE, 2, AxisType.LOCAL), UOp.range(decode_waves, 3, AxisType.LOCAL)
   head_group = block_bhkv % (G//DECODE_HEAD_TILE)
   bhkv = block_bhkv // (G//DECODE_HEAD_TILE)
   b, kv_head = bhkv // H_KV, bhkv % H_KV
@@ -63,8 +65,8 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   init = UOp.group(acc.store(acc.const_like(0)), row_max.store(row_max.const_like(-math.inf)), row_sum.store(row_sum.const_like(0)))
   acc, row_max, row_sum = acc.after(init), row_max.after(init), row_sum.after(init)
 
-  offset = UOp.range(CHUNK//DECODE_WAVES, 100, AxisType.REDUCE)
-  key = block_n*CHUNK + wave*(CHUNK//DECODE_WAVES) + offset
+  offset = UOp.range(CHUNK//decode_waves, 100, AxisType.REDUCE)
+  key = block_n*CHUNK + wave*(CHUNK//decode_waves) + offset
   valid = key < valid_kv_len
   kvals = tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims)
   vvals = tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims)
@@ -80,8 +82,8 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   update = UOp.group(*updates).end(offset)
   acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
 
-  partial_acc = UOp.placeholder((DECODE_HEAD_TILE, DECODE_WAVES, D), dtypes.float, slot=3, addrspace=AddrSpace.LOCAL)
-  partial_stats = UOp.placeholder((DECODE_HEAD_TILE, DECODE_WAVES, 2), dtypes.float, slot=4, addrspace=AddrSpace.LOCAL)
+  partial_acc = UOp.placeholder((DECODE_HEAD_TILE, decode_waves, D), dtypes.float, slot=3, addrspace=AddrSpace.LOCAL)
+  partial_stats = UOp.placeholder((DECODE_HEAD_TILE, decode_waves, 2), dtypes.float, slot=4, addrspace=AddrSpace.LOCAL)
   partial_stores = []
   for head in range(DECODE_HEAD_TILE):
     partial_stores += [partial_acc[head, wave, d].store(acc[head, i]) for i,d in enumerate(dims)]
@@ -91,12 +93,13 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   stores = []
   for head in range(DECODE_HEAD_TILE):
     q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
-    wave_max = tuple(partial_stats.after(merged)[head, w, 0] for w in range(DECODE_WAVES))
-    maximum = wave_max[0].maximum(wave_max[1]).maximum(wave_max[2].maximum(wave_max[3]))
-    scales = tuple(((partial_stats.after(merged)[head, w, 0]-maximum)*LOG2E).exp2() for w in range(DECODE_WAVES))
-    denominator = sum((partial_stats.after(merged)[head, w, 1]*scales[w] for w in range(DECODE_WAVES)), UOp.const(dtypes.float, 0))
+    wave_max = tuple(partial_stats.after(merged)[head, w, 0] for w in range(decode_waves))
+    maximum = wave_max[0]
+    for wave_value in wave_max[1:]: maximum = maximum.maximum(wave_value)
+    scales = tuple(((partial_stats.after(merged)[head, w, 0]-maximum)*LOG2E).exp2() for w in range(decode_waves))
+    denominator = sum((partial_stats.after(merged)[head, w, 1]*scales[w] for w in range(decode_waves)), UOp.const(dtypes.float, 0))
     stores += [out[b, q_head, block_n, d.valid(wave.eq(0))].store(
-      sum((partial_acc.after(merged)[head, w, d]*scales[w] for w in range(DECODE_WAVES)), UOp.const(dtypes.float, 0))) for d in dims]
+      sum((partial_acc.after(merged)[head, w, d]*scales[w] for w in range(decode_waves)), UOp.const(dtypes.float, 0))) for d in dims]
     stores += [stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 0].store(maximum),
                stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 1].store(denominator)]
   return UOp.group(*stores).end(lane, wave, block_n, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
