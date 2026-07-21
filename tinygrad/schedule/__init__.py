@@ -110,6 +110,17 @@ def create_schedule(sched_sink:UOp) -> UOp:
       ret = distance_to_precompiled(root)
       assert ret is not None
       return ret
+    path_len: dict[UOp, int] = {}
+    def downstream_path(root:UOp) -> int:
+      stack = [(root, False)]
+      while stack:
+        node, visited = stack.pop()
+        if node in path_len: continue
+        if visited: path_len[node] = 1 + max((path_len[x] for x in children.get(node, [])), default=0)
+        else:
+          stack.append((node, True))
+          stack.extend((x, False) for x in children.get(node, []) if x not in path_len)
+      return path_len[root]
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
     continuation: deque[UOp] = deque()
     overlap_group: set[UOp] = set()
@@ -123,7 +134,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         queue.remove(rk)
       elif overlapping and len(continuation):
         reachable = [x for x in continuation if distance_to_precompiled(x) is not None]
-        rk = min(reachable, key=reachable_distance) if stop_at_precompiled and len(reachable) else continuation[0]
+        rk = min(reachable, key=reachable_distance) if stop_at_precompiled and len(reachable) else max(continuation, key=downstream_path)
         continuation.remove(rk)
       elif len(continuation) and len(queue) and queue[0] in copy_children:
         overlap_group = {x for x in queue if x in copy_children}
@@ -132,7 +143,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         overlap_limit = len(copy_parents[queue[0]])
         overlap_steps = 0
         overlapping = True
-        rk = min(reachable, key=reachable_distance) if stop_at_precompiled else continuation[0]
+        rk = min(reachable, key=reachable_distance) if stop_at_precompiled else max(continuation, key=downstream_path)
         continuation.remove(rk)
       elif len(continuation) and (not len(queue) or queue[0] not in copy_children): rk = continuation.popleft()
       else: rk = queue.popleft()
