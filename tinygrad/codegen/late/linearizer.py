@@ -85,10 +85,9 @@ pm_add_control_flow = PatternMatcher([
 ])
 
 def do_split_ends(e:UOp):
-  # only LOOP and its backedge condition are kept from the non-RANGE srcs (SPECIAL/STACK/CONST srcs are dropped like before)
-  ret, others = e.src[0], tuple(x for x in e.src[1:] if x.op is Ops.LOOP or x.dtype == dtypes.bool)
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret.end(*others) if len(others) else ret
+  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.op is Ops.LOOP or x.dtype == dtypes.bool)
+  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret.end(*backedge) if len(backedge) else ret
 
 pm_split_ends = PatternMatcher([
   # split the ends
