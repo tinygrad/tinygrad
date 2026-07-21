@@ -424,7 +424,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_simple_from_source(self):
     a = Tensor([0., 1., 2.]).realize()
 
-    src = "void test_src(float* restrict a) { a[0] = 1.0; }"
+    src = "void test_src(void *args_buf) { float *a = *(float **)args_buf; a[0] = 1.0; }"
     # TODO: it currently requires a compiler for Ops.BINARY
     from tinygrad.device import Device
     binary = Device[a.device].renderer.compiler.compile(src)
