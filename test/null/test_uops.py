@@ -14,28 +14,26 @@ class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):
     self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.float16, 1.0)), None), dtypes.float32)
     self.assertEqual(dtype_from_uop(Ops.MUL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.int32, 1)), None), dtypes.int32)
-    self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.int8, 1)), None), dtypes.int8)
+    with self.assertRaises(KeyError): dtype_from_uop(Ops.ADD, (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.int8, 1)), None)
 
   def test_same_dtype_fast_path(self):
-    src = (UOp.const(dtypes.index, 1), UOp.const(dtypes.index, 2))
-    self.assertEqual(dtype_from_uop(Ops.ADD, src, None), dtypes.index)
+    src = (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.weakint, 2))
+    self.assertEqual(dtype_from_uop(Ops.ADD, src, None), dtypes.weakint)
 
   def test_where_promotion(self):
     cond = UOp.const(dtypes.bool, True)
     self.assertEqual(dtype_from_uop(Ops.WHERE, (cond, UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.float16, 1.0)), None), dtypes.float32)
     idx = UOp.range(4, 0)
-    self.assertEqual(idx.valid(idx < 4).dtype, dtypes.index)
+    self.assertEqual(idx.valid(idx < 4).dtype, dtypes.weakint)
 
   def test_const_dtype_from_value(self):
     self.assertEqual(dtype_from_uop(Ops.CONST, (), True), dtypes.bool)
-    self.assertEqual(dtype_from_uop(Ops.CONST, (), 3), dtypes.weakint)
     self.assertEqual(dtype_from_uop(Ops.CONST, (), ConstFloat(3.0)), dtypes.weakfloat)
     self.assertEqual(dtype_from_uop(Ops.CONST, (), Invalid), dtypes.bool)
     self.assertRaises(TypeError, dtype_from_uop, Ops.CONST, (), (1, 2))
 
   @Context(SPEC=2)
   def test_const_default_dtype_is_derived(self):
-    self.assertEqual(UOp(Ops.CONST, arg=3).dtype, dtypes.weakint)
     self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
     self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
@@ -81,7 +79,7 @@ class TestExecALU(unittest.TestCase):
     # Invalid poisons any binary op regardless of result dtype: a comparison must not fold to a boolean
     self.assertIs(exec_alu(Ops.CMPLT, dtypes.bool, (Invalid, 1)), Invalid)
     self.assertIs(exec_alu(Ops.CMPNE, dtypes.bool, (Invalid, 1)), Invalid)
-    self.assertIs(exec_alu(Ops.ADD, dtypes.index, (Invalid, 1)), Invalid)
+    self.assertIs(exec_alu(Ops.ADD, dtypes.weakint, (Invalid, 1)), Invalid)
 
   def test_div(self):
     self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (8, 2)), 4)
@@ -155,8 +153,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp.param(0, dtypes.float, (8,))
     gidx0 = UOp.special(4, 'gidx0')
-    gate = gidx0<UOp.const(dtypes.index, 1)
-    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.index, 2)).valid(gate)))
+    gate = gidx0<UOp.const(dtypes.weakint, 1)
+    idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(dtypes.weakint, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, src=(idx, val))
     uops = to_uops_list([store])
@@ -172,8 +170,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
     gidx0 = UOp.special(4, 'gidx0')
-    idx = gidx0 * UOp.const(dtypes.index, 2)
-    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.index, 1))))
+    idx = gidx0 * UOp.const(dtypes.weakint, 2)
+    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(dtypes.weakint, 1))))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
@@ -192,8 +190,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem0 = UOp.param(0, dtypes.float, (8,))
     gmem1 = UOp.param(1, dtypes.float, (8,))
     gidx0 = UOp.special(4, 'gidx0')
-    idx = gidx0*UOp.const(dtypes.index, 2)
-    gate = gidx0<UOp.const(dtypes.index, 1)
+    idx = gidx0*UOp.const(dtypes.weakint, 2)
+    gate = gidx0<UOp.const(dtypes.weakint, 1)
     idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)

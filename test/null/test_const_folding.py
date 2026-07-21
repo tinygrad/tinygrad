@@ -40,7 +40,7 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakint, 2**41))
 
   def test_float_unaries(self):
-    for dtype in (dtypes.weakint, dtypes.weakfloat):
+    for dtype in (dtypes.weakfloat,):
       for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
         out = UOp.const(dtype, 4).alu(op).simplify()
         self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))

@@ -48,7 +48,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
   device = device[0].split(":")[0] if isinstance(device, tuple) else device.split(":")[0]
   if device in {"AMD", "NULL"}: atomic_arg = "if ({2} > {3}) __hip_atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
   else: raise NotImplementedError(f"no atomic max for device {device}")
-  amax_idx = amax_out.reshape((1,)).index(UOp.const(dtypes.index, 0))
+  amax_idx = amax_out.reshape((1,)).index(UOp.const(dtypes.weakint, 0))
   max_val = lds[0].load()
   atomic = UOp(Ops.CUSTOM, dtypes.void, (amax_idx, max_val.bitcast(dtypes.int32), max_val, amax_idx.load()), arg=atomic_arg)
   return atomic.end(tid, wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", opts_to_apply=()))
