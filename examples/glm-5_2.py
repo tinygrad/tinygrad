@@ -48,7 +48,7 @@ class DSAKVCache:
     B, T, d = value.shape
     assert 1 <= B <= self.max_batch, "batch size is greater than max batch"
     assert 1 <= T <= self.max_context, "tokens more than max context"
-    assert 1 <= len(step_t) == len(to_write) == B, f"list values are wrong step_t: {step_t}, {len(step_t)}, to_write: {to_write}, {len(to_write)}, B: {B}"
+    assert 1 <= len(step_t) == len(to_write) == B, f"list values are wrong step_t"
     assert layer < self.layers, "layer is greater than max_layer"
     assert all([s + v <= self.max_context for (s, v) in zip(step_t, to_write)]), "sequence is greater than max_context"
     max_end_point = max([a+b for a, b in zip(step_t, to_write)])
@@ -72,7 +72,7 @@ def precompute_freqs_cis(batch:int, dim: int, end: int, theta: float, device:str
 
 # This does interleaved ROPE, which is slightly different from the
 # half-split(llama) version
-# Exptets x to be of shape (B, S, H, HD)
+# x: (B, S, H, HD)
 def apply_rope(x:Tensor, freqs_cis:Tensor, start_pos: list[int], to_write: list[int]) -> Tensor:
   assert max(to_write) == x.shape[1]
   assert x.shape[-1] % 2 == 0
@@ -304,17 +304,6 @@ class GLMModel():
     x = self.norm(x)
     return self.lm_head(x)
 
-#TODO: try to get rid of this and make own tokenizer with the json
-from tokenizers import Tokenizer
-def load_tokenizer()-> Tokenizer: 
-  return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
-
-# This has total 9 files each approx 50GB
-def load_model(to_load: int = 1):
-  model_tensors: dict[str, Tensor] = {}
-  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
-  return model_tensors
-
 testing_start_layer = 2
 testing_end_layer = 4
 
@@ -344,6 +333,21 @@ config = GLMConfig (
   rope_theta = 800000
 )
 
+replace_map: dict = {
+  "model.": "",
+}
+
+#TODO: try to get rid of this and make own tokenizer with the json
+from tokenizers import Tokenizer
+def load_tokenizer()-> Tokenizer: 
+  return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
+
+# This has total 9 files each approx 50GB
+def load_model(to_load: int = 1):
+  model_tensors: dict[str, Tensor] = {}
+  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
+  return model_tensors
+
 if __name__ == "__main__":
   tokenizer = load_tokenizer()
   model_part_1 = load_model(1)
@@ -354,11 +358,15 @@ if __name__ == "__main__":
 
   model = GLMModel(config)
 
-  input = Tensor([encoded.ids])
-  output = model(input, [0], [len(encoded.ids)])
-  print(output.tolist())
+  # input = Tensor([encoded.ids])
+  # output = model(input, [0], [len(encoded.ids)])
+  # print(output.tolist())
+  #
+  # decoded = tokenizer.decode(encoded.ids)
+  # print(decoded)
 
-  decoded = tokenizer.decode(encoded.ids)
-  print(decoded)
+  print(nn.state.get_state_dict(model).keys())
 
-  # print([x for x in model_part_1.keys() if "layers.0." in x])
+  renamed = {k.replace(pat0, pat1): v for k,v in model_part_1.items() for pat0, pat1 in replace_map.items()}
+
+  print([x for i, x in enumerate(renamed.keys()) if  i <= 500])
