@@ -1,9 +1,15 @@
 import functools, itertools
+from typing import cast
 from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import Invalid, dtypes
 
 # *** allreduce implementation ***
+def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
+  use_all2all = ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1)
+  use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  return use_all2all, use_ring
+
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
@@ -12,8 +18,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
   # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_all2all = (ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
-  use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  use_all2all, use_ring = allreduce_modes(ndev, numel)
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
   # contiguous before we copy it
@@ -93,6 +98,10 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if output is None: output = UOp.const(red.dtype, Invalid, shape=red.shape).clone(device=red.device)
+  if isinstance(buf.device, tuple) and allreduce_modes(len(buf.device), prod(cast(tuple[int, ...], buf.shape)))[0]:
+    ret = handle_allreduce(buf, red, output)
+    assert ret is not None
+    return ret if ret.op is Ops.AFTER and ret.src[0] is output else output.after(output.store(ret.cast(output.dtype)))
   to = output.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)

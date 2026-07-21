@@ -79,10 +79,63 @@ def create_schedule(sched_sink:UOp) -> UOp:
             in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
+    # Continue through one precompiled CALL while COPY consumers wait on another queue, then drain every consumer that
+    # was ready together. A CALL of a LINEAR is the graph-level stage boundary, independent of model and kernel names.
+    def is_copy(parent:UOp) -> bool:
+      call = parent.src[0] if parent.op is Ops.END else parent
+      return call.op is Ops.CALL and call.src[0].op is Ops.COPY
+    copy_parents: dict[UOp, set[UOp]] = {}
+    for parent, childs in children.items():
+      if is_copy(parent):
+        for child in childs: copy_parents.setdefault(child, set()).add(parent)
+    copy_children = set(copy_parents)
+    def is_precompiled(parent:UOp) -> bool:
+      call = parent.src[0] if parent.op is Ops.END else parent
+      return call.op is Ops.CALL and call.src[0].op is Ops.LINEAR
+    linear_distance: dict[UOp, int|None] = {}
+    def distance_to_precompiled(root:UOp) -> int|None:
+      stack = [(root, False)]
+      while stack:
+        node, visited = stack.pop()
+        if node in linear_distance: continue
+        if is_precompiled(node): linear_distance[node] = 0
+        elif visited:
+          distances = [d for x in children.get(node, []) if (d:=linear_distance[x]) is not None]
+          linear_distance[node] = 1 + min(distances) if len(distances) else None
+        else:
+          stack.append((node, True))
+          stack.extend((x, False) for x in children.get(node, []) if x not in linear_distance)
+      return linear_distance[root]
+    def reachable_distance(root:UOp) -> int:
+      ret = distance_to_precompiled(root)
+      assert ret is not None
+      return ret
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
+    continuation: deque[UOp] = deque()
+    overlap_group: set[UOp] = set()
+    overlapping, drain_group, stop_at_precompiled = False, False, False
+    overlap_steps, overlap_limit = 0, 0
     linearized: list[UOp] = []
-    while len(queue):
-      rk = queue.popleft()
+    while len(queue) or len(continuation):
+      ready_group = [x for x in queue if x in overlap_group]
+      if drain_group and len(ready_group):
+        rk = ready_group[0]
+        queue.remove(rk)
+      elif overlapping and len(continuation):
+        reachable = [x for x in continuation if distance_to_precompiled(x) is not None]
+        rk = min(reachable, key=reachable_distance) if stop_at_precompiled and len(reachable) else continuation[0]
+        continuation.remove(rk)
+      elif len(continuation) and len(queue) and queue[0] in copy_children:
+        overlap_group = {x for x in queue if x in copy_children}
+        reachable = [x for x in continuation if distance_to_precompiled(x) is not None]
+        stop_at_precompiled = len(reachable) != 0
+        overlap_limit = len(copy_parents[queue[0]])
+        overlap_steps = 0
+        overlapping = True
+        rk = min(reachable, key=reachable_distance) if stop_at_precompiled else continuation[0]
+        continuation.remove(rk)
+      elif len(continuation) and (not len(queue) or queue[0] not in copy_children): rk = continuation.popleft()
+      else: rk = queue.popleft()
       if rk.op is Ops.LINEAR:
         linearized.extend(rk.src)
       else:
@@ -92,7 +145,16 @@ def create_schedule(sched_sink:UOp) -> UOp:
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0:
+          if x not in copy_children and len(queue) and queue[0] in copy_children: continuation.append(x)
+          else: queue.append(x)
+      if overlapping:
+        overlap_steps += 1
+        if is_precompiled(rk) or not len(continuation) or (not stop_at_precompiled and overlap_steps >= overlap_limit):
+          overlapping, drain_group = False, True
+      if drain_group and not any(x in overlap_group for x in queue):
+        drain_group = False
+        overlap_group.clear()
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
   return UOp(Ops.LINEAR, src=tuple(linearized))
 

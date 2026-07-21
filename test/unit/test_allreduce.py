@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.device import MultiBuffer
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite
 from tinygrad.schedule.multi import multi_pm
 
 class TestRingAllReduce(unittest.TestCase):
@@ -29,6 +29,31 @@ class TestRingAllReduce(unittest.TestCase):
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
       self.assertEqual(len(sinks), 25)
+
+  def test_schedule_all2all_defers_copy_consumer(self):
+    def named_copy(name):
+      def copy(out, src):
+        idx = UOp.range(src.shape[0], 0)
+        return out[idx].store(src[idx]).end(idx).sink(arg=KernelInfo(name=name))
+      return copy
+
+    with Context(ALL2ALL=2):
+      N = 4
+      ds = tuple(f"NULL:{i}" for i in range(N))
+      t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
+      allreduce = (t.sum(0)+1).contiguous()
+      src = Tensor.ones(N*100, device="NULL").contiguous().realize()
+      first = Tensor.custom_kernel(Tensor.empty_like(src), src, fxn=named_copy("local_first"))[0]
+      second = Tensor.custom_kernel(Tensor.empty_like(src), first, fxn=named_copy("local_second"))[0]
+
+      linear = Tensor.schedule_linear(allreduce, second)
+      names = [call.src[0].arg.name if call.src[0].op is Ops.SINK else call.src[0].op.name for call in linear.src]
+      first_allreduce_add = next(i for i,call in enumerate(linear.src)
+                                 if call.src[0].op is Ops.SINK and isinstance(call.device, str) and len(call.src) == N+2)
+      reduce_scatter_copies = [i for i,call in enumerate(linear.src[:first_allreduce_add]) if call.src[0].op is Ops.COPY]
+      self.assertEqual(len(reduce_scatter_copies), N*(N-1))
+      self.assertLess(max(reduce_scatter_copies), names.index("local_second"))
+      self.assertLess(names.index("local_second"), first_allreduce_add)
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):
