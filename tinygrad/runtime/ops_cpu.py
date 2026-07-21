@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, ctypes, functools, mmap, threading, array
+import platform, sys, os, ctypes, functools, mmap, threading, array
 from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -46,48 +46,49 @@ def timestamp_prog():
 
 @cpu_program
 def quit_prog():
-  fn = UOp.param(0, dtypes.uint64, (1,))
-  return UOp(Ops.CALL, src=(fn.index(UOp.const(dtypes.int, 0)).load(), UOp.const(dtypes.uint64, 0)))
+  fn = UOp.param(0, dtypes.uint64, (1 if WIN else 3,))
+  if WIN: return UOp(Ops.CALL, src=(fn.index(UOp.const(dtypes.int, 0)).load(), UOp.const(dtypes.uint64, 0)))
+  sem = UOp.param(1, dtypes.uint64, (1,))
+  close = UOp(Ops.CALL, src=(fn.index(UOp.const(dtypes.int, 2)).load(), sem.index(UOp.const(dtypes.int, 0))))
+  return UOp(Ops.CALL, src=(fn.after(close).index(UOp.const(dtypes.int, 0)).load(), UOp.const(dtypes.uint64, 0)))
 
 @cpu_program
 def worker_prog():
-  state, ring = UOp.param(0, dtypes.uint64, (1,)), UOp.param(1, dtypes.uint64, (RING_SLOTS * CMD_SIZE,))
-  head = UOp.placeholder((1,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)[0].set(0)
+  ring, wait, sem = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,)), UOp.param(1, dtypes.uint64, (1,)), UOp.param(2, dtypes.uint64, (1,))
   loop = UOp.range(2**31-1, 1, AxisType.LOOP, dtype=dtypes.int)
-  head_i, state_i = head.after(loop), state.after(loop)
-  head_val = head_i[0].load(arg="volatile")
-  ready = (state_i.index(UOp.const(dtypes.int, 0)).load(arg="volatile") > head_val).wait().barrier()
-  base = (head_val % UOp.const(dtypes.uint64, RING_SLOTS)) * UOp.const(dtypes.uint64, CMD_SIZE)
+  ready = ((wait.after(loop).index(UOp.const(dtypes.int, 0)).load(arg="volatile") > loop.cast(dtypes.uint64)).wait() if WIN else
+           UOp(Ops.CALL, src=(wait.after(loop).index(UOp.const(dtypes.int, 0)).load(arg="volatile"),
+                              sem.after(loop).index(UOp.const(dtypes.int, 0))))).barrier()
+  base = (loop.cast(dtypes.uint64) % UOp.const(dtypes.uint64, RING_SLOTS)) * UOp.const(dtypes.uint64, CMD_SIZE)
   entry = [ring.after(ready).index(base + UOp.const(dtypes.uint64, i)).load(arg="volatile") for i in range(CMD_SIZE)]
-  call = UOp(Ops.CALL, src=tuple(entry))
-  return head.after(call)[0].store(head_val + UOp.const(dtypes.uint64, 1)).end(loop)
+  return UOp(Ops.CALL, src=tuple(entry)).end(loop)
 
 class CPUComputeQueue(HWQueue):
+  def __init__(self, dev):
+    super().__init__()
+    self.dev = dev
+  def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=prog(self.dev), prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
 
-    args = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
+    args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
     assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments"
 
     for tid in range(1 if lvp else (global_size or (1,))[0]):
       if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
     return self
-  def wait(self, signal, value=0):
-    return self.exec(p:=wait_prog(unwrap(signal.owner)), p.fill_kernargs((signal.base_buf,), (value,)), None, None)
-  def timestamp(self, signal):
-    return self.exec(p:=timestamp_prog(unwrap(signal.owner)),
-                     p.fill_kernargs((signal.base_buf.offset(8, 8), unwrap(signal.owner).fns.offset(0, 8))), None, None)
-  def signal(self, signal, value:sint=0):
-    return self.exec(p:=signal_prog(unwrap(signal.owner)), p.fill_kernargs((signal.base_buf,), (value,)), None, None)
+  def wait(self, signal, value=0): return self._cmd(wait_prog, (signal.base_buf,), (value,))
+  def timestamp(self, signal): return self._cmd(timestamp_prog, (signal.base_buf.offset(8, 8), self.dev.func_table.offset(0, 8)))
+  def signal(self, signal, value:sint=0): return self._cmd(signal_prog, (signal.base_buf,), (value,))
   def _submit(self, dev):
     for off in range(0, len(self._q), CMD_SIZE):
-      prg = self._q[off]
-      entry = [prg.addr, *self._q[off+1:off+CMD_SIZE]]
-      base = (dev.sys_view[0] % RING_SLOTS) * CMD_SIZE
-      dev.ring_view[base:base+CMD_SIZE] = array.array('Q', (int(x) & ((1<<64)-1) for x in entry))
-      dev.sys_view[0] += 1
+      entry = [self._q[off].addr, *self._q[off+1:off+CMD_SIZE]]
+      dev.ring_view[(base:=(dev.ring_pos % RING_SLOTS) * CMD_SIZE):base+CMD_SIZE] = array.array('Q', (int(x) & ((1<<64)-1) for x in entry))
+      dev.ring_pos += 1
+      if WIN: dev.sys_view[0] = dev.ring_pos
+      else: assert libc.sem_post(dev.sem) == 0
 
 class LVPArgsState(CLikeArgsState):
   def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
@@ -162,18 +163,31 @@ class CPUAllocator(HCQAllocator):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
-                     HCQSignal, CPUComputeQueue, arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
-    worker = worker_prog(self)
-    for p in (signal_prog, wait_prog, timestamp_prog, quit_prog): p(self)
-    self.sys = self.allocator.alloc(8, BufferSpec())
+      HCQSignal, functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
+
     self.ring = self.allocator.alloc(RING_SLOTS * CMD_SIZE * 8, BufferSpec())
-    self.fns = self.allocator.alloc(16, BufferSpec())
-    self.sys_view, self.ring_view = self.sys.cpu_view().view(fmt='Q'), self.ring.cpu_view().view(fmt='Q')
-    self.sys_view[0] = 0
-    exit_fn = ctypes.windll.kernel32.ExitThread if sys.platform == "win32" else libc.dll.pthread_exit  # type: ignore[attr-defined]
-    self.fns.cpu_view().view(fmt='Q')[:] = array.array('Q', (0 if WIN else unwrap(ctypes.cast(libc.dll.clock_gettime, ctypes.c_void_p).value),
-                                                            unwrap(ctypes.cast(exit_fn, ctypes.c_void_p).value)))
-    self.worker = threading.Thread(target=worker.fxn, args=(ctypes.c_uint64(self.sys.va_addr), ctypes.c_uint64(self.ring.va_addr)), daemon=True)
+    self.ring_view, self.ring_pos = self.ring.cpu_view().view(fmt='Q'), 0
+
+    if WIN:
+      self.sys = self.allocator.alloc(8, BufferSpec())
+      self.sys_view, sem_addr = self.sys.cpu_view().view(fmt='Q'), 0
+      self.sys_view[0] = 0
+    else:
+      self.sem = libc.sem_open(sem_name:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
+      if (sem_addr:=unwrap(ctypes.cast(self.sem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(sem_name):
+        raise OSError(ctypes.get_errno(), "semaphore")
+      self.sem_buf = HCQBuffer(sem_addr, 1, owner=self)
+
+    # TODO: move to hcq2 infra
+    self.func_table = self.allocator.alloc(32, BufferSpec())
+    self.func_table.cpu_view().view(fmt='Q')[:] = array.array('Q', (0 if WIN else unwrap(ctypes.cast(libc.dll.clock_gettime, ctypes.c_void_p).value),
+      unwrap(ctypes.cast(ctypes.windll.kernel32.ExitThread if WIN else libc.dll.pthread_exit, ctypes.c_void_p).value),  # type: ignore[attr-defined]
+      0 if WIN else unwrap(ctypes.cast(libc.dll.sem_wait, ctypes.c_void_p).value),
+      0 if WIN else unwrap(ctypes.cast(libc.dll.sem_close, ctypes.c_void_p).value)))
+
+    self.worker = threading.Thread(target=worker_prog(self).fxn, args=(ctypes.c_uint64(self.ring.va_addr),
+      ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr)), daemon=True)
     self.worker.start()
 
-  def finalize(self): CPUComputeQueue().exec(p:=quit_prog(self), p.fill_kernargs((self.fns.offset(8, 8),)), None, None).submit(self)
+  def finalize(self):
+    CPUComputeQueue(self)._cmd(quit_prog, (self.func_table.offset(8, 8),) if WIN else (self.func_table.offset(8, 24), self.sem_buf)).submit(self)
