@@ -10,7 +10,7 @@ if __name__ == "__main__":
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
-from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
+from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
 
@@ -69,6 +69,11 @@ def swiglu(x:Tensor, limit:float=7.0, alpha:float=1.702) -> Tensor:
   x_glu = x_glu.clamp(max_=limit)
   x_linear = x_linear.clamp(-limit, limit)
   return (x_glu * (alpha * x_glu).sigmoid()) * (x_linear + 1)
+
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2, dtype=dtypes.float32)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end, dtype=dtypes.float32).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).cast(dtypes.default_float).reshape(1, end, 1, dim//2, 2)
 
 class GPTOSS:
   def __init__(self, dim:int, n_layers:int, n_heads:int, n_kv_heads:int, head_dim:int, n_experts:int, experts_per_tok:int,
