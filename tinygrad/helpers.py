@@ -274,7 +274,6 @@ DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
 @dataclass(frozen=True)
 class Metadata:
   name: str
-  caller: str
   backward: bool = False
   def __hash__(self): return hash(self.name)
   def __str__(self): return self.name + (" bw" if self.backward else "")
