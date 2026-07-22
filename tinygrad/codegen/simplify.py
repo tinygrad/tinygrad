@@ -10,7 +10,7 @@ def flatten_range(r:UOp) -> UOp|None:
   rngs = r.src[off:]
   if not len(rngs): return None
   # ranges in the cond should not be ended
-  backedge = tuple(x for x in rngs if (x.op is Ops.RANGE and not len(x.src)) or x.dtype == dtypes.bool)
+  backedge = tuple(x for x in rngs if x.dtype in (dtypes.void, dtypes.bool))
   return r.replace(src=r.src[:off]+tuple(UOp.sink(*[x for x in rngs if x not in backedge]).ranges)+backedge)
 
 pm_flatten_range = PatternMatcher([

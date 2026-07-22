@@ -48,7 +48,6 @@ class PythonProgram:
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
-    void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.STORE}
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
       pbufs: list[memoryview] = list(bufs)
@@ -57,8 +56,8 @@ class PythonProgram:
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.op not in void_ops and (v.op is not Ops.RANGE or len(v.src))]
-        src_dtypes = [v.dtype for v in u.src if v.op not in void_ops and (v.op is not Ops.RANGE or len(v.src))]
+        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
           if len(u.src) == 3:
@@ -75,7 +74,7 @@ class PythonProgram:
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and not len(u.src)):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
           continue

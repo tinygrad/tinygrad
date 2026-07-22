@@ -1,6 +1,9 @@
 import unittest
 from tinygrad import Tensor, UOp
+from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.uop.ops import KernelInfo
 
 def wait_loop_kernel(C:UOp) -> UOp:
@@ -72,6 +75,7 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
 
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, X86Renderer)), "loops are not supported in LVP and X86")
 class TestWaitLoop(unittest.TestCase):
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
