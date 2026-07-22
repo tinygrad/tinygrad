@@ -90,6 +90,13 @@ class TestValidateOOB(unittest.TestCase):
       to_uops_list([buf.index(r & 15).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r & 31).load(dtype=dtypes.int)])  # 0..31 oob
+      # align masks round down to a multiple of 2^k
+      to_uops_list([buf.index((r & -4).valid(r < 16)).load(dtype=dtypes.int)])  # 0..12 valid
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(r & -2).load(dtype=dtypes.int)])  # 0..100 oob
+      # other masks can't be modeled as mod
+      with self.assertRaisesRegex(RuntimeError, "z3 int AND only supports"):
+        to_uops_list([buf.index(r & 21).load(dtype=dtypes.int)])
 
   def test_max(self):
     with Context(CHECK_OOB=1, SPEC=2):
