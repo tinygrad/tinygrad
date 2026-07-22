@@ -371,10 +371,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return wmma_b + (self.src[2].shape[-1],)
 
       # passthrough ops
-      case Ops.MSELECT:
-        # MSELECT returns one physical shard, not the logical multi-device shape.
-        return self.src[0].shard_shape
-      case Ops.MSTACK | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
 
@@ -1182,9 +1179,6 @@ class ProgramInfo:
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      # Void CUSTOM statements may mutate the buffer addressed by their first argument (for example, atomics).
-      if u.op is Ops.CUSTOM and u.dtype is dtypes.void and len(u.src) and u.src[0].op is Ops.INDEX:
-        if (buf:=u.src[0].src[0].buf_uop).op is Ops.PARAM: outs.append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size

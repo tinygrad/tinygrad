@@ -27,8 +27,6 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
-  # MULTI represents identical physical shards in src[0]; select that backing shard directly.
-  (UPat(Ops.MSELECT, src=(UPat(Ops.MULTI, name="multi"),), name="ms"), lambda multi, ms: multi.src[0].mselect(ms.arg)),
   # move shrink before MSTACK
   (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
   # move MSELECT before movement ops
