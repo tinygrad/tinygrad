@@ -13,7 +13,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, Ops, KernelInfo
+from tinygrad.uop.ops import sint, KernelInfo
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
@@ -57,7 +57,7 @@ class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
     super().__init__()
     self.dev = dev
-  def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=self.dev.progs[prog], prg.fill_kernargs(args, vals), None, None)
+  def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=self.dev.prgs[prog], prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
@@ -171,11 +171,10 @@ class CPUDevice(HCQCompiled):
 
     # TODO: move to hcq2
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
-      self.progs = {f: CPUProgram(self, f.__name__, next(x.arg for x in do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1),
-        ClangRenderer(self.renderer.target)).src if x.op is Ops.BINARY), native=True)
-        for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
+      prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
+      self.prgs = {f: self.runtime(f.__name__, do_to_program(v, ClangRenderer(self.renderer.target)).src[3].arg, native=True) for f,v in prgs.items()}
 
-    self.worker:threading.Thread|None = threading.Thread(target=self.progs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
+    self.worker:threading.Thread|None = threading.Thread(target=self.prgs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
       ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr)), daemon=True)
     self.worker.start()
 
