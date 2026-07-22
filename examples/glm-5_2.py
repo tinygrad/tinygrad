@@ -226,47 +226,25 @@ class GLMMoeGateTopK():
 
     return router_logits, topk_weights, topk_idx
 
-class GLMMoeExperts():
-  def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
-    self.num_experts, self.devices = config.num_exp, devices
-    self.gate_up_proj = Tensor.empty(config.num_exp, 2 * config.moe_intermediate_size, config.dim)
-    self.down_proj = Tensor.empty(config.num_exp, config.dim, config.moe_intermediate_size)
+class GLMMoeExpert():
+  def __init__(self, config: GLMConfig):
+    self.num_experts = config.num_exp
+    self.gate_up_proj = nn.Linear(config.dim, 2 * config.moe_intermediate_size)
+    self.down_proj =  nn.Linear(config.moe_intermediate_size, config.dim)
 
-  # x : (B, S, dim) topk_idx: (B, S, k) topk_weigths: (B, S, k)
-  def __call__(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor) -> Tensor:
-    # One gpu batch
-    # gate, up: (B, S, K, I)
-    # gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose()).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I)
-    # x = (gate.silu() * up).contiguous() # (B, S, K, I)
-    # x = (x.unsqueeze(-2) @ self.down_proj[topk_idx].transpose()).squeeze(-2) # (B, S, K, 1, I) @ (B, S, K, I, dim) => (B, S, K, 1, dim) => (B, S, K, dim)
-    # x = x * topk_weights.unsqueeze(-1) # (B, S, K, dim)
-    # return x.sum(axis=-2) # (B, S, dim)
+  # This call expects that the inputs and weights are already on the right device shard
+  # x : (N, dim) w: (N) 
+  def __call__(self, x: Tensor, w: Tensor) -> Tensor:
+    # gate, up: (N, 2I)
+    gate, up = self.gate_up_proj(x).chunk(2, dim=-1) # gate, up: (N, dim) @ (dim , 2I)
+    x = (gate.silu() * up).contiguous() # (N, I)
+    x = self.down_proj(x) # (N, I) @ (I, dim) => (N, dim)
+    return (x * w.unsqueeze(-1)) # (N, dim)
     
-    # Split experts over GPU'S
-    default_device = self.devices[0]
-    exp_arange = Tensor.zeros(*topk_idx.shape[:-1], self.num_experts) # (B, S, num_exp)
-    exp_map = exp_arange.scatter(-1, topk_idx, 1).bool().permute(2, 0, 1) # (num_exp, B, S)
-    output = Tensor.zeros_like(x)
-    for exp in range(self.num_experts):
-      if not exp_map[exp].any().item(): continue
-
-      shard_device = device_to_load(self.devices, exp)
-      coords = exp_map[exp].nonzero()
-      b, s = coords[:, 0], coords[:, 1]
-      x_exp = x[b, s].to(shard_device) # (num_true, dim)
-      w = ((topk_idx[b, s] == exp) * topk_weights[b,s]).sum(-1).to(shard_device) # (n_true)
-
-      # gate, up: (num_true, 2I)
-      gate, up = (x_exp @ self.gate_up_proj[exp].transpose().to(shard_device)).chunk(2, dim=-1) # gate, up: (num_true, dim) @ (dim , 2I)
-      x_exp = (gate.silu() * up).contiguous() # (num_true, I)
-      x_exp = x_exp @ self.down_proj[exp].transpose().to(shard_device) # (num_true, I) @ (I, dim) => (num_true, dim)
-      x_exp = x_exp * w.unsqueeze(-1) # (num_true, dim)
-      output[b, s] += x_exp.to(default_device)
-    return output # (B, S, dim)
-
 class GLMMoeLayer():
   def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
-    self.experts = GLMMoeExperts(config, devices)
+    self.num_exp, self.devices = config.num_exp, devices
+    self.experts = [GLMMoeExpert(config) for _ in range(self.num_exp)]
     self.selector = GLMMoeGateTopK(config)
     self.shared_expert = GLMMLPLayer(config)
 
@@ -274,9 +252,24 @@ class GLMMoeLayer():
   def __call__(self, x: Tensor) -> Tensor:
     residual = x
     _, topk_weights, topk_idx = self.selector(x)
-    x = self.experts(x, topk_idx, topk_weights)
-    x = x + self.shared_expert(residual)
-    return x
+
+    default_device = self.devices[0]
+    exp_arange = Tensor.zeros(*topk_idx.shape[:-1], self.num_exp) # (B, S, num_exp)
+    exp_map = exp_arange.scatter(-1, topk_idx, 1).bool().permute(2, 0, 1) # (num_exp, B, S)
+    output = Tensor.zeros_like(x)
+
+    for exp in range(self.num_exp):
+      if not exp_map[exp].any().item(): continue
+
+      shard_device = device_to_load(self.devices, exp)
+      coords = exp_map[exp].nonzero()
+      b, s = coords[:, 0], coords[:, 1]
+      x_exp = x[b, s].to(shard_device) # (num_true, dim)
+      w = ((topk_idx[b, s] == exp) * topk_weights[b,s]).sum(-1).to(shard_device) # (num_true)
+      output[b,s] += self.experts[exp](x_exp, w, (default_device, shard_device)).to(default_device)
+
+    x = output + self.shared_expert(residual)
+    return x # (B, S, dim)
 
 class GLMMLPLayer():
   def __init__(self, config: GLMConfig):
@@ -290,22 +283,22 @@ class GLMMLPLayer():
 class GLMBlock():
   def __init__(self, config: GLMConfig, layer: int, devices: tuple[str, ...]):
     self.input_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.self_attn = GLMAttention(config, layer)
+    self.self_attention = GLMAttention(config, layer)
     if config.layers[layer] == "dense":
-      self.block_layer = GLMMLPLayer(config)
+      self.mlp = GLMMLPLayer(config)
     else:
-      self.block_layer = GLMMoeLayer(config, devices)
-    self.post_attn_layer_norm = nn.RMSNorm(config.dim, config.norm_eps)
+      self.mlp = GLMMoeLayer(config, devices)
+    self.post_attention_layer_norm = nn.RMSNorm(config.dim, config.norm_eps)
 
   def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
     residual = x
     x = self.input_layernorm(x)
-    x, _, topk_idx = self.self_attn(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
+    x, _, topk_idx = self.self_attention(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
     x = x + residual
 
     residual = x
-    x = self.post_attn_layer_norm(x)
-    x = self.block_layer(x)
+    x = self.post_attention_layer_norm(x)
+    x = self.mlp(x)
     x = x + residual
     return x, topk_idx
 
@@ -332,8 +325,8 @@ class GLMModel():
     return self.lm_head(x)
 
 # NOTE: just to test on smaller gpu clusters
-testing_start_layer = 2
-testing_end_layer = 3
+testing_start_layer = 0
+testing_end_layer = 5
 
 indexer_types:list[IndexerType] = ["full", "full", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared"]
 layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse"]
@@ -370,10 +363,7 @@ from tokenizers import Tokenizer
 def load_tokenizer()-> Tokenizer: 
   return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
 
-# This has total 9 files each approx 50GB
-def load_model(to_load: int = 1):
-  model_tensors: dict[str, Tensor] = {}
-  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
+# This has total 9.safetensors")))
   return model_tensors
 
 if __name__ == "__main__":
@@ -385,22 +375,24 @@ if __name__ == "__main__":
 
   tokenizer = load_tokenizer()
   model_part_1 = load_model(1)
+  renamed = {k.replace(pat, rep): v for k,v in model_part_1.items() for pat, rep in replace_map.items()}
 
-  encoded_one = tokenizer.encode("This is test string one")
-  encoded_two = tokenizer.encode("This is test string two")
-  encoded_three = tokenizer.encode("This is test string three")
-  encoded_four = tokenizer.encode("This is test string four")
-  encoded_five = tokenizer.encode("This is test string five")
 
-  model = GLMModel(config, devices)
-
-  ids = [encoded_one.ids, encoded_two.ids, encoded_three.ids, encoded_four.ids, encoded_five.ids]
-  input = Tensor(ids)
-  output = model(input, [0, 0, 0, 0, 0], [len(x) for x in ids])
-  print(output.tolist())
-
-  # print(nn.state.get_state_dict(model).keys())
+  # encoded_one = tokenizer.encode("This is test string one")
+  # encoded_two = tokenizer.encode("This is test string two")
+  # encoded_three = tokenizer.encode("This is test string three")
+  # encoded_four = tokenizer.encode("This is test string four")
+  # encoded_five = tokenizer.encode("This is test string five")
   #
-  # renamed = {k.replace(pat, rep): v for k,v in model_part_1.items() for pat, rep in replace_map.items()}
+  #
+  model = GLMModel(config, devices)
+  #
+  # ids = [encoded_one.ids, encoded_two.ids, encoded_three.ids, encoded_four.ids, encoded_five.ids]
+  # input = Tensor(ids)
+  # output = model(input, [0, 0, 0, 0, 0], [len(x) for x in ids])
+  # print(output.tolist())
+
+  print(nn.state.get_state_dict(model).keys())
+  #
   #
   # print({(k, v.device, v.dtype) for i, (k,v) in enumerate(renamed.items()) if "weight_packed" in k})
