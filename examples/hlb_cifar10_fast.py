@@ -17,6 +17,7 @@ EVAL_BS      = getenv("EVAL_BS", 2000)
 SEED         = getenv("SEED", 1337)
 LOSS_SCALE   = getenv("LOSS_SCALE", 1/32)  # mathematically neutral, keeps the summed fp16 loss in range
 LOG_INTERVAL = getenv("LOG_INTERVAL", 100)
+TTA          = getenv("TTA", 2)  # test-time aug: 2=mirror+translate (6 views), 1=mirror (2), 0=none (1)
 
 # hyperparameters from airbench94, lr/wd are given in decoupled "per 1024 examples" form and converted below
 MOMENTUM, BIAS_SCALER, LABEL_SMOOTHING, WHITEN_BIAS_EPOCHS, EMA_EVERY, EMA_BASE = 0.85, 64.0, 0.2, 3, 5, 0.95
@@ -202,12 +203,13 @@ if __name__ == "__main__":
     ema.pullback()
     train_tm = time.perf_counter()
 
-    # *** evaluation: single pass with airbench TTA level 2 (mirror + 1px translations, weighted 0.25/0.25/0.125x4) ***
+    # *** evaluation: airbench TTA (TTA=2: mirror+1px translations 6 views; TTA=1: mirror 2 views; TTA=0: 1 view) ***
     @TinyJit
     @Context(TRAINING=1)  # batchnorm uses eval-batch stats (there are no running stats), like hlb_cifar10
     def eval_step(x:Tensor, y:Tensor) -> Tensor:
-      def infer_mirror(z:Tensor) -> Tensor: return 0.5*model(z) + 0.5*model(z.flip(-1))
-      logits = 0.5*infer_mirror(x[:, :, 1:33, 1:33]) + 0.25*(infer_mirror(x[:, :, 0:32, 0:32]) + infer_mirror(x[:, :, 2:34, 2:34]))
+      def infer_mirror(z:Tensor) -> Tensor: return 0.5*model(z) + 0.5*model(z.flip(-1)) if TTA else model(z)
+      if TTA >= 2: logits = 0.5*infer_mirror(x[:, :, 1:33, 1:33]) + 0.25*(infer_mirror(x[:, :, 0:32, 0:32]) + infer_mirror(x[:, :, 2:34, 2:34]))
+      else: logits = infer_mirror(x[:, :, 1:33, 1:33])
       return (logits.argmax(axis=1) == y).cast(dtypes.int32).sum()
 
     vj = Variable("j", 0, X_test.shape[0] - EVAL_BS)
