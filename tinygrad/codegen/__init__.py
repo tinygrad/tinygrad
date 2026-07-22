@@ -302,7 +302,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
@@ -317,14 +317,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = memory_coalescing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
-  # need this cleanup because the previous one is bottom_up
+  # extra symbolic before decomp. crashes without this?
   sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
-  sink = graph_rewrite(sink, pm_lower_index_dtype, ctx={}, name="lower all index dtypes")
+  # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
 
   # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic+indexing_simplify, name="final symbolic")
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
