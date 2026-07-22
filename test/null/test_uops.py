@@ -3,9 +3,9 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
-from tinygrad.dtype import dtypes, ConstFloat, Invalid  # noqa: F401
+from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
@@ -44,6 +44,25 @@ class TestDTypeFromUOp(unittest.TestCase):
     for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
       with self.assertRaises(RuntimeError): type_verify(UOp.const(weak, value).sink(), spec_program)
       type_verify(UOp.const(concrete, value).sink(), spec_program)
+
+class TestLowerIndexDtype(unittest.TestCase):
+  def test_gated_shrink_lowers_to_selected_width(self):
+    # coalesce builds gated SHRINKs for masked vectorized loads; lowering must resolve them at the
+    # width the offset bounds select (this one needs long)
+    buf = UOp.param(0, dtypes.float, (2**31+64,))
+    i = UOp.variable("i", 0, 2**28)
+    shrink = UOp(Ops.SHRINK, src=(buf, (i*24).valid(i < 2**28), UOp.const(dtypes.weakint, 4)))
+    lowered = graph_rewrite(shrink.sink(), pm_lower_index_dtype)
+    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    sh = next(u for u in lowered.backward_slice_with_self if u.op is Ops.SHRINK)
+    self.assertEqual(sh.src[1].dtype, dtypes.long)
+
+  def test_reg_buffer_size_lowers(self):
+    reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
+    self.assertEqual(reg.src[0].dtype, dtypes.weakint)
+    lowered = graph_rewrite(reg.sink(), pm_lower_index_dtype)
+    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):

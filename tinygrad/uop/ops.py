@@ -1699,7 +1699,7 @@ def select_dtype(u:UOp):
 def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
   src = u.src[:-2]+(x.cast(dt), y.cast(dt))
   return src[0].alu(u.op, *src[1:]).cast(u.dtype)
-pm_lower_index_dtype = PatternMatcher([
+pm_lower_weakint = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(Ops.CONST, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
   # Binary can widen the dtype, WHERE cannot
@@ -1707,6 +1707,9 @@ pm_lower_index_dtype = PatternMatcher([
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),
   (UPat(Ops.WHERE, dtypes.weakint, src=(UPat(), UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint)), name="u"),
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(x.dtype, y.dtype))),
+  # in a weakint WHERE, an Invalid branch takes the dtype of the other branch
+  (UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(dtypes.weakint), UPat(Ops.CONST, arg=Invalid)),
+   lambda gate,idx: idx.valid(gate).cast(dtypes.weakint)),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.weakint)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.weakint)),
   (UPat(Ops.STACK, src=UPat().cast(dtypes.weakint), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.weakint)),
@@ -1717,22 +1720,26 @@ pm_lower_index_dtype = PatternMatcher([
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=dtypes.int)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
-  # remove hanging casts
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx)),
-  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("slen", dtypes.ints).cast(),), name="shrink"),
-   lambda shrink,buf,idx,slen: shrink.replace(src=(buf,idx,slen))),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
-   lambda buf,idx,gate: buf.index(idx.valid(gate))),
-  # remove hanging casts for images
-  (UPat(Ops.PARAM, src=(UPat.var("shape").cast(),), name="p"), lambda p,shape: p.replace(src=(shape,))),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_y", dtypes.ints).cast(), UPat.var("idx_x", dtypes.ints).cast()),),
-   lambda buf,idx_x,idx_y: buf.index(idx_y, idx_x, dtype=dtypes.float)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"),
-                        UPat.var("gate").where(UPat.var("idx_y", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)),
-                        UPat.var("gate").where(UPat.var("idx_x", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
-   lambda buf,idx_x,idx_y,gate: buf.index(idx_y.valid(gate), idx_x.valid(gate), dtype=dtypes.float)),
-  (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
-   lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
+])
+def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
+  if ctx is None: ctx = {}
+  def lower(s:UOp) -> UOp:
+    if (r:=ctx.get(s)) is None:
+      r = graph_rewrite(s, pm_lower_weakint)
+      # the consumer absorbs the cast on its own edge
+      ctx[s] = r = r.src[0] if r.op is Ops.CAST and r.dtype == dtypes.weakint else r
+    return r
+  # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
+  ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype == dtypes.weakint else s for s in u.src))
+  return None if ret is u else ret
+pm_lower_index_dtype = PatternMatcher([
+  (UPat(GroupOp.All, name="u"),
+   lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype != dtypes.weakint and any(s.dtype == dtypes.weakint for s in u.src) else None),
+  # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
+  # TODO: more generic
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
+        allow_any_len=True, name="u"),
+   lambda u,buf,gate,idx: u.replace(src=(buf, idx.cast(dtypes.int).valid(gate))+u.src[2:]) if buf.max_numel()-1 <= dtypes.int32.max else None),
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
