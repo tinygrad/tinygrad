@@ -17,19 +17,13 @@ from tinygrad.uop.ops import sint, Ops, KernelInfo
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
-def cpu_program(dev, f):
-  with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
-    prg = do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
-  return CPUProgram(dev, prg.arg.function_name, next(x.arg for x in prg.src if x.op is Ops.BINARY), native=True)
-
 def signal_prog():
-  value = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
-  return UOp.param(0, dtypes.uint32, (1,))[0].store(value.cast(dtypes.uint32))
+  val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
+  return UOp.param(0, dtypes.uint32, (1,))[0].store(val.cast(dtypes.uint32))
 
 def wait_prog():
-  value = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
-  v = UOp.param(0, dtypes.uint32, (1,), volatile=True).after(l:=UOp.loop(0))[0].load()
-  return v.end(l, v < value.cast(dtypes.uint32))
+  val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
+  return (v:=UOp.param(0, dtypes.uint32, (1,), volatile=True).after(l:=UOp.loop(0))[0].load()).end(l, v < val.cast(dtypes.uint32))
 
 def timestamp_prog():
   if WIN: val = UOp.const(dtypes.uint64, 0)
@@ -43,21 +37,21 @@ def quit_prog():
   fn = UOp.param(0, dtypes.uint64, (1 if WIN else 3,))
   if WIN: return fn[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # ExitThread(0)
   sem = UOp.param(1, dtypes.uint64, (1,))
+
   close = fn[2].load().call(sem[0], ret_dtype=dtypes.void) # sem_close(sem)
   return fn.after(close)[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # pthread_exit(0)
 
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
-  cur = (loop:=UOp.range(2**31-1, 0, dtype=dtypes.int)).cast(dtypes.uint64)
+  cur = UOp.range(2**64-1, 0, dtype=dtypes.uint64)
 
-  if WIN: # spin until the host publishes a slot past cur
-    v = wait.after(lw:=UOp.loop(1), loop)[0].load()
-    ready = v.end(lw, v <= cur)
-  else: ready = wait.after(loop)[0].load().call(sem.after(loop)[0], ret_dtype=dtypes.void) # sem_wait(sem)
+  # spin on windows, sem_wait to sleep on posix
+  if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)
+  else: ready = wait.after(cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.void)
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
-  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(loop)
+  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
 
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
@@ -156,11 +150,15 @@ class CPUDevice(HCQCompiled):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
       HCQSignal, functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
     def fa(fn): return unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
-    self.progs = {f: cpu_program(self, f) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
+
+    # with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
+    self.progs = {f: CPUProgram(self, f.__name__, next(x.arg for x in do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1),
+      ClangRenderer(self.renderer.target)).src if x.op is Ops.BINARY), native=True) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
 
     self.ring = self.allocator.alloc(RING_SLOTS * CMD_SIZE * 8, BufferSpec())
     self.ring_view, self.ring_pos = self.ring.cpu_view().view(fmt='Q'), 0
 
+    # posix uses sem to put cpus into sleep
     if WIN:
       self.sys = self.allocator.alloc(8, BufferSpec())
       self.sys_view, sem_addr = self.sys.cpu_view().view(fmt='Q'), 0
