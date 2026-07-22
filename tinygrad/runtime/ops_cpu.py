@@ -149,11 +149,6 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
       HCQSignal, functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
-    def fa(fn): return unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
-
-    # with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
-    self.progs = {f: CPUProgram(self, f.__name__, next(x.arg for x in do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1),
-      ClangRenderer(self.renderer.target)).src if x.op is Ops.BINARY), native=True) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
 
     self.ring = self.allocator.alloc(RING_SLOTS * CMD_SIZE * 8, BufferSpec())
     self.ring_view, self.ring_pos = self.ring.cpu_view().view(fmt='Q'), 0
@@ -164,14 +159,21 @@ class CPUDevice(HCQCompiled):
       self.sys_view, sem_addr = self.sys.cpu_view().view(fmt='Q'), 0
     else:
       self.sem = libc.sem_open(sem_name:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
-      if (sem_addr:=fa(self.sem)) == ctypes.c_void_p(-1).value or libc.sem_unlink(sem_name): raise OSError(ctypes.get_errno(), "semaphore")
+      if (sem_addr:=unwrap(ctypes.cast(self.sem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(sem_name):
+        raise OSError(ctypes.get_errno(), "semaphore")
       self.sem_buf = HCQBuffer(sem_addr, 1, owner=self)
 
     # TODO: move to hcq2 infra
     self.func_table = self.allocator.alloc(32, BufferSpec())
     fns = ([0, ctypes.windll.kernel32.ExitThread, 0, 0] if WIN else  # type: ignore[attr-defined]
            [libc.dll.clock_gettime, libc.dll.pthread_exit, libc.dll.sem_wait, libc.dll.sem_close])
-    self.func_table.cpu_view().view(fmt='Q')[:] = array.array('Q', [fa(f) if f else 0 for f in fns])
+    self.func_table.cpu_view().view(fmt='Q')[:] = array.array('Q', [unwrap(ctypes.cast(f, ctypes.c_void_p).value) if f else 0 for f in fns])
+
+    # TODO: move to hcq2
+    with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
+      self.progs = {f: CPUProgram(self, f.__name__, next(x.arg for x in do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1),
+        ClangRenderer(self.renderer.target)).src if x.op is Ops.BINARY), native=True)
+        for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
 
     self.worker:threading.Thread|None = threading.Thread(target=self.progs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
       ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr)), daemon=True)
