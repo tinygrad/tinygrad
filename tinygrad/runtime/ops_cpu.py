@@ -68,7 +68,9 @@ def worker_prog():
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(loop)
 
 class CPUComputeQueue(HWQueue):
-  def __init__(self, dev): super().__init__(); self.dev = dev
+  def __init__(self, dev):
+    super().__init__()
+    self.dev = dev
   def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=prog(self.dev), prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
