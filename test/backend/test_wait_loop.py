@@ -40,6 +40,38 @@ def nested_loop_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="nested_loop", opts_to_apply=()))
 
+def two_loops_kernel(C:UOp) -> UOp:
+  # two sequential loops on the same counter: ++ until 10, then ++ until 25
+  l1, l2 = UOp.loop(0), UOp.loop(1)
+
+  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = i.after(i[0].store(0))
+
+  inc1 = i.after(l1)[0].load() + 1
+  i = i.after(i[0].store(inc1).end(l1, inc1 < 10))
+
+  inc2 = i.after(l2)[0].load() + 1
+  i = i.after(i[0].store(inc2).end(l2, inc2 < 25))
+
+  return C[0].store(i[0].load()).sink(arg=KernelInfo(name="two_loops", opts_to_apply=()))
+
+def loop_in_loop_kernel(C:UOp) -> UOp:
+  # outer loop while i < 12, inner loop increments until i % 4 == 0 -> 12
+  l1, l2 = UOp.loop(0), UOp.loop(1)
+
+  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = i.after(i[0].store(0))
+
+  inc = i.after(l1, l2)[0].load() + 1
+  st = i[0].store(inc)
+
+  # the outer END closes the inner END, and its cond reloads the register after the inner loop (in scope at the outer level)
+  e2 = st.end(l2, inc % 4 != 0)
+  oc = i.after(e2)[0].load()
+  i = i.after(e2.end(l1, oc < 12))
+
+  return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
+
 class TestWaitLoop(unittest.TestCase):
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
@@ -50,6 +82,18 @@ class TestWaitLoop(unittest.TestCase):
   def test_nested_loop_in_range(self):
     c = Tensor.empty(1, dtype=dtypes.int)
     c = Tensor.custom_kernel(c, fxn=nested_loop_kernel)[0]
+    c.realize()
+    self.assertEqual(c.item(), 12)
+
+  def test_two_sequential_loops(self):
+    c = Tensor.empty(1, dtype=dtypes.int)
+    c = Tensor.custom_kernel(c, fxn=two_loops_kernel)[0]
+    c.realize()
+    self.assertEqual(c.item(), 25)
+
+  def test_loop_in_loop(self):
+    c = Tensor.empty(1, dtype=dtypes.int)
+    c = Tensor.custom_kernel(c, fxn=loop_in_loop_kernel)[0]
     c.realize()
     self.assertEqual(c.item(), 12)
 

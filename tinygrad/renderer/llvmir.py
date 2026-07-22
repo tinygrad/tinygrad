@@ -97,7 +97,7 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
   # loop (a RANGE with no src is an unbounded loop header)
-  (UPat(Ops.RANGE, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:" if l.is_loop else None),
+  (UPat(Ops.RANGE, src=(), name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
     f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
 

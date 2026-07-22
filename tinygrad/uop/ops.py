@@ -484,11 +484,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # a RANGE with no src (no bound) is an unbounded loop header, it's void and ended by a conditional END
   @property
-  def is_loop(self) -> bool: return self.op is Ops.RANGE and len(self.src) == 0
-
-  @property
   def ranges(self) -> dict[UOp, None]:
-    if self.op is Ops.RANGE and not self.is_loop: return {self:None} | self._ranges
+    if self.op is Ops.RANGE and len(self.src) != 0: return {self:None} | self._ranges
     return self._ranges
 
   # *** uop evaluation ***
@@ -1032,7 +1029,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
-    if self.op is Ops.RANGE and self.is_loop: return 0, 0  # unbounded loop, unknown trip count
+    if self.op is Ops.RANGE and len(self.src) == 0: return 0, 0  # unbounded loop, unknown trip count
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)

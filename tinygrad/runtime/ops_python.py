@@ -57,8 +57,8 @@ class PythonProgram:
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.op not in void_ops and not v.is_loop]
-        src_dtypes = [v.dtype for v in u.src if v.op not in void_ops and not v.is_loop]
+        src_values = [values[v] for v in u.src if v.op not in void_ops and (v.op is not Ops.RANGE or len(v.src))]
+        src_dtypes = [v.dtype for v in u.src if v.op not in void_ops and (v.op is not Ops.RANGE or len(v.src))]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
           if len(u.src) == 3:
@@ -75,7 +75,7 @@ class PythonProgram:
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or u.is_loop:
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and not len(u.src)):
           # in the python emulator, the warp is always in sync
           i += 1
           continue

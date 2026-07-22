@@ -17,8 +17,8 @@ def linearize(sink:UOp) -> list[UOp]:
     for s in u.src: out_degree[s] += 1
 
     # we place UOps with higher run_counts later
-    # loops have an unbounded trip count, so they always schedule after any enclosing bounded ranges (edges can't be added to their src)
-    run_count = prod([int(r.vmax)+1 for r in u.ranges]) if not u.is_loop else float('inf')
+    # loops (RANGEs with no src) have an unbounded trip count, so they schedule after any enclosing bounded ranges
+    run_count = float('inf') if u.op is Ops.RANGE and not len(u.src) else prod([int(r.vmax)+1 for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
@@ -83,11 +83,11 @@ class CFGContext:
 
 pm_add_control_flow = PatternMatcher([
   # control flow edges are only added to bounded ranges, loops keep src=() so they stay identifiable
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if not x.is_loop and (y:=ctx.edges.get(x)) is not None else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if len(x.src) and (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_split_ends(e:UOp):
-  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.is_loop or x.dtype == dtypes.bool)
+  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if (x.op is Ops.RANGE and not len(x.src)) or x.dtype == dtypes.bool)
   for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
   return ret.end(*backedge) if len(backedge) else ret
 
