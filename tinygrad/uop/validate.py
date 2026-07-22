@@ -17,10 +17,18 @@ def z3_xor(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(b, z3.IntNumRef) and b.as_long() == -1: return -(a+1)
   if isinstance(a, z3.IntNumRef) and a.as_long() == -1: return -(b+1)
   raise RuntimeError(f"z3 int XOR only supports XOR with -1, got {a=} {b=}")
+def z3_and(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  if isinstance(a, z3.BoolRef): return a&b
+  if isinstance(a, z3.IntNumRef): a, b = b, a
+  if isinstance(b, z3.IntNumRef):
+    # x & (2^k-1) = x % 2^k and x & -(2^k) = x - x % 2^k for any x in two's complement
+    if (m:=b.as_long()+1) > 0 and m&(m-1) == 0: return a%m
+    if (m:=-b.as_long()) > 0 and m&(m-1) == 0: return a - a%m
+  raise RuntimeError(f"z3 int AND only supports 2**k-1 and -2**k masks, got {a=} {b=}")
 z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
-  Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
+  Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
 def create_bounded(name:str, vmin:int, vmax:int, z3ctx:z3.Context) -> tuple[z3.ArithRef, z3.BoolRef]:
   return (s:=z3.Int(name, ctx=z3ctx)), (vmin <= s)&(s <= vmax)
 
