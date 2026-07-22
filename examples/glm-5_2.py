@@ -68,7 +68,7 @@ class DSAKVCache:
       return self.store_attn_idx[slot, :B, :max_end_point]
 
 @functools.cache
-def precompute_freqs_cis(batch:int, dim: int, end: int, theta: float, device:str|None=None) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float, device:str|None=None) -> Tensor:
   assert dim % 2 == 0, "dim must be even for ROPE"
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2) / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0) # (end, 1) * (1, dim//2) -> (end, dim//2)
@@ -266,7 +266,7 @@ class GLMMoeLayer():
       b, s = coords[:, 0], coords[:, 1]
       x_exp = x[b, s].to(shard_device) # (num_true, dim)
       w = ((topk_idx[b, s] == exp) * topk_weights[b,s]).sum(-1).to(shard_device) # (num_true)
-      output[b,s] += self.experts[exp](x_exp, w, (default_device, shard_device)).to(default_device)
+      output[b,s] += self.experts[exp](x_exp, w).to(default_device)
 
     x = output + self.shared_expert(residual)
     return x # (B, S, dim)
@@ -363,7 +363,10 @@ from tokenizers import Tokenizer
 def load_tokenizer()-> Tokenizer: 
   return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
 
-# This has total 9.safetensors")))
+# This has total 9 files each approx 50GB
+def load_model(to_load: int = 1):
+  model_tensors: dict[str, Tensor] = {}
+  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
   return model_tensors
 
 if __name__ == "__main__":
@@ -377,6 +380,10 @@ if __name__ == "__main__":
   model_part_1 = load_model(1)
   renamed = {k.replace(pat, rep): v for k,v in model_part_1.items() for pat, rep in replace_map.items()}
 
+  # To Remove
+  # model = GLMModel(config, devices)
+  # for k,v in renamed.items():
+  #   assert k in nn.state.get_state_dict(model).keys(), f"{k}"
 
   # encoded_one = tokenizer.encode("This is test string one")
   # encoded_two = tokenizer.encode("This is test string two")
