@@ -112,7 +112,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
     case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.LOOP | \
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
@@ -121,7 +121,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
-    case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
+    case Ops.RANGE:
+      # a RANGE with no bound in src[0] is an unbounded loop header, it's void (control flow may append edges to the src)
+      return src[0].dtype if len(src) and src[0].op not in {Ops.END, Ops.RANGE} else dtypes.void
+    case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
       # pass through first
@@ -346,7 +349,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # some ops init the shape
       case Ops.GETADDR: return ()
-      case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.LOOP: return ()
+      case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
         if len(self.src): return self.src[0].as_shape
@@ -479,9 +482,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         for s in er.ranges: ret.pop(s, None)
     return ret
 
+  # a RANGE with no src (no bound) is an unbounded loop header, it's void and ended by a conditional END
+  @property
+  def is_loop(self) -> bool: return self.op is Ops.RANGE and self.dtype == dtypes.void
+
   @property
   def ranges(self) -> dict[UOp, None]:
-    if self.op is Ops.RANGE: return {self:None} | self._ranges
+    if self.op is Ops.RANGE and not self.is_loop: return {self:None} | self._ranges
     return self._ranges
 
   # *** uop evaluation ***
@@ -595,7 +602,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
-  def loop(axis_id:int, *arg): return UOp(Ops.LOOP, src=(), arg=(axis_id,)+arg)
+  def loop(axis_id:int, *arg): return UOp(Ops.RANGE, dtypes.void, src=(), arg=(axis_id, AxisType.LOOP)+arg)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
   @staticmethod
@@ -1025,6 +1032,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
+    if self.op is Ops.RANGE and self.is_loop: return 0, 0  # unbounded loop, unknown trip count
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)

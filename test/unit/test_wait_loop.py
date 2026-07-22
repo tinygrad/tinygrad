@@ -6,8 +6,8 @@ from tinygrad.uop.ops import KernelInfo
 def wait_loop_kernel(C:UOp) -> UOp:
   N = 10
 
-  # LOOP is a bound-less loop header: a jump target with no induction variable.
-  # the compare and conditional backedge are expanded by the renderers from LOOP/END
+  # a RANGE with no src is a bound-less loop header: a jump target with no induction variable.
+  # the compare and conditional backedge are expanded by the renderers from the loop RANGE/END
   l = UOp.loop(0)
 
   i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)

@@ -116,6 +116,9 @@ string_rewrite = PatternMatcher([
   # simple
   (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [] if x.addrspace == AddrSpace.REG else [
     f".shared .align 16 .b8 local{x.arg.slot}[{x.max_numel()*x.dtype.itemsize}];", f"mov.u64 {ctx.r[x]}, local{x.arg.slot}[0];"]),
+  (UPat(Ops.RANGE, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:" if l.is_loop else None),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
+    f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
   (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
     f"mov.u32 {ctx.r[r]}, -1;",
     f"bra END_{ctx.r[r][1:]};",
@@ -125,9 +128,6 @@ string_rewrite = PatternMatcher([
     ctx.code_for_op[Ops.ADD](ctx.r[r], ctx.r[r], "1", dtypes.int, ctx.types[dtypes.int]),
     ctx.code_for_op[Ops.CMPLT](ctx.r[x], ctx.r[r], ctx.r[r.src[0]], dtypes.int, ctx.types[dtypes.int]),
     f"@{ctx.r[x]} bra LOOP_{ctx.r[r][1:]};"]),
-  (UPat(Ops.LOOP, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.LOOP, name="l"), UPat(name="c"))), lambda ctx, l, c:
-    f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
   (UPat(Ops.IF, name="x"), lambda ctx, x: f"@!{ctx.r[x.src[0]]} bra IF_{ctx.r[x.src[0]][1:]}_{ctx.uops.index(x)};"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
@@ -214,6 +214,7 @@ class PTXRenderer(Renderer):
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
+      if u.is_loop: prefix = None  # loop headers don't have a register
       if prefix: r[u] = ssa(prefix, u, dtype)
 
       l: str|list[str]|None = string_rewrite.rewrite(u, ctx=self)
