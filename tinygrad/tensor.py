@@ -537,30 +537,7 @@ _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
     if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
-
-    if TRACEMETA >= 2:
-      caller_frame = sys._getframe(frame := 1)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      caller_func = caller_frame.f_code.co_name
-      if caller_module is None: return fn(*args, **kwargs)
-
-      # if its called from nn we want to step up frames until we are out of nn
-      while caller_module.startswith("tinygrad.nn") and "optim" not in caller_module:
-        caller_frame = sys._getframe(frame := frame + 1)
-        caller_module = caller_frame.f_globals.get("__name__", None)
-        if caller_module is None: return fn(*args, **kwargs)
-
-      # if its called from a lambda in tinygrad we want to look two more frames up
-      if caller_module.startswith("tinygrad") and caller_func == "<lambda>": caller_frame = sys._getframe(frame := frame + 2)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      if caller_module is None: return fn(*args, **kwargs)
-      caller_func = caller_frame.f_code.co_name
-      caller_lineno = caller_frame.f_lineno
-
-      caller = f"{caller_module}:{caller_lineno}::{caller_func}"
-    else: caller = ""
-
-    token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
+    token = _METADATA.set(Metadata(name=fn.__name__))
     with cpu_profile(TracingKey(fn.__name__), "USER"):
       ret = fn(*args, **kwargs)
     _METADATA.set(token)
