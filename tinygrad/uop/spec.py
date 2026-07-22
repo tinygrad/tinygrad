@@ -100,6 +100,10 @@ spec_shared = PatternMatcher([
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
+  # CALL of an external function
+  (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),
+   lambda x: x.src[0].dtype is dtypes.uint64 if x.src[0].dtype is not dtypes.void else None),
+
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
 
