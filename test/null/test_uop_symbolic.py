@@ -1035,12 +1035,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(expr, 0, 6, "(x<5).where((b*2), c)")
 
   def test_where_closure_folding_valid(self):
-    # a valid gate on the same cond folds in the true branch, the false branch keeps the Invalid gate
+    # a valid gate on the same cond folds in the true branch, the live else value is kept
     x = Variable("x", 0, 10)
     a = Variable("a", 0, 3)
     cond = x < 5
     expr = cond.where(a.valid(cond), Variable("c", 0, 3))
-    self.assertIs(graph_rewrite(expr, sym), cond.where(a, UOp.invalid()))
+    self.assertIs(graph_rewrite(expr, sym), cond.where(a, Variable("c", 0, 3)))
     # a same-cond valid gate in the false branch is Invalid there
     expr = cond.where(Variable("t", 0, 3), a.valid(cond))
     self.assertIs(graph_rewrite(expr, sym), cond.where(Variable("t", 0, 3), UOp.invalid()))
@@ -1288,6 +1288,12 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
 """
 
 class TestInvalidIndex(unittest.TestCase):
+  def test_invalid_lift_keeps_live_else(self):
+    ridx = Variable("ridx", 0, 10)
+    cond = ridx < 5
+    expr = cond.where(cond.where(ridx, UOp.invalid()), ridx+100)
+    self.assertIs(expr.simplify(), cond.where(ridx, ridx+100))
+
   def test_invalid_times_0(self):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())*0
