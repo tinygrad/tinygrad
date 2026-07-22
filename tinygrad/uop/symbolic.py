@@ -64,22 +64,14 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
         return ((b % (div*d))*mul).usum(*rest)
   return None
 
-# an invalid index is cond.where(idx, Invalid) in index. the consumer reads cond back off the WHERE with UOp.get_valid,
-# so casts and comparisons of a gated index can drop the gate: when the index is invalid the result is never used
-invalid_idx_gate = UPat().where(UPat.var("x"), UPat(Ops.CONST, dtypes.weakint, arg=Invalid))
-pm_index_invalid = PatternMatcher([
-  (invalid_idx_gate.cast(name="cast"), lambda x,cast: x.cast(cast.dtype)),
-  (UPat(GroupOp.Comparison, src=(invalid_idx_gate, UPat.var("y")), name="alu"), lambda x,y,alu: x.alu(alu.op,y)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("y"), invalid_idx_gate), name="alu"), lambda x,y,alu: y.alu(alu.op,x)),
-])
-
-# everywhere else Invalid poisons the value: ops move inside the gate so the Invalid reaches the LOAD/STORE and folds there.
+# Invalid poisons the value: ops move inside the gate so the Invalid reaches the LOAD/STORE and folds there.
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,), name="op"), lambda i,op: i.cast(op.dtype)),
-  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_gate,), name="op"), lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i.cast(op.dtype))),
+  (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
+   lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i.cast(op.dtype))),
   # binary ops move inside the gate, with Invalid cast to the result dtype (bool for comparisons)
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
@@ -90,9 +82,8 @@ pm_data_invalid = PatternMatcher([
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
-  # when a is cond, ~a|cond is True and would drop the Invalid gate (losing the valid), so keep cond as the gate
   (UPat.var("a").where(invalid_gate, UPat.var("c")), lambda cond,i,x,a,c:
-   (cond if a is cond else (a.logical_not()|cond)).where(a.where(x,c), i) if c.arg != Invalid else None),
+   (a.logical_not()|cond).where(a.where(x,c), i) if c.arg != Invalid else None),
   (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if b.arg != Invalid else None),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
@@ -100,13 +91,11 @@ pm_data_invalid = PatternMatcher([
     lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
-propagate_invalid = pm_index_invalid + pm_data_invalid
-
 pm_remove_invalid = PatternMatcher([
   (invalid_pat, lambda i: i.const_like(0)),
 ])
 
-symbolic_simple = propagate_invalid + PatternMatcher([
+symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
