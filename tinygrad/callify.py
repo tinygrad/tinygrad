@@ -54,8 +54,9 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
-  if (cv := src.contiguous_view()) is None or (cv[0].numel() == src.numel() and cv[1] == 0): return None
+  if (cv := src.contiguous_view()) is None: return None
   buf, offset = cv
+  if buf.op is not Ops.BUFFER or buf.nbytes() == src.nbytes(): return None
   name = f"buf{buf.arg.slot}_offset{next(ctx.offset_counts.setdefault(buf, count()))}"
   offset = UOp.variable(name, 0, buf.max_numel() - (size:=src.max_numel() * src.element_size() // buf.element_size()),
                         multiple_of=min(offset & -offset or 1, 16)).bind(offset) # don't assume alignment more than 16 bytes
