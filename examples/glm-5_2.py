@@ -1,9 +1,9 @@
 # Using GLM-5.2 weights from https://huggingface.co/RedHatAI/GLM-5.2-NVFP4 model
 # Using the https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py as source of truth
 
-from tinygrad import fetch, Tensor, nn, dtypes
+from tinygrad import fetch, Tensor, nn, dtypes, Device
 from dataclasses import dataclass
-import functools
+import functools, argparse
 from typing import Literal
 
 LayerType = Literal["dense", "sparse"]
@@ -32,6 +32,10 @@ class GLMConfig:
   indexers: list[IndexerType]
   attn_rope_dim: int
   rope_theta: float
+
+DEFAULT = 0
+def device_to_load(device: tuple[str, ...], num: int) -> str: 
+  return device[num % len(device)]
 
 # KV cache Sparse MLA(DSA)
 class DSAKVCache:
@@ -70,8 +74,7 @@ def precompute_freqs_cis(batch:int, dim: int, end: int, theta: float, device:str
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0) # (end, 1) * (1, dim//2) -> (end, dim//2)
   return freqs.cos().cat(freqs.sin(), dim=-1).clone(device) # (end, dim)
 
-# This does interleaved ROPE, which is slightly different from the
-# half-split(llama) version
+# This does interleaved ROPE, which is slightly different from the half-split(llama) version
 # x: (B, S, H, HD)
 def apply_rope(x:Tensor, freqs_cis:Tensor, start_pos: list[int], to_write: list[int]) -> Tensor:
   assert max(to_write) == x.shape[1]
@@ -92,6 +95,7 @@ class GLMDSAIndexer():
     self.weights_proj_idx = nn.Linear(config.dim, self.idx_num_heads, bias=False)
     self.softmax_scale = self.idx_head_dim ** -0.5
 
+    
   def __call__(self, x: Tensor, q_latent: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, step_t: list[int], to_write: list[int], attn_mask: Tensor) -> Tensor:
     assert x.shape[0] == len(step_t) == len(to_write) == q_latent.shape[0], "error in batch dim"
     q_idx = self.q_up_proj_idx(q_latent) # (B, S, H*HD)
@@ -137,8 +141,7 @@ def create_causal_attn_mask(step_t: list[int], to_write: list[int], longest_seq:
 def basic_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, attn_heads: int, attn_dim: int, batch: int):
     attn_weights = ((queries @ keys.transpose(-1, -2)) + attn_mask.unsqueeze(1)) * (attn_dim ** -0.5) # (B, attn_head, S_inp, S_longest)
     attn_weights = attn_weights.softmax(-1) # (B, attn_head, S_inp, S_longest)
-    attn_output = attn_weights @ values # (B, attn_head, S_inp, attn_dim)
-    attn_output = attn_output.permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
+    attn_output = (attn_weights @ values).permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
     attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contiguous() # (B, S_inp, attn_head * attn_dim)
     return attn_weights, attn_output
 
@@ -164,6 +167,7 @@ class GLMAttention():
     self.indexer = GLMDSAIndexer(layer, config) if config.indexers[layer] == "full" else None
 
   # x: (B, S, dim)
+  # TODO: precompute the up proj single matrix for k, q, v for MLA inference optimization
   def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None):
     batch, orig_seq = x.shape[:-1]
     q_latent = self.q_norm(self.q_down_proj(x)) # (B, S, q_lat)
@@ -223,23 +227,46 @@ class GLMMoeGateTopK():
     return router_logits, topk_weights, topk_idx
 
 class GLMMoeExperts():
-  def __init__(self, config: GLMConfig):
-    self.num_experts = config.num_exp
+  def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
+    self.num_experts, self.devices = config.num_exp, devices
     self.gate_up_proj = Tensor.empty(config.num_exp, 2 * config.moe_intermediate_size, config.dim)
     self.down_proj = Tensor.empty(config.num_exp, config.dim, config.moe_intermediate_size)
 
   # x : (B, S, dim) topk_idx: (B, S, k) topk_weigths: (B, S, k)
-  def __call__(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor): 
+  def __call__(self, x: Tensor, topk_idx: Tensor, topk_weights: Tensor) -> Tensor:
+    # One gpu batch
     # gate, up: (B, S, K, I)
-    gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose(-1, -2)).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I) => (B,S, K, 1, 2I)
-    x = (gate.silu() * up).contiguous() # (B, S, K, I)
-    x = (x.unsqueeze(-2) @ self.down_proj[topk_idx].transpose(-1, -2)).squeeze(-2) # (B, S, K, 1, I) @ (B, S, K, I, dim) => (B, S, K, 1, dim)
-    x = x * topk_weights.unsqueeze(-1) # (B, S, K, dim)
-    return x.sum(axis=-2) # (B, S, dim)
+    # gate, up = (x.unsqueeze(2).unsqueeze(3) @ self.gate_up_proj[topk_idx].transpose()).squeeze(-2).chunk(2, dim=-1) # (B, S, 1, 1, dim) @ (B, S, k, dim, 2I)
+    # x = (gate.silu() * up).contiguous() # (B, S, K, I)
+    # x = (x.unsqueeze(-2) @ self.down_proj[topk_idx].transpose()).squeeze(-2) # (B, S, K, 1, I) @ (B, S, K, I, dim) => (B, S, K, 1, dim) => (B, S, K, dim)
+    # x = x * topk_weights.unsqueeze(-1) # (B, S, K, dim)
+    # return x.sum(axis=-2) # (B, S, dim)
+    
+    # Split experts over GPU'S
+    default_device = self.devices[0]
+    exp_arange = Tensor.zeros(*topk_idx.shape[:-1], self.num_experts) # (B, S, num_exp)
+    exp_map = exp_arange.scatter(-1, topk_idx, 1).bool().permute(2, 0, 1) # (num_exp, B, S)
+    output = Tensor.zeros_like(x)
+    for exp in range(self.num_experts):
+      if not exp_map[exp].any().item(): continue
+
+      shard_device = device_to_load(self.devices, exp)
+      coords = exp_map[exp].nonzero()
+      b, s = coords[:, 0], coords[:, 1]
+      x_exp = x[b, s].to(shard_device) # (num_true, dim)
+      w = ((topk_idx[b, s] == exp) * topk_weights[b,s]).sum(-1).to(shard_device) # (n_true)
+
+      # gate, up: (num_true, 2I)
+      gate, up = (x_exp @ self.gate_up_proj[exp].transpose().to(shard_device)).chunk(2, dim=-1) # gate, up: (num_true, dim) @ (dim , 2I)
+      x_exp = (gate.silu() * up).contiguous() # (num_true, I)
+      x_exp = x_exp @ self.down_proj[exp].transpose().to(shard_device) # (num_true, I) @ (I, dim) => (num_true, dim)
+      x_exp = x_exp * w.unsqueeze(-1) # (num_true, dim)
+      output[b, s] += x_exp.to(default_device)
+    return output # (B, S, dim)
 
 class GLMMoeLayer():
-  def __init__(self, config: GLMConfig):
-    self.experts = GLMMoeExperts(config)
+  def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
+    self.experts = GLMMoeExperts(config, devices)
     self.selector = GLMMoeGateTopK(config)
     self.shared_expert = GLMMLPLayer(config)
 
@@ -261,13 +288,13 @@ class GLMMLPLayer():
     return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
 
 class GLMBlock():
-  def __init__(self, config: GLMConfig, layer: int):
+  def __init__(self, config: GLMConfig, layer: int, devices: tuple[str, ...]):
     self.input_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
     self.self_attn = GLMAttention(config, layer)
     if config.layers[layer] == "dense":
       self.block_layer = GLMMLPLayer(config)
     else:
-      self.block_layer = GLMMoeLayer(config)
+      self.block_layer = GLMMoeLayer(config, devices)
     self.post_attn_layer_norm = nn.RMSNorm(config.dim, config.norm_eps)
 
   def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
@@ -283,11 +310,11 @@ class GLMBlock():
     return x, topk_idx
 
 class GLMModel():
-  def __init__(self, config: GLMConfig):
+  def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
     self.max_context, self.rope_theta, self.attn_rope_dim, self.indexers, self.kv_latent_dim = config.max_context, config.rope_theta, config.attn_rope_dim, config.indexers, config.kv_latent_dim
     self.idx_attn_dim, self.max_batch, self.rope_dim = config.idx_attn_dim, config.max_batch, config.attn_rope_dim
     self.embedding = nn.Embedding(config.vocab_size, config.dim)
-    self.layers = [GLMBlock(config, i) for i in range(len(config.layers))]
+    self.layers = [GLMBlock(config, i, devices) for i in range(len(config.layers))]
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.lm_head = nn.Linear(config.dim, config.vocab_size)
 
@@ -304,33 +331,34 @@ class GLMModel():
     x = self.norm(x)
     return self.lm_head(x)
 
+# NOTE: just to test on smaller gpu clusters
 testing_start_layer = 2
-testing_end_layer = 4
+testing_end_layer = 3
 
 indexer_types:list[IndexerType] = ["full", "full", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared"]
 layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse"]
 config = GLMConfig (
   max_batch = 10,
-  dim = 6144,
+  dim = 6_144,
   layers = layer_types[testing_start_layer:testing_end_layer],
   norm_eps = 1e-5,
-  vocab_size = 154880,
+  vocab_size = 154_880,
   max_context = 1_000,
-  intermediate_size = 12288,
+  intermediate_size = 12_288,
   num_exp = 256,
   num_exp_per_tok = 8,
   routed_scaling_fact = 2.5,
-  moe_intermediate_size = 2048,
+  moe_intermediate_size = 2_048,
   attn_dim = 64,
   attn_heads = 32,
-  q_latent_dim = 2048,
+  q_latent_dim = 2_048,
   kv_latent_dim = 512,
   idx_attn_dim = 128,
   idx_heads = 32,
-  idx_topk = 2048,
+  idx_topk = 2_048,
   indexers = indexer_types[testing_start_layer:testing_end_layer],
   attn_rope_dim = 64,
-  rope_theta = 800000
+  rope_theta = 800_000
 )
 
 replace_map: dict = {
@@ -349,24 +377,30 @@ def load_model(to_load: int = 1):
   return model_tensors
 
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
+  args = parser.parse_args()
+   
+  devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else tuple(f"{Device.DEFAULT}")
+
   tokenizer = load_tokenizer()
   model_part_1 = load_model(1)
 
-  encoded = tokenizer.encode("Hello, my name is risahbh")
-  print("ids", encoded.ids)
-  print("tokens", encoded.tokens)
+  encoded_one = tokenizer.encode("This is test string one")
+  encoded_two = tokenizer.encode("This is test string two")
+  encoded_three = tokenizer.encode("This is test string three")
+  encoded_four = tokenizer.encode("This is test string four")
+  encoded_five = tokenizer.encode("This is test string five")
 
-  model = GLMModel(config)
+  model = GLMModel(config, devices)
 
-  # input = Tensor([encoded.ids])
-  # output = model(input, [0], [len(encoded.ids)])
-  # print(output.tolist())
+  ids = [encoded_one.ids, encoded_two.ids, encoded_three.ids, encoded_four.ids, encoded_five.ids]
+  input = Tensor(ids)
+  output = model(input, [0, 0, 0, 0, 0], [len(x) for x in ids])
+  print(output.tolist())
+
+  # print(nn.state.get_state_dict(model).keys())
   #
-  # decoded = tokenizer.decode(encoded.ids)
-  # print(decoded)
-
-  print(nn.state.get_state_dict(model).keys())
-
-  renamed = {k.replace(pat0, pat1): v for k,v in model_part_1.items() for pat0, pat1 in replace_map.items()}
-
-  print([x for i, x in enumerate(renamed.keys()) if  i <= 500])
+  # renamed = {k.replace(pat, rep): v for k,v in model_part_1.items() for pat, rep in replace_map.items()}
+  #
+  # print({(k, v.device, v.dtype) for i, (k,v) in enumerate(renamed.items()) if "weight_packed" in k})
