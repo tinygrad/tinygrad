@@ -568,7 +568,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, 0)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
 
@@ -577,7 +577,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(0, x)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
 
