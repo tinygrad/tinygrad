@@ -166,8 +166,10 @@ class Buffer:
         GlobalCounters.mem_used -= self.nbytes
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
-      for dev, mb in self._bufs.items():
-        if dev != self.device: Device[dev].allocator._unmap(mb)
+      # HCQ buffers own their peer mappings and release them from the owner allocator.
+      if not hasattr(self._buf, "mapped_devs"):
+        for dev, mb in self._bufs.items():
+          if dev != self.device: Device[dev].allocator._unmap(mb)
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     self._bufs.clear()

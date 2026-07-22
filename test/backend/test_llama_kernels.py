@@ -1,14 +1,16 @@
 import unittest, functools
-from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
+from tinygrad import Tensor, TinyJit, Device, dtypes, Context, GlobalCounters
 from tinygrad.helpers import getenv
+from tinygrad.uop.ops import UOp
 from examples.mlperf.optim import GradAccClipAdamW
-from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
+from examples.mlperf.models.flat_llama import FP8_DTYPE, apply_grad, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import NUM_WG, local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import _custom_bwd as custom_rmsnorm_bwd
 from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8, fused_rmsnorm_mul_quantize_fp8
 from extra.llama_kernels.cast_amax import _custom_fused_bwd_w13 as custom_fused_bwd_w13
+from extra.llama_kernels.peer_embedding import peer_embedding_bwd
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fa_backward_pre, custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu
@@ -45,6 +47,51 @@ class TestFusedCE(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT.split(":")[0] == "AMD", "requires AMD custom kernel")
   def test_fused_ce_llama31_8b(self): run_fused_ce(2, 8192, 128256)
+
+class TestPeerEmbedding(unittest.TestCase):
+  def test_peer_embedding_backward(self):
+    base = Device.DEFAULT.split(":")[0]
+    devices = tuple(base if i == 0 else f"{base}:{i}" for i in range(8))
+    tokens, embed, vocab = 8, 16, 64
+    grads = [Tensor.full((tokens, embed), float(i+1), dtype=dtypes.bfloat16, device=d).realize() for i,d in enumerate(devices)]
+    grad = UOp.mstack(*(x.uop for x in grads))
+    idx_values = [(i * 7 + 3) % vocab for i in range(tokens * len(devices))]
+    idx = Tensor(idx_values, dtype=dtypes.int32, device="CPU").shard(devices, axis=0).realize()
+    weight = Tensor.empty(vocab, embed, dtype=dtypes.bfloat16, device="CPU").shard(devices, axis=0).realize()
+    out = peer_embedding_bwd(grad, UOp.sink().call(weight.uop, idx.uop))[0]
+
+    ref_values = [[0.0] * embed for _ in range(vocab)]
+    for i,token in enumerate(idx_values):
+      for j in range(embed): ref_values[token][j] += i // tokens + 1
+    ref = Tensor(ref_values, dtype=dtypes.bfloat16).realize()
+    got = Tensor(out).to("CPU").contiguous().realize()
+    self.assertEqual(got.tolist(), ref.tolist())
+    grad_buf = Tensor.zeros(vocab, embed, dtype=dtypes.bfloat16).shard(devices, axis=None).contiguous().realize()
+    apply_grad(grad_buf, out)
+    self.assertIsNone(grad_buf.uop.axis)
+    def check_accumulator(expected:Tensor):
+      for i in range(len(devices)):
+        got = Tensor(grad_buf.uop.mselect(i)).to("CPU").contiguous().realize()
+        self.assertEqual(got.tolist(), expected.tolist())
+    check_accumulator(ref)
+    apply_grad(grad_buf, out)
+    check_accumulator((ref + ref).realize())
+    grad_buf.assign(grad_buf.zeros_like()).realize()
+    check_accumulator(Tensor.zeros_like(ref).realize())
+    apply_grad(grad_buf, out)
+    check_accumulator(ref)
+
+    @TinyJit
+    def accumulate(*xs:Tensor):
+      new_out = peer_embedding_bwd(UOp.mstack(*(x.uop for x in xs)), UOp.sink().call(weight.uop, idx.uop))[0]
+      apply_grad(grad_buf, new_out)
+      return grad_buf.realize()
+    @TinyJit
+    def clear(): return grad_buf.assign(0).realize()
+    for _ in range(3):
+      clear()
+      accumulate(*grads)
+      check_accumulator(ref)
 
 def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
   Tensor.manual_seed(0)

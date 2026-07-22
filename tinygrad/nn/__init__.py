@@ -387,12 +387,13 @@ class Embedding:
   """
   def __init__(self, vocab_size:int, embed_size:int):
     self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+    self.grad_fxn = _embedding_bwd
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
     if USE_ATOMICS:
       fxn = _embedding_fwd_fxn(self.weight.as_param(0).uop, idx.as_param(1).uop, self.weight.device)
-      return Tensor.call(self.weight, idx, fxn=fxn, grad_fxn=_embedding_bwd)
+      return Tensor.call(self.weight, idx, fxn=fxn, grad_fxn=self.grad_fxn)
     return _embedding_fwd(self.weight, idx)
 
 class LSTMCell:

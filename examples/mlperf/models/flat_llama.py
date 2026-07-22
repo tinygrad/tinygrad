@@ -17,6 +17,7 @@ from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
+from extra.llama_kernels.peer_embedding import peer_assemble_add, peer_embedding_bwd
 
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
@@ -154,6 +155,7 @@ class FlatTransformer:
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    self.tok_embeddings.grad_fxn = peer_embedding_bwd
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).clone().is_param_(False)
@@ -356,6 +358,9 @@ def _get_pads(uop:UOp) -> list[UOp]:
   return [uop]
 
 def apply_grad(grad_buf:Tensor, new_grad:UOp):
+  if grad_buf.uop.axis is None and new_grad.axis is not None and grad_buf.device == new_grad.device:
+    grad_buf.uop = peer_assemble_add(grad_buf.uop, new_grad.cast(grad_buf.dtype))
+    return
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)

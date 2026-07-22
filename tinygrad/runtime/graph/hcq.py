@@ -172,6 +172,12 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if runtime is not None:
+        # Kernels may directly access peer buffers. Map fixed buffers now and remember dynamic inputs so they are mapped on graph invocation.
+        uop_replace_j = dict(self.uop_replace[j])
+        for bufid in ast.arg.globals:
+          buf = bufs[bufid]
+          if (replace_iidx:=uop_replace_j.get(bufid)) is not None: self.input_replace_map[enqueue_dev].add((replace_iidx, dev_idx))
+          elif cast(HCQCompiled, Device[buf.device]) is not enqueue_dev: cast(HCQAllocator, enqueue_dev.allocator)._map(self.hcq_bufs[j][bufid])
         enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size or (1,1,1), ast.arg.local_size or (1,1,1))
       elif j in self.rdma_deps:
         dest_queue, dest_deps, dest_out_signal, dest_out_val = self.rdma_deps[j]
