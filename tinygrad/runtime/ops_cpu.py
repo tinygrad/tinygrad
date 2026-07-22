@@ -10,33 +10,27 @@ from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
-from tinygrad.codegen import to_program
+from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sint, Ops, KernelInfo
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
-def cpu_program(f):
-  @functools.cache
-  def wrapped(dev):
-    with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
-      prg = to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
-    return CPUProgram(dev, prg.arg.function_name, next(x.arg for x in prg.src if x.op is Ops.BINARY), native=True)
-  return wrapped
+def cpu_program(dev, f):
+  with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
+    prg = do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
+  return CPUProgram(dev, prg.arg.function_name, next(x.arg for x in prg.src if x.op is Ops.BINARY), native=True)
 
-@cpu_program
 def signal_prog():
   value = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
   return UOp.param(0, dtypes.uint32, (1,))[0].store(value.cast(dtypes.uint32))
 
-@cpu_program
 def wait_prog():
   value = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
   v = UOp.param(0, dtypes.uint32, (1,), volatile=True).after(l:=UOp.loop(0))[0].load()
   return v.end(l, v < value.cast(dtypes.uint32))
 
-@cpu_program
 def timestamp_prog():
   if WIN: val = UOp.const(dtypes.uint64, 0)
   else:
@@ -45,7 +39,6 @@ def timestamp_prog():
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, (1,))[0].store(val)
 
-@cpu_program
 def quit_prog():
   fn = UOp.param(0, dtypes.uint64, (1 if WIN else 3,))
   if WIN: return fn[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # ExitThread(0)
@@ -53,7 +46,6 @@ def quit_prog():
   close = fn[2].load().call(sem[0], ret_dtype=dtypes.void) # sem_close(sem)
   return fn.after(close)[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # pthread_exit(0)
 
-@cpu_program
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
@@ -71,7 +63,7 @@ class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
     super().__init__()
     self.dev = dev
-  def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=prog(self.dev), prg.fill_kernargs(args, vals), None, None)
+  def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=self.dev.progs[prog], prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
@@ -164,6 +156,7 @@ class CPUDevice(HCQCompiled):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
       HCQSignal, functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
     def fa(fn): return unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
+    self.progs = {f: cpu_program(self, f) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
 
     self.ring = self.allocator.alloc(RING_SLOTS * CMD_SIZE * 8, BufferSpec())
     self.ring_view, self.ring_pos = self.ring.cpu_view().view(fmt='Q'), 0
@@ -182,7 +175,7 @@ class CPUDevice(HCQCompiled):
            [libc.dll.clock_gettime, libc.dll.pthread_exit, libc.dll.sem_wait, libc.dll.sem_close])
     self.func_table.cpu_view().view(fmt='Q')[:] = array.array('Q', [fa(f) if f else 0 for f in fns])
 
-    self.worker:threading.Thread|None = threading.Thread(target=worker_prog(self).fxn, args=(ctypes.c_uint64(self.ring.va_addr),
+    self.worker:threading.Thread|None = threading.Thread(target=self.progs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
       ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr)), daemon=True)
     self.worker.start()
 
