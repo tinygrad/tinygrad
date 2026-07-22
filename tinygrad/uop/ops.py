@@ -1091,7 +1091,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-            multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, axis:int|None=None, volatile=False):
+            multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, axis:int|None=None, volatile:bool=False):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     if shape is not None and axis is not None and isinstance(device, tuple):
       shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))

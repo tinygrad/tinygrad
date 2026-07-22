@@ -97,6 +97,21 @@ class TestWaitLoop(unittest.TestCase):
     c.realize()
     self.assertEqual(c.item(), 12)
 
+  def test_two_sequential_loops(self):
+    c = Tensor.empty(1, dtype=dtypes.int)
+    c = Tensor.custom_kernel(c, fxn=two_loops_kernel)[0]
+    c.realize()
+    self.assertEqual(c.item(), 25)
+
+  def test_loop_in_loop(self):
+    c = Tensor.empty(1, dtype=dtypes.int)
+    c = Tensor.custom_kernel(c, fxn=loop_in_loop_kernel)[0]
+    c.realize()
+    self.assertEqual(c.item(), 12)
+
+@unittest.skipUnless(Device.DEFAULT in ("CPU", "AMD", "NV"))
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, X86Renderer)), "loops are not supported in LVP and X86")
+class TestVolatileLoops():
   def test_async_wait_ext(self):
     sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     try: sig_view = sig_buf.as_memoryview(force_zero_copy=True).cast('i')
@@ -112,16 +127,5 @@ class TestWaitLoop(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf)),)), wait=True)
     sync.join(timeout=3)
 
-  def test_two_sequential_loops(self):
-    c = Tensor.empty(1, dtype=dtypes.int)
-    c = Tensor.custom_kernel(c, fxn=two_loops_kernel)[0]
-    c.realize()
-    self.assertEqual(c.item(), 25)
-
-  def test_loop_in_loop(self):
-    c = Tensor.empty(1, dtype=dtypes.int)
-    c = Tensor.custom_kernel(c, fxn=loop_in_loop_kernel)[0]
-    c.realize()
-    self.assertEqual(c.item(), 12)
 
 if __name__ == "__main__": unittest.main()
