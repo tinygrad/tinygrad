@@ -59,10 +59,19 @@ class BatchNorm(nn.BatchNorm):
     self.weight = Tensor.ones(sz, dtype=dtypes.float32).is_param_(False)
     self.bias = Tensor.zeros(sz, dtype=dtypes.float32).contiguous()
 
+class MatmulConv2d(nn.Conv2d):
+  # im2col conv-as-GEMM: BEAM applies correct tensor cores to matmuls, unlike direct-conv backward (which miscompiles)
+  def __call__(self, x:Tensor) -> Tensor:
+    if not getenv("MATMUL_CONV", 0): return super().__call__(x)
+    bs, cin, _, _ = x.shape; cout, _, ky, kx = self.weight.shape
+    p = x.pad((1, 1, 1, 1))._pool((ky, kx)); oy, ox = p.shape[2:4]
+    p = p.permute(0, 2, 3, 1, 4, 5).reshape(bs*oy*ox, cin*ky*kx)
+    return (p @ self.weight.reshape(cout, cin*ky*kx).T).reshape(bs, oy, ox, cout).permute(0, 3, 1, 2)
+
 class ConvGroup:
   def __init__(self, channels_in:int, channels_out:int):
-    self.conv1 = nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
-    self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv1 = MatmulConv2d(channels_in, channels_out, kernel_size=3, padding=1, bias=False)
+    self.conv2 = MatmulConv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
     self.conv1.weight, self.conv2.weight = dirac_init(self.conv1.weight), dirac_init(self.conv2.weight)
     self.norm1, self.norm2 = BatchNorm(channels_out), BatchNorm(channels_out)
   def __call__(self, x:Tensor) -> Tensor:
