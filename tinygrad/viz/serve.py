@@ -341,7 +341,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
       counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e).__name__, []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
+    if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
     if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
   if len(counter_events) == 0: return None
   data.ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(data.ctxs), 0), (durations, all_counters:={}))]})
