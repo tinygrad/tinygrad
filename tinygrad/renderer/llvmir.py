@@ -7,6 +7,8 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
 
+def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
+
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
   if count > 1: return f"<{count} x {ldt(dt, 1, ptr)}>"
@@ -72,13 +74,16 @@ base_rewrite = PatternMatcher([
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
-   f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
-   f"  store {ldt(var.dtype, idx.max_numel())} {ctx[var]}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
