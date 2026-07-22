@@ -321,11 +321,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
-  # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype, ctx={}, name="lower all index dtypes")
 
-  # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic, name="final symbolic")
+  # final symbolic before decomp. indexing_simplify removes the cast to long using the Invalid
+  sink = graph_rewrite(sink, symbolic+indexing_simplify, name="final symbolic")
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
