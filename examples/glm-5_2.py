@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import functools, argparse
 from typing import Literal
 
-
 # Copying this over from llama cause weight_scale is a little different
 class FP8Linear:
   def __init__(self, in_features, out_features, bias=True):
@@ -114,7 +113,6 @@ class GLMDSAIndexer():
     self.weights_proj = nn.Linear(config.dim, self.idx_num_heads, bias=False)
     self.softmax_scale = self.idx_head_dim ** -0.5
 
-    
   def __call__(self, x: Tensor, q_latent: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, step_t: list[int], to_write: list[int], attn_mask: Tensor) -> Tensor:
     assert x.shape[0] == len(step_t) == len(to_write) == q_latent.shape[0], "error in batch dim"
     q_idx = self.q_up_proj_idx(q_latent) # (B, S, H*HD)
@@ -373,16 +371,7 @@ config = GLMConfig (
   rope_theta = 8_000_000
 )
 
-replace_map: dict = {
-  "model.": "",
-  "wq_b.": "q_up_proj_idx.",
-  "kv_a_proj_with_mqa.": "kv_down_proj.",
-  "kv_b_proj.": "kv_up_proj.",
-  "q_a_proj.": "q_down_proj.",
-  "q_b_proj.": "q_up_proj.",
-  "kv_a_layernorm.": "kv_norm.",
-  "q_a_layernorm.": "q_norm.",
-}
+replace_map: dict = { "model.": "", "wq_b.": "q_up_proj_idx.", "kv_a_proj_with_mqa.": "kv_down_proj.", "kv_b_proj.": "kv_up_proj.", "q_a_proj.": "q_down_proj.", "q_b_proj.": "q_up_proj.", "kv_a_layernorm.": "kv_norm.", "q_a_layernorm.": "q_norm." }
 
 #TODO: try to get rid of this and make own tokenizer with the json
 from tokenizers import Tokenizer
