@@ -20,7 +20,8 @@ MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 def cpu_program(f):
   @functools.cache
   def wrapped(dev):
-    with Context(EMULATED_DTYPES=""): prg = to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
+    with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
+      prg = to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), ClangRenderer(dev.renderer.target))
     return CPUProgram(dev, prg.arg.function_name, next(x.arg for x in prg.src if x.op is Ops.BINARY), native=True)
   return wrapped
 
