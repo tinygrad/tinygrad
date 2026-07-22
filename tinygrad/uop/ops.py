@@ -122,8 +122,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
     case Ops.RANGE:
-      # a RANGE with no bound in src[0] is an unbounded loop header, it's void (control flow may append edges to the src)
-      return src[0].dtype if len(src) and src[0].op not in {Ops.END, Ops.RANGE} else dtypes.void
+      # a RANGE with no src is an unbounded loop header, it's void
+      return src[0].dtype if len(src) else dtypes.void
     case Ops.LOAD | Ops.INDEX | Ops.MULTI | Ops.REDUCE | Ops.AFTER | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
@@ -484,7 +484,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # a RANGE with no src (no bound) is an unbounded loop header, it's void and ended by a conditional END
   @property
-  def is_loop(self) -> bool: return self.op is Ops.RANGE and self.dtype == dtypes.void
+  def is_loop(self) -> bool: return self.op is Ops.RANGE and len(self.src) == 0
 
   @property
   def ranges(self) -> dict[UOp, None]:

@@ -9,7 +9,7 @@ def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
-  priorities:dict[UOp, tuple[int, int, Any]] = {}
+  priorities:dict[UOp, tuple[int|float, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
@@ -17,7 +17,8 @@ def linearize(sink:UOp) -> list[UOp]:
     for s in u.src: out_degree[s] += 1
 
     # we place UOps with higher run_counts later
-    run_count = prod([int(r.vmax)+1 for r in u.ranges])
+    # loops have an unbounded trip count, so they always schedule after any enclosing bounded ranges (edges can't be added to their src)
+    run_count = prod([int(r.vmax)+1 for r in u.ranges]) if not u.is_loop else float('inf')
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
@@ -81,7 +82,8 @@ class CFGContext:
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  # control flow edges are only added to bounded ranges, loops keep src=() so they stay identifiable
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if not x.is_loop and (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_split_ends(e:UOp):

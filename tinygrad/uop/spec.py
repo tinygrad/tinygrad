@@ -77,9 +77,9 @@ spec_shared = PatternMatcher([
   # RANGE can be in the big graph now
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
-      all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType) or None),
-  # a void RANGE is a bound-less loop header, the arg is an axis id like RANGE (control flow may append edges to the src)
-  (UPat(Ops.RANGE, dtypes.void, name="rng"), lambda rng:
+      all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+  # a RANGE with no src is a bound-less loop header, the arg is an axis id like RANGE
+  (UPat(Ops.RANGE, dtypes.void, src=(), name="rng"), lambda rng:
     isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
