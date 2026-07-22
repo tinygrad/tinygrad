@@ -111,7 +111,7 @@ class TestWaitLoop(unittest.TestCase):
 
 @unittest.skipUnless(Device.DEFAULT in ("CPU", "AMD", "NV"), "need proper uncached=True handling")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, X86Renderer)), "loops are not supported in LVP and X86")
-class TestVolatileLoops:
+class TestVolatileLoops(unittest.TestCase):
   def test_async_wait_ext(self):
     sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     try: sig_view = sig_buf.as_memoryview(force_zero_copy=True).cast('i')
