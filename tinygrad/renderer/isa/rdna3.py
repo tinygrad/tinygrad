@@ -16,7 +16,7 @@ isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 insdefs = [
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
   (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
-  (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "i32_i24_e32", "lo_u32", "lo_u16"], False), # TODO: mul i16?
+  (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "lo_u32", "lo_u16"], False), # TODO: mul i16?
   (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
   (Ops.SIN, "v_sin", ["f32_e32"], False),
@@ -173,7 +173,6 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
-  print(base.op, base.arg)
   # TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is and
   # the size of the other ones. Use isel ctx?
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
@@ -361,8 +360,10 @@ def alu(ctx, x:UOp):
     return _vop2(ctx, x.replace(src=x.src[::-1]).ins(ins))
 
   if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
-  elif x.op in OP_INS and x.dtype in OP_INS[x.op]:
-    ins = OP_INS[x.op][x.dtype]
+  elif x.op in OP_INS:
+    dt = x.dtype
+    if x.op is Ops.MUL and x.dtype is dtypes.int: dt = dtypes.uint32
+    if dt in OP_INS[x.op]: ins = OP_INS[x.op][dt]
   else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
@@ -643,7 +644,7 @@ class CntType(Enum):
 
 def ctp(x:UOp) -> CntType|None:
   if x.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }: return CntType.STORE_CNT if x.dtype is dtypes.void else CntType.LOAD_CNT
-  if x.arg.func in { RDNA3Ops.SMEM }: return CntType.DS_CNT
+  if x.arg.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
   return None
 
 def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
