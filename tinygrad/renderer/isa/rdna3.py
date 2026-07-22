@@ -207,10 +207,11 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   vreg = make_vgpr(ctx, width=nregs)
   nbytes = n * base.dtype.itemsize
   tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not (dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype))]
-  nx = x.ins(_insspace(tupins, base), src=fold_address(ctx, addr), tag=(vreg,))
+  folded = fold_address(ctx, addr)
+  nx = x.ins(_insspace(tupins, base), src=folded, tag=(vreg,))
   if gate is not None:
-    if alt.op is Ops.GROUP: packed = alt.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(alt.src)), tag=(vreg,))
-    else: packed = vmov(alt).replace(tag=(vreg,))
+    if alt.op is Ops.GROUP: packed = alt.replace(src=tuple(s.replace(src=s.src + folded, tag=(vreg.sub(i),)) for i,s in enumerate(alt.src)), tag=(vreg,))
+    else: packed = vmov(alt).replace(src=(alt,) + folded, tag=(vreg,))
     return nx.replace(src=(packed,) + nx.src  + (gate,def_reg(dtypes.uint32,GP_SGPRS)))
   return nx
 
@@ -430,12 +431,9 @@ def lower_gated(ctx, x:UOp):
   skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".EXIT_{skip_label}")
   save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
   nsrc = x.src[:-2] if gated_store else x.src[1:-2]
-  line = []
-  if not gated_store:
-    if x.src[0].op is Ops.GROUP: line.extend(x.src[0].src)
-    else: line = [x.src[0]]
-  line.extend([save, skip, x.replace(src=nsrc), lbl, restoreexec(x.src[-1])])
-  return line[0], line
+  nx = x.replace(src=nsrc)
+  line = [save, skip, nx, lbl, restoreexec(x.src[-1])]
+  return nx, line
 
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
