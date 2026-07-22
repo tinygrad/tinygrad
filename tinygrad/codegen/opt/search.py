@@ -3,6 +3,7 @@ from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
+from tinygrad.dtype import dtypes, _to_np_dtype
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -110,10 +111,39 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
     except KernelOptError: pass
   return acted
 
-beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
+# *** BEAM output validation: beam only times kernels, this gates on correctness vs the un-optimized kernel ***
+def _beam_exec(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer]): time_call(prg.call(*[UOp.from_buffer(b) for b in rawbufs]), var_vals)
+def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int]):
+  import numpy as np
+  base = to_program(s.copy().get_optimized_ast(name_override="test"), s.ren)
+  outs, ins = base.arg.outs, base.arg.ins
+  if not len(outs) or any((b:=rawbufs[i]) is None or _to_np_dtype(b.dtype) is None for i in base.arg.globals): return None  # can't validate
+  rng, inplace = np.random.default_rng(1337), [i for i in ins if i in outs]
+  for i in base.arg.globals:  # fill inputs deterministically so base/candidate see identical data
+    d = rng.standard_normal((b:=rawbufs[i]).size).astype(_to_np_dtype(b.dtype)) if dtypes.is_float(b.dtype) else np.zeros(b.size, _to_np_dtype(b.dtype))
+    b.allocator._copyin(b._buf, memoryview(bytearray(d.tobytes())))
+  snap = {i:bytearray(rawbufs[i].as_memoryview()) for i in inplace}
+  def restore():
+    for i in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(snap[i]))
+  try:
+    _beam_exec(base, var_vals, rawbufs)
+    ref = {i:rawbufs[i].numpy().copy() for i in outs}
+  except Exception: return None
+  rtol, atol = getenv("BEAM_VALIDATE_RTOL", 1e-2), getenv("BEAM_VALIDATE_ATOL", 1e-2)
+  def validate(cand:Scheduler) -> bool:
+    restore()
+    try:
+      _beam_exec(to_program(cand.copy().get_optimized_ast(name_override="test"), cand.ren), var_vals, rawbufs)
+      for i in outs: np.testing.assert_allclose(rawbufs[i].numpy(), ref[i], rtol=rtol, atol=atol)
+    except Exception: return False
+    return True
+  return validate
+
+beam_pool, BEAM_DEBUG, BEAM_VALIDATE = None, getenv("BEAM_DEBUG"), getenv("BEAM_VALIDATE")
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
+  if BEAM_VALIDATE: key["validate"] = 1  # validated results are a distinct (correct-only) cache namespace
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
     for o in val[len(s.applied_opts):]: ret.apply_opt(o)
@@ -137,6 +167,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
     var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
+    validate = get_beam_validator(s, rawbufs, var_vals) if BEAM_VALIDATE else None
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:
@@ -172,6 +203,13 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
 
       # done
       opts = sorted(timed, key=lambda x: x[1])
+      if validate is not None:  # keep the fastest correct candidates, reject miscompiles (falls back to no-opt if none pass)
+        vopts: list[tuple[Scheduler, float]] = []
+        for cand, tm in opts:
+          if validate(cand): vopts.append((cand, tm))
+          elif BEAM_DEBUG: print(f"BEAM_VALIDATE reject {cand.applied_opts}")
+          if len(vopts) >= amt: break
+        opts = vopts
       exiting = len(opts) == 0 or (opts[0][1] < min_progress) or (len(beam) > 0 and ((beam[0][1]-opts[0][1]) < min_progress))
       if not exiting: beam = opts[:amt]
       elif len(opts) > 0 and opts[0][1] < beam[0][1]: beam = opts[:1]
