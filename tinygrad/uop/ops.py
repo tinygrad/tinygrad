@@ -274,6 +274,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
+  @recursive_property
+  def bool_slice(self) -> frozenset[UOp]:
+    ret = frozenset().union(*[s.bool_slice for s in self.src])
+    return ret | {self} if self.dtype is dtypes.bool else ret
+
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)

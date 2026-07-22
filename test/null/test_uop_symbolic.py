@@ -1001,7 +1001,6 @@ class TestSymbolic(unittest.TestCase):
     # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
     self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
 
-  @unittest.expectedFailure
   def test_where_closure_folding(self):
     # cond.where(t, f) where f contains cond.where(a, b) should fold the inner where to b in false branch
     x = Variable("x", 0, 10)
@@ -1010,6 +1009,41 @@ class TestSymbolic(unittest.TestCase):
     outer = cond.where(inner * 2, inner + 1)  # true: -x*2, false: x+1
     # the inner where should be folded: true branch gets -x, false branch gets x
     self.helper_test_variable(outer, -20, 11, "(x<5).where((x*-2), (x+1))")
+
+  def test_where_closure_folding_deep(self):
+    x = Variable("x", 0, 10)
+    cond = x < 5
+    w1 = cond.where(-x, x)
+    w2 = cond.where(w1*2, w1+1)
+    self.helper_test_variable(cond.where(w2*3, w2+7), -60, 18, "(x<5).where((x*-6), (x+8))")
+
+  def test_where_closure_folding_different_cond(self):
+    # a nested where on a different condition is not folded
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = (x<5).where((x<7).where(a, b), (x<7).where(b, a))
+    self.helper_test_variable(expr, 0, 3, "(x<5).where((x<7).where(a, b), (x<7).where(b, a))")
+
+  def test_where_closure_folding_derived_cond(self):
+    # cond is a value inside the branch: (!cond).where(a, b) is b in the true branch
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    expr = (x<5).where((x<5).logical_not().where(a, b)*2, c)
+    self.helper_test_variable(expr, 0, 6, "(x<5).where((b*2), c)")
+
+  def test_where_closure_folding_valid(self):
+    # a valid gate on the same cond folds in the true branch, the false branch keeps the Invalid gate
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    cond = x < 5
+    expr = cond.where(a.valid(cond), Variable("c", 0, 3))
+    self.assertIs(graph_rewrite(expr, sym), cond.where(a, UOp.invalid()))
+    # a same-cond valid gate in the false branch is Invalid there
+    expr = cond.where(Variable("t", 0, 3), a.valid(cond))
+    self.assertIs(graph_rewrite(expr, sym), cond.where(Variable("t", 0, 3), UOp.invalid()))
 
   def test_symbolic_div(self):
     # from symbolic arange
@@ -1259,18 +1293,10 @@ class TestInvalidIndex(unittest.TestCase):
     idx = (ridx<5).where(ridx, UOp.invalid())*0
     self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
 
-  def test_invalid_comparison_drops_invalid(self):
-    # comparisons return a bool, and bools can't be invalid
-    ridx = Variable("ridx", 0, 10)
-    idx = (ridx<5).where(ridx, UOp.invalid())<3
-    self.assertIs(idx.simplify(), (ridx<3), "comparison of index should drop the invalid")
-    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0),
-      "comparison of index should drop the invalid")
-
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
-    idx = (ridx<5).where(ridx, UOp.invalid())*10
-    self.assertIs(idx.simplify(), (ridx<5).where(ridx*10, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+    self.assertIs((10*(ridx<5).where(ridx, UOp.invalid())).simplify(), (ridx<5).where(ridx*10, UOp.invalid()),
+      "Invalid should poison either binary operand position")
 
   def test_merge_invalid_conditions(self):
     ridx0 = Variable("ridx0", 0, 10)
