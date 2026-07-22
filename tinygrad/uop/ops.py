@@ -113,11 +113,14 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
-    case Ops.STORE | Ops.CALL | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
+    case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
+    case Ops.CALL:
+      # a CALL of an opaque body is void, a CALL of an address can return a value
+      return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PYLITERAL:
       return dtypes.void
     case Ops.NOOP:
@@ -308,8 +311,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.FUNCTION:
         return None
+
+      # a void CALL has no shape, the return value of a CALL has the shape of its dtype
+      case Ops.CALL:
+        return None if self.dtype is dtypes.void else ()
 
       # INS shape is always scalar, vector width is in the instruction encoding
       case Ops.INS:
@@ -1107,8 +1114,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
-  def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
+  def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+    if ret_dtype is not None: return UOp(Ops.CALL, ret_dtype, src=(self,)+srcs)
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     if self.op in UOp._OPAQUE_CALL_BODIES:
       return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
@@ -1591,7 +1599,8 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[n.src[0]] = n.src[0]
+        if not self.enter_calls and (n.op is Ops.FUNCTION or (n.op is Ops.CALL and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+          self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1631,7 +1640,9 @@ class RewriteContext:
         # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[new_n.src[0]] = new_n.src[0]
+        # A CALL of an address is not a body, its srcs are regular dataflow
+        if not self.enter_calls and (new_n.op is Ops.FUNCTION or (new_n.op is Ops.CALL and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+          self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
