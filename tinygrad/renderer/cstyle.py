@@ -67,7 +67,7 @@ base_rewrite = PatternMatcher([
 
   # call an external function
   (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"((({ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[x.src[0]]}))" +
+   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[x.src[0]]}))" +
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   # custom passes through with format
@@ -116,6 +116,7 @@ def wmma_args(uops:list[UOp]):
               for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
+  abi: str = ""
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -277,7 +278,8 @@ class ClangRenderer(CStyleLanguage):
     + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   if sys.platform == 'win32':
-    kernel_typedef = "__attribute__((ms_abi)) void"
+    abi = "__attribute__((ms_abi)) "
+    kernel_typedef = abi + "void"
   def render_vector_prefix(self, dt:DType, count:int) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
     alignment = 2**int(math.log2(dt.itemsize * count)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
