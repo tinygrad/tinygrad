@@ -38,11 +38,6 @@ pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
-pm_no_index = PatternMatcher([
-  (UPat(GroupOp.ALU.union({Ops.CONST}), dtype=dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int)),
-  (UPat(Ops.CAST, dtype=dtypes.weakint, src=(UPat.var("x"),)), lambda x: x.cast(dtypes.int)),
-])
-
 def build_range_map(sink:UOp) -> dict[int, int]:
   ctx: dict[int, int] = {}
   for x in sink.toposort():
@@ -327,7 +322,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -351,7 +346,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_index
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer
