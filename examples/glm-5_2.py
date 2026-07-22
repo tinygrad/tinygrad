@@ -1,10 +1,30 @@
-# Using GLM-5.2 weights from https://huggingface.co/RedHatAI/GLM-5.2-NVFP4 model
+# Using GLM-5.2 weights from https://huggingface.co/zai-org/GLM-5.2-FP8
 # Using the https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py as source of truth
 
+from math import ceil
 from tinygrad import fetch, Tensor, nn, dtypes, Device
 from dataclasses import dataclass
 import functools, argparse
 from typing import Literal
+
+
+# Copying this over from llama cause weight_scale is a little different
+class FP8Linear:
+  def __init__(self, in_features, out_features, bias=True):
+    self.block_size, self.out_features, self.in_features = 128, out_features, in_features
+    self.weight = Tensor.empty(out_features, in_features, dtype=dtypes.fp8e4m3)
+    self.bias = Tensor.empty(out_features, dtype=dtypes.float16) if bias else None
+    self.weight_scale_inv = Tensor.empty((ceil(out_features/self.block_size), ceil(in_features/self.block_size)), dtype=dtypes.float16)
+
+  def __call__(self, x:Tensor):
+    weight_scale_inv = self.weight_scale_inv.unsqueeze(1).unsqueeze(-1)
+    weight_scale_inv = weight_scale_inv.expand(ceil(self.out_features/self.block_size), self.block_size, ceil(self.in_features//self.block_size), self.block_size).reshape(self.out_features, self.in_features)
+    weight_scale_inv = weight_scale_inv[:self.out_features, :self.in_features]
+    weight = self.weight.cast(dtypes.float32) * weight_scale_inv.cast(dtypes.float32)
+
+    y = x.dot(weight.T) * weight_scale_inv
+    if self.bias is not None: y = y + self.bias.cast(y.dtype)
+    return y.cast(x.dtype)
 
 LayerType = Literal["dense", "sparse"]
 IndexerType = Literal["full", "shared"]
@@ -33,7 +53,6 @@ class GLMConfig:
   attn_rope_dim: int
   rope_theta: float
 
-DEFAULT = 0
 def device_to_load(device: tuple[str, ...], num: int) -> str: 
   return device[num % len(device)]
 
@@ -89,10 +108,10 @@ class GLMDSAIndexer():
   def __init__(self, layer:int, config:GLMConfig):
     self.idx_num_heads, self.idx_head_dim, self.attn_rope_dim = config.idx_heads, config.idx_attn_dim, config.attn_rope_dim
     self.layer, self.idx_topk = layer, config.idx_topk
-    self.q_up_proj_idx = nn.Linear(config.q_latent_dim, self.idx_num_heads * self.idx_head_dim, bias=False)
-    self.wk_idx = nn.Linear(config.dim, self.idx_head_dim, bias=False)
-    self.k_norm_idx = nn.LayerNorm(self.idx_head_dim, eps=1e-6)
-    self.weights_proj_idx = nn.Linear(config.dim, self.idx_num_heads, bias=False)
+    self.q_up_proj_idx = FP8Linear(config.q_latent_dim, self.idx_num_heads * self.idx_head_dim, bias=False)
+    self.wk = FP8Linear(config.dim, self.idx_head_dim, bias=False)
+    self.k_norm = nn.LayerNorm(self.idx_head_dim, eps=1e-6)
+    self.weights_proj = nn.Linear(config.dim, self.idx_num_heads, bias=False)
     self.softmax_scale = self.idx_head_dim ** -0.5
 
     
@@ -102,7 +121,7 @@ class GLMDSAIndexer():
     q_idx = q_idx.reshape(*q_idx.shape[:-1], self.idx_num_heads, self.idx_head_dim) # (B, S, H, HD)
     q_rot_idx, q_pass_idx = q_idx[..., :self.attn_rope_dim], q_idx[..., self.attn_rope_dim:]
 
-    k_idx = self.k_norm_idx(self.wk_idx(x)).unsqueeze(2) # (B, S, HD) -> (B, S, 1, HD)
+    k_idx = self.k_norm(self.wk(x)).unsqueeze(2) # (B, S, HD) -> (B, S, 1, HD)
     k_rot_idx, k_pass_idx = k_idx[..., :self.attn_rope_dim], k_idx[...,self.attn_rope_dim:]
 
     q_rot_idx, k_rot_idx = apply_rope(q_rot_idx, position_embeddings, step_t, to_write), apply_rope(k_rot_idx, position_embeddings, step_t, to_write)
@@ -118,7 +137,7 @@ class GLMDSAIndexer():
     scores = scores.relu()
 
     # weights per head (B, S, idx_num_heads)
-    weights = self.weights_proj_idx(x.cast(self.weights_proj_idx.weight.dtype)).float() * (self.idx_num_heads ** -0.5)
+    weights = self.weights_proj(x.cast(self.weights_proj.weight.dtype)).float() * (self.idx_num_heads ** -0.5)
     index_scores = weights.unsqueeze(-2) @ scores # (B, S, 1, H) @ (B, S, H, T) => (B, S, 1, T)
     index_scores = index_scores.squeeze(-2) # (B, S, T)
 
@@ -154,15 +173,15 @@ def perform_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tenso
 class GLMAttention():
   def __init__(self, config: GLMConfig, layer: int):
     self.attn_dim, self.attn_rope_dim, self.kv_latent_dim, self.attn_heads, self.layer = config.attn_dim, config.attn_rope_dim, config.kv_latent_dim, config.attn_heads, layer
-    self.q_down_proj = nn.Linear(config.dim, config.q_latent_dim, bias=False)
+    self.q_down_proj = FP8Linear(config.dim, config.q_latent_dim, bias=False)
     self.q_norm = nn.RMSNorm(config.q_latent_dim)
-    self.q_up_proj = nn.Linear(config.q_latent_dim, config.attn_heads * config.attn_dim, bias=False)
+    self.q_up_proj = FP8Linear(config.q_latent_dim, config.attn_heads * config.attn_dim, bias=False)
 
-    self.kv_down_proj = nn.Linear(config.dim, config.kv_latent_dim + config.attn_rope_dim, bias=False)
+    self.kv_down_proj = FP8Linear(config.dim, config.kv_latent_dim + config.attn_rope_dim, bias=False)
     self.kv_norm = nn.RMSNorm(config.kv_latent_dim)
-    self.kv_up_proj = nn.Linear(config.kv_latent_dim, config.attn_heads * ((config.attn_dim - config.attn_rope_dim) + config.attn_dim))
+    self.kv_up_proj = FP8Linear(config.kv_latent_dim, config.attn_heads * ((config.attn_dim - config.attn_rope_dim) + config.attn_dim), bias=False)
 
-    self.o_proj = nn.Linear(config.attn_heads * config.attn_dim, config.dim, bias=False)
+    self.o_proj = FP8Linear(config.attn_heads * config.attn_dim, config.dim, bias=False)
 
     self.indexer = GLMDSAIndexer(layer, config) if config.indexers[layer] == "full" else None
 
@@ -209,13 +228,13 @@ class GLMMoeGateTopK():
     self.num_exp, self.num_exp_per_token, self.dim = config.num_exp ,config.num_exp_per_tok, config.dim
     self.routed_scaling_fact = config.routed_scaling_fact
     self.weight = Tensor.empty(self.num_exp, self.dim)
-    self.exp_score_corretion_bias = Tensor.empty(self.num_exp)
+    self.e_score_correction_bias = Tensor.empty(self.num_exp)
 
   # x: (B, S, dim)
   def __call__(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     router_logits = x @ self.weight.transpose() # (B, S, dim) @ (dim, E) => (B, S, E)
     scores = router_logits.sigmoid() # (B, S, E)
-    scores_for_choice = scores + self.exp_score_corretion_bias # (B, S, E)
+    scores_for_choice = scores + self.e_score_correction_bias # (B, S, E)
     topk_idx = scores_for_choice.topk(self.num_exp_per_token, -1)[1] # (B, S, K)
     topk_weights = scores.gather(-1,topk_idx)
 
@@ -229,29 +248,30 @@ class GLMMoeGateTopK():
 class GLMMoeExpert():
   def __init__(self, config: GLMConfig):
     self.num_experts = config.num_exp
-    self.gate_up_proj = nn.Linear(config.dim, 2 * config.moe_intermediate_size)
-    self.down_proj =  nn.Linear(config.moe_intermediate_size, config.dim)
+    self.up_proj = FP8Linear(config.dim, config.moe_intermediate_size)
+    self.gate_proj = FP8Linear(config.dim, config.moe_intermediate_size)
+    self.down_proj =  FP8Linear(config.moe_intermediate_size, config.dim)
 
   # This call expects that the inputs and weights are already on the right device shard
   # x : (N, dim) w: (N) 
   def __call__(self, x: Tensor, w: Tensor) -> Tensor:
-    # gate, up: (N, 2I)
-    gate, up = self.gate_up_proj(x).chunk(2, dim=-1) # gate, up: (N, dim) @ (dim , 2I)
+    gate = self.gate_proj(x) # (N, I)
+    up = self.up_proj(x) # (N, I)
     x = (gate.silu() * up).contiguous() # (N, I)
     x = self.down_proj(x) # (N, I) @ (I, dim) => (N, dim)
     return (x * w.unsqueeze(-1)) # (N, dim)
-    
+
 class GLMMoeLayer():
   def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
     self.num_exp, self.devices = config.num_exp, devices
     self.experts = [GLMMoeExpert(config) for _ in range(self.num_exp)]
-    self.selector = GLMMoeGateTopK(config)
-    self.shared_expert = GLMMLPLayer(config)
+    self.gate = GLMMoeGateTopK(config)
+    self.shared_experts = GLMMLPLayer(config)
 
   # x: (B, S, dim)
   def __call__(self, x: Tensor) -> Tensor:
     residual = x
-    _, topk_weights, topk_idx = self.selector(x)
+    _, topk_weights, topk_idx = self.gate(x)
 
     default_device = self.devices[0]
     exp_arange = Tensor.zeros(*topk_idx.shape[:-1], self.num_exp) # (B, S, num_exp)
@@ -260,7 +280,6 @@ class GLMMoeLayer():
 
     for exp in range(self.num_exp):
       if not exp_map[exp].any().item(): continue
-
       shard_device = device_to_load(self.devices, exp)
       coords = exp_map[exp].nonzero()
       b, s = coords[:, 0], coords[:, 1]
@@ -268,14 +287,14 @@ class GLMMoeLayer():
       w = ((topk_idx[b, s] == exp) * topk_weights[b,s]).sum(-1).to(shard_device) # (num_true)
       output[b,s] += self.experts[exp](x_exp, w).to(default_device)
 
-    x = output + self.shared_expert(residual)
+    x = output + self.shared_experts(residual)
     return x # (B, S, dim)
 
 class GLMMLPLayer():
   def __init__(self, config: GLMConfig):
-    self.gate_proj = nn.Linear(config.dim, config.intermediate_size, bias=False)
-    self.up_proj = nn.Linear(config.dim, config.intermediate_size, bias=False)
-    self.down_proj = nn.Linear(config.intermediate_size, config.dim, bias=False)
+    self.gate_proj = FP8Linear(config.dim, config.intermediate_size, bias=False)
+    self.up_proj = FP8Linear(config.dim, config.intermediate_size, bias=False)
+    self.down_proj = FP8Linear(config.intermediate_size, config.dim, bias=False)
 
   def __call__(self, x: Tensor) -> Tensor:
     return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
@@ -283,21 +302,21 @@ class GLMMLPLayer():
 class GLMBlock():
   def __init__(self, config: GLMConfig, layer: int, devices: tuple[str, ...]):
     self.input_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.self_attention = GLMAttention(config, layer)
+    self.self_attn = GLMAttention(config, layer)
     if config.layers[layer] == "dense":
       self.mlp = GLMMLPLayer(config)
     else:
       self.mlp = GLMMoeLayer(config, devices)
-    self.post_attention_layer_norm = nn.RMSNorm(config.dim, config.norm_eps)
+    self.post_attention_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
 
   def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
     residual = x
     x = self.input_layernorm(x)
-    x, _, topk_idx = self.self_attention(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
+    x, _, topk_idx = self.self_attn(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
     x = x + residual
 
     residual = x
-    x = self.post_attention_layer_norm(x)
+    x = self.post_attention_layernorm(x)
     x = self.mlp(x)
     x = x + residual
     return x, topk_idx
@@ -306,13 +325,13 @@ class GLMModel():
   def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
     self.max_context, self.rope_theta, self.attn_rope_dim, self.indexers, self.kv_latent_dim = config.max_context, config.rope_theta, config.attn_rope_dim, config.indexers, config.kv_latent_dim
     self.idx_attn_dim, self.max_batch, self.rope_dim = config.idx_attn_dim, config.max_batch, config.attn_rope_dim
-    self.embedding = nn.Embedding(config.vocab_size, config.dim)
+    self.embed_tokens = nn.Embedding(config.vocab_size, config.dim)
     self.layers = [GLMBlock(config, i, devices) for i in range(len(config.layers))]
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.lm_head = nn.Linear(config.dim, config.vocab_size)
+    self.lm_head = nn.Linear(config.dim, config.vocab_size, bias=False)
 
   def __call__(self, input_toks: Tensor, step_t: list[int], to_write: list[int]) -> Tensor:
-    x = self.embedding(input_toks)
+    x = self.embed_tokens(input_toks)
     batch = input_toks.shape[0]
     assert batch <= self.max_batch, "batch size is bigger than max_batch"
     position_embeddings = precompute_freqs_cis(batch, self.attn_rope_dim, self.max_context, self.rope_theta)
@@ -333,8 +352,8 @@ layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", 
 config = GLMConfig (
   max_batch = 10,
   dim = 6_144,
-  layers = layer_types[testing_start_layer:testing_end_layer],
-  norm_eps = 1e-5,
+  layers = layer_types,
+  norm_eps = 1e-05,
   vocab_size = 154_880,
   max_context = 1_000,
   intermediate_size = 12_288,
@@ -342,48 +361,57 @@ config = GLMConfig (
   num_exp_per_tok = 8,
   routed_scaling_fact = 2.5,
   moe_intermediate_size = 2_048,
-  attn_dim = 64,
-  attn_heads = 32,
+  attn_dim = 256,
+  attn_heads = 64,
   q_latent_dim = 2_048,
   kv_latent_dim = 512,
   idx_attn_dim = 128,
   idx_heads = 32,
   idx_topk = 2_048,
-  indexers = indexer_types[testing_start_layer:testing_end_layer],
+  indexers = indexer_types,
   attn_rope_dim = 64,
-  rope_theta = 800_000
+  rope_theta = 8_000_000
 )
 
 replace_map: dict = {
   "model.": "",
+  "wq_b.": "q_up_proj_idx.",
+  "kv_a_proj_with_mqa.": "kv_down_proj.",
+  "kv_b_proj.": "kv_up_proj.",
+  "q_a_proj.": "q_down_proj.",
+  "q_b_proj.": "q_up_proj.",
+  "kv_a_layernorm.": "kv_norm.",
+  "q_a_layernorm.": "q_norm.",
 }
 
 #TODO: try to get rid of this and make own tokenizer with the json
 from tokenizers import Tokenizer
 def load_tokenizer()-> Tokenizer: 
-  return Tokenizer.from_file(str(fetch("https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/tokenizer.json")))
+  return Tokenizer.from_file(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/tokenizer.json")))
 
-# This has total 9 files each approx 50GB
-def load_model(to_load: int = 1):
+# This has total 141 files each approx 5.3 GB ~= 750 GB
+def load_model(to_load: int = 141):
   model_tensors: dict[str, Tensor] = {}
-  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/RedHatAI/GLM-5.2-NVFP4/resolve/main/model-0000{i+1}-of-00009.safetensors")))
-  return model_tensors
+  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/model-0000{i+1}-of-00141.safetensors")))
+
+  renamed = {}
+  for k,v in model_tensors.items(): 
+    for pat, rep in replace_map.items(): k = k.replace(pat, rep)
+    renamed[k] = v
+  return renamed
 
 if __name__ == "__main__":
+  tokenizer = load_tokenizer()
+  loaded_model = load_model(3)
+
   parser = argparse.ArgumentParser()
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   args = parser.parse_args()
-   
+
   devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else tuple(f"{Device.DEFAULT}")
 
-  tokenizer = load_tokenizer()
-  model_part_1 = load_model(1)
-  renamed = {k.replace(pat, rep): v for k,v in model_part_1.items() for pat, rep in replace_map.items()}
-
-  # To Remove
-  # model = GLMModel(config, devices)
-  # for k,v in renamed.items():
-  #   assert k in nn.state.get_state_dict(model).keys(), f"{k}"
+  model = GLMModel(config, devices)
+  nn.state.load_state_dict(model, loaded_model)
 
   # encoded_one = tokenizer.encode("This is test string one")
   # encoded_two = tokenizer.encode("This is test string two")
@@ -392,14 +420,9 @@ if __name__ == "__main__":
   # encoded_five = tokenizer.encode("This is test string five")
   #
   #
-  model = GLMModel(config, devices)
+  # model = GLMModel(config, devices)
   #
   # ids = [encoded_one.ids, encoded_two.ids, encoded_three.ids, encoded_four.ids, encoded_five.ids]
   # input = Tensor(ids)
   # output = model(input, [0, 0, 0, 0, 0], [len(x) for x in ids])
   # print(output.tolist())
-
-  print(nn.state.get_state_dict(model).keys())
-  #
-  #
-  # print({(k, v.device, v.dtype) for i, (k,v) in enumerate(renamed.items()) if "weight_packed" in k})
