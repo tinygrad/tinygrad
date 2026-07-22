@@ -865,9 +865,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
     # see contiguous_view
-    if self.op is Ops.BITCAST: return all(not d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str)
-                                                                                       else self.device or ())) and self.src[0].has_buffer_identity()
-    if self.op is Ops.SHRINK: return self.src[0].op is Ops.PARAM and self.src[1].op is Ops.PARAM
+    if all(not d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device or ())):
+      if self.op is Ops.BITCAST: return self.src[0].has_buffer_identity()
+      if self.op is Ops.SHRINK: return len(self.src[0].shape) == 1 and self.src[0].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
