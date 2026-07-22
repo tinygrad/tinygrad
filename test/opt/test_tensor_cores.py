@@ -141,9 +141,9 @@ class TestTensorCores(unittest.TestCase):
       if tc.dtype_in is dtypes.bfloat16: continue # <-- broken with numpy
       # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
       golden_result = None
+      a = Tensor.rand(16, 16, 29, 29, dtype=tc.dtype_in).realize()
+      b = Tensor.rand(32, 16, 16, 16, dtype=tc.dtype_in).realize()
       for axis in range(9):
-        a = Tensor.rand(16, 16, 29, 29, dtype=tc.dtype_in).realize()
-        b = Tensor.rand(32, 16, 16, 16, dtype=tc.dtype_in).realize()
         c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
@@ -160,7 +160,7 @@ class TestTensorCores(unittest.TestCase):
         result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(real_bufs[0].dtype))
 
         # ensure the results for each choice of axis matches
-        if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(real_bufs[0].dtype))
+        if golden_result is None: golden_result = result.copy()
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
   @Context(ALLOW_TF32=1)
