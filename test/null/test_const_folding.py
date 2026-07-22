@@ -50,7 +50,7 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakfloat, 3.75))
 
   def test_invalid_poison(self):
-    self.assertIs(UOp.const(dtypes.weakint, Invalid).alu(Ops.CDIV, UOp.const(dtypes.weakint, 0)).simplify().arg, Invalid)
+    self.assertIs(UOp.invalid().alu(Ops.CDIV, UOp.const(dtypes.weakint, 0)).simplify().arg, Invalid)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):

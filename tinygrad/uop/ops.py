@@ -274,6 +274,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
+  @recursive_property
+  def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
+  # NOTE: self is added outside the cache, a cached self-reference is a cycle the refcounter can't free
+  @property
+  def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
+
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)

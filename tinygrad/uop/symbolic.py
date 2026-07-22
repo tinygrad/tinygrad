@@ -215,6 +215,13 @@ commutative = PatternMatcher([
     x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize and not x.src[0].tuplize < x.src[1].tuplize else None),
 ])
 
+def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
+  """in cond.where(t, f), cond is True within t and False within f"""
+  if cond not in t.bool_slice and cond not in f.bool_slice: return None
+  # INDEX gates are owned by the valid/store-coalescing machinery, leave them alone
+  if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
+  return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
+
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
@@ -233,6 +240,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
    lambda cond, t, f: cond.where(f,t) if f.arg is not Invalid else None),
+  # in cond.where(t, f), uses of cond fold to True within t and False within f
+  (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -404,15 +413,6 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
-# TODO: this is O(number of WHERE * number of node)
-# def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-#   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-#   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
-#   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-#   if not t_subs and not f_subs: return None
-#   new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
-#   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
-
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
@@ -434,8 +434,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.STACK, src=(UOp(alu.op, src=(x,y)),))),
   # ** where **
-  # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
-  # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
   # ** pow **
