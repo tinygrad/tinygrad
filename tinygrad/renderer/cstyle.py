@@ -13,10 +13,10 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
 
   # range/loop/if/endif
+  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda ctx,x: "for (;;) {"),
   (UPat(Ops.RANGE, name="x"),
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
-  (UPat(Ops.LOOP, name="x"), lambda ctx,x: "for (;;) {"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.LOOP), UPat(name="c", dtype=dtypes.bool))), lambda ctx,c: f"  if (!({ctx[c]})) {{ break; }}\n}}"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE), UPat(name="c", dtype=dtypes.bool))), lambda ctx,c: f"  if (!({ctx[c]})) {{ break; }}\n}}"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
 
@@ -238,7 +238,7 @@ class CStyleLanguage(Renderer):
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("\n".join("  "*depth + line for line in l.split("\n")))
         if prefix: c[prefix] += 1  # if it was used, increment
-      if u.op in {Ops.IF, Ops.RANGE, Ops.LOOP}: depth += 1
+      if u.op in {Ops.IF, Ops.RANGE}: depth += 1
     del self.r
 
     # NOTE: this relies on bufs dict preserving order

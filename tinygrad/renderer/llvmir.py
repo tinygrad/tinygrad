@@ -96,6 +96,11 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
+  # loop (a RANGE with no src is an unbounded loop header)
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
+    f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
+
   # range
   (UPat(Ops.RANGE, name="r"), lambda ctx,r:
    f"  br label %loop_entry_{range_str(r)}\n"
@@ -112,11 +117,6 @@ base_rewrite = PatternMatcher([
    f"loop_footer_{range_str(r)}:\n"
    f"  br label %loop_latch_{range_str(r)}\n"
    f"loop_exit_{range_str(r)}:"),
-
-  # loop
-  (UPat(Ops.LOOP, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.LOOP, name="l"), UPat(name="c"))), lambda ctx,l,c:
-    f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
