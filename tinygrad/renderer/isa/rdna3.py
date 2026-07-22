@@ -110,7 +110,10 @@ def _vop3(ctx, x:UOp):
   return x.replace(src=tuple(new))
 
 # TODO: pass in original op to use GroupOp.COMMUTATIVE?
+rev_op_order = { RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
 def _vop2(ctx, x:UOp):
+  assert x.op is Ops.INS, f"should only legalize INS ops: {x.op}"
+  if x.arg in rev_op_order: x = x.replace(src=x.src[2::-1] + x.src[2:])
   # def _isvgpr(u:UOp): return (r := reg(u)) is not None and isinstance(r, Register) and r.cons[0].name[0] == "v"
   if not is_const(x.src[1]): return x
   rest = x.src[2:] if len(x.src) > 2 else ()
@@ -149,9 +152,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   i = ctx.func_args.index(x)
   if x.op is Ops.SPECIAL: # maintain src edge?
     dim = int(x.arg[-1])
-    if x.arg[0] == 'g':
-      # return vmov(def_reg(dtypes.uint32, WGIDS[dim]))
-      return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
+    if x.arg[0] == 'g': return UOp(Ops.INS, dtype=dtypes.uint32, arg=RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.uint32, WGIDS[dim]),))
     else: return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(lidop, const(dtypes.uint32, 10 * dim), const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
   # if AddrSpace is ALU auto load into vgpr
@@ -165,10 +166,11 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  shft = to_vgpr(ctx, const(dtypes.int, disp_scale.bit_length() - 1))
+  shft = const(dtypes.int, disp_scale.bit_length() - 1)
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
   # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
-  return (_vop2(ctx, UOp(Ops.SHL, dtypes.uint32, src=(idx, shft))), base, const(dtypes.int16, 0))
+  offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
+  return (offs, base, const(dtypes.int16, 0))
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
@@ -178,9 +180,10 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.uint32,0),)), const(dtypes.uint16, idx.arg * scale), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(dtypes.uint16, idx.src[1].arg * scale), base)
-  shft = to_vgpr(ctx, const(dtypes.uint32, scale.bit_length() - 1))
   # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
-  return (_vop2(ctx, UOp(Ops.SHL, dtypes.uint32, src=(idx.cast(dtypes.uint32), shft))), const(dtypes.uint16, 0), base)
+  shft = const(dtypes.uint32, scale.bit_length() - 1)
+  offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
+  return (offs, const(dtypes.uint16, 0), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 def _insspace(gl,x): return gl[1] if x.addrspace is AddrSpace.LOCAL else gl[0]
@@ -192,7 +195,7 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   if base.addrspace is AddrSpace.REG: 
     # TODO: gated reg load
     assert idx.op is Ops.CONST and gate is None, "gated load on reg BUFFER"
-    if base.dtype.itemsize <= 4: return vmov(base.index(idx))
+    if base.dtype.itemsize <= 4: return base.index(idx)
     else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
   # NOTE: load_i* automatically sign extends, this messes up some of the tests currently ex. i8 bitcast_alt
   imap = {
@@ -335,6 +338,8 @@ def idiv(ctx, x:UOp):
     q = (is_one | is_big).where(special, q0)
   return (q ^ sign) + -sign if signed else q
 
+_lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
+_lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
   if dpreciz and x.op is Ops.ADD: return arith64(ctx, x, add=True)
@@ -342,30 +347,23 @@ def alu(ctx, x:UOp):
   if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
 
   # NOTE: ignore b16 instructions for now
-  def _bitwise(sins:InsOp, hins:InsOp):
-    if dpreciz: return bitwise64(ctx, x, sins)
-    return _vop2(ctx, x.ins(sins))
-    # if x.dtype.itemsize == 4: return _vop2(ctx, x.ins(sins))
-    # return _vop3(ctx, x.ins(hins))
+  def _bitwise(sins:InsOp, hins:InsOp): return bitwise64(ctx, x, sins) if dpreciz else _vop2(ctx, x.ins(sins))
   if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32, RDNA3Ops.v_and_b16)
   elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32, RDNA3Ops.v_or_b16)
   elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32, RDNA3Ops.v_xor_b16)
 
-  _lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
-  _lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
-  if x.op is Ops.SHL: return _vop2(ctx, x.replace(src=x.src[::-1]).ins(_lshl[max(2,x.dtype.itemsize)] if x.arg is None else x.arg))
+  if x.op is Ops.SHL:
+    ins = _lshl[max(2, x.dtype.itemsize)]
   elif x.op is Ops.SHR:
-    if x.arg is not None: ins = x.arg
-    elif x.dtype is dtypes.int32: ins = RDNA3Ops.v_ashrrev_i32_e32 # TODO: handle 64 bit
+    if x.dtype is dtypes.int32: ins = RDNA3Ops.v_ashrrev_i32_e32 # TODO: handle 64 bit
     else: ins = _lshr[max(2,x.dtype.itemsize)]
-    return _vop2(ctx, x.replace(src=x.src[::-1]).ins(ins))
 
   if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
   elif x.op in OP_INS:
     dt = x.dtype
     if x.op is Ops.MUL and x.dtype is dtypes.int: dt = dtypes.uint32
     if dt in OP_INS[x.op]: ins = OP_INS[x.op][dt]
-  else: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
+  elif x.op not in {Ops.SHL, Ops.SHR}: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
