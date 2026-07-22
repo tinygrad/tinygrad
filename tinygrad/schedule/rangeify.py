@@ -145,9 +145,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
-  # COPY transfers a contiguous range, so materialize any source that isn't a base buffer plus offset
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
-   lambda c,r: None if r.has_buffer_identity() else c.replace(src=(r.contiguous(),))),
+  # COPY transfers a contiguous range, so materialize any source that isn't a base buffer plus offset or a same-sized contiguous expression
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"), lambda c,r:
+   None if r.has_buffer_identity() or (not resolve(r.numel() != r.base.numel(), False) and r.contiguous_view() is not None)
+   else c.replace(src=(r.contiguous(),))),
 
   # copying mselect to same device is just mselect (no NOOP kernel)
   (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
