@@ -273,9 +273,7 @@ runs:
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
-      run: |
-        brew install llvm@20
-        echo "LLVM_PATH=$(brew --prefix llvm@20)/lib/libLLVM.dylib" >> "$GITHUB_ENV"
+      run: brew install llvm@20
 
     # *** tinydreno ***
     - name: Install tinydreno (linux)
