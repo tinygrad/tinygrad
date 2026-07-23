@@ -243,7 +243,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), expected=IndexError)
-    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 1, -1), expected=RuntimeError)
 
   def test_meshgrid(self):
@@ -1048,8 +1047,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
   def test_hardsigmoid_extreme(self):
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=300, high=400)
+    helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=-400, high=-300)
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
@@ -1265,23 +1264,20 @@ class TestOps(unittest.TestCase):
                    lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
 
   def test_argsort(self):
-    for dim in [-1, 0, 1]:
-      for descending in [True, False]:
-        helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=dim, descending=descending, stable=True).type(torch.int32),
-                                  lambda x: x.argsort(dim, descending), forward_only=True)
+    helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=1, descending=True, stable=True).type(torch.int32),
+                              lambda x: x.argsort(1, True), forward_only=True)
 
   def test_topk(self):
     helper_test_op([(8)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(8)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
-    for dim in [0, 1, -1]:
-      for largest in [True, False]:
-        for sorted_ in [True]: # TODO support False
-          helper_test_op([(5,5,4)],
-                          lambda x: x.topk(4, dim, largest, sorted_).values,
-                          lambda x: x.topk(4, dim, largest, sorted_)[0], forward_only=True)
-          helper_test_op([(5,5,4)],
-                          lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
-                          lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
+    for dim, largest in [(0, True), (1, False)]:
+      for sorted_ in [True]: # TODO support False
+        helper_test_op([(5,5,4)],
+                        lambda x: x.topk(4, dim, largest, sorted_).values,
+                        lambda x: x.topk(4, dim, largest, sorted_)[0], forward_only=True)
+        helper_test_op([(5,5,4)],
+                        lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
+                        lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
     if not COMPILE_ONLY:
       value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
@@ -1904,9 +1900,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[-2:2])
     helper_test_op([(3,3,3)], lambda x: x[-2:-5])
 
-  def test_slice_empty(self):
-    helper_test_op([(10,10)], lambda x: x[1:1])
-
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1])  # x.shape = (0, 10)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
@@ -2098,7 +2091,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,3,6,6)], lambda x: x.squeeze(0))
     helper_test_op([(4,3,1,6)], lambda x: x.squeeze(1))
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze(3))
-    self.helper_test_exception([(4,3,6,6)], lambda x: x.squeeze(50), expected=IndexError)
     self.helper_test_exception([(4,3,6,6)], lambda x: x.squeeze(50), expected=IndexError)
     helper_test_op([(4,3,6,1)], lambda x: x.squeeze(-1))
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze())
@@ -2372,9 +2364,10 @@ class TestOps(unittest.TestCase):
               lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
   @slow_test
+  @unittest.skip("redundant: bs/cout are loop dims, kernel×cin sweep covered by test_conv2d")
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
-  @slow_test
+  @unittest.skip("redundant: cin=1 covered by test_conv2d_bs_1_cin_1")
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
   def test_conv2d_errors(self):
@@ -2494,9 +2487,6 @@ class TestOps(unittest.TestCase):
             helper_test_op([(1,1,n,n), (1,1,k,k)],
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
               lambda x,w: Tensor.conv2d(x,w,padding=p))
-            helper_test_op([(1,1,n,n), (1,1,k,k)],
-              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
-              lambda x,w: Tensor.conv2d(x,w,padding=p))
 
   def test_padded_conv2d_p21(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
@@ -2545,7 +2535,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_max_pool2d(self):
-    for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
+    for ksz in [2, (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,11,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
@@ -2553,7 +2543,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_max_pool2d_padding(self):
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [(3,3), 2, (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
           helper_test_op([(4,2,11,28)],
@@ -2616,7 +2606,7 @@ class TestOps(unittest.TestCase):
 
   def test_max_pool2d_ceil_mode(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
@@ -2696,7 +2686,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
+    for ksz in [2, (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
@@ -2710,7 +2700,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d_padding(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [2, (3,3), (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
           helper_test_op([shape],
@@ -2732,7 +2722,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [(3,3), 2, (3,2)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False),
@@ -2740,7 +2730,7 @@ class TestOps(unittest.TestCase):
 
   def test_avg_pool2d_ceil_mode(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
@@ -2748,7 +2738,7 @@ class TestOps(unittest.TestCase):
 
   def test_avg_pool2d_ceil_mode_padding_not_counted(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False),

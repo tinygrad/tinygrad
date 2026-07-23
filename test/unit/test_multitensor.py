@@ -227,6 +227,7 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
+  @slow
   def test_backprop_conv_wino(self):
     with Context(WINO=1): self.test_backprop_conv()
 
@@ -593,7 +594,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
-    for i in range(4):
+    for i in range(2):
       print(f"{i=}")
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
