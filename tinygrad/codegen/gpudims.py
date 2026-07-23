@@ -63,7 +63,10 @@ def add_gpudims(ctx:Renderer, s:UOp):
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
     # define indexes for GPU-like execution
-    local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
+    # a WARP dim must stay whole in threadIdx.x: hw lanes are x-first and WMMA lane layout requires lane id == warp idx
+    lmax = ctx.local_max
+    if lmax is not None and local_dims and all_ranges[local_dims[0]].arg[-1] is AxisType.WARP: lmax = (_dim_max(local_shape[0]),)+tuple(lmax[1:])
+    local_idxs = get_grouped_dims("lidx", local_shape, lmax)
     hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
     global_max = ctx.global_max if ctx.global_prod_max is None else \
       tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
