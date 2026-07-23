@@ -98,10 +98,11 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   input_buffers, subs = list(c.src[1:]), {}
   for i,x in enumerate(c.src[1:]):
     # if this is a buffer view, rather than materialize it as an input, pull the SHRINK into the function
-    if x.op is Ops.SHRINK and x.src[0].op is Ops.BUFFER and x.src[1].op is Ops.BIND:
-      input_buffers[i] = x.src[0]
-      input_buffers.append(x.src[1])
-      subs[x.param_like(i)] = x.replace(src=(x.src[0].param_like(i), x.src[1].param_like(len(input_buffers)-1), x.src[2]))
+    view = x.src[0] if x.op is Ops.RESHAPE else x
+    if view.op is Ops.SHRINK and view.src[0].op is Ops.BUFFER and view.src[1].op is Ops.BIND:
+      subs[x.param_like(i)] = view.replace(src=(view.src[0].param_like(i), view.src[1].param_like(len(input_buffers)), view.src[2])).reshape(x.shape)
+      input_buffers[i] = view.src[0]
+      input_buffers.append(view.src[1])
     elif x.op not in {Ops.AFTER, Ops.BIND}: input_buffers[i] = x.contiguous()
 
   # add the outputs to the call
