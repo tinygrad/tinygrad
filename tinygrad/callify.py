@@ -92,7 +92,10 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # materialize straight into t
   if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
+  storage_view = s
+  while storage_view.op in {Ops.AFTER, Ops.MULTI}: storage_view = storage_view.src[0]
+  if storage_view.base.op is Ops.BUFFER and storage_view.contiguous_view_offset() == 0 \
+     and storage_view.numel() == storage_view.buf_uop.numel(): return t
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:

@@ -538,7 +538,11 @@ class TestFunctionTuple(unittest.TestCase):
       c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
-    np.testing.assert_allclose(f(a).numpy(), 14.0)
+    out = f(a)
+    GlobalCounters.reset()
+    out.realize()
+    self.assertEqual(GlobalCounters.kernel_count, len(devs))
+    np.testing.assert_allclose(out.numpy(), 14.0)
 
     # g is f with empty output instead of invalids
     @function(precompile=True, allow_implicit=True)
