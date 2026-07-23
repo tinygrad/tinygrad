@@ -843,10 +843,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return s
 
   def contiguous_view_offset(self) -> int|None:
-    """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
-    from tinygrad.schedule.rangeify import pm_mops
-    from tinygrad.uop.symbolic import symbolic
-
     # WEBGPU and CL do not support views.
     # WEBGPU requires that minUniformBufferOffsetAlignment be at least 32 bytes: https://gpuweb.github.io/gpuweb/#adapter-capability-guarantees
     # CL 1.1 provides the clCreateSubBuffer API, but at the time of writing, relevant CL runtimes (rusticl, adreno, nvidia, amd) do not provide
@@ -854,6 +850,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if self.device is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)):
       return None
+    return self.get_offset()
+
+  def get_offset(self) -> int|None:
+    """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
+    from tinygrad.schedule.rangeify import pm_mops
+    from tinygrad.uop.symbolic import symbolic
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
