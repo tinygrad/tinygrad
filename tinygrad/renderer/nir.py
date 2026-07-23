@@ -187,7 +187,8 @@ class NIRRenderer(Renderer):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r: dict[UOp, Any] = {}
-    self.param_idx, ranges = 0, [] # type: (int, list[Any])
+    self.param_idx = 0
+    ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
