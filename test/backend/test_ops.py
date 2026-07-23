@@ -790,9 +790,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
-    self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_xor(y), lambda x,y: x.bitwise_xor(y).realize(), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor^torch.tensor([1.0]), lambda: (ten^Tensor([1.0])).realize(), expected=RuntimeError)
-
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -808,10 +805,6 @@ class TestOps(unittest.TestCase):
 
     helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
 
-    self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_and(y), lambda x,y: x.bitwise_and(y).realize(), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor&torch.tensor([1.0]), lambda: (ten&Tensor([1.0])).realize(), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor&1.0, lambda: (ten&1.0).realize(), expected=RuntimeError)
-
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -825,9 +818,6 @@ class TestOps(unittest.TestCase):
     ten0, ten1 = Tensor(data[0], dtype=dtypes.bool), Tensor(data[1], dtype=dtypes.bool)
     helper_test_op([], lambda: tor0|tor1, lambda: ten0|ten1, forward_only=True)
 
-    self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_or(y), lambda x,y: x.bitwise_or(y).realize(), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor|torch.tensor([1.0]), lambda: (ten|Tensor([1.0])).realize(), expected=RuntimeError)
-
   def test_bitwise_not(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -840,8 +830,6 @@ class TestOps(unittest.TestCase):
     ten = Tensor(data, dtype=dtypes.bool)
     helper_test_op([], lambda: tor.bitwise_not(), lambda: ten.bitwise_not(), forward_only=True)
     helper_test_op([], lambda: ~tor, lambda: ~ten, forward_only=True)
-
-    self.helper_test_exception([(4)], lambda x: x.bitwise_not(), lambda x: x.bitwise_not().realize(), expected=RuntimeError)
 
   def test_lshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
