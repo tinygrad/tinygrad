@@ -174,11 +174,11 @@ def finalize_after(ctx:AllocCtx, x:UOp):
   # tagged: untag and map each original pre-rewrite UOp to the stripped buffer; the untagged result is reprocessed as untagged
   ret = x.replace(tag=None)
   replace_uop = ret
-  wrappers:list[UOp] = []
+  after_replace:list[UOp] = []
   while replace_uop.op in {Ops.AFTER, Ops.MULTI, Ops.RESHAPE}:
-    if replace_uop.op is not Ops.AFTER: wrappers.append(replace_uop)
+    if replace_uop.op is not Ops.AFTER: after_replace.append(replace_uop)
     replace_uop = replace_uop.src[0]
-  for wrapper in reversed(wrappers): replace_uop = wrapper.replace(src=(replace_uop,)+wrapper.src[1:])
+  for a in reversed(after_replace): replace_uop = a.replace(src=(replace_uop,)+a.src[1:])
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)

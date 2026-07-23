@@ -397,7 +397,6 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
-  @unittest.expectedFailure
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
@@ -407,8 +406,8 @@ class TestCustomKernel(unittest.TestCase):
       return Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y = run(x[0]).realize()
-    # it's copying the input and the output
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    # CL/WEBGPU copy the input and the output because of lack of SLICE in callify
+    self.assertEqual(GlobalCounters.kernel_count, 3 if x.device.startswith(("WEBGPU", "CL")) else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
