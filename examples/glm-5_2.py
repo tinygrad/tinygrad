@@ -6,7 +6,6 @@ from typing import Literal
 from dataclasses import dataclass
 import functools, argparse, jinja2, json
 from tinygrad import fetch, Tensor, nn, dtypes, Device
-from tinygrad.engine.jit import TinyJit
 
 def device_to_load(device: tuple[str, ...], num: int) -> str:
   return device[num % len(device)]
