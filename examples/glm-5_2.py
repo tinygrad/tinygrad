@@ -2,10 +2,12 @@
 # Using the https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py as source of truth
 
 from math import ceil
-from tinygrad import fetch, Tensor, nn, dtypes, Device
+from tinygrad import fetch, Tensor, nn, dtypes, Device, GlobalCounters
 from dataclasses import dataclass
-import functools, argparse
+import functools, argparse, json
 from typing import Literal
+from pathlib import Path
+import jinja2
 
 # Copying this over from llama cause weight_scale is a little different
 class FP8Linear:
@@ -21,9 +23,45 @@ class FP8Linear:
     weight_scale_inv = weight_scale_inv[:self.out_features, :self.in_features]
     weight = self.weight.cast(dtypes.float32) * weight_scale_inv.cast(dtypes.float32)
 
-    y = x.dot(weight.T) * weight_scale_inv
+    y = x.dot(weight.T)
     if self.bias is not None: y = y + self.bias.cast(y.dtype)
     return y.cast(x.dtype)
+
+
+class GLMTokenizer:
+  def __init__(self, token_config: str):
+    from tokenizers import Tokenizer
+    self.special_tokens: list[str] = [
+      "<|endoftext|>",
+      "[MASK]",
+      "[gMASK]",
+      "[sMASK]",
+      "<sop>",
+      "<eop>",
+      "<|system|>",
+      "<|user|>",
+      "<|assistant|>",
+      "<|observation|>",
+      "<|begin_of_image|>",
+      "<|end_of_image|>",
+      "<|begin_of_video|>",
+      "<|end_of_video|>",
+      "<|begin_of_audio|>",
+      "<|end_of_audio|>",
+      "<|begin_of_transcription|>",
+      "<|end_of_transcription|>"
+    ]
+    self.model = Tokenizer.from_file(token_config)
+
+  @property
+  def bos_id(self): return self.model.encode("[gMASK]<bos>").ids[0]
+  @property
+  def stop_token(self): return self.model.encode("<|endoftext|>").ids[0]
+  @property
+  def pad_token(self): return 154820 # pad_id got from config on hf
+  def decode(self, toks): return self.model.decode(toks)
+  def encode(self, text, allow_special=False):
+    return self.model.encode(text, add_special_tokens=allow_special)
 
 LayerType = Literal["dense", "sparse"]
 IndexerType = Literal["full", "shared"]
@@ -76,13 +114,13 @@ class DSAKVCache:
     max_end_point = max([a+b for a, b in zip(step_t, to_write)])
     if segment == "attention":
       assert d == self.attn_latent_dim, "shape of dim is incorrect"
-      [self.store_attn[layer, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(step_t, to_write))]
+      [self.store_attn[layer, b, s:s + w].assign(value[b, -w:]) for b,(s, w) in enumerate(zip(step_t, to_write))] # data is right aligned
       return self.store_attn[layer, :B, :max_end_point]
     else:
       assert d == self.idx_k_cache_dim, "shape of dim is incorrect"
       assert self.indexer_type[layer] == "full", "there should be no k value for indexers that are shared"
       slot = self.full_to_slot[layer]
-      [self.store_attn_idx[slot, b, s:s + v].assign(value[b, :v]) for b,(s, v) in enumerate(zip(step_t, to_write))]
+      [self.store_attn_idx[slot, b, s:s + w].assign(value[b, -w:]) for b,(s, w) in enumerate(zip(step_t, to_write))] # data is right aligned
       return self.store_attn_idx[slot, :B, :max_end_point]
 
 @functools.cache
@@ -264,7 +302,7 @@ class GLMMoeLayer():
     self.num_exp, self.devices = config.num_exp, devices
     self.experts = [GLMMoeExpert(config) for _ in range(self.num_exp)]
     self.gate = GLMMoeGateTopK(config)
-    self.shared_experts = GLMMLPLayer(config)
+    self.shared_experts = GLMMLPLayer(config, config.moe_intermediate_size)
 
   # x: (B, S, dim)
   def __call__(self, x: Tensor) -> Tensor:
@@ -289,10 +327,11 @@ class GLMMoeLayer():
     return x # (B, S, dim)
 
 class GLMMLPLayer():
-  def __init__(self, config: GLMConfig):
-    self.gate_proj = FP8Linear(config.dim, config.intermediate_size, bias=False)
-    self.up_proj = FP8Linear(config.dim, config.intermediate_size, bias=False)
-    self.down_proj = FP8Linear(config.intermediate_size, config.dim, bias=False)
+  def __init__(self, config: GLMConfig, intermediate_size: int|None):
+    intermediate_size = config.intermediate_size if intermediate_size is None else intermediate_size
+    self.gate_proj = FP8Linear(config.dim, intermediate_size, bias=False)
+    self.up_proj = FP8Linear(config.dim, intermediate_size, bias=False)
+    self.down_proj = FP8Linear(intermediate_size, config.dim, bias=False)
 
   def __call__(self, x: Tensor) -> Tensor:
     return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
@@ -302,7 +341,7 @@ class GLMBlock():
     self.input_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
     self.self_attn = GLMAttention(config, layer)
     if config.layers[layer] == "dense":
-      self.mlp = GLMMLPLayer(config)
+      self.mlp = GLMMLPLayer(config, None)
     else:
       self.mlp = GLMMoeLayer(config, devices)
     self.post_attention_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -321,25 +360,41 @@ class GLMBlock():
 
 class GLMModel():
   def __init__(self, config: GLMConfig, devices: tuple[str, ...]):
-    self.max_context, self.rope_theta, self.attn_rope_dim, self.indexers, self.kv_latent_dim = config.max_context, config.rope_theta, config.attn_rope_dim, config.indexers, config.kv_latent_dim
-    self.idx_attn_dim, self.max_batch, self.rope_dim = config.idx_attn_dim, config.max_batch, config.attn_rope_dim
+    self.max_context, self.rope_theta, self.attn_rope_dim, self.max_batch = config.max_context, config.rope_theta, config.attn_rope_dim, config.max_batch
     self.embed_tokens = nn.Embedding(config.vocab_size, config.dim)
     self.layers = [GLMBlock(config, i, devices) for i in range(len(config.layers))]
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.lm_head = nn.Linear(config.dim, config.vocab_size, bias=False)
 
-  def __call__(self, input_toks: Tensor, step_t: list[int], to_write: list[int]) -> Tensor:
+  def __call__(self, input_toks: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache) -> Tensor:
     x = self.embed_tokens(input_toks)
     batch = input_toks.shape[0]
     assert batch <= self.max_batch, "batch size is bigger than max_batch"
-    position_embeddings = precompute_freqs_cis(batch, self.attn_rope_dim, self.max_context, self.rope_theta)
-    kv_cache = DSAKVCache(len(self.layers), self.indexers, self.max_context, self.kv_latent_dim + self.rope_dim, self.idx_attn_dim, self.max_batch)
+    position_embeddings = precompute_freqs_cis(self.attn_rope_dim, self.max_context, self.rope_theta)
 
     topk_idx = None
     for block in self.layers: x, topk_idx = block(x, position_embeddings, step_t, to_write, kv_cache, topk_idx)
 
     x = self.norm(x)
-    return self.lm_head(x)
+    # TODO: sample with temperature
+    return self.lm_head(x)[:, -1, :].argmax(axis=-1) # (B)
+
+def prompt_jinja_render(prompts: list) -> list[str]:
+  return [template.render(p) for p in prompts]
+
+def prefill_encode_and_pad(tokenizer: GLMTokenizer, prompts: list) -> tuple[list[int], list[int], Tensor]:
+  rendered_prompts = prompt_jinja_render(prompts)
+  encoded = [tokenizer.encode(r).ids for r in rendered_prompts]
+  longest_prompt = max([len(e) for e in encoded])
+  # Padding is done on the left according to the config
+  input_tensor = Tensor.stack(*[Tensor(e).pad((longest_prompt - len(e), 0), value=tokenizer.pad_token) for e in encoded])
+  step_t = [0 for _ in encoded]
+  to_write = [len(e) for e in encoded]
+  return step_t, to_write, input_tensor
+
+def stream_decode(tokenizer: GLMTokenizer, outputs: Tensor) -> tuple[list[int], list[str]]:
+  ids = [int(o.item()) for o in outputs]
+  return ids, [tokenizer.decode(i) for i in ids]
 
 # NOTE: just to test on smaller gpu clusters
 testing_start_layer = 0
@@ -373,45 +428,106 @@ config = GLMConfig (
 
 replace_map: dict = { "model.": "", "wq_b.": "q_up_proj_idx.", "kv_a_proj_with_mqa.": "kv_down_proj.", "kv_b_proj.": "kv_up_proj.", "q_a_proj.": "q_down_proj.", "q_b_proj.": "q_up_proj.", "kv_a_layernorm.": "kv_norm.", "q_a_layernorm.": "q_norm." }
 
-#TODO: try to get rid of this and make own tokenizer with the json
-from tokenizers import Tokenizer
-def load_tokenizer()-> Tokenizer: 
-  return Tokenizer.from_file(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/tokenizer.json")))
-
 # This has total 141 files each approx 5.3 GB ~= 750 GB
-def load_model(to_load: int = 141):
+def load_model(model: GLMModel,devices: tuple[str, ...], to_load: int = 141):
   model_tensors: dict[str, Tensor] = {}
-  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/model-0000{i+1}-of-00141.safetensors")))
+  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/model-{i+1:05d}-of-00141.safetensors")))
 
-  renamed = {}
+  model_state_dict = nn.state.get_state_dict(model)
   for k,v in model_tensors.items(): 
     for pat, rep in replace_map.items(): k = k.replace(pat, rep)
-    renamed[k] = v
-  return renamed
+    k_comps = k.split('.')
+    if len(k_comps) >= 5 and k_comps[3] == "experts":
+      exp_num = int(k_comps[4])
+      device = device_to_load(devices, exp_num)
+    else: device = device_to_load(devices, 0)
+    model_state_dict[k].replace(v.to(device)).realize()
+  return model
 
 if __name__ == "__main__":
-  tokenizer = load_tokenizer()
-  loaded_model = load_model(3)
-
   parser = argparse.ArgumentParser()
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   args = parser.parse_args()
 
-  devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else tuple(f"{Device.DEFAULT}")
+  devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else (Device.DEFAULT, )
 
+  tokenizer = GLMTokenizer(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/tokenizer.json")))
   model = GLMModel(config, devices)
-  nn.state.load_state_dict(model, loaded_model)
+  loaded_model = load_model(model, devices, 3)
 
-  # encoded_one = tokenizer.encode("This is test string one")
-  # encoded_two = tokenizer.encode("This is test string two")
-  # encoded_three = tokenizer.encode("This is test string three")
-  # encoded_four = tokenizer.encode("This is test string four")
-  # encoded_five = tokenizer.encode("This is test string five")
-  #
-  #
-  # model = GLMModel(config, devices)
-  #
-  # ids = [encoded_one.ids, encoded_two.ids, encoded_three.ids, encoded_four.ids, encoded_five.ids]
-  # input = Tensor(ids)
-  # output = model(input, [0, 0, 0, 0, 0], [len(x) for x in ids])
-  # print(output.tolist())
+  kv_cache = DSAKVCache(len(config.layers), config.indexers, config.max_context, config.kv_latent_dim + config.attn_rope_dim, config.idx_attn_dim, config.max_batch)
+
+  template = jinja2.Template(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/chat_template.jinja").read_text()))
+  prompt_one = {
+    "reasoning_effort": "high",
+    "tools": None,
+    "messages": [
+        {
+          "role": "system", 
+          "content": "You are an helpful assistant.",
+        },
+        {
+          "role": "user",
+          "content": "What is the capital of India?"
+        }
+    ]
+  }
+
+  prompt_two = {
+    "reasoning_effort": "high",
+    "tools": None,
+    "messages": [
+        {
+          "role": "system", 
+          "content": "You are an helpful assistant.",
+        },
+        {
+          "role": "user",
+          "content": "What is the sum of 2 + 2?"
+        }
+    ]
+  }
+
+  prompt_three = {
+    "reasoning_effort": "high",
+    "tools": None,
+    "messages": [
+        {
+          "role": "system", 
+          "content": "You are an helpful assistant.",
+        },
+        {
+          "role": "user",
+          "content": "Can you give me a short essay on United States of America?"
+        }
+    ]
+  }
+
+  #TODO: right now position ids due to left padding is messed up make position ids as a tensor and use that
+  # Prefill
+  prefill = True
+  step_t, to_write, input_tokens = prefill_encode_and_pad(tokenizer, [prompt_one, prompt_two, prompt_three])
+  batches = [True for _ in step_t]
+
+  while True:
+    if prefill:
+      outputs = model(input_tokens, step_t, to_write, kv_cache)
+      input_tokens = outputs.reshape(len(batches), 1)
+      step_t = [w for w in to_write]
+      to_write = [1 for _ in to_write]
+      prefill = False
+
+    else:
+      outputs = model(input_tokens, step_t, to_write, kv_cache)
+      step_t = [s + w for s, w in zip(step_t, to_write)]
+      to_write = [1 for _ in step_t]
+      input_tokens = outputs.reshape(len(batches), 1)
+
+    ids, decoded_outputs = stream_decode(tokenizer, outputs)
+    for b, (id, tok) in enumerate(zip(ids, decoded_outputs)):
+      if not batches[b]: continue
+      if id == tokenizer.stop_token: 
+        batches[b] = False
+      print(f"batch: {b} -> {tok}")
+
+    if batches.count(True) == 0: break
