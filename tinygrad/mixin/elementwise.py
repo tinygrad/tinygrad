@@ -72,10 +72,6 @@ class ElementwiseMixin(CreationMixin):
     """
     return self.logical_not() if self.dtype == dtypes.bool else self * (-1)
 
-  def _check_dtype(self) -> None:
-    if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):
-      raise RuntimeError(f"{self.dtype} is not supported")
-
   def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
     Adds `self` and `x`.
@@ -147,7 +143,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, False]).bitwise_not().numpy())
     ```
     """
-    self._check_dtype()
     if self.dtype == dtypes.bool: return self.logical_not()
     return (self ^ self.dtype.max) if dtypes.is_unsigned(self.dtype) else (self ^ -1)
 
@@ -163,7 +158,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.AND, x, reverse)
 
   def bitwise_or(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -178,7 +172,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.OR, x, reverse)
 
   def bitwise_xor(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -194,7 +187,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_xor(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:

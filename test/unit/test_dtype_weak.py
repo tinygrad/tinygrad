@@ -1,7 +1,9 @@
 import tempfile, unittest
 
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp
+from tinygrad.helpers import Context
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.spec import spec_shared, type_verify
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -52,6 +54,19 @@ class TestWeakPromotion(unittest.TestCase):
   def test_dot_defers_weak(self):
     weak = Tensor([True, False]).where(Tensor(1), 2)
     self.assertEqual(weak.dot(Tensor([1, 1], dtype=dtypes.int8)).dtype, dtypes.int8)
+
+  def test_weak_int_binop(self):
+    v = UOp.variable("i", 0, 10, dtypes.weakint)
+    self.assertEqual((v << 1).dtype, dtypes.weakint)
+    self.assertEqual((v & 3).dtype, dtypes.weakint)
+    with self.assertRaises(RuntimeError): Tensor.const(dtypes.weakfloat, 1.0) << Tensor.const(dtypes.weakfloat, 1.0)
+    with self.assertRaises(RuntimeError): UOp.const(dtypes.int32, 1).alu(Ops.SHL, UOp.const(dtypes.float64, 1))
+    # float bitwise/shift builds, the spec rejects it
+    with Context(SPEC=1):
+      f32, wf = UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.weakfloat, 1.0)
+      for bad in (f32.alu(Ops.AND, f32), f32.alu(Ops.SHL, UOp.const(dtypes.int32, 1)),
+                  UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
+        with self.assertRaises(RuntimeError): type_verify([bad], spec_shared)
 
   def test_integer_values(self):
     x = Tensor.full((1,), 1, dtype=dtypes.int64, device="CPU")
