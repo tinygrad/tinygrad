@@ -371,6 +371,27 @@ def reduce_mul_chain(r:UOp) -> UOp|None:
   if len(outside) == 0: return None
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
+# pre-rangeify sibling of reduce_mul_chain: pull factors broadcast (size-1) along the reduced axes out of a sum,
+# while the reduce operand is still PERMUTE(MUL) and the permute's arg still names the reduced axes
+def _reduce_inv(u:UOp, axes:tuple[int, ...], ndim:int) -> UOp|None:
+  if u._shape is None: return None
+  while u.op is Ops.EXPAND: u = u.src[0]
+  if (off:=ndim-len(u.shape)) < 0 or any(a >= off and u.shape[a-off] != 1 for a in axes): return None
+  return u.reshape(tuple(s for i,s in enumerate(u.shape) if i+off not in axes))
+def _reduce_sum_simplify(r:UOp, p:UOp, x:UOp) -> UOp|None:
+  if r.arg[0] is not Ops.ADD: return None
+  axes = p.marg[:r.arg[1]]
+  inside:list[UOp] = []
+  outside:list[UOp] = []
+  for f in x.split_uop(Ops.MUL):
+    (outside if (inv:=_reduce_inv(f, axes, len(p.marg))) is not None else inside).append(inv if inv is not None else f)
+  if not outside: return None
+  inner = inside[0].uprod(*inside[1:]) if inside else x.const_like(1)
+  return r.replace(src=(p.replace(src=(inner.expand(x.shape),)),)) * outside[0].uprod(*outside[1:])
+pm_tensor_reduce = PatternMatcher([
+  (UPat(Ops.MUL, name="x").f(Ops.PERMUTE, name="p").reduce(name="r"), _reduce_sum_simplify),
+])
+
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   keep, drop = partition(cond.split_uop(Ops.AND), lambda c: any(r in x.ranges for r in c.ranges))
   return UOp.const(dtypes.bool, True).uprod(*keep).where(x, i) if drop else None

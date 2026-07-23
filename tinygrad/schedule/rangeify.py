@@ -4,7 +4,7 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, pm_tensor_reduce
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -533,6 +533,7 @@ split_kernels = PatternMatcher([
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(tsink, pm_tensor_reduce, name="tensor reduce")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
