@@ -159,18 +159,20 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if x.addrspace is AddrSpace.ALU:
     val = x.ins(RDNA3Ops.s_load_b32, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS),))
     return UOp(Ops.INS, arg=RDNA3Ops.v_mov_b32_e32, dtype=x.dtype, src=(val,))
-  return x.ins(RDNA3Ops.s_load_b64, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=kernarg_ptr + (const(dtypes.uint32, offs),), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
-# GLOBAL_ADDR = SGPR_u64 + VGPR_OFFS_U32 + IMMOFFS_u16
+# GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
-  # TODO: handle offseting cleanly, ensure 13 bit imoff doesnt overflow
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(dtypes.int, disp_scale.bit_length() - 1)
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg * disp_scale),)), base, const(dtypes.int16, 0))
-  # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
-  offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
-  return (offs, base, const(dtypes.int16, 0))
+  vaddr, offs = idx, const(dtypes.int16, 0)
+  if idx.op is Ops.CONST: vaddr = idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(dtypes.int, idx.arg),))
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and \
+    -(1 << 12) <= (_offs := idx.src[1].arg * disp_scale) < (1 << 12):
+    vaddr, offs = idx.src[0], const(dtypes.int16, _offs)
+  vaddr = UOp(Ops.SHL, dtype=dtypes.uint64, src=(castint64(ctx, vaddr, dtypes.uint64), shft))
+  return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
@@ -381,8 +383,8 @@ def intcast(y:UOp, x:UOp):
 
 # TODO: move this into pattern matcher
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
-def castint64(ctx, y:UOp, x:UOp):
-  hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+def castint64(ctx, y:UOp, tdt:DType):
+  hi_dt = dtypes.uint32 if dtypes.is_unsigned(tdt) else dtypes.int32
   if y.dtype in dtypes.ints:
     do_sext = not dtypes.is_unsigned(y.dtype)
     if do_sext:
@@ -391,14 +393,14 @@ def castint64(ctx, y:UOp, x:UOp):
       # extend sign to upper part of low
       lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(dtypes.uint32, ~((1 << nbits) - 1)))))) # TODO: cleanup manual constr.
     else: lo, hi = vmov(y), vmov(const(dtypes.uint32, 0))
-    return multireg(lo, hi, dtype=x.dtype)
+    return multireg(lo, hi, dtype=tdt)
   elif y.dtype is dtypes.float64: # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
     tr = UOp(Ops.TRUNC, dtypes.float64, src=(y,))
     hi_f = tr.ins(RDNA3Ops.v_ldexp_f64, src=(tr,const(dtypes.int16, -32)))
     hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
     lo_f = hi_f.ins(RDNA3Ops.v_ldexp_f64, src=(hi_f, const(dtypes.int16, 32))) # tr - hi_f * 2 ^ 32
     lo_f = UOp(Ops.ADD, dtypes.float64, src=(tr, UOp(Ops.MUL, dtypes.float64, src=(lo_f, const(dtypes.float64, -1.)))))
-    return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=x.dtype)
+    return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=tdt)
   raise NotImplementedError()
 
 # TODO: currently only 53 bit precision (f64 mantissa), could do better
@@ -513,6 +515,8 @@ def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) 
 # cast i8 -> i16/i32 = bfe
 # NOTE: down casting float to int should round first then reduce precision
 pre_isel_matcher = PatternMatcher([
+  # NOTE: does src order matter for upat?, maybe thats an arg
+  # (UPat(Ops.ADD, src=[UPat(Ops.MUL, src=(UPat.var("a"), UPat.cvar("c"))), UPat.var("b")], name="x"), lambda ctx,x,a,b,c: x.replace(op=Ops.SUB, src=(b, a)) if c.arg == -1.0 else None),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
@@ -547,7 +551,7 @@ pre_isel_matcher = PatternMatcher([
   # other
   (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
   (UPat.var("x", dtype=(dtypes.ulong, dtypes.long)).cast(dtypes.float64), long2double),
-  (UPat.var("y", dtype=dtypes.int32s+dtypes.int16s+dtypes.int8s+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), castint64),
+  (UPat.var("y", dtype=dtypes.int32s+dtypes.int16s+dtypes.int8s+dtypes.floats).cast((dtypes.ulong, dtypes.long), name="x"), lambda ctx,x,y: castint64(ctx, y, x.dtype)),
   # narrowing long goes through b32
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half), name="x"), lambda y,x: long2double(y).cast(dtypes.float).cast(x.dtype)),
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
@@ -579,7 +583,7 @@ isel_matcher = PatternMatcher([
   # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
-  # TODO: v_add3 for u32
+  (UPat(Ops.ADD, dtype=dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"), lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
@@ -626,8 +630,8 @@ def encode(ctx, x:UOp):
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=_immorreg(oprs[0]), saddr=_fuse(rdefs(oprs[1])), offset=_immorreg(oprs[2]))
-    if reg(x) is None: kw["data"]=_fuse(rdefs(oprs[3]))
+    kw = dict(addr=_immorreg(oprs[0]),  offset=_immorreg(oprs[1]))
+    if reg(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.DS:
     kw = dict(addr=_immorreg(oprs[0]), offset1=_immorreg(oprs[1]))
@@ -676,10 +680,6 @@ def _dual_ops():
   return { getattr(RDNA3Ops, f"v_{opc}_e32") : getattr(RDNA3Ops, f"v_dual_{opc}") for opc in dual_op_srcs }
 dual_ops = _dual_ops()
 
-# restrictions:
-# - at most one literal, or they share
-# [x] dest vgprs 1 even, 1 odd
-# [x] independent instructions, if y reads from x's output it will read the old value (no races)
 def dual_alu(uops:list[UOp]):
   nuops = []
   for x,y in zip(uops[::2], uops[1::2]):
