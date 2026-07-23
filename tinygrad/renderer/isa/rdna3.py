@@ -61,7 +61,8 @@ def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
-def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 else RDNA3Ops.v_mov_b32_e32, src=(x,))
+# NOTE: v_mov_b16 breaks min 1 register per value invariant, but its required for f16
+def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
 def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def const_vgpr(ctx, dt, v:int) -> UOp: return to_vgpr(ctx, const(dt, v))
@@ -583,7 +584,7 @@ isel_matcher = PatternMatcher([
   # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
-  (UPat(Ops.ADD, dtype=dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"), lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
+  # (UPat(Ops.ADD, dtype=dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"), lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
@@ -728,8 +729,8 @@ class RDNA3Renderer(ISARenderer):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     # uops = lin.src
-    uops = dual_alu(lin.src)
-    nuops = insertwaitcnts(uops)
+    # uops = dual_alu(lin.src)
+    nuops = insertwaitcnts(lin.src)
 
     # labels + encode
     pc = 0
@@ -752,6 +753,6 @@ class RDNA3Renderer(ISARenderer):
     lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
 
     from tinygrad.renderer.amd.elf import assemble_linear
-    return assemble_linear(prg, lin, self.target.arch, scratch_size=256)
+    return assemble_linear(prg, lin, self.target.arch, scratch_size=0)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
