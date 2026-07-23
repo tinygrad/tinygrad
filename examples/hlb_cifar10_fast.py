@@ -124,17 +124,21 @@ class TriangularLR:
     return (self.base_lr * mult).cast(self.opt.lr.dtype)
   def schedule_step(self) -> list[Tensor]: return [self.counter.assign(self.counter + 1), self.opt.lr.assign(self.get_lr())]
 
+def jit_now(j:TinyJit) -> TinyJit:
+  j.cnt = 1  # skip the uncaptured warmup call, capture on the first call (the kernels are all in the warm cache anyway)
+  return j
+
 class Lookahead:
   """airbench lookahead/EMA: every 5 steps ema = decay*ema + (1-decay)*net, and the net is pulled back onto the ema"""
   def __init__(self, params:list[Tensor]):
     self.params, self.ema = params, [p.detach().clone().is_param_(False) for p in params]
+  @jit_now
   @TinyJit
   def update(self, decay:Tensor):
     for p, e in zip(self.params, self.ema):
       e.assign((decay*e.float() + (1-decay)*p.detach().float()).cast(e.dtype))
       p.assign(e)
     Tensor.realize(*self.ema, *self.params)
-  def pullback(self): Tensor.realize(*[p.assign(e) for p, e in zip(self.params, self.ema)])  # the final decay=1.0 update
 
 if __name__ == "__main__":
   with WallTimeEvent(BenchEvent.FULL):
@@ -175,12 +179,14 @@ if __name__ == "__main__":
     # *** training ***
     @TinyJit
     @Context(TRAINING=1)
-    def train_step(X:Tensor, Y:Tensor) -> Tensor:
+    def train_step(X:Tensor, Y:Tensor, off:Variable) -> Tensor:
+      X, Y = X[off:off+BS], Y[off:off+BS]
       loss = model(X).sparse_categorical_crossentropy(Y, label_smoothing=LABEL_SMOOTHING, reduction='none').mul(LOSS_SCALE).sum().div(LOSS_SCALE)
       opt.zero_grad()
       loss.backward()
       return loss.realize(*opt.schedule_step(), *[t for s in schedulers for t in s.schedule_step()])
 
+    @jit_now
     @TinyJit
     def epoch_aug(X:Tensor, Y:Tensor, flip:Tensor) -> tuple[Tensor, Tensor]:
       X = random_crop(X, crop_size=32)
@@ -195,18 +201,19 @@ if __name__ == "__main__":
     for epoch in range(math.ceil(total_steps / steps_per_epoch)):
       Xa, Ya = epoch_aug(X_train, Y_train, Tensor([epoch % 2 == 1]))
       for j in range(min(steps_per_epoch, total_steps - i)):
-        vib = vi.bind(j * BS)
-        loss = train_step(Xa[vib:vib+BS], Ya[vib:vib+BS])
+        loss = train_step(Xa, Ya, vi.bind(j * BS))
         i += 1
         if i % EMA_EVERY == 0: ema.update(Tensor([EMA_BASE**EMA_EVERY * (i/total_steps)**3], dtype=dtypes.float32))
         if LOG_INTERVAL and (i % LOG_INTERVAL == 0 or i == total_steps): print(f"step {i:4d}/{total_steps}, loss {loss.item():8.2f}")
-    ema.pullback()
+    ema.update(Tensor([1.0], dtype=dtypes.float32))  # the final pullback is just a decay=1.0 update
     train_tm = time.perf_counter()
 
     # *** evaluation: airbench TTA (TTA=2: mirror+1px translations 6 views; TTA=1: mirror 2 views; TTA=0: 1 view) ***
+    @jit_now
     @TinyJit
     @Context(TRAINING=1)  # batchnorm uses eval-batch stats (there are no running stats), like hlb_cifar10
-    def eval_step(x:Tensor, y:Tensor) -> Tensor:
+    def eval_step(x:Tensor, y:Tensor, off:Variable) -> Tensor:
+      x, y = x[off:off+EVAL_BS], y[off:off+EVAL_BS]
       def infer_mirror(z:Tensor) -> Tensor: return 0.5*model(z) + 0.5*model(z.flip(-1)) if TTA else model(z)
       if TTA >= 2: logits = 0.5*infer_mirror(x[:, :, 1:33, 1:33]) + 0.25*(infer_mirror(x[:, :, 0:32, 0:32]) + infer_mirror(x[:, :, 2:34, 2:34]))
       else: logits = infer_mirror(x[:, :, 1:33, 1:33])
@@ -214,9 +221,7 @@ if __name__ == "__main__":
 
     vj = Variable("j", 0, X_test.shape[0] - EVAL_BS)
     correct = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize()
-    for j in range(0, X_test.shape[0], EVAL_BS):
-      vjb = vj.bind(j)
-      correct.assign(correct + eval_step(X_test[vjb:vjb+EVAL_BS], Y_test[vjb:vjb+EVAL_BS])).realize()
+    for j in range(0, X_test.shape[0], EVAL_BS): correct.assign(correct + eval_step(X_test, Y_test, vj.bind(j))).realize()
     num_correct, num_test = correct.item(), X_test.shape[0]
     eval_acc_pct = 100.0 * num_correct / num_test
     eval_tm = time.perf_counter()
