@@ -852,7 +852,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # CL 1.1 provides the clCreateSubBuffer API, but at the time of writing, relevant CL runtimes (rusticl, adreno, nvidia, amd) do not provide
     # reasonable values for CL_DEVICE_MEM_BASE_ADDR_ALIGN. cl_ext_buffer_device_address could potentially help, but this extension is not provided
     # by relevant CL runtimes at time of writing.
-    if any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)): return None
+    if self.device is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)): return None
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")

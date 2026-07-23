@@ -3,7 +3,7 @@ import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, broadcast_axes
-from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
+from tinygrad.uop.ops import CallInfo, consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
@@ -16,6 +16,11 @@ def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+
+def realize_call_srcs(ctx:dict[UOp, None], cl:UOp) -> None:
+  if isinstance(cl.arg, CallInfo) and cl.arg.precompile: return
+  for s in cl.src[1:]:
+    if s.contiguous_view_offset() != 0: ctx[s] = None
 
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
@@ -30,6 +35,7 @@ pm_generate_realize_map = PatternMatcher([
   (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  (UPat(Ops.CALL, name="cl"), realize_call_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
