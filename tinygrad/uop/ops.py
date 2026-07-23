@@ -154,7 +154,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
-      assert dtypes.is_int(src[1].dtype), "shift distance must be int"
+      if not dtypes.is_int(src[1].dtype): raise RuntimeError(f"shift distance must be int, got {src[1].dtype}")
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
@@ -1289,8 +1289,6 @@ class UPat(OpMixin):
 
   @property
   def dtype(self) -> DType: return self.match_dtype[0] if self.match_dtype is not None else dtypes.void
-
-  def _check_dtype(self) -> None: pass
 
   def __reduce__(self):
     return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location,
