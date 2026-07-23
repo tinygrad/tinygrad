@@ -484,6 +484,17 @@ def bufreg(ctx, x:UOp):
   nx = nbase.index(0)
   return nx.replace(src=nx.src + x.src[2:])
 
+wmma_op = {
+  (dtypes.float32, dtypes.float16) : RDNA3Ops.v_wmma_f32_16x16x16_f16,
+  (dtypes.float32, dtypes.bfloat16) : RDNA3Ops.v_wmma_f32_16x16x16_bf16,
+  (dtypes.float16, dtypes.float16) : RDNA3Ops.v_wmma_f16_16x16x16_f16,
+  (dtypes.bfloat16, dtypes.bfloat16) : RDNA3Ops.v_wmma_bf16_16x16x16_bf16,
+}
+def render_wmma(ctx, x:UOp):
+  a,b,acc = x.src
+  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[a.dtype]}_16x16x16_{dt_to_isa[b.dtype]}")
+  return UOp(Ops.INS, arg=ins, src=(a,b,acc), tag=(make_vgpr(ctx, width=8),))
+
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
@@ -555,6 +566,7 @@ pre_isel_matcher = PatternMatcher([
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
   (UPat(name="x").bitcast(), lambda x: x),
+  (UPat(Ops.WMMA, name="x"), render_wmma),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -602,7 +614,8 @@ def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
   def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
-  def _immorreg(x:UOp): return x.arg if x.op == Ops.CONST else _fuse(rdefs(x))
+  def _immorreg(x:UOp):
+    return x.arg if x.op is Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
@@ -622,12 +635,18 @@ def encode(ctx, x:UOp):
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
   elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
-  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
+  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST, RDNA3Ops.VOP3P]: # alu
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
-    if group is RDNA3Ops.VOP3: oprs = oprs[:3]
+    if group in [RDNA3Ops.VOP3, RDNA3Ops.VOP3P]: oprs = oprs[:3]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
+  elif group is RDNA3Ops.VOPD:
+    y = x.src[0]
+    kw = dict(opy=y.arg.args[0], vdstx=_fuse(rdefs(x)), vdsty=_fuse(rdefs(y)), srcx0=_immorreg(x.src[1]), srcy0=_immorreg(y.src[0]))
+    dual_binary = { RDNA3Ops.v_dual_mul_f32, RDNA3Ops.v_dual_add_f32 }
+    if x.arg in dual_binary: kw["vsrcx1"] = _immorreg(x.src[2])
+    if y.arg in dual_binary: kw["vsrcy1"] = _immorreg(y.src[1])
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
 
   ret = enc(**kw) if kw is not None else enc(*args)
@@ -649,6 +668,27 @@ def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
     nuops.append(u)
     if (tp := ctp(u)) is not None:
       nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(dtypes.int16, 0),)))
+  return nuops
+
+# basic ones to start
+def _dual_ops():
+  dual_op_srcs = { "mov_b32", "mul_f32", "add_f32", "fmac_f32" }
+  return { getattr(RDNA3Ops, f"v_{opc}_e32") : getattr(RDNA3Ops, f"v_dual_{opc}") for opc in dual_op_srcs }
+dual_ops = _dual_ops()
+
+# restrictions:
+# - at most one literal, or they share
+# [x] dest vgprs 1 even, 1 odd
+# [x] independent instructions, if y reads from x's output it will read the old value (no races)
+def dual_alu(uops:list[UOp]):
+  nuops = []
+  for x,y in zip(uops[::2], uops[1::2]):
+    indp = all(r not in rdefs(x) for s in y.src for r in rdefs(s))
+    if x.arg in dual_ops and y.arg in dual_ops and indp and (rdef(x).index + rdef(y).index) % 2 != 0: 
+      dx, dy = x.replace(arg=dual_ops[x.arg]), y.replace(arg=dual_ops[y.arg])
+      nuops.append(dx.replace(src=(dy,) + dx.src))
+    else: nuops.extend([x,y])
+  if len(uops) % 2 != 0: nuops.append(uops[-1])
   return nuops
 
 @dataclass
@@ -683,8 +723,9 @@ class RDNA3Renderer(ISARenderer):
     return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(dtypes.uint32, spill_offset),x))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    # nuops = lin.src
-    nuops = insertwaitcnts(lin.src)
+    # uops = lin.src
+    uops = dual_alu(lin.src)
+    nuops = insertwaitcnts(uops)
 
     # labels + encode
     pc = 0

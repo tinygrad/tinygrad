@@ -1,5 +1,6 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
+import tinygrad.dtype
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -151,7 +152,7 @@ def _f16(f: float) -> int: return struct.unpack('H', struct.pack('e', f))[0]
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
-  _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+  _FLOAT_ENC = {0.0: 128, 0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
   def __init__(self, hi: int, lo: int, default=s[0]):
     super().__init__(hi, lo, default)
@@ -164,7 +165,7 @@ class SrcField(BitField):
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
     if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
+    elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
     elif isinstance(val, int): offset = 255  # literal
@@ -251,7 +252,7 @@ OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 def _needs_literal(val) -> bool:
   """Check if a value needs a literal constant (can't be encoded inline)."""
   if val is None or isinstance(val, Reg): return False
-  if isinstance(val, float): return val not in SrcField._FLOAT_ENC
+  if isinstance(val, (float, tinygrad.dtype.ConstFloat)): return float(val) not in SrcField._FLOAT_ENC
   if isinstance(val, int): return not (0 <= val <= 64 or -16 <= val < 0)
   return False
 
