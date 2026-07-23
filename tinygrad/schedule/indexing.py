@@ -20,7 +20,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 def realize_call_srcs(ctx:dict[UOp, None], cl:UOp) -> None:
   if isinstance(cl.arg, CallInfo) and cl.arg.precompile: return None
   for s in cl.src[1:]:
-    if s.get_offset() != 0: ctx[s] = None
+    if s.base.op not in ALWAYS_CONTIGUOUS or s.get_offset() != 0: ctx[s] = None
 
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
