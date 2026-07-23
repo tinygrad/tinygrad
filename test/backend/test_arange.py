@@ -1,10 +1,12 @@
-import unittest
+import unittest, platform
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu
+
+METAL3 = Device.DEFAULT == "METAL" and int(platform.mac_ver()[0].split('.')[0]) >= 13
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -164,7 +166,7 @@ class TestIndexing(unittest.TestCase):
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
   # NOTE: call doesn't work with SPEC=2
-  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD") and not METAL3, "atomics only on AMD/CPU/Metal 3")
   @Context(USE_ATOMICS=1, SPEC=1)
   def test_llama_8b_embedding_backward(self):
     from tinygrad.renderer.cstyle import CStyleLanguage
@@ -188,7 +190,7 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD") and not METAL3, "atomics only on AMD/CPU/Metal 3")
   @Context(USE_ATOMICS=1, SPEC=1)
   def test_embedding_backward_padded_embed(self):
     from tinygrad.renderer.cstyle import CStyleLanguage
