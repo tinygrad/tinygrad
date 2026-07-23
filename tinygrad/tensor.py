@@ -6,7 +6,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, ConstLike
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -125,7 +125,7 @@ class Tensor(RandMixin):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> Tensor: return cls(u)
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstLike) -> Tensor: return Tensor(UOp.const(dtype, b))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
