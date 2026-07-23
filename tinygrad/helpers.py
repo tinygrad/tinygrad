@@ -241,6 +241,7 @@ SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), Contex
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
+COMPILE_UOPS_MAX = ContextVar("COMPILE_UOPS_MAX", 0)  # refuse to compile kernels with more uops (pathological compiles hang beam workers)
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)

@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, COMPILE_UOPS_MAX
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
@@ -417,6 +417,8 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
+  # gate BEFORE the compiler call: pathological kernels can wedge nvrtc forever, uninterruptible in-process
+  if 0 < COMPILE_UOPS_MAX.value <= len(prg.src[1].src): raise RuntimeError(f"too many uops to compile: {len(prg.src[1].src)}")
   if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
   if DEBUG >= 7: ctx.compiler.disassemble(lib)

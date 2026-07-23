@@ -63,7 +63,8 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   ret = None
   try:
     st = time.perf_counter()
-    prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    with Context(COMPILE_UOPS_MAX=getenv("BEAM_UOPS_MAX", 3000)):
+      prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
@@ -135,7 +136,9 @@ def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int
     try:
       _beam_exec(to_program(cand.copy().get_optimized_ast(name_override="test"), cand.ren), var_vals, rawbufs)
       for i in outs: np.testing.assert_allclose(rawbufs[i].numpy(), ref[i], rtol=rtol, atol=atol)
-    except Exception: return False
+    except Exception as e:
+      if BEAM_DEBUG: print(f"BEAM_VALIDATE maxdiff {max((float(np.abs(rawbufs[i].numpy().astype(np.float32)-ref[i].astype(np.float32)).max()) for i in outs), default=float('nan')):.4g} {type(e).__name__}")
+      return False
     return True
   return validate
 
