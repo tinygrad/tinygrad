@@ -60,9 +60,9 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
+  if (base:=target.base) not in src.backward_slice_with_self: return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  base = target.base
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
@@ -78,7 +78,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # split is moved to the end to provide maximum locality for the second phase reduce.
 
   # get expanded by rangeifying the UOp x
-  indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.index, 0) for i,s in enumerate(x.shape)])
+  indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.weakint, 0) for i,s in enumerate(x.shape)])
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP, x.base.dtype)}, extra_pm=pm_mops).ranges]
   is_expanded = [i not in range_nums for i in range(len(x.shape))]
 
@@ -323,7 +323,7 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
-DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
+DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
 def limit_bufs(ctx:IndexingContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
@@ -470,7 +470,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
+   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
 
   # this renumbers the params

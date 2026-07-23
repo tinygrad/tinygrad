@@ -74,7 +74,6 @@ testing_minimal = [
   "torch==2.9.1",
   "pytest",
   "pytest-xdist",
-  "pytest-timeout",
   "pytest-split",
   "hypothesis>=6.148.9",
   "z3-solver<4.15.4",  # 4.15.4 has a segfault when creating many z3.Context()
@@ -160,9 +159,6 @@ norecursedirs = [
   ".hypothesis",
   ".git",
 ]
-timeout = 300
-timeout_method = "thread"
-timeout_func_only = true
 testpaths = ["test"]
 filterwarnings = [
   # Ignore SWIG warnings from importlib

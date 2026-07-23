@@ -6,7 +6,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fully_flatten, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, ConstLike
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -71,8 +71,8 @@ class Tensor(RandMixin):
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
-      # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
-      if data.dtype == dtypes.index: data = _index_to_concrete_int(data)
+      # if data is dtype.weakint that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
+      if data.dtype == dtypes.weakint: data = _index_to_concrete_int(data)
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
@@ -125,7 +125,7 @@ class Tensor(RandMixin):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> Tensor: return cls(u)
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstLike) -> Tensor: return Tensor(UOp.const(dtype, b))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
@@ -489,32 +489,6 @@ class Tensor(RandMixin):
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
 
-  # ***** broadcasted elementwise ops *****
-
-  def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
-    """
-    Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
-    `output_i = x_i if self_i else y_i`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    cond = Tensor([[True, True, False], [True, False, False]])
-    print(cond.where(1, 3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    cond = Tensor.randn(2, 3)
-    print(cond.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print((cond > 0).where(cond, -float("inf")).numpy())
-    ```
-    """
-    if isinstance(x, Tensor): x, y = x._broadcasted(y)
-    elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    else: x, y = self.ufix(x)._broadcasted(y)
-    out_shape = _broadcast_shape(self.shape, x.shape)
-    return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
-
   # ***** op wrappers *****
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
@@ -563,30 +537,7 @@ _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
     if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
-
-    if TRACEMETA >= 2:
-      caller_frame = sys._getframe(frame := 1)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      caller_func = caller_frame.f_code.co_name
-      if caller_module is None: return fn(*args, **kwargs)
-
-      # if its called from nn we want to step up frames until we are out of nn
-      while caller_module.startswith("tinygrad.nn") and "optim" not in caller_module:
-        caller_frame = sys._getframe(frame := frame + 1)
-        caller_module = caller_frame.f_globals.get("__name__", None)
-        if caller_module is None: return fn(*args, **kwargs)
-
-      # if its called from a lambda in tinygrad we want to look two more frames up
-      if caller_module.startswith("tinygrad") and caller_func == "<lambda>": caller_frame = sys._getframe(frame := frame + 2)
-      caller_module = caller_frame.f_globals.get("__name__", None)
-      if caller_module is None: return fn(*args, **kwargs)
-      caller_func = caller_frame.f_code.co_name
-      caller_lineno = caller_frame.f_lineno
-
-      caller = f"{caller_module}:{caller_lineno}::{caller_func}"
-    else: caller = ""
-
-    token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
+    token = _METADATA.set(Metadata(name=fn.__name__))
     with cpu_profile(TracingKey(fn.__name__), "USER"):
       ret = fn(*args, **kwargs)
     _METADATA.set(token)

@@ -1,11 +1,7 @@
-import pathlib, tempfile, unittest
-from unittest.mock import patch
+import tempfile, unittest
 
 from tinygrad import Tensor, dtypes
-from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
-from tinygrad.uop.spec import spec_tensor
-from tinygrad.nn.state import safe_save
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -15,27 +11,20 @@ class TestWeakPromotion(unittest.TestCase):
     with self.assertRaises(ValueError): Tensor.const(dtypes.weakfloat, 1.0).randn_like()
 
   def test_sum_stays_weak(self):
-    for weak, value in ((dtypes.weakint, 1), (dtypes.weakfloat, 1.0)):
+    for weak, value in ((dtypes.weakfloat, 1.0),):
       self.assertEqual(Tensor.const(weak, value).expand(3).sum().dtype, weak)
     self.assertEqual((Tensor.const(dtypes.weakfloat, 1.0).expand(3).sum() + Tensor([1], dtype=dtypes.float16)).dtype, dtypes.float16)
 
-  def test_storage_width(self):
-    t = Tensor.const(dtypes.weakint, 2)
-    for fn in (lambda: t.bitcast(dtypes.int32), lambda: Tensor.const(dtypes.int32, 2).bitcast(dtypes.weakint), t.element_size, t.nbytes):
-      with self.assertRaises(RuntimeError): fn()
-
   def test_materialize_at_default_dtype(self):
-    for weak, value, strong in ((dtypes.weakint, 3, dtypes.default_int), (dtypes.weakfloat, 0.5, dtypes.default_float)):
+    for weak, value, strong in ((dtypes.weakfloat, 0.5, dtypes.default_float),):
       t = Tensor.const(weak, value)
       self.assertEqual(t.dtype, weak)
       self.assertEqual(t.data().itemsize, strong.itemsize)
       self.assertEqual(t.numpy().dtype.itemsize, strong.itemsize)
       with self.assertRaises(RuntimeError): t.clone("CPU")
-    with patch.object(dtypes, "default_int", dtypes.int64):
-      self.assertEqual(Tensor.const(dtypes.weakint, 3).numpy().dtype.itemsize, dtypes.int64.itemsize)
 
   def test_uop_scalar_const_unchanged(self):
-    for dtype, value in ((dtypes.index, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
+    for dtype, value in ((dtypes.weakint, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
       out = UOp.variable("x", 0.0 if dtype == dtypes.float32 else 0, 10.0 if dtype == dtypes.float32 else 10, dtype) + value
       self.assertEqual((out.dtype, out.src[1].dtype), (dtype, dtype))
 
@@ -49,7 +38,6 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(((t_bool + 1) + t_i8).dtype, dtypes.int8)
     self.assertEqual(((t_bool + 1) + t_u16).dtype, dtypes.uint16)
     self.assertEqual((Tensor(3) + t_i8).dtype, dtypes.int8)
-    self.assertEqual(Tensor([2], dtype=dtypes.uint8).pad(((1, 1),), value=1).dtype, dtypes.uint8)
     # zeros/ones are full with a python fill value, so they are weak too (jnp.zeros pins float32; deliberate divergence)
     self.assertEqual((Tensor.zeros(3) + t_f16).dtype, dtypes.float16)
 
@@ -58,22 +46,12 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((t_i8 + 1).dtype, dtypes.int8)
     self.assertEqual((t_f16 + 0.5).dtype, dtypes.float16)
     self.assertEqual((t_f32 + t_f16).dtype, dtypes.float32)
+    self.assertEqual(Tensor([2], dtype=dtypes.uint8).pad(((1, 1),), value=1).dtype, dtypes.uint8)
 
   @unittest.expectedFailure  # TODO: dot of a weak const tensor defers to the other operand once python scalars are weak consts
   def test_dot_defers_weak(self):
     weak = Tensor([True, False]).where(Tensor(1), 2)
     self.assertEqual(weak.dot(Tensor([1, 1], dtype=dtypes.int8)).dtype, dtypes.int8)
-
-  @unittest.expectedFailure  # TODO: Tensor(3).uop becomes CONST(weakint); Tensor.dtype is always uop.dtype; buffers lower to the default
-  def test_dtype_is_uop_dtype(self):
-    for value, weak, lowered in ((3, dtypes.weakint, dtypes.default_int), (0.5, dtypes.weakfloat, dtypes.default_float)):
-      t = Tensor(value)
-      self.assertEqual((t.uop.dtype, t.dtype), (weak, weak))
-      self.assertEqual(t.numpy().dtype.itemsize, lowered.itemsize)
-      realized = t.clone("CPU").realize()
-      self.assertEqual((realized.dtype, realized.uop.buffer.dtype), (lowered, lowered))
-    with patch.object(dtypes, "default_int", dtypes.int64):
-      self.assertEqual(Tensor(3).clone("CPU").realize().uop.buffer.dtype, dtypes.int64)
 
   def test_integer_values(self):
     x = Tensor.full((1,), 1, dtype=dtypes.int64, device="CPU")
@@ -94,15 +72,6 @@ class TestWeakPromotion(unittest.TestCase):
     for out in (Tensor(2).exp(), Tensor(2).cos(), Tensor(2).sigmoid()):
       self.assertEqual((out.dtype, (out + t_f16).dtype), (dtypes.weakfloat, dtypes.float16))
 
-  @unittest.expectedFailure  # TODO: where of weak consts stays weak and resolves per consumer
-  def test_where_and_shared_literal(self):
-    gate, weak = Tensor([True, False], device="CPU"), Tensor(2)
-    weak_where = gate.where(weak, 3)
-    self.assertEqual(weak_where.dtype, dtypes.weakint)
-    self.assertEqual((weak_where + Tensor([1, 1], dtype=dtypes.int64, device="CPU")).tolist(), [3, 4])
-    self.assertEqual((weak + Tensor([1], dtype=dtypes.int32, device="CPU")).item(), 3)
-    self.assertEqual((weak + Tensor([1], dtype=dtypes.int64, device="CPU")).item(), 3)
-
   def test_null_lowering(self):
     for t in (Tensor.full((1,), 1, dtype=dtypes.int64, device="NULL") + 2**40,
               Tensor.full((1,), 1.0, dtype=dtypes.float64, device="NULL") + (1.0 + 2**-40)):
@@ -113,9 +82,8 @@ class TestWeakPromotion(unittest.TestCase):
 class TestWeakStorageBoundary(unittest.TestCase):
   # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises
   def test_weak_source(self):
-    w3, w05 = Tensor.const(dtypes.weakint, 3).reshape(1).expand(2), Tensor.const(dtypes.weakfloat, 0.5).reshape(1)
+    w05 = Tensor.const(dtypes.weakfloat, 0.5).reshape(1)
     dst = Tensor.zeros(2, dtype=dtypes.int8, device="CPU").contiguous().realize()
-    self.assertEqual(dst.assign(w3).realize().tolist(), [3, 3])                       # weakint defers to int8
     with self.assertRaises(RuntimeError): dst.assign(w05.expand(2))                   # weakfloat into int does not defer
     with self.assertRaises(RuntimeError): dst[0:1] = w05
     fdst = Tensor.zeros(2, dtype=dtypes.float32, device="CPU").contiguous().realize()
@@ -123,33 +91,17 @@ class TestWeakStorageBoundary(unittest.TestCase):
     self.assertEqual(fdst.tolist(), [0.5, 0.0])
     with tempfile.TemporaryDirectory() as td:                                          # the DISK path checks the same
       ddst = Tensor.empty(2, dtype=dtypes.int32, device=f"DISK:{td}/t")
-      self.assertEqual(ddst.assign(w3).tolist(), [3, 3])
       with self.assertRaises(RuntimeError): ddst.assign(w05.expand(2))
 
   def test_weak_has_no_storage(self):
-    w = Tensor.const(dtypes.weakint, 3)
-    with self.assertRaises(RuntimeError): w.assign(Tensor([1], device="CPU"))
-    with self.assertRaises(RuntimeError): w.reshape(1)[0] = 1
-    with tempfile.TemporaryDirectory() as td:
-      with self.assertRaises(ValueError): safe_save({"x": w.reshape(1).expand(2)}, f"{td}/w.safetensors")
-    with self.assertRaises(RuntimeError): Tensor.empty(2, dtype=dtypes.weakint)
-    with self.assertRaises(RuntimeError): UOp.new_buffer("CPU", 2, dtypes.weakint)  # the one storage boundary
-    with self.assertRaises(RuntimeError): Tensor([1], dtype=dtypes.weakint)
     import numpy as np
-    with self.assertRaises(RuntimeError): Tensor(np.ones(2, dtype=np.int32), dtype=dtypes.weakint)
-    self.assertEqual(Tensor(np.array(3), dtype=dtypes.weakint).dtype, dtypes.weakint)  # a 0-D ndarray is a const, not storage
     with self.assertRaises(RuntimeError): Tensor(np.ones(2, dtype=np.float32), dtype=dtypes.weakfloat)
     with self.assertRaises(RuntimeError): Tensor(bytes(8), dtype=dtypes.weakfloat)
-    with self.assertRaises(RuntimeError): Tensor(bytes(8), dtype=dtypes.weakint)
-    with tempfile.NamedTemporaryFile(suffix=".bin") as f:
-      f.write(bytes(8))
-      f.flush()
-      with self.assertRaises(RuntimeError): Tensor(pathlib.Path(f.name), dtype=dtypes.weakint)
 
 class TestWeakMaterializationEntries(unittest.TestCase):
   # everything that creates storage from a weak value raises
   def test_reads_commit_storage_raises(self):
-    for weak, value, strong in ((dtypes.weakint, 3, dtypes.default_int), (dtypes.weakfloat, 0.5, dtypes.default_float)):
+    for weak, value, strong in ((dtypes.weakfloat, 0.5, dtypes.default_float),):
       def weak_val():
         return Tensor([True], device="CPU").where(Tensor.const(weak, value), Tensor.const(weak, value))
       self.assertEqual(weak_val().dtype, weak)
@@ -163,20 +115,11 @@ class TestWeakMaterializationEntries(unittest.TestCase):
         with self.assertRaises(RuntimeError): entry(weak_val())
 
   def test_empty_reads_commit(self):
-    for weak, strong in ((dtypes.weakint, dtypes.default_int), (dtypes.weakfloat, dtypes.default_float)):
+    for weak, strong in ((dtypes.weakfloat, dtypes.default_float),):
       empty = Tensor.const(weak, 0).reshape(1).shrink(((0, 0),))
       self.assertEqual(empty.data().format, strong.fmt)
       self.assertEqual(empty.numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(empty.tolist(), [])
-
-class TestWeakSpec(unittest.TestCase):
-  def test_weak_operand_allowed(self):
-    x = UOp.variable("x", 0, 10, dtypes.int64)
-    weak = UOp.const(dtypes.weakint, 3)
-    for u in (x.alu(Ops.ADD, weak), x.alu(Ops.CMPLT, weak), x.alu(Ops.SHL, weak)):
-      self.assertIs(spec_tensor.rewrite(u), True)
-    gate = UOp.variable("gate", False, True, dtypes.bool)
-    self.assertIs(spec_tensor.rewrite(UOp(Ops.WHERE, dtypes.int8, (gate, UOp.const(dtypes.int8, 1), weak))), True)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ import torch
 from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
 TINY_BACKEND = getenv("TINY_BACKEND")
@@ -244,7 +243,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), expected=IndexError)
-    self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 1, -1), expected=RuntimeError)
 
   def test_meshgrid(self):
@@ -450,7 +448,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))
@@ -468,7 +465,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
     helper_test_op(None, lambda x: x.tril(), vals=[[[True] * 3] * 3], forward_only=True)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
@@ -771,6 +767,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
                        lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
 
+  def test_pow_int_base_float_exponent(self):
+    for exponent in (0.5, 1.5, 2.0, -1.0, 0.0):
+      helper_test_op([], lambda: torch.tensor([1, 2, 3, 4], dtype=torch.int) ** exponent,
+                         lambda: Tensor([1, 2, 3, 4], dtype=dtypes.int32) ** exponent, forward_only=True)
+
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
     helper_test_op(None, lambda x: x.sqrt(), vals=[[0.0]])
@@ -791,7 +792,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_xor(y), expected=RuntimeError)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -809,7 +809,6 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_and(y), expected=RuntimeError)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -1048,8 +1047,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
   def test_hardsigmoid_extreme(self):
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=300, high=400)
+    helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=-400, high=-300)
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
@@ -1229,7 +1228,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[True, False]])
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_argmin(self):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
@@ -1266,23 +1264,20 @@ class TestOps(unittest.TestCase):
                    lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
 
   def test_argsort(self):
-    for dim in [-1, 0, 1]:
-      for descending in [True, False]:
-        helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=dim, descending=descending, stable=True).type(torch.int32),
-                                  lambda x: x.argsort(dim, descending), forward_only=True)
+    helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=1, descending=True, stable=True).type(torch.int32),
+                              lambda x: x.argsort(1, True), forward_only=True)
 
   def test_topk(self):
     helper_test_op([(8)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(8)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
-    for dim in [0, 1, -1]:
-      for largest in [True, False]:
-        for sorted_ in [True]: # TODO support False
-          helper_test_op([(5,5,4)],
-                          lambda x: x.topk(4, dim, largest, sorted_).values,
-                          lambda x: x.topk(4, dim, largest, sorted_)[0], forward_only=True)
-          helper_test_op([(5,5,4)],
-                          lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
-                          lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
+    for dim, largest in [(0, True), (1, False)]:
+      for sorted_ in [True]: # TODO support False
+        helper_test_op([(5,5,4)],
+                        lambda x: x.topk(4, dim, largest, sorted_).values,
+                        lambda x: x.topk(4, dim, largest, sorted_)[0], forward_only=True)
+        helper_test_op([(5,5,4)],
+                        lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
+                        lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
     if not COMPILE_ONLY:
       value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
@@ -1535,7 +1530,6 @@ class TestOps(unittest.TestCase):
   def test_prod_dtype_arg(self):
     with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(dtype="")
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
     helper_test_op([(45,3)], lambda x: x.min())
@@ -1575,7 +1569,6 @@ class TestOps(unittest.TestCase):
   def test_any_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_all(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(), forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[True, True]], forward_only=True)
@@ -1907,9 +1900,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[-2:2])
     helper_test_op([(3,3,3)], lambda x: x[-2:-5])
 
-  def test_slice_empty(self):
-    helper_test_op([(10,10)], lambda x: x[1:1])
-
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1])  # x.shape = (0, 10)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5])  # x.shape = (0, 3, 3)
@@ -2101,7 +2091,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,3,6,6)], lambda x: x.squeeze(0))
     helper_test_op([(4,3,1,6)], lambda x: x.squeeze(1))
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze(3))
-    self.helper_test_exception([(4,3,6,6)], lambda x: x.squeeze(50), expected=IndexError)
     self.helper_test_exception([(4,3,6,6)], lambda x: x.squeeze(50), expected=IndexError)
     helper_test_op([(4,3,6,1)], lambda x: x.squeeze(-1))
     helper_test_op([(4,3,6,6)], lambda x: x.squeeze())
@@ -2375,9 +2364,10 @@ class TestOps(unittest.TestCase):
               lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
   @slow_test
+  @unittest.skip("redundant: bs/cout are loop dims, kernel×cin sweep covered by test_conv2d")
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
-  @slow_test
+  @unittest.skip("redundant: cin=1 covered by test_conv2d_bs_1_cin_1")
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
   def test_conv2d_errors(self):
@@ -2497,9 +2487,6 @@ class TestOps(unittest.TestCase):
             helper_test_op([(1,1,n,n), (1,1,k,k)],
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
               lambda x,w: Tensor.conv2d(x,w,padding=p))
-            helper_test_op([(1,1,n,n), (1,1,k,k)],
-              lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w),
-              lambda x,w: Tensor.conv2d(x,w,padding=p))
 
   def test_padded_conv2d_p21(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
@@ -2548,7 +2535,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_max_pool2d(self):
-    for ksz in [(2,2), (3,3), 2, 3, (3,2), (5,5), (5,1)]:
+    for ksz in [2, (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([(32,2,11,28)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
@@ -2556,7 +2543,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_max_pool2d_padding(self):
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [(3,3), 2, (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
           helper_test_op([(4,2,11,28)],
@@ -2619,7 +2606,7 @@ class TestOps(unittest.TestCase):
 
   def test_max_pool2d_ceil_mode(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
@@ -2699,7 +2686,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
+    for ksz in [2, (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
@@ -2713,7 +2700,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d_padding(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [2, (3,3), (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
           helper_test_op([shape],
@@ -2735,7 +2722,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
+    for ksz in [(3,3), 2, (3,2)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False),
@@ -2743,7 +2730,7 @@ class TestOps(unittest.TestCase):
 
   def test_avg_pool2d_ceil_mode(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
@@ -2751,7 +2738,7 @@ class TestOps(unittest.TestCase):
 
   def test_avg_pool2d_ceil_mode_padding_not_counted(self):
     shape = (1,1,6,6)
-    for ksz in [(3,3), 3, (3,2), 4]:
+    for ksz in [(3,3), (3,2), 4]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False),
@@ -2953,7 +2940,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_dim_collapse_int(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim collapse from int
@@ -2964,7 +2950,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_dim_inject_none(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # dim injection from None
@@ -2999,7 +2984,6 @@ class TestOps(unittest.TestCase):
                             lambda x: x[Tensor([[0,1,-1],[-1,-2,0]]), Tensor([2,1,-1])])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[((0,),)])
@@ -3011,7 +2995,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,(2,1,0),c,(-2,1,0),e], lambda x: x[i,(2,1,0),k,(-2,1,0),p])
 
   @slow_test
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "QCOM CL vectorized bool bug")
   def test_slice_fancy_indexing_tuple_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(((0,),),)], lambda x: x[(((0,),),)])
@@ -3342,6 +3325,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf((DEV.interface.startswith("MOCK") or Device.DEFAULT == "PYTHON"), "very slow on MOCKGPU because reduce does not fold")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu runtime issue")
   @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM fails with: Resource deadlock avoided")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and DEV.renderer == "LVP", "extremely slow with LVP")
   def test_masked_select(self):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)

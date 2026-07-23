@@ -39,9 +39,10 @@ class Estimates:
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.scalar().itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
-        mults *= cast(sint, u.src[0].ssimplify())
-        # SPECIAL are already counted in mults
-        mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
+        if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
+          mults *= cast(sint, u.src[0].ssimplify())
+          # SPECIAL are already counted in mults
+          mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.PARAM and u.arg.addrspace == AddrSpace.ALU and u.expr == 'core_id': mults *= int(u.vmax) + 1

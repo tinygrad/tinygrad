@@ -61,27 +61,28 @@ spec_shared = PatternMatcher([
   (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
    lambda s: all_same([x.shape for x in s.src]) and all(x.dtype == s.dtype for x in s.src)),
 
-  # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
+  # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
   # a weak dtype matches any dtype (TODO: make python scalars weak consts)
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))),
-   lambda w,x,y: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in (x,y))),
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(), UPat())),
+   lambda w: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in w.src[1:])),
+  (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
    lambda x,y: x.dtype == y.dtype or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
-  # and SHL/SHR, the shift distance can be an int
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"),
-   lambda a,x,y: a.dtype == x.dtype and (y.dtype in (x.dtype, dtypes.uint) or y.dtype in dtypes.weaks)),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype or None),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(y.dtype == x.dtype or y.dtype in dtypes.weaks for y in x.src)),
 
   # CAST
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
 
-  # RANGE can be in the big graph now
+  # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
-  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
+  # END closes RANGEs
+  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:]) or None),
+  # a loop-ended END requires a trailing bool condition for the backedge (loop again while true)
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool))), lambda: True),
 
   # PARAM
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
@@ -99,14 +100,15 @@ spec_shared = PatternMatcher([
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
+  # CALL of an external function
+  (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),
+   lambda x: x.src[0].dtype is dtypes.uint64 if x.src[0].dtype is not dtypes.void else None),
+
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
 
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
-
-  # WAIT until a condition evaluates to true.
-  (UPat(Ops.WAIT, dtypes.void, src=(UPat(dtype=dtypes.bool),)), lambda: True),
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
@@ -136,11 +138,11 @@ spec_tensor = PatternMatcher([
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.index and is_device(buf.arg.device))
+   (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.weakint and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int, dtypes.index,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -155,10 +157,10 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.index),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
   # inputs to movement ops
-  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.index), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
@@ -168,7 +170,7 @@ spec_tensor = PatternMatcher([
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
-   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.index, dtypes.int) for y in x.src[1:])),
+   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
   # COPY. TODO: this should not have allow_any_len, but something is adding ranges
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"),), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype and is_device(copy.arg)),
@@ -200,7 +202,7 @@ spec_tensor = PatternMatcher([
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
   # index and weak dtypes are not allowed in programs
-  (UPat(GroupOp.All, (dtypes.index, dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
@@ -233,7 +235,7 @@ spec_full = PatternMatcher([
 
   # SLICE on BUFFER is allowed if BUFFER is
   (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER})),
-                        UPat(Ops.CONST, dtype=dtypes.index)), allow_any_len=True, name="bv"),
+                        UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
 
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
@@ -248,7 +250,7 @@ spec_full = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
 
   # while BIND is being casted
-  (UPat(Ops.BIND, (dtypes.int, dtypes.index), (UPat(), UPat()), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 ])+spec_tensor+spec_program+spec_hcq
 
 # **** pyrender (move this) ****
