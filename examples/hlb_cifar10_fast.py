@@ -79,8 +79,11 @@ class ConvGroup:
     # batchnorms are computed in fp32 islands, idiom from hlb_cifar10
     # NOTE: .contiguous() forces the conv into its own kernel; without it BEAM fuses conv+pool+bn and miscompiles
     c = (lambda t: t.contiguous()) if getenv("CONTIG", 1) else (lambda t: t)
-    x = act(self.norm1(c(self.conv1(x)).max_pool2d(2).float()).cast(dtypes.default_float))
-    return act(self.norm2(c(self.conv2(x)).float()).cast(dtypes.default_float))
+    # NOTE: .contiguous_backward() materializes the grad at the act input: the bn bias grad becomes a cheap reduce
+    # instead of a mega-fused kernel that recomputes the whole transposed conv (6ms -> ~1ms)
+    cb = (lambda t: t.contiguous_backward()) if getenv("CBW", 1) else (lambda t: t)
+    x = act(cb(self.norm1(c(self.conv1(x)).max_pool2d(2).float()).cast(dtypes.default_float)))
+    return act(cb(self.norm2(c(self.conv2(x)).float()).cast(dtypes.default_float)))
 
 class CifarNet:
   def __init__(self, whiten_weight:Tensor):
@@ -93,7 +96,8 @@ class CifarNet:
     # pad to 32x32 because the whitening conv creates 31x31 images that are awfully slow to compute with, hack from hlb_cifar10
     # NOTE: .contiguous() isolates each matmul/conv into its own kernel so BEAM's WMMA opt doesn't fuse with a downstream reduce and miscompile
     c = (lambda t: t.contiguous()) if getenv("CONTIG", 1) else (lambda t: t)
-    x = c(act(self.whiten(x))).pad((1, 0, 0, 1))
+    cb = (lambda t: t.contiguous_backward()) if getenv("CBW", 1) else (lambda t: t)
+    x = c(act(cb(self.whiten(x)))).pad((1, 0, 0, 1))
     x = x.sequential([self.group1, self.group2, self.group3])
     return self.linear(c(x.max((2, 3)))) / 9.
 
