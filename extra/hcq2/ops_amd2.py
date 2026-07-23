@@ -149,7 +149,7 @@ def pm4_submit(cmdbuf, devs):
 
   # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
   for d in devs: q = Device[d].compute_queue
-  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, ("COMPUTE:0", name), unique=False)
+  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, f"COMPUTE:0_{name}", unique=False)
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # place the cmdbuf at the ring's write offset, wrapping the ring
@@ -214,7 +214,7 @@ def sdma_submit(cmdbuf, devs):
 
   # the sdma queue's ring and its host-side ring/write/put pointers
   for d in devs: q = Device[d].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, ("COPY:0", name), unique=False)
+  ring, wptr, doorbell, put_ptr = (make_placeholder(devs, b.size, b.dtype, f"COPY:0_{name}", unique=False)
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
@@ -628,10 +628,10 @@ class AMDDevice(HCQ2Compiled):
 
     qname = f"{'COPY' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
     self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
+      (UPat(Ops.PARAM, tag=f"{qname}_{name}"), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
     ] + [
-      (UPat(Ops.PARAM, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx[0].timeline_signal(q)),
-      (UPat(Ops.PARAM, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx[0].timeline_value(q)),
+      (UPat(Ops.PARAM, tag=f"{qname}_timeline_signal"), lambda ctx, q=qname: ctx[0].timeline_signal(q)),
+      (UPat(Ops.PARAM, tag=f"{qname}_timeline_value"), lambda ctx, q=qname: ctx[0].timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue
