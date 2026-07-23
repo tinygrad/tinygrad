@@ -1,36 +1,22 @@
-# https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html
+# NOTE: we patch torch.compile instead of using register_backend because register_backend
+# runs after Dynamo traces the function into FX graphs. We need to wrap the raw Python
+# function before tracing to capture the full training step (fwd+bwd+optimizer) in TinyJit.
 import torch
-import torch._dynamo
 from extra.torch_backend.backend import unwrap, wrap
+from tinygrad import Tensor, TinyJit, dtypes
 
-from torch._dynamo.backends.registry import register_backend
-from torch._functorch.aot_autograd import aot_module_simplified
+def _tiny_compile(fn):
+  model = next((v for v in fn.__globals__.values() if isinstance(v, torch.nn.Module) and list(v.parameters())), None)
+  assert model, "torch.compile(backend='tiny') requires step to reference a nn.Module"
+  params, loss_out = [unwrap(p) for p in model.parameters()], Tensor.zeros((), dtype=dtypes.float32)
+  @TinyJit
+  def _jit(*args: Tensor):
+    with Tensor.train(): loss_out.assign(unwrap(fn(*[wrap(a) for a in args])))
+    Tensor.realize(loss_out, *params)
+    return wrap(loss_out)
+  return lambda *args: _jit(*[unwrap(a) for a in args])
 
-from tinygrad import Tensor, TinyJit
+_orig = torch.compile
+torch.compile = lambda fn=None, /, **kw: (lambda f: _tiny_compile(f)) if kw.get("backend") == "tiny" and fn is None \
+  else _tiny_compile(fn) if kw.get("backend") == "tiny" else _orig(fn, **kw)
 
-@register_backend
-def tiny(gm:torch.fx.GraphModule, sample_inputs):
-  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
-    # TODO: the jit should capture the graph directly, not need three runs. this is a planned tinygrad refactor after becomes_map
-    @TinyJit
-    def tiny_function(*args:Tensor):
-      outs = gm(*[wrap(x) for x in args])
-      for x in outs: unwrap(x).realize()
-      return outs
-    # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
-    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
-    return torch_function
-  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
-
-if __name__ == "__main__":
-  def foo(x, y):
-    a = torch.sin(x)
-    b = torch.cos(y)
-    return a + b
-
-  print("calling compile")
-  opt_foo1 = torch.compile(foo, backend="tiny")
-  print("compiled")
-  for i in range(5):
-    out = opt_foo1(torch.randn(10, 10), torch.randn(10, 10))
-    print(out.device)
