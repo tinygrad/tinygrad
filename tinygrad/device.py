@@ -191,9 +191,11 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
-  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
+      if not no_sync: self.allocator.dev.synchronize()
+      return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv

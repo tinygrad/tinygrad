@@ -332,9 +332,7 @@ class QCOMAllocator(HCQAllocatorBase):
   def _copyin(self, dest:HCQBuffer, src:memoryview): self._do_copy(mv_address(src), dest.cpu_view().addr, src.nbytes, f"TINY -> {self.dev.device}")
   def _copyout(self, dest:memoryview, src:HCQBuffer): self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, f"{self.dev.device} -> TINY")
 
-  def _as_buffer(self, src:HCQBuffer) -> memoryview:
-    self.dev.synchronize()
-    return to_mv(src.cpu_view().addr, src.size)
+  def _as_buffer(self, src:HCQBuffer) -> memoryview: return to_mv(src.cpu_view().addr, src.size)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 
