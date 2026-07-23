@@ -4,8 +4,9 @@
 from math import ceil
 from typing import Literal
 from dataclasses import dataclass
-import functools, argparse, jinja2
+import functools, argparse, jinja2, json
 from tinygrad import fetch, Tensor, nn, dtypes, Device
+from tinygrad.engine.jit import TinyJit
 
 def device_to_load(device: tuple[str, ...], num: int) -> str: 
   return device[num % len(device)]
@@ -18,10 +19,11 @@ class FP8Linear:
     self.bias = Tensor.empty(out_features, dtype=dtypes.float16) if bias else None
     self.weight_scale_inv = Tensor.empty((ceil(out_features/self.block_size), ceil(in_features/self.block_size)), dtype=dtypes.float16)
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     weight_scale_inv = self.weight_scale_inv.unsqueeze(1).unsqueeze(-1)
-    weight_scale_inv = weight_scale_inv.expand(ceil(self.out_features/self.block_size), self.block_size, ceil(self.in_features//self.block_size), self.block_size).reshape(self.out_features, self.in_features)
-    weight_scale_inv = weight_scale_inv[:self.out_features, :self.in_features]
+    out_blocks, in_blocks = ceil(self.out_features/self.block_size), ceil(self.in_features/self.block_size)
+    weight_scale_inv = weight_scale_inv.expand(out_blocks, self.block_size, in_blocks, self.block_size)
+    weight_scale_inv = weight_scale_inv.reshape(out_blocks * self.block_size, in_blocks * self.block_size)[:self.out_features, :self.in_features]
     weight = self.weight.cast(dtypes.float32) * weight_scale_inv.cast(dtypes.float32)
 
     y = x.dot(weight.T)
@@ -36,7 +38,7 @@ class GLMTokenizer:
   @property
   def bos_id(self): return self.model.encode("[gMASK]<bos>").ids[0]
   @property
-  def stop_token(self): return self.model.encode("<|endoftext|>").ids[0]
+  def stop_tokens(self): return [154820, 154827, 154829] # got the values from the config
   @property
   def pad_token(self): return 154820 # pad_id got from config on hf
   def decode(self, toks): return self.model.decode(toks)
@@ -50,7 +52,6 @@ class GLMConfig:
   max_batch: int
   dim: int
   layers: list[LayerType]
-  norm_eps: float
   vocab_size: int
   max_context: int
   intermediate_size: int
@@ -76,8 +77,8 @@ class DSAKVCache:
     self.layers, self.max_context, self.attn_latent_dim = layers, max_context, latent_dim
     self.idx_k_cache_dim, self.max_batch, self.indexer_type = idx_latent_dim, max_batch, indexers
     self.full_to_slot = {i: s  for s, i in enumerate([i for i, v in enumerate(indexers) if v == "full"])}
-    self.store_attn = Tensor.empty(layers, max_batch, max_context, latent_dim)
-    self.store_attn_idx = Tensor.empty(indexers.count("full"), max_batch, max_context, idx_latent_dim)
+    self.store_attn = Tensor.empty(layers, max_batch, max_context, latent_dim, dtype=dtypes.bfloat16)
+    self.store_attn_idx = Tensor.empty(indexers.count("full"), max_batch, max_context, idx_latent_dim, dtype=dtypes.bfloat16)
 
   CacheSegment = Literal["attention", "indexer"]
   # This expects the shape (B, T, d)
@@ -86,8 +87,8 @@ class DSAKVCache:
     assert 1 <= B <= self.max_batch, "batch size is greater than max batch"
     assert 1 <= T <= self.max_context, "tokens more than max context"
     assert layer < self.layers, "layer is greater than max_layer"
-    assert (segment == "indexer" and d == self.attn_latent_dim) or \
-           (segment == "attention" and d == self.idx_k_cache_dim), "shape of dim is incorrect"
+    assert (segment == "attention" and d == self.attn_latent_dim) or \
+           (segment == "indexer" and d == self.idx_k_cache_dim), "shape of dim is incorrect"
     to_write = (positional_ids >= 0).sum(-1) # (B)
     padded_values = (positional_ids < 0).sum(-1) # (B)
     for b in range(B):
@@ -96,9 +97,9 @@ class DSAKVCache:
       if segment == "attention":
         self.store_attn[layer, b, start_point:start_point+writes].assign(value[b, -writes:])
       else: 
-        self.store_attn_idx[layer, b, start_point:start_point+writes].assign(value[b, -writes:])
+        self.store_attn_idx[self.full_to_slot[layer], b, start_point:start_point+writes].assign(value[b, -writes:])
     if segment == "attention": return self.store_attn[layer, :B, :]
-    else: return self.store_attn_idx[layer, :B, :]
+    else: return self.store_attn_idx[self.full_to_slot[layer], :B, :]
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float, device:str|None=None) -> Tensor:
@@ -113,8 +114,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, positional_ids: Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
   valid = positional_ids >= 0 # (B, S)
   idx = valid.where(positional_ids, 0)
-  batched_freqs = Tensor.empty(x.shape[0], x.shape[1], freqs_cis.shape[-1])
-  for i in range(x.shape[0]): batched_freqs[i].assign(freqs_cis[idx[i]].pad_to(x.shape[1], None)) # Taking slice for each token from freqs
+  batched_freqs = freqs_cis[idx].cast(dtypes.bfloat16) # Taking slice for each token from freqs
   cos, sin = batched_freqs.reshape(x.shape[0], x.shape[1], 1, -1).chunk(2, dim=-1) # (B, S, 1, dim//2)
   cos, sin = valid.unsqueeze(-2).unsqueeze(-1).where(cos, 1), valid.unsqueeze(-2).unsqueeze(-1).where(sin, 0)
   x1, x2 = x[..., 0::2], x[..., 1::2]
@@ -143,7 +143,6 @@ class GLMDSAIndexer():
     q_idx, k_idx = q_rot_idx.cat(q_pass_idx, dim=-1), k_rot_idx.cat(k_pass_idx, dim=-1).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
 
     # (B, S_longest, HD)
-    # TODO: is this the correct place to store cache
     k_idx = kv_cache.update_cache(self.layer, positional_ids, k_idx, "indexer") # This will return values that are padded to the max sequnce of all batches 
 
     # (B, S, H, HD) @ (B, 1, HD, T) -> (B, S, H, T)
@@ -169,7 +168,7 @@ def create_causal_attn_mask(positional_ids: Tensor, longest_seq: int) -> Tensor:
     return keep.where(0, dtypes.float.min)
 
 def basic_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, attn_heads: int, attn_dim: int, batch: int):
-    attn_weights = ((queries @ keys.transpose(-1, -2)) + attn_mask.unsqueeze(1)) * (attn_dim ** -0.5) # (B, attn_head, S_inp, S_longest)
+    attn_weights = ((queries @ keys.transpose(-1, -2)) * attn_dim ** -0.5) + attn_mask.unsqueeze(1) # (B, attn_head, S_inp, S_longest)
     attn_weights = attn_weights.softmax(-1) # (B, attn_head, S_inp, S_longest)
     attn_output = (attn_weights @ values).permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
     attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contiguous() # (B, S_inp, attn_head * attn_dim)
@@ -259,9 +258,9 @@ class GLMMoeGateTopK():
 class GLMMoeExpert():
   def __init__(self, config: GLMConfig):
     self.num_experts = config.num_exp
-    self.up_proj = FP8Linear(config.dim, config.moe_intermediate_size)
-    self.gate_proj = FP8Linear(config.dim, config.moe_intermediate_size)
-    self.down_proj =  FP8Linear(config.moe_intermediate_size, config.dim)
+    self.up_proj = FP8Linear(config.dim, config.moe_intermediate_size, bias=False)
+    self.gate_proj = FP8Linear(config.dim, config.moe_intermediate_size, bias=False)
+    self.down_proj =  FP8Linear(config.moe_intermediate_size, config.dim, bias=False)
 
   # This call expects that the inputs and weights are already on the right device shard
   # x : (N, dim) w: (N) 
@@ -352,7 +351,7 @@ class GLMModel():
 
     x = self.norm(x)
     # TODO: sample with temperature
-    return self.lm_head(x)[:, -1, :].argmax(axis=-1) # (B)
+    return self.lm_head(x[:, -1, :]).argmax(axis=-1) # (B)
 
 def prompt_jinja_render(prompts: list) -> list[str]:
   return [template.render(p) for p in prompts]
@@ -366,20 +365,20 @@ def prefill_encode_and_pad(tokenizer: GLMTokenizer, prompts: list) -> tuple[Tens
   positional_ids = Tensor.stack(*[Tensor.arange(len(e)).pad((longest_prompt - len(e), 0), value=-1) for e in encoded])
   return input_tensor, positional_ids
 
-def stream_decode(tokenizer: GLMTokenizer, outputs: Tensor) -> tuple[list[int], list[str]]:
+def decode_tokens(tokenizer: GLMTokenizer, outputs: Tensor) -> tuple[list[int], list[str]]:
   ids = [int(o.item()) for o in outputs]
-  return ids, [tokenizer.decode(i) for i in ids]
+  return ids, [tokenizer.decode([i]) for i in ids]
 
 # NOTE: just to test on smaller gpu clusters
 testing_start_layer = 0
-testing_end_layer = 5
+testing_end_layer = 15
 
 indexer_types:list[IndexerType] = ["full", "full", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared", "full", "shared", "shared", "shared"]
 layer_types: list[LayerType] =  ["dense", "dense", "dense", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse", "sparse"]
 config = GLMConfig (
   max_batch = 10,
   dim = 6_144,
-  layers = layer_types,
+  layers = layer_types[testing_start_layer:testing_end_layer],
   norm_eps = 1e-05,
   vocab_size = 154_880,
   max_context = 1_000,
@@ -395,21 +394,30 @@ config = GLMConfig (
   idx_attn_dim = 128,
   idx_heads = 32,
   idx_topk = 2_048,
-  indexers = indexer_types,
+  indexers = indexer_types[testing_start_layer: testing_end_layer],
   attn_rope_dim = 64,
   rope_theta = 8_000_000
 )
 
-replace_map: dict = { "model.": "", "wq_b.": "q_up_proj_idx.", "kv_a_proj_with_mqa.": "kv_down_proj.", "kv_b_proj.": "kv_up_proj.", "q_a_proj.": "q_down_proj.", "q_b_proj.": "q_up_proj.", "kv_a_layernorm.": "kv_norm.", "q_a_layernorm.": "q_norm." }
-
 # This has total 141 files each approx 5.3 GB ~= 750 GB
-def load_model(model: GLMModel,devices: tuple[str, ...], to_load: int = 141):
-  model_tensors: dict[str, Tensor] = {}
-  for i in range(to_load): model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/model-{i+1:05d}-of-00141.safetensors")))
+def load_model(model: GLMModel,devices: tuple[str, ...]):
+
+  def replace_with_pat(k: str) -> str:
+    replace_map: dict = { "model.": "", "wq_b.": "q_up_proj_idx.", "kv_a_proj_with_mqa.": "kv_down_proj.", "kv_b_proj.": "kv_up_proj.", "q_a_proj.": "q_down_proj.", "q_b_proj.": "q_up_proj.", "kv_a_layernorm.": "kv_norm.", "q_a_layernorm.": "q_norm." }
+    for pat, rep in replace_map.items(): k = k.replace(pat, rep)
+    return k
 
   model_state_dict = nn.state.get_state_dict(model)
+  model_index = json.loads(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/model.safetensors.index.json").read_text())['weight_map']
+  wanted_files = {model_index[k] for k in model_index.keys() if replace_with_pat(k) in model_state_dict}
+
+  model_tensors: dict[str, Tensor] = {}
+  for file in wanted_files: model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/{file}")))
+
   for k,v in model_tensors.items(): 
-    for pat, rep in replace_map.items(): k = k.replace(pat, rep)
+    k = replace_with_pat(k)
+    if k not in model_state_dict: continue
+    if "layers.78" in k: continue # layer 78 is the MTP layer
     k_comps = k.split('.')
     if len(k_comps) >= 5 and k_comps[3] == "experts":
       exp_num = int(k_comps[4])
@@ -417,6 +425,19 @@ def load_model(model: GLMModel,devices: tuple[str, ...], to_load: int = 141):
     else: device = device_to_load(devices, 0)
     model_state_dict[k].replace(v.to(device)).realize()
   return model
+
+def prefill(tokenizer: GLMTokenizer, prompts: list, model: GLMModel, kv_cache: DSAKVCache) -> tuple[Tensor, Tensor, Tensor, list[bool]]:
+  input_tokens, positional_ids = prefill_encode_and_pad(tokenizer, prompts)
+  batches = [True for _ in range(input_tokens.shape[0])]
+  outputs = model(input_tokens, positional_ids, kv_cache)
+  return input_tokens, outputs, (positional_ids[:, -1] + 1), batches
+
+def decode(input_tokens: Tensor, positional_ids: Tensor, kv_cache: DSAKVCache) -> tuple[Tensor, Tensor, Tensor]:
+  outputs = model(input_tokens, positional_ids, kv_cache)
+  positional_ids = positional_ids + 1
+  positional_ids = positional_ids.reshape(len(batches), 1)
+  input_tokens = outputs.reshape(len(batches), 1)
+  return input_tokens, positional_ids, outputs
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -428,7 +449,7 @@ if __name__ == "__main__":
   tokenizer = GLMTokenizer(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/tokenizer.json")))
   kv_cache = DSAKVCache(len(config.layers), config.indexers, config.max_context, config.kv_latent_dim + config.attn_rope_dim, config.idx_attn_dim, config.max_batch)
   model = GLMModel(config, devices)
-  loaded_model = load_model(model, devices, 3)
+  loaded_model = load_model(model, devices)
 
   template = jinja2.Template(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/chat_template.jinja").read_text()))
   prompt_one = {
@@ -443,7 +464,8 @@ if __name__ == "__main__":
           "role": "user",
           "content": "What is the capital of India?"
         }
-    ]
+    ],
+    "add_generation_prompt": True
   }
 
   prompt_two = {
@@ -458,7 +480,8 @@ if __name__ == "__main__":
           "role": "user",
           "content": "What is the sum of 2 + 2?"
         }
-    ]
+    ],
+    "add_generation_prompt": True
   }
 
   prompt_three = {
@@ -473,30 +496,20 @@ if __name__ == "__main__":
           "role": "user",
           "content": "Can you give me a short essay on United States of America?"
         }
-    ]
+    ],
+    "add_generation_prompt": True
   }
 
-  prefill = True
-  input_tokens, positional_ids = prefill_encode_and_pad(tokenizer, [prompt_one, prompt_two, prompt_three])
-  batches = [True for _ in range(input_tokens.shape[0])]
+  input_tokens, outputs, positional_ids, batches = prefill(tokenizer, [prompt_one, prompt_two, prompt_three], model, kv_cache)
 
   while True:
-    if prefill:
-      outputs = model(input_tokens, positional_ids, kv_cache)
-      positional_ids = positional_ids[:, -1] + 1
-      prefill = False
-
-    else:
-      outputs = model(input_tokens, positional_ids, kv_cache)
-      positional_ids = positional_ids + 1
-
-    positional_ids = positional_ids.reshape(len(batches), 1)
-    input_tokens = outputs.reshape(len(batches), 1)
-    ids, decoded_outputs = stream_decode(tokenizer, outputs)
-    for b, (id, tok) in enumerate(zip(ids, decoded_outputs)):
+    input_tokens, positional_ids, outputs = decode(input_tokens, positional_ids, kv_cache)
+    decoded_ids, decoded_strs = decode_tokens(tokenizer, outputs)
+    for b, (id, tok) in enumerate(zip(decoded_ids, decoded_strs)):
       if not batches[b]: continue
-      if id == tokenizer.stop_token: 
+      if id in tokenizer.stop_tokens: 
         batches[b] = False
       print(f"batch: {b} -> {tok}")
 
-    if batches.count(True) == 0: break
+    if batches.count(True) == 0: print("All batches done"); break
+    elif (positional_ids[:, -1].max().item()) >= config.max_context: raise RuntimeError("max context reached")
