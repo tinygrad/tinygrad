@@ -649,7 +649,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
+    m = self - self.max(axis=axis, keepdim=True)
     if dtype is not None: m = m.cast(to_dtype(dtype))
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)

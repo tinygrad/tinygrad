@@ -371,8 +371,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(4, 32).realize()
     c = Tensor.empty(4, 32).realize()
     out = (c * a.sum(-1, keepdim=True)).sum(-1) + (b * a.sum(-1, keepdim=True)).sum(-1) # a.sum has >1 children but should still fuse
-    # check_schedule(out, 1)
-    check_schedule(out, 2)
+    check_schedule(out, 1)
 
   def test_reduce_expand_reduce_fusion(self):
     a = Tensor.empty(4, 32).realize()
@@ -1123,7 +1122,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_optim(self, adam=False):
-    optim, cnt = (nn.optim.Adam, 29) if adam else (nn.optim.SGD, 15)
+    optim, cnt = (nn.optim.Adam, 27) if adam else (nn.optim.SGD, 15)
     with Context(TRAINING=1):
       img = Tensor.ones(1,3,4,4)
       c1 = nn.Conv2d(3,32,3)
@@ -1470,7 +1469,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64).realize()
     x.softmax().sum().backward()
-    run_linear(*check_schedule(x.grad, 4))
+    run_linear(*check_schedule(x.grad, 1))
 
   def test_logsumexp_backward(self):
     Tensor.manual_seed(0)
