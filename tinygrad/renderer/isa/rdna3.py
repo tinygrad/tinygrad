@@ -684,7 +684,11 @@ def dual_alu(uops:list[UOp]):
   nuops = []
   for x,y in zip(uops[::2], uops[1::2]):
     indp = all(r not in rdefs(x) for s in y.src for r in rdefs(s))
-    if x.arg in dual_ops and y.arg in dual_ops and indp and (rdef(x).index + rdef(y).index) % 2 != 0: 
+    # ensure they dont have different literals
+    _consts = {0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0}
+    _consts.update(range(64))
+    lits = set([u.arg for u in x.src+y.src if u.op is Ops.CONST and u.arg not in _consts])
+    if x.arg in dual_ops and y.arg in dual_ops and indp and (rdef(x).index + rdef(y).index) % 2 != 0 and len(lits) <= 1:
       dx, dy = x.replace(arg=dual_ops[x.arg]), y.replace(arg=dual_ops[y.arg])
       nuops.append(dx.replace(src=(dy,) + dx.src))
     else: nuops.extend([x,y])
