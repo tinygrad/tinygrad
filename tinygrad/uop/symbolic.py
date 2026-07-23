@@ -300,6 +300,8 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     # (X < c).ne(True) -> X >= c
     return s0.src[0], False, int(s0.src[1].vmin)
   if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
+    # c < X -> X >= c+1 (a const on the left is a lower bound on the right)
+    if v.src[0].op is Ops.CONST: return v.src[1], False, int(v.src[0].arg)+1
     # X < c -> X <= c-1
     return v.src[0], True, int((v.src[1]).vmax)-1
   return None
