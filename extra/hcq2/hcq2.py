@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any
 import struct, functools, time, collections, itertools
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
@@ -410,13 +410,14 @@ def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar(),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
-  for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)): b.ensure_allocated()._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
+  for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)):
+    b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for b, v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
     data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.arg))
-    b.ensure_allocated()._buf.cpu_view().view(offset=off.arg * buf.dtype.itemsize, size=len(data), fmt='B')[:] = data
+    b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(byte_off:=off.arg*buf.dtype.itemsize):byte_off+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
@@ -492,19 +493,19 @@ class HCQ2Compiled(Compiled):
   @functools.cache
   def timeline_signal(self, queue:str|None=None, init_value:int=0) -> Buffer:
     buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    buf._buf.cpu_view().mv.cast('Q')[0] = init_value
+    buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   @functools.cache
   def timeline_value(self, queue:str|None=None, init_value:int=1) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
-    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = init_value
+    buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
-    sig = self.timeline_signal()._buf.cpu_view().mv.cast('Q')
-    tl = self.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')
+    sig = self.timeline_signal().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    tl = self.timeline_value().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
@@ -532,25 +533,18 @@ class HCQ2Compiled(Compiled):
     # if the device has an interface, call device_fini to clean up resources
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
+@dataclass
 class HCQ2Buffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQ2Buffer|None=None, view:MMIOInterface|None=None, owner:HCQ2Compiled|None=None):
-    self.va_addr, self.size, self.meta, self._base, self.view, self.owner = va_addr, size, meta, _base, view, owner
+  va_addr:sint
+  meta:Any=None
+  view:MMIOInterface|None=None
 
-  def offset(self, offset:int=0, size:int|None=None) -> HCQ2Buffer:
-    return HCQ2Buffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
-      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
-
-  def cpu_view(self) -> MMIOInterface:
-    assert self.view is not None, "buffer has no cpu_view"
-    return self.view
-
-  @property
-  def base(self) -> HCQ2Buffer: return self._base or self
+  def offset(self, offset:int, size:int) -> HCQ2Buffer:
+    return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _as_buffer(self, buf:HCQ2Buffer) -> memoryview:
-    self.dev.synchronize()
-    return buf.cpu_view().mv
+    return unwrap(buf.view).mv
 
   def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
