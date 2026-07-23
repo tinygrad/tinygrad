@@ -333,7 +333,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mod_wrong_sign(self):
     v1=Variable("v1", 0, 128)
     v3=Variable("v3", 0, 7)
-    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), 0, 4, "((v3+v1%2*2+-3)%5)")
+    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), 0, 4, "((v3+v1%2*2+2)%5)")
 
   def test_mod_mod_wrong_sign2(self):
     v2=Variable("v2", 0, 8)
@@ -365,7 +365,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_const_div_wrong_sign_divisor(self):
     a = Variable("a", 0, 124)
-    self.helper_test_variable(((a+10)//-2+10)//-4, -2, 14, "(((a+10)//-2+10)//-4)")
+    self.helper_test_variable(((a+10)//-2+10)//-4, -2, 14, "((a//-2+-3)//-4+-2)")
 
   def test_nested_div_negative_divisor(self):
     # (x//c1)//c2 -> x//(c1*c2) only when c2>0
@@ -450,8 +450,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(c & c.logical_not(), False, False, "False")
 
   def test_mod_factor_negative(self):
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+b*28+-29)%28)")
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+b*28+-29)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")
+
+  def test_mod_const_reduction_negative_offset(self):
+    # (x+c)%d -> (x+c%d)%d holds for any sign of x+c and d
+    x = Variable("x", 0, 100)
+    self.helper_test_variable((x-50)%3, 0, 2, "((x+1)%3)")
+    self.helper_test_variable((x-50)%-3, -2, 0, "((x+-2)%-3)")
+    self.helper_test_variable((x+7)%-13, -12, 0, "((x+-6)%-13)")
 
   def test_sum_combine_num(self):
     self.helper_test_variable(usum([uconst(29), Variable("a", 0, 10), uconst(-23)]), 6, 16, "(a+6)")
@@ -579,9 +586,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(x%12//4*4 + x%4 + x//12*12, 0, 23, "x")
 
   def test_div_neg_cancel(self):
-    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((idx*-1+199)//-4+50)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx*-1+200)//-4+50)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "((idx*-1+201)//-4+50)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((idx*-1+-1)//-4)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "(idx*-1//-4)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "((idx*-1+-3)//-4+-1)")
     self.helper_test_variable((-Variable("idx", 0, 100))//2, -50, 0, "(idx*-1//2)")
     self.helper_test_variable(Variable("idx", 0, 100)//-2, -50, 0, "(idx//-2)")
 
@@ -658,20 +665,20 @@ class TestSymbolic(unittest.TestCase):
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
     lidx = Variable("lidx", 0, 7)
-    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "((gidx*-8+lidx*-1+999)//-4+250)")
-    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((gidx*-8+lidx*-1+1000)//-4+250)")
-    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "((gidx*-8+lidx*-1+1001)//-4+250)")
-    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "((gidx*-8+lidx*-1+1002)//-4+250)")
+    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "((lidx*-1+gidx*-8+-1)//-4)")
+    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((lidx*-1+gidx*-8)//-4)")
+    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "((lidx*-1+gidx*-8+-3)//-4+-1)")
+    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "((lidx*-1+gidx*-8+-2)//-4+-1)")
 
   def test_div_neg_then_neg(self):
     # taken from arange opts
     lidx0 = Variable("lidx0", 0, 7)
     lidx1 = Variable("lidx1", 0, 7)
     alu2 = -lidx0-lidx1
-    self.helper_test_variable((((alu2+14)//(-32))+4), 3, 4, "((lidx0*-1+lidx1*-1+14)//-32+4)")
-    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -3, "((lidx0*-1+lidx1*-1+14)//-32*-1+-4)")
-    self.helper_test_variable((((alu2+134)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+134)//-32+4)")
-    self.helper_test_variable((((alu2+142)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+142)//-32+4)")
+    self.helper_test_variable((((alu2+14)//(-32))+4), 3, 4, "((lidx0*-1+lidx1*-1+-18)//-32+3)")
+    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -3, "((lidx0*-1+lidx1*-1+-18)//-32*-1+-3)")
+    self.helper_test_variable((((alu2+134)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+-26)//-32+-1)")
+    self.helper_test_variable((((alu2+142)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+-18)//-32+-1)")
     self.helper_test_variable((((alu2+150)//(-32))+4), -1, -1, "-1")
     self.helper_test_variable((((alu2+158)//(-32))+4), -1, -1, "-1")
 
@@ -837,12 +844,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(x%(-3) + ((x//(-3))%5)*(-3), -14, 0, "x%-15")
 
   def test_div_mod_recombine_shifted_quotient(self):
-    # when vmin<0 blocks const reduction on the mod side, the quotient is stored const-shifted: (x-50)//3 -> (x+1)//3 - 17.
+    # const reduction stores mod/div const-shifted: (x-50)%3 -> (x+1)%3, (x-50)//3 -> (x+1)//3 - 17.
     # recombine only needs a quotient of some b congruent to base mod div, so the shift folds into the result
     x = Variable("x", 0, 100)
     y = Variable("y", 0, 99)
     self.helper_test_variable((x-50)%3 + ((x-50)//3)*3, -50, 50, "(x+-50)")                # shifted literal quotient
-    self.helper_test_variable((x-50)%3 + (((x-50)//3)%5)*3, 0, 14, "((x+-50)%15)")         # shift inside the partial's mod
+    self.helper_test_variable((x-50)%3 + (((x-50)//3)%5)*3, 0, 14, "((x+10)%15)")         # shift inside the partial's mod
     self.helper_test_variable(((y-50)//5)%4 + ((y-50)//20)*4, -10, 9, "(y//5+-10)")        # merged and shifted
 
   def test_div_mod_recombine_in_additive_sum(self):
@@ -1077,8 +1084,8 @@ class TestSymbolic(unittest.TestCase):
   def test_nested_mod_negative_range(self):
     # (x%(k*c))%c = x%c for positive c
     x = Variable("x", 0, 1575)
-    self.helper_test_variable(((x + (-1064)) % 512) % 4, 0, 3, "((x+-1064)%4)")
-    self.helper_test_variable(((x + (-1064)) % 512) % 128, 0, 127, "((x+-1064)%128)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 4, 0, 3, "(x%4)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 128, 0, 127, "((x+88)%128)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
