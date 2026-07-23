@@ -274,7 +274,6 @@ DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
 @dataclass(frozen=True)
 class Metadata:
   name: str
-  caller: str
   backward: bool = False
   def __hash__(self): return hash(self.name)
   def __str__(self): return self.name + (" bw" if self.backward else "")
@@ -412,7 +411,7 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
-_db_tables = set()
+_db_tables: set[str] = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
@@ -511,6 +510,18 @@ def capstone_flatdump(lib: bytes, arch:str):
   for instr in cs.disasm(lib, 0):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
+
+def _find_llvm_objdump():
+  if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
+  # Try ROCm path first, then versioned, then unversioned
+  for p in ['/opt/rocm/llvm/bin/llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20', 'llvm-objdump']:
+    if shutil.which(p): return p
+  raise FileNotFoundError("llvm-objdump not found")
+
+def amdgpu_disassemble(lib:bytes):
+  asm = system(f"{_find_llvm_objdump()} -d -", input=lib).splitlines()
+  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
+  print("\n".join(asm))
 
 def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)

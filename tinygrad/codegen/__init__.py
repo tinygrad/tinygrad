@@ -17,14 +17,14 @@ from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
-from tinygrad.codegen.late.coalese import indexing_simplify
+from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
+from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
@@ -36,11 +36,6 @@ def do_number_param(ctx:list[int], x:UOp):
 
 pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
-])
-
-pm_no_index = PatternMatcher([
-  (UPat(GroupOp.ALU.union({Ops.CONST}), dtype=dtypes.index, name="x"), lambda x: x.replace(dtype=dtypes.int)),
-  (UPat(Ops.CAST, dtype=dtypes.index, src=(UPat.var("x"),)), lambda x: x.cast(dtypes.int)),
 ])
 
 def build_range_map(sink:UOp) -> dict[int, int]:
@@ -110,7 +105,7 @@ def broadcast_and_devec_wmma(b:UOp):
                   for u,shp in zip(b.src, shaped_aligned)]
   src = []
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
-    idx_c = [UOp.const(dtypes.index, i) for i in idx]
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
   return UOp.stack(*src).reshape(b.shape)
 
@@ -135,7 +130,7 @@ def do_devectorize(b:UOp):
   if not all_same([x.shape for x in b.src]): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.index, i) for i in idx]
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
     src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
@@ -145,7 +140,7 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp.stack(*[b.index(UOp.const(dtypes.index, i)) for i in range(b.max_numel())]))
+      src.append(UOp.stack(*[b.index(UOp.const(dtypes.weakint, i)) for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -171,13 +166,10 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.index, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> STACK
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
    lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
-  # INDEX on INDEX is INDEX
-  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1", allow_any_len=True),), allow_any_len=True, name="idx2"),
-   lambda idx1, idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:])),
 ])
 
 def fix_group_for_reduce(x:UOp):
@@ -318,11 +310,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
 
-  # some coalesing misses without this
+  # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
-  # do memory coalesing (late)
-  sink = memory_coalesing(sink, ren)
+  # do memory coalescing (late)
+  sink = memory_coalescing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
@@ -330,7 +322,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -354,7 +346,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_index
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # this was the linearizer

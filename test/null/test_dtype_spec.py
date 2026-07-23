@@ -224,30 +224,16 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.fp8e5m2, dtypes.uint64) == dtypes.fp8e5m2
 
   def test_weakint_promo(self):
-    # weakint with itself is weakint
-    assert least_upper_dtype(dtypes.weakint, dtypes.weakint) == dtypes.weakint
-    # weakint is above bool
-    assert least_upper_dtype(dtypes.weakint, dtypes.bool) == dtypes.weakint
-    # weakint defers to any concrete int type
-    assert least_upper_dtype(dtypes.weakint, dtypes.int8) == dtypes.int8
-    assert least_upper_dtype(dtypes.weakint, dtypes.uint8) == dtypes.uint8
-    assert least_upper_dtype(dtypes.weakint, dtypes.int16) == dtypes.int16
-    assert least_upper_dtype(dtypes.weakint, dtypes.int32) == dtypes.int32
-    assert least_upper_dtype(dtypes.weakint, dtypes.int64) == dtypes.int64
-    assert least_upper_dtype(dtypes.weakint, dtypes.uint64) == dtypes.uint64
-    # weakint defers to any float type
-    assert least_upper_dtype(dtypes.weakint, dtypes.float16) == dtypes.float16
-    assert least_upper_dtype(dtypes.weakint, dtypes.float32) == dtypes.float32
-    assert least_upper_dtype(dtypes.weakint, dtypes.float64) == dtypes.float64
+    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.weakint)
+    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.int8)
 
   def test_weakfloat_promo(self):
-    # weakfloat is a float, but like weakint it is not one of dtypes.floats
+    # weakfloat is a float, but is not one of dtypes.floats
     assert dtypes.is_float(dtypes.weakfloat) and dtypes.weakfloat not in dtypes.floats
     # weakfloat with itself is weakfloat
     assert least_upper_dtype(dtypes.weakfloat, dtypes.weakfloat) == dtypes.weakfloat
-    # weakfloat is above bool, weakint and any concrete int (they defer up to it)
+    # weakfloat is above bool and any concrete int (they defer up to it)
     assert least_upper_dtype(dtypes.weakfloat, dtypes.bool) == dtypes.weakfloat
-    assert least_upper_dtype(dtypes.weakfloat, dtypes.weakint) == dtypes.weakfloat
     assert least_upper_dtype(dtypes.weakfloat, dtypes.int32) == dtypes.weakfloat
     assert least_upper_dtype(dtypes.weakfloat, dtypes.uint64) == dtypes.weakfloat
     # weakfloat defers to any concrete float type
@@ -328,6 +314,19 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
     assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_pad_scalar(self, dt):
+    t = Tensor.ones(4, dtype=dt)
+    assert t.pad(((1, 1),), value=2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert t.pad(((1, 1),), value=2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert t.pad(((1, 1),), value=True).dtype == dt
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_sort(self, dt):
+    # sort pads with dtype.min/max, a scalar of its own dtype
+    assert Tensor([3, 1, 2], dtype=dt).sort()[0].dtype == dt
+    assert Tensor([3, 1, 2], dtype=dt).sort(descending=True)[0].dtype == dt
 
   @given(strat.sampled_from(dtype_floats))
   def test_int_div_int(self, default_float):
@@ -429,6 +428,9 @@ class TestAutoCastType(unittest.TestCase):
     self.check_where_alternate_input_other(3.1, True, dtypes.default_float)
     self.check_where_alternate_input_other(3, 2, dtypes.default_int)
     self.check_where_alternate_input_other(3, True, dtypes.default_int)
+
+  def test_where_non_bool_cond_raises(self):
+    with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0)
     self.check_where_alternate_input_other(False, True, dtypes.bool)
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))

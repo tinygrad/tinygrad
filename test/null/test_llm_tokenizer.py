@@ -1,4 +1,4 @@
-import unittest, base64, functools, sys
+import unittest, base64, functools, re, sys, time, unicodedata
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
@@ -45,6 +45,41 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_llama_special2(self): self._test_coding(self.llama_tok, "<|start_header_id|>user<|end_header_id|>\n\n", [ 128006, 882, 128007, 271 ])
   def test_llama_repeat(self): self._test_coding(self.llama_tok, "00000000000000000", [ 931, 931, 931, 931, 931, 410 ])
   def test_llama_pat(self): self._test_coding(self.llama_tok, "today\n  \n", [ 31213, 14211 ])
+
+  def test_split_regex_matches_naive_listing(self):
+    # the compacted codepoint ranges must match the same text as listing every codepoint
+    def naive(pre): return "".join(re.escape(chr(cp)) for cp in range(0x323b0) if unicodedata.category(chr(cp)).startswith(pre))
+    r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + naive("Z"), naive("N"), naive("L")
+    naive_re = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" +
+      f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
+    sample = "hello world 한국어 中文 текст ١٢٣ 123 😊\n  \ttoday\n'équivalent ²³№ "
+    self.assertEqual(SimpleTokenizer({}, {})._split_to_word.findall(sample), naive_re.findall(sample))
+
+  def test_split_regex_speed(self):
+    # the naive listing compiles a 429KB pattern that takes 10+s to match a 225KB prompt; ranges keep it small and fast
+    tok = SimpleTokenizer({}, {})
+    self.assertLess(len(tok._split_to_word.pattern), 100_000)
+    text = "The quick brown fox jumps over the lazy dog. " * 5000
+    tok._split_to_word.findall(text)  # warmup
+    tms = []
+    for _ in range(5):
+      st = time.perf_counter()
+      words = tok._split_to_word.findall(text)
+      tms.append(time.perf_counter() - st)
+    self.assertLess(min(tms), 4)  # best-of-5 is robust to CI scheduling pauses; new code takes ~60ms
+    self.assertEqual(len(words), 50001)
+
+  def test_llama_continued_conversation(self):
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world", [15339, 220, 128009, 14957])
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world again", [15339, 220, 128009, 14957, 1578])
+    self._test_coding(self.llama_tok, "hello changed <|eot_id|>world again", [15339, 5614, 220, 128009, 14957, 1578])
+
+  def test_long_cached_prompt_matches_fresh_tokenization(self):
+    prefix = "system tools\n" * 700 + "<|eot_id|>"
+    first, changed = prefix + "run tower of hanoi", prefix + "run ls /"
+    expected = self.llama_tok.encode(changed)
+    self.llama_tok.encode(first)
+    self.assertEqual(self.llama_tok.encode(changed), expected)
 
   def test_tekken_from_gguf_kv(self):
     kv = {

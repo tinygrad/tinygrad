@@ -237,8 +237,8 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
       if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
-        fmt["FLOPS"] = int(sym_infer(ki.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6))
-        fmt["B/s mem"], fmt["B/s lds"] = int(sym_infer(ki.estimates.mem, var_vals)/t), int(sym_infer(ki.estimates.lds, var_vals)/t)
+        for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
+          with soft_err(lambda _: fmt.update({est_key:"ERR"})): fmt[est_key] = int(sym_infer(est_val, ei.arg['var_vals'])/(dur*1e-6))
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
@@ -341,7 +341,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
       counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e).__name__, []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
+    if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
     if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
   if len(counter_events) == 0: return None
   data.ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(data.ctxs), 0), (durations, all_counters:={}))]})

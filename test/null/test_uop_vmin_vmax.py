@@ -127,6 +127,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x.vmin, 0)
     self.assertEqual(x.vmax, 10 >> 2)
 
+  def test_vmin_vmax_cast_unsigned(self):
+    # a fitting source keeps exact bounds: no wrap can occur
+    self.assertEqual(UOp.variable('x', 5, 10).cast(dtypes.uint8)._min_max, (5, 10))
+    # a possibly-negative or too-large source can wrap: conservative
+    self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
+    self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1
@@ -160,7 +167,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertNotEqual(i.vmin, i.vmax)
 
   def test_vmin_vmax_invalid_vconst(self):
-    x = UOp.const(dtypes.index, (0, 4, Invalid, Invalid))
+    x = UOp.const(dtypes.weakint, (0, 4, Invalid, Invalid))
     self.assertLess(x.vmin, 0)
     self.assertGreater(x.vmax, 4)
 
@@ -364,6 +371,10 @@ class TestConstFactor(unittest.TestCase):
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
+  def test_const_factor_variable_multiple_of(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    self.assertEqual(x.const_factor(), 4)
+
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
@@ -401,6 +412,16 @@ class TestDivides(unittest.TestCase):
     uop = x * 4
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3
+
+  def test_divides_variable_multiple_of_exact(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(4)
+    self.assertIsNotNone(result)
+
+  def test_divides_variable_multiple_of_factor(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(2)
+    self.assertIsNotNone(result)
 
 if __name__ == '__main__':
   unittest.main()
