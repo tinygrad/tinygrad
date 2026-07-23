@@ -232,7 +232,7 @@ class TestSymbolicShard(unittest.TestCase):
   def test_symbolic_allreduce_over_sharded_axis(self):
     devs = ("NULL:1", "NULL:2")
     v = UOp.variable("T", 1, 8).bind(4)
-    Tensor.empty(8, 8).shard(devs, axis=1)[:v].sum(axis=1).realize()
+    Tensor.empty(8, 8).shard(devs, axis=1)[:v].sum().realize()
 
   def test_symbolic_sharded_reshape_axis(self):
     devs = ("NULL:1", "NULL:2")
