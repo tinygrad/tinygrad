@@ -8,7 +8,7 @@ import functools, argparse, jinja2, json
 from tinygrad import fetch, Tensor, nn, dtypes, Device
 from tinygrad.engine.jit import TinyJit
 
-def device_to_load(device: tuple[str, ...], num: int) -> str: 
+def device_to_load(device: tuple[str, ...], num: int) -> str:
   return device[num % len(device)]
 
 # Copying this over from llama cause weight_scale is a little different
@@ -96,7 +96,7 @@ class DSAKVCache:
       start_point = int(positional_ids[b, int(padded_values[b].item())].item())
       if segment == "attention":
         self.store_attn[layer, b, start_point:start_point+writes].assign(value[b, -writes:])
-      else: 
+      else:
         self.store_attn_idx[self.full_to_slot[layer], b, start_point:start_point+writes].assign(value[b, -writes:])
     if segment == "attention": return self.store_attn[layer, :B, :]
     else: return self.store_attn_idx[self.full_to_slot[layer], :B, :]
@@ -143,7 +143,7 @@ class GLMDSAIndexer():
     q_idx, k_idx = q_rot_idx.cat(q_pass_idx, dim=-1), k_rot_idx.cat(k_pass_idx, dim=-1).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
 
     # (B, S_longest, HD)
-    k_idx = kv_cache.update_cache(self.layer, positional_ids, k_idx, "indexer") # This will return values that are padded to the max sequnce of all batches 
+    k_idx = kv_cache.update_cache(self.layer, positional_ids, k_idx, "indexer") # This will return values that are padded to the max sequnce of all batches
 
     # (B, S, H, HD) @ (B, 1, HD, T) -> (B, S, H, T)
     scores = q_idx.float() @ k_idx.transpose(-1, -2).float().unsqueeze(1)
@@ -161,24 +161,24 @@ class GLMDSAIndexer():
     return index_scores.topk(topk, dim=-1)[1].cast(dtypes.int32)
 
 def create_causal_attn_mask(positional_ids: Tensor, longest_seq: int) -> Tensor:
-    valid_queries = positional_ids >= 0
-    mask = Tensor.arange(longest_seq).unsqueeze(0).unsqueeze(1).expand(*positional_ids.shape, longest_seq) # (B, S, longest_seq)
-    key_ok = mask <= positional_ids.unsqueeze(-1) # (B, S, longest_seq) < (B, S, 1) => (B, S, longest_deq)
-    keep = key_ok & valid_queries.unsqueeze(-1) # (B, S, longest_seq)
-    return keep.where(0, dtypes.float.min)
+  valid_queries = positional_ids >= 0
+  mask = Tensor.arange(longest_seq).unsqueeze(0).unsqueeze(1).expand(*positional_ids.shape, longest_seq) # (B, S, longest_seq)
+  key_ok = mask <= positional_ids.unsqueeze(-1) # (B, S, longest_seq) < (B, S, 1) => (B, S, longest_deq)
+  keep = key_ok & valid_queries.unsqueeze(-1) # (B, S, longest_seq)
+  return keep.where(0, dtypes.float.min)
 
 def basic_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, attn_heads: int, attn_dim: int, batch: int):
-    attn_weights = ((queries @ keys.transpose(-1, -2)) * attn_dim ** -0.5) + attn_mask.unsqueeze(1) # (B, attn_head, S_inp, S_longest)
-    attn_weights = attn_weights.softmax(-1) # (B, attn_head, S_inp, S_longest)
-    attn_output = (attn_weights @ values).permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
-    attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contiguous() # (B, S_inp, attn_head * attn_dim)
-    return attn_weights, attn_output
+  attn_weights = ((queries @ keys.transpose(-1, -2)) * attn_dim ** -0.5) + attn_mask.unsqueeze(1) # (B, attn_head, S_inp, S_longest)
+  attn_weights = attn_weights.softmax(-1) # (B, attn_head, S_inp, S_longest)
+  attn_output = (attn_weights @ values).permute(0, 2, 1, 3) # (B, S_inp, attn_head, attn_dim)
+  attn_output = attn_output.reshape(batch, -1, attn_heads * attn_dim).contiguous() # (B, S_inp, attn_head * attn_dim)
+  return attn_weights, attn_output
 
 def perform_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, topk_idx: Tensor, attn_heads: int, attn_dim: int) -> tuple[Tensor, Tensor]:
-    batch, queries, keys, values = queries.shape[0], queries.permute(0, 2, 1, 3), keys.permute(0, 2, 1, 3), values.permute(0, 2, 1, 3)
-    topk_idx_inv = Tensor.ones_like(attn_mask).scatter(-1, topk_idx, 0)
-    attn_mask = attn_mask.masked_fill(topk_idx_inv.bool(), dtypes.float.min) # (B, S_inp, S_longest)
-    return basic_attn(queries, keys, values, attn_mask, attn_heads, attn_dim, int(batch))
+  batch, queries, keys, values = queries.shape[0], queries.permute(0, 2, 1, 3), keys.permute(0, 2, 1, 3), values.permute(0, 2, 1, 3)
+  topk_idx_inv = Tensor.ones_like(attn_mask).scatter(-1, topk_idx, 0)
+  attn_mask = attn_mask.masked_fill(topk_idx_inv.bool(), dtypes.float.min) # (B, S_inp, S_longest)
+  return basic_attn(queries, keys, values, attn_mask, attn_heads, attn_dim, int(batch))
 
 class GLMAttention():
   def __init__(self, config: GLMConfig, layer: int):
@@ -213,12 +213,11 @@ class GLMAttention():
 
     # k_pass: (B, S_longest, attn_dim - attn_rope_dim) values: (B, S_longest, attn_dim)
     k_pass, values = self.kv_up_proj(self.kv_norm(kv_common)).reshape(batch, longest_seq, self.attn_heads, -1).split([self.attn_dim - self.attn_rope_dim, self.attn_dim], dim=-1)
-    
     k_rot = k_rot.expand(*k_pass.shape[:-1], -1)
 
     queries = q_pass.cat(q_rot, dim=-1) # (B, S_inp, attn_head, attn_dim)
     keys = k_pass.cat(k_rot, dim=-1) # (B, S_longest, attn_head, attn_dim)
-    
+
     # creating the attention mask after kv cache fills in old keys as well
     attn_mask = create_causal_attn_mask(positional_ids, int(longest_seq)) # (B, S_inp, S_longest)
 
@@ -263,7 +262,7 @@ class GLMMoeExpert():
     self.down_proj =  FP8Linear(config.moe_intermediate_size, config.dim, bias=False)
 
   # This call expects that the inputs and weights are already on the right device shard
-  # x : (N, dim) w: (N) 
+  # x : (N, dim) w: (N)
   def __call__(self, x: Tensor, w: Tensor) -> Tensor:
     gate = self.gate_proj(x) # (N, I)
     up = self.up_proj(x) # (N, I)
@@ -414,7 +413,7 @@ def load_model(model: GLMModel,devices: tuple[str, ...]):
   model_tensors: dict[str, Tensor] = {}
   for file in wanted_files: model_tensors.update(nn.state.safe_load(fetch(f"https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/{file}")))
 
-  for k,v in model_tensors.items(): 
+  for k,v in model_tensors.items():
     k = replace_with_pat(k)
     if k not in model_state_dict: continue
     if "layers.78" in k: continue # layer 78 is the MTP layer
@@ -507,7 +506,7 @@ if __name__ == "__main__":
     decoded_ids, decoded_strs = decode_tokens(tokenizer, outputs)
     for b, (id, tok) in enumerate(zip(decoded_ids, decoded_strs)):
       if not batches[b]: continue
-      if id in tokenizer.stop_tokens: 
+      if id in tokenizer.stop_tokens:
         batches[b] = False
       print(f"batch: {b} -> {tok}")
 
