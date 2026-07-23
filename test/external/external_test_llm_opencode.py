@@ -11,7 +11,7 @@ Or let the test start the server:
 """
 from __future__ import annotations
 
-import json, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, time, unittest, urllib.request
+import fcntl, json, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, time, unittest, urllib.request
 
 
 RUN_REGRESSION = os.getenv("RUN_LLM_OPENCODE_REGRESSION") == "1"
@@ -142,6 +142,15 @@ def server_ready(base_url:str) -> bool:
   except (OSError, urllib.error.URLError):
     return False
 
+def wait_server_ready(base_url:str, timeout:float=120) -> bool:
+  # The inference server is intentionally single-request. Under xdist another worker can be running a completion while
+  # this worker's setUpClass probes /models, so a single one-second probe is not evidence that the server is down.
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    if server_ready(base_url): return True
+    time.sleep(0.25)
+  return False
+
 
 @unittest.skipUnless(RUN_REGRESSION, "set RUN_LLM_OPENCODE_REGRESSION=1 to run the real-model OpenCode regression")
 class TestLLMOpenCode(unittest.TestCase):
@@ -154,7 +163,11 @@ class TestLLMOpenCode(unittest.TestCase):
     if (base_url := os.getenv("LLM_BASE_URL")) is not None:
       cls.base_url = base_url.rstrip("/")
       if not cls.base_url.endswith("/v1"): cls.base_url += "/v1"
-      if not server_ready(cls.base_url): raise RuntimeError(f"LLM server is not responding at {cls.base_url}")
+      # Coordinate class-level probes with test requests too. Otherwise xdist workers can queue one-second /models
+      # probes behind a completion, time out, and later make the server write to already-closed sockets.
+      with open("/tmp/tinygrad-llm-opencode-regression.lock", "w") as server_lock:
+        fcntl.flock(server_lock, fcntl.LOCK_EX)
+        if not wait_server_ready(cls.base_url): raise RuntimeError(f"LLM server is not responding at {cls.base_url}")
       return
 
     model = pathlib.Path(os.getenv("LLM_GGUF", DEFAULT_GGUF))
@@ -163,7 +176,7 @@ class TestLLMOpenCode(unittest.TestCase):
     cls.base_url = f"http://127.0.0.1:{port}/v1"
     cls.server_log = tempfile.NamedTemporaryFile(mode="w+", prefix="tinygrad-llm-")
     cls.server = subprocess.Popen(
-      [sys.executable, "-m", "tinygrad.llm", "--model", str(model), "--serve", str(port), "--max_context", "65536"],
+      [sys.executable, "-m", "tinygrad.llm", "--model", str(model), "--serve", str(port), "--max_context", "262144"],
       stdout=cls.server_log, stderr=subprocess.STDOUT, start_new_session=True)
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline and cls.server.poll() is None:
@@ -185,13 +198,11 @@ class TestLLMOpenCode(unittest.TestCase):
   def setUp(self):
     # The model and its KV/recurrent caches are stateful. Keep xdist workers from interleaving independent OpenCode
     # conversations, which changes cache reuse and can hide precisely the incremental path this suite exercises.
-    import fcntl
-    self._fcntl = fcntl
     self._server_lock = open("/tmp/tinygrad-llm-opencode-regression.lock", "w")
-    self._fcntl.flock(self._server_lock, self._fcntl.LOCK_EX)
+    fcntl.flock(self._server_lock, fcntl.LOCK_EX)
 
   def tearDown(self):
-    self._fcntl.flock(self._server_lock, self._fcntl.LOCK_UN)
+    fcntl.flock(self._server_lock, fcntl.LOCK_UN)
     self._server_lock.close()
 
   def run_opencode(self, prompt:str, cwd:pathlib.Path, timeout:int=120) -> str:

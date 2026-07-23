@@ -5,7 +5,7 @@ from tinygrad.helpers import GlobalCounters, Context
 import functools, math
 
 BLOCK_M, BLOCK_N = 32, 32
-DECODE_HEAD_TILE = 4
+DECODE_HEAD_TILE = 8
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N = 2, 2
@@ -47,10 +47,11 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   _, H, M, _ = q.shape
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
   G, CHUNK, DV = H // H_KV, block_n, D // WARP_SIZE
-  # One wave avoids an unsafe LDS merge and gives each workgroup a contiguous KV range to stream. At long context, updating
-  # two tokens at once halves the accumulator rescale work without increasing register pressure as much as larger groups.
-  decode_waves = 1
-  decode_group = 1 if max_kv_len <= 8192 else 2
+  # Each wave owns two GQA query heads while the workgroup shares one KV head. This keeps per-wave register pressure low
+  # and lets the cache coalesce the identical KV stream instead of launching a second workgroup for the same KV head.
+  heads_per_wave = 2
+  decode_waves = DECODE_HEAD_TILE // heads_per_wave
+  decode_group = 4 if max_kv_len <= 8192 else 2
   assert G % DECODE_HEAD_TILE == 0
   block_bhkv = UOp.range(B*H_KV*(G//DECODE_HEAD_TILE), 0, AxisType.GLOBAL)
   block_n = UOp.range((valid_kv_len+CHUNK-1)//CHUNK, 1, AxisType.GLOBAL)
@@ -60,22 +61,22 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   b, kv_head = bhkv // H_KV, bhkv % H_KV
   dims = tuple(lane + i*WARP_SIZE for i in range(DV))
 
-  acc = UOp.placeholder((DECODE_HEAD_TILE, DV), dtypes.float, slot=0, addrspace=AddrSpace.REG)
-  row_max = UOp.placeholder((DECODE_HEAD_TILE,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  row_sum = UOp.placeholder((DECODE_HEAD_TILE,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+  acc = UOp.placeholder((heads_per_wave, DV), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+  row_max = UOp.placeholder((heads_per_wave,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+  row_sum = UOp.placeholder((heads_per_wave,), dtypes.float, slot=2, addrspace=AddrSpace.REG)
   init = UOp.group(acc.store(acc.const_like(0)), row_max.store(row_max.const_like(-math.inf)), row_sum.store(row_sum.const_like(0)))
   acc, row_max, row_sum = acc.after(init), row_max.after(init), row_sum.after(init)
 
-  offset = UOp.range(CHUNK//decode_waves//decode_group, 100, AxisType.REDUCE)
-  keys = tuple(block_n*CHUNK + wave*(CHUNK//decode_waves) + offset*decode_group + i for i in range(decode_group))
+  offset = UOp.range(CHUNK//decode_group, 100, AxisType.REDUCE)
+  keys = tuple(block_n*CHUNK + offset*decode_group + i for i in range(decode_group))
   valid = tuple(key < valid_kv_len for key in keys)
   kvals = tuple(tuple(cache_kv[0, b, kv_head, key, d].float() for d in dims) for key in keys)
   vvals = tuple(tuple(cache_kv[1, b, kv_head, key, d].float() for d in dims) for key in keys)
   updates = []
-  for head in range(DECODE_HEAD_TILE):
-    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
+  for head in range(heads_per_wave):
+    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + wave*heads_per_wave + head
     scores = tuple(wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, key_kvals)),
-                                       UOp.const(dtypes.float, 0)), lane) / math.sqrt(D) for key_kvals in kvals)
+                                       UOp.const(dtypes.float, 0)), lane + wave*WARP_SIZE) / math.sqrt(D) for key_kvals in kvals)
     new_max = row_max[head]
     for is_valid, score in zip(valid, scores): new_max = new_max.maximum(is_valid.where(score, UOp.const(dtypes.float, -math.inf)))
     alpha = ((row_max[head]-new_max)*LOG2E).exp2()
@@ -85,26 +86,12 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   update = UOp.group(*updates).end(offset)
   acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
 
-  partial_acc = UOp.placeholder((DECODE_HEAD_TILE, decode_waves, D), dtypes.float, slot=3, addrspace=AddrSpace.LOCAL)
-  partial_stats = UOp.placeholder((DECODE_HEAD_TILE, decode_waves, 2), dtypes.float, slot=4, addrspace=AddrSpace.LOCAL)
-  partial_stores = []
-  for head in range(DECODE_HEAD_TILE):
-    partial_stores += [partial_acc[head, wave, d].store(acc[head, i]) for i,d in enumerate(dims)]
-    partial_stores += [partial_stats[head, wave.valid(lane.eq(0)), 0].store(row_max[head]),
-                       partial_stats[head, wave.valid(lane.eq(0)), 1].store(row_sum[head])]
-  merged = UOp.group(*partial_stores).barrier()
   stores = []
-  for head in range(DECODE_HEAD_TILE):
-    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + head
-    wave_max = tuple(partial_stats.after(merged)[head, w, 0] for w in range(decode_waves))
-    maximum = wave_max[0]
-    for wave_value in wave_max[1:]: maximum = maximum.maximum(wave_value)
-    scales = tuple(((partial_stats.after(merged)[head, w, 0]-maximum)*LOG2E).exp2() for w in range(decode_waves))
-    denominator = sum((partial_stats.after(merged)[head, w, 1]*scales[w] for w in range(decode_waves)), UOp.const(dtypes.float, 0))
-    stores += [out[b, q_head, block_n, d.valid(wave.eq(0))].store(
-      sum((partial_acc.after(merged)[head, w, d]*scales[w] for w in range(decode_waves)), UOp.const(dtypes.float, 0))) for d in dims]
-    stores += [stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 0].store(maximum),
-               stats[b, q_head.valid(lane.eq(0) & wave.eq(0)), block_n, 1].store(denominator)]
+  for head in range(heads_per_wave):
+    q_head = kv_head*G + head_group*DECODE_HEAD_TILE + wave*heads_per_wave + head
+    stores += [out[b, q_head, block_n, d].store(acc[head, i]) for i,d in enumerate(dims)]
+    stores += [stats[b, q_head.valid(lane.eq(0)), block_n, 0].store(row_max[head]),
+               stats[b, q_head.valid(lane.eq(0)), block_n, 1].store(row_sum[head])]
   return UOp.group(*stores).end(lane, wave, block_n, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
 
 @functools.cache
@@ -179,7 +166,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
     fxn=functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=block_n))[:2]
   live_chunks = (valid_kv_len+block_n-1)//block_n
   if max_kv_len > 8192:
-    reduce_group = 8
+    reduce_group = 16
     reduced_chunks = (chunks+reduce_group-1)//reduce_group
     reduced = Tensor.empty(B, H, reduced_chunks, D, dtype="float32", device=q.device)
     reduced_stats = Tensor.empty(B, H, reduced_chunks, 2, dtype="float32", device=q.device)

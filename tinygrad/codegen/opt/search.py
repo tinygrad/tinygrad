@@ -135,7 +135,12 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {s.colored_shape()}")
 
   try:
-    rawbufs = _ensure_buffer_alloc(rawbufs)
+    try: rawbufs = _ensure_buffer_alloc(rawbufs)
+    except MemoryError:
+      # Autotuning is optional. Large models can fit for inference while leaving too little memory for BEAM's duplicate
+      # timing buffers; keep the valid heuristic schedule instead of making warmup fail.
+      if CACHELEVEL >= 1: diskcache_put("beam_search", key, s.applied_opts)
+      return s
     var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]

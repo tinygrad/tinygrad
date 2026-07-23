@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, topk_softmax,
 )
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -213,6 +213,16 @@ class TestPairwiseTopk(unittest.TestCase):
       vals, sel = pairwise_topk(x, 8)
       np.testing.assert_equal(sel.numpy(), expected)
       np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
+
+  def test_256_experts_softmax_matches_reference(self):
+    rng = np.random.default_rng(123)
+    data = rng.standard_normal((256, 256) if Device.DEFAULT.startswith("AMD") else (4, 3, 256), dtype=np.float32)
+    data[..., [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
+    probs, sel = topk_softmax(Tensor(data), 8)
+    selected = np.take_along_axis(data, sel.numpy(), axis=-1)
+    expected = np.exp(selected - selected.max(axis=-1, keepdims=True))
+    expected /= expected.sum(axis=-1, keepdims=True)
+    np.testing.assert_allclose(probs.numpy(), expected, rtol=2e-6, atol=2e-7)
 
 if __name__ == '__main__':
   unittest.main()

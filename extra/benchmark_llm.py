@@ -10,8 +10,8 @@ from __future__ import annotations
 import argparse, gc, json, statistics, time
 from dataclasses import asdict, dataclass
 
-from tinygrad import Device, Tensor, Variable
-from tinygrad.helpers import fetch
+from tinygrad import Context, Device, Tensor, Variable
+from tinygrad.helpers import fetch, profile_marker
 from tinygrad.llm.cli import models
 from tinygrad.llm.model import Transformer
 
@@ -41,15 +41,19 @@ def synthetic_prompt(length:int, vocab_size:int, salt:int) -> list[int]:
 
 def benchmark(model:Transformer, prompt:list[int], decode_tokens:int, chunk_size:int) -> Result:
   gen = model.generate(prompt.copy(), chunk_size=chunk_size)
+  profile_marker(f"prefill {len(prompt)} start")
   begin = time.perf_counter()
   next(gen)
   ttft = time.perf_counter() - begin
+  profile_marker(f"prefill {len(prompt)} end")
 
   decode_times: list[float] = []
+  profile_marker(f"decode {len(prompt)} start")
   for _ in range(decode_tokens):
     begin = time.perf_counter()
     next(gen)
     decode_times.append(time.perf_counter() - begin)
+  profile_marker(f"decode {len(prompt)} end")
 
   return Result(len(prompt), decode_tokens, ttft, len(prompt) / ttft, decode_tokens / sum(decode_times),
                 statistics.median(decode_times) * 1e3, percentile(decode_times, 0.95) * 1e3)
@@ -76,6 +80,8 @@ def main() -> None:
   parser.add_argument("--decode-tokens", type=int, default=32)
   parser.add_argument("--decode-position", type=int, help="Benchmark decode at this position without prefilling preceding KV entries")
   parser.add_argument("--chunk-size", type=int, default=256)
+  parser.add_argument("--beam", type=int, default=2, help="Kernel optimization beam width")
+  parser.add_argument("--jit-batch-size", type=int, default=448, help="Kernels per JIT graph (server default: 448)")
   parser.add_argument("--realize", action="store_true", help="Unpack model weights once at load time")
   parser.add_argument("--json", action="store_true", help="Print machine-readable results")
   args = parser.parse_args()
@@ -91,7 +97,7 @@ def main() -> None:
   model, kv = Transformer.from_gguf(path, args.max_context, realize=args.realize)
   vocab_size = len(kv["tokenizer.ggml.tokens"])
 
-  model.warmup(args.chunk_size)
+  with Context(BEAM=args.beam, JIT_BATCH_SIZE=args.jit_batch_size, PARALLEL_COMPILE=12): model.warmup(args.chunk_size)
   gc.freeze()
 
   results = [benchmark_decode_position(model, args.decode_position, args.decode_tokens)] if args.decode_position is not None else \
@@ -99,10 +105,12 @@ def main() -> None:
      for i, n in enumerate(args.prompt_tokens)]
   if args.json:
     print(json.dumps({"model": args.model, "max_context": args.max_context, "chunk_size": args.chunk_size,
+                      "beam": args.beam, "jit_batch_size": args.jit_batch_size,
                       "realize": args.realize, "results": [asdict(x) for x in results]}, indent=2))
     return
 
-  print(f"model={args.model} max_context={args.max_context} chunk_size={args.chunk_size} realize={args.realize}")
+  print(f"model={args.model} max_context={args.max_context} chunk_size={args.chunk_size} beam={args.beam} "
+        f"jit_batch_size={args.jit_batch_size} realize={args.realize}")
   print(f"{'prompt':>8} {'TTFT':>10} {'prefill':>14} {'decode':>14} {'decode p50':>12} {'decode p95':>12}")
   for result in results:
     print(f"{result.prompt_tokens:8d} {result.time_to_first_token_s:9.3f}s {result.prefill_tokens_per_s:11.1f} t/s "
