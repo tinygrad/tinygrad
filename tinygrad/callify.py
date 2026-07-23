@@ -95,15 +95,21 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
-  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+  input_buffers, subs = list(c.src[1:]), {}
+  for i,x in enumerate(c.src[1:]):
+    # if this is a buffer view, rather than materialize it as an input, pull the SHRINK into the function
+    if x.op is Ops.SHRINK and x.src[0].op is Ops.BUFFER and x.src[1].op is Ops.BIND:
+      input_buffers[i] = x.src[0]
+      input_buffers.append(x.src[1])
+      subs[x.param_like(i)] = x.replace(src=(x.src[0].param_like(i), x.src[1].param_like(len(input_buffers)-1), x.src[2]))
+    elif x.op not in {Ops.AFTER, Ops.BIND}: input_buffers[i] = x.contiguous()
 
   # add the outputs to the call
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
-  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  targets = [o.param_like(len(input_buffers)+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
 
-  subs:dict[UOp, UOp] = {}
   items:list[UOp] = []
   for s, t in zip(srcs, targets):
     after_deps:list[UOp] = []
