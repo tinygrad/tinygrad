@@ -2,12 +2,13 @@
 # Using the https://github.com/huggingface/transformers/blob/main/src/transformers/models/glm_moe_dsa/modeling_glm_moe_dsa.py as source of truth
 
 from math import ceil
-from tinygrad import fetch, Tensor, nn, dtypes, Device, GlobalCounters
-from dataclasses import dataclass
-import functools, argparse, json
 from typing import Literal
-from pathlib import Path
-import jinja2
+from dataclasses import dataclass
+import functools, argparse, jinja2
+from tinygrad import fetch, Tensor, nn, dtypes, Device
+
+def device_to_load(device: tuple[str, ...], num: int) -> str: 
+  return device[num % len(device)]
 
 # Copying this over from llama cause weight_scale is a little different
 class FP8Linear:
@@ -27,30 +28,9 @@ class FP8Linear:
     if self.bias is not None: y = y + self.bias.cast(y.dtype)
     return y.cast(x.dtype)
 
-
 class GLMTokenizer:
   def __init__(self, token_config: str):
     from tokenizers import Tokenizer
-    self.special_tokens: list[str] = [
-      "<|endoftext|>",
-      "[MASK]",
-      "[gMASK]",
-      "[sMASK]",
-      "<sop>",
-      "<eop>",
-      "<|system|>",
-      "<|user|>",
-      "<|assistant|>",
-      "<|observation|>",
-      "<|begin_of_image|>",
-      "<|end_of_image|>",
-      "<|begin_of_video|>",
-      "<|end_of_video|>",
-      "<|begin_of_audio|>",
-      "<|end_of_audio|>",
-      "<|begin_of_transcription|>",
-      "<|end_of_transcription|>"
-    ]
     self.model = Tokenizer.from_file(token_config)
 
   @property
@@ -90,9 +70,6 @@ class GLMConfig:
   attn_rope_dim: int
   rope_theta: float
 
-def device_to_load(device: tuple[str, ...], num: int) -> str: 
-  return device[num % len(device)]
-
 # KV cache Sparse MLA(DSA)
 class DSAKVCache:
   def __init__(self, layers: int, indexers: list[IndexerType], max_context: int, latent_dim: int, idx_latent_dim: int, max_batch: int):
@@ -104,24 +81,24 @@ class DSAKVCache:
 
   CacheSegment = Literal["attention", "indexer"]
   # This expects the shape (B, T, d)
-  def update_cache(self, layer: int, step_t: list[int], to_write: list[int], value: Tensor, segment: CacheSegment) -> Tensor:
+  def update_cache(self, layer: int, positional_ids: Tensor, value: Tensor, segment: CacheSegment) -> Tensor:
     B, T, d = value.shape
     assert 1 <= B <= self.max_batch, "batch size is greater than max batch"
     assert 1 <= T <= self.max_context, "tokens more than max context"
-    assert 1 <= len(step_t) == len(to_write) == B, f"list values are wrong step_t"
     assert layer < self.layers, "layer is greater than max_layer"
-    assert all([s + v <= self.max_context for (s, v) in zip(step_t, to_write)]), "sequence is greater than max_context"
-    max_end_point = max([a+b for a, b in zip(step_t, to_write)])
-    if segment == "attention":
-      assert d == self.attn_latent_dim, "shape of dim is incorrect"
-      [self.store_attn[layer, b, s:s + w].assign(value[b, -w:]) for b,(s, w) in enumerate(zip(step_t, to_write))] # data is right aligned
-      return self.store_attn[layer, :B, :max_end_point]
-    else:
-      assert d == self.idx_k_cache_dim, "shape of dim is incorrect"
-      assert self.indexer_type[layer] == "full", "there should be no k value for indexers that are shared"
-      slot = self.full_to_slot[layer]
-      [self.store_attn_idx[slot, b, s:s + w].assign(value[b, -w:]) for b,(s, w) in enumerate(zip(step_t, to_write))] # data is right aligned
-      return self.store_attn_idx[slot, :B, :max_end_point]
+    assert (segment == "indexer" and d == self.attn_latent_dim) or \
+           (segment == "attention" and d == self.idx_k_cache_dim), "shape of dim is incorrect"
+    to_write = (positional_ids >= 0).sum(-1) # (B)
+    padded_values = (positional_ids < 0).sum(-1) # (B)
+    for b in range(B):
+      writes = int(to_write[b].item())
+      start_point = int(positional_ids[b, int(padded_values[b].item())].item())
+      if segment == "attention":
+        self.store_attn[layer, b, start_point:start_point+writes].assign(value[b, -writes:])
+      else: 
+        self.store_attn_idx[layer, b, start_point:start_point+writes].assign(value[b, -writes:])
+    if segment == "attention": return self.store_attn[layer, :B, :]
+    else: return self.store_attn_idx[layer, :B, :]
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float, device:str|None=None) -> Tensor:
@@ -132,12 +109,14 @@ def precompute_freqs_cis(dim: int, end: int, theta: float, device:str|None=None)
 
 # This does interleaved ROPE, which is slightly different from the half-split(llama) version
 # x: (B, S, H, HD)
-def apply_rope(x:Tensor, freqs_cis:Tensor, start_pos: list[int], to_write: list[int]) -> Tensor:
-  assert max(to_write) == x.shape[1]
+def apply_rope(x:Tensor, freqs_cis:Tensor, positional_ids: Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
-  batched_freqs = Tensor.empty(x.shape[0], max(to_write), freqs_cis.shape[-1])
-  for i, (s, tw) in enumerate(zip(start_pos, to_write)): batched_freqs[i].assign(freqs_cis[s:s+tw].pad_to(max(to_write), None)) # Taking slice for each token from freqs
-  cos, sin = batched_freqs.reshape(x.shape[0], max(to_write), 1, -1).chunk(2, dim=-1) # (B, max(to_write), 1, dim//2)
+  valid = positional_ids >= 0 # (B, S)
+  idx = valid.where(positional_ids, 0)
+  batched_freqs = Tensor.empty(x.shape[0], x.shape[1], freqs_cis.shape[-1])
+  for i in range(x.shape[0]): batched_freqs[i].assign(freqs_cis[idx[i]].pad_to(x.shape[1], None)) # Taking slice for each token from freqs
+  cos, sin = batched_freqs.reshape(x.shape[0], x.shape[1], 1, -1).chunk(2, dim=-1) # (B, S, 1, dim//2)
+  cos, sin = valid.unsqueeze(-2).unsqueeze(-1).where(cos, 1), valid.unsqueeze(-2).unsqueeze(-1).where(sin, 0)
   x1, x2 = x[..., 0::2], x[..., 1::2]
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
@@ -151,8 +130,8 @@ class GLMDSAIndexer():
     self.weights_proj = nn.Linear(config.dim, self.idx_num_heads, bias=False)
     self.softmax_scale = self.idx_head_dim ** -0.5
 
-  def __call__(self, x: Tensor, q_latent: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, step_t: list[int], to_write: list[int], attn_mask: Tensor) -> Tensor:
-    assert x.shape[0] == len(step_t) == len(to_write) == q_latent.shape[0], "error in batch dim"
+  def __call__(self, x: Tensor, q_latent: Tensor, position_embeddings: Tensor, kv_cache: DSAKVCache, positional_ids: Tensor, attn_mask: Tensor) -> Tensor:
+    assert x.shape[0] == q_latent.shape[0], "error in batch dim"
     q_idx = self.q_up_proj_idx(q_latent) # (B, S, H*HD)
     q_idx = q_idx.reshape(*q_idx.shape[:-1], self.idx_num_heads, self.idx_head_dim) # (B, S, H, HD)
     q_rot_idx, q_pass_idx = q_idx[..., :self.attn_rope_dim], q_idx[..., self.attn_rope_dim:]
@@ -160,12 +139,12 @@ class GLMDSAIndexer():
     k_idx = self.k_norm(self.wk(x)).unsqueeze(2) # (B, S, HD) -> (B, S, 1, HD)
     k_rot_idx, k_pass_idx = k_idx[..., :self.attn_rope_dim], k_idx[...,self.attn_rope_dim:]
 
-    q_rot_idx, k_rot_idx = apply_rope(q_rot_idx, position_embeddings, step_t, to_write), apply_rope(k_rot_idx, position_embeddings, step_t, to_write)
+    q_rot_idx, k_rot_idx = apply_rope(q_rot_idx, position_embeddings, positional_ids), apply_rope(k_rot_idx, position_embeddings, positional_ids)
     q_idx, k_idx = q_rot_idx.cat(q_pass_idx, dim=-1), k_rot_idx.cat(k_pass_idx, dim=-1).squeeze(2) # q_idx: (B, S, H, HD) k_idx: (B, S, HD)
 
     # (B, S_longest, HD)
     # TODO: is this the correct place to store cache
-    k_idx = kv_cache.update_cache(self.layer, step_t, to_write, k_idx, "indexer") # This will return values that are padded to the max sequnce of all batches 
+    k_idx = kv_cache.update_cache(self.layer, positional_ids, k_idx, "indexer") # This will return values that are padded to the max sequnce of all batches 
 
     # (B, S, H, HD) @ (B, 1, HD, T) -> (B, S, H, T)
     scores = q_idx.float() @ k_idx.transpose(-1, -2).float().unsqueeze(1)
@@ -182,16 +161,12 @@ class GLMDSAIndexer():
     topk = int(min(self.idx_topk, index_scores.shape[-1]))
     return index_scores.topk(topk, dim=-1)[1].cast(dtypes.int32)
 
-# TODO: make this cleaner, maybe use abs positions in a Tensor instead of step_t and to_write
-# I think I can clean this up
-def create_causal_attn_mask(step_t: list[int], to_write: list[int], longest_seq: int) -> Tensor:
-    longest_input_seqs = max(to_write)
-    seq_pos = Tensor.stack(*[Tensor([s + s_i for s_i in range(w)]).pad(((0, longest_input_seqs - w)), value=dtypes.float.max) for s, w in zip(step_t, to_write)]) # (B, S_inp)
-    query_ok = seq_pos < Tensor([s + w for s, w in zip(step_t, to_write)]).unsqueeze(-1) # (B, S_inp)
-    keys_arange = Tensor.arange(longest_seq).unsqueeze(0).unsqueeze(1) # (1, 1, T)
-    key_ok = keys_arange < Tensor([s + w for s, w in zip(step_t, to_write)]).unsqueeze(1).unsqueeze(2) # (1, 1, T) (B, 1, 1) => (B, 1, T)
-    valid = ((keys_arange <= seq_pos.unsqueeze(-1)) & key_ok) & query_ok.unsqueeze(-1) # (B, S_inp, longest_seq)
-    return valid.where(0, dtypes.float.min)
+def create_causal_attn_mask(positional_ids: Tensor, longest_seq: int) -> Tensor:
+    valid_queries = positional_ids >= 0
+    mask = Tensor.arange(longest_seq).unsqueeze(0).unsqueeze(1).expand(*positional_ids.shape, longest_seq) # (B, S, longest_seq)
+    key_ok = mask <= positional_ids.unsqueeze(-1) # (B, S, longest_seq) < (B, S, 1) => (B, S, longest_deq)
+    keep = key_ok & valid_queries.unsqueeze(-1) # (B, S, longest_seq)
+    return keep.where(0, dtypes.float.min)
 
 def basic_attn(queries: Tensor, keys: Tensor, values: Tensor, attn_mask: Tensor, attn_heads: int, attn_dim: int, batch: int):
     attn_weights = ((queries @ keys.transpose(-1, -2)) + attn_mask.unsqueeze(1)) * (attn_dim ** -0.5) # (B, attn_head, S_inp, S_longest)
@@ -223,7 +198,7 @@ class GLMAttention():
 
   # x: (B, S, dim)
   # TODO: precompute the up proj single matrix for k, q, v for MLA inference optimization
-  def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None):
+  def __call__(self, x: Tensor, position_embeddings: Tensor, positional_ids: Tensor, kv_cache: DSAKVCache, prev_idx_topk: Tensor|None):
     batch, orig_seq = x.shape[:-1]
     q_latent = self.q_norm(self.q_down_proj(x)) # (B, S, q_lat)
     q_pass, q_rot = self.q_up_proj(q_latent).reshape(batch, orig_seq, -1, self.attn_dim).split([self.attn_dim - self.attn_rope_dim, self.attn_rope_dim], dim=-1)
@@ -231,9 +206,9 @@ class GLMAttention():
     cached_kv = self.kv_down_proj(x)
     kv_common, k_pre_rot= cached_kv.split([self.kv_latent_dim, self.attn_rope_dim], dim=-1) # kv_common: (B, S_inp, kv_latent_dim) k_pre_rot: (B, S_inp, attn_rope_dom)
     k_pre_rot = k_pre_rot.reshape(batch, orig_seq, 1, self.attn_rope_dim)
-    q_rot, k_rot = apply_rope(q_rot, position_embeddings, step_t, to_write), apply_rope(k_pre_rot, position_embeddings, step_t, to_write)
+    q_rot, k_rot = apply_rope(q_rot, position_embeddings, positional_ids), apply_rope(k_pre_rot, position_embeddings, positional_ids)
 
-    kv_common, k_rot = kv_cache.update_cache(self.layer, step_t, to_write, kv_common.cat(k_rot.squeeze(2), dim=-1), "attention").split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
+    kv_common, k_rot = kv_cache.update_cache(self.layer, positional_ids, kv_common.cat(k_rot.squeeze(2), dim=-1), "attention").split([self.kv_latent_dim, self.attn_rope_dim], dim=-1)
     longest_seq = kv_common.shape[1] # Now this becomes the longest seq in this set of batches that came from kv_cache
     k_rot = k_rot.unsqueeze(2)
 
@@ -246,10 +221,10 @@ class GLMAttention():
     keys = k_pass.cat(k_rot, dim=-1) # (B, S_longest, attn_head, attn_dim)
     
     # creating the attention mask after kv cache fills in old keys as well
-    attn_mask = create_causal_attn_mask(step_t, to_write, int(longest_seq)) # (B, S_inp, S_longest)
+    attn_mask = create_causal_attn_mask(positional_ids, int(longest_seq)) # (B, S_inp, S_longest)
 
     if self.indexer is not None:
-      topk_idx = self.indexer(x, q_latent, position_embeddings, kv_cache, step_t, to_write, attn_mask) # (B, S_inp, K)
+      topk_idx = self.indexer(x, q_latent, position_embeddings, kv_cache, positional_ids, attn_mask) # (B, S_inp, K)
     else:
       assert prev_idx_topk is not None, "previous idx topk should come for shared idx layers"
       topk_idx = prev_idx_topk
@@ -346,10 +321,10 @@ class GLMBlock():
       self.mlp = GLMMoeLayer(config, devices)
     self.post_attention_layernorm = nn.RMSNorm(config.dim, config.norm_eps)
 
-  def __call__(self, x: Tensor, position_embeddings: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
+  def __call__(self, x: Tensor, position_embeddings: Tensor, positional_ids: Tensor, kv_cache: DSAKVCache, prev_idx_topk: Tensor|None) -> tuple[Tensor, Tensor]:
     residual = x
     x = self.input_layernorm(x)
-    x, _, topk_idx = self.self_attn(x, position_embeddings, step_t, to_write, kv_cache, prev_idx_topk)
+    x, _, topk_idx = self.self_attn(x, position_embeddings, positional_ids, kv_cache, prev_idx_topk)
     x = x + residual
 
     residual = x
@@ -366,14 +341,14 @@ class GLMModel():
     self.norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.lm_head = nn.Linear(config.dim, config.vocab_size, bias=False)
 
-  def __call__(self, input_toks: Tensor, step_t: list[int], to_write: list[int], kv_cache: DSAKVCache) -> Tensor:
+  def __call__(self, input_toks: Tensor, positional_ids: Tensor, kv_cache: DSAKVCache) -> Tensor:
     x = self.embed_tokens(input_toks)
     batch = input_toks.shape[0]
     assert batch <= self.max_batch, "batch size is bigger than max_batch"
     position_embeddings = precompute_freqs_cis(self.attn_rope_dim, self.max_context, self.rope_theta)
 
     topk_idx = None
-    for block in self.layers: x, topk_idx = block(x, position_embeddings, step_t, to_write, kv_cache, topk_idx)
+    for block in self.layers: x, topk_idx = block(x, position_embeddings, positional_ids, kv_cache, topk_idx)
 
     x = self.norm(x)
     # TODO: sample with temperature
@@ -382,15 +357,14 @@ class GLMModel():
 def prompt_jinja_render(prompts: list) -> list[str]:
   return [template.render(p) for p in prompts]
 
-def prefill_encode_and_pad(tokenizer: GLMTokenizer, prompts: list) -> tuple[list[int], list[int], Tensor]:
+def prefill_encode_and_pad(tokenizer: GLMTokenizer, prompts: list) -> tuple[Tensor, Tensor]:
   rendered_prompts = prompt_jinja_render(prompts)
   encoded = [tokenizer.encode(r).ids for r in rendered_prompts]
   longest_prompt = max([len(e) for e in encoded])
   # Padding is done on the left according to the config
   input_tensor = Tensor.stack(*[Tensor(e).pad((longest_prompt - len(e), 0), value=tokenizer.pad_token) for e in encoded])
-  step_t = [0 for _ in encoded]
-  to_write = [len(e) for e in encoded]
-  return step_t, to_write, input_tensor
+  positional_ids = Tensor.stack(*[Tensor.arange(len(e)).pad((longest_prompt - len(e), 0), value=-1) for e in encoded])
+  return input_tensor, positional_ids
 
 def stream_decode(tokenizer: GLMTokenizer, outputs: Tensor) -> tuple[list[int], list[str]]:
   ids = [int(o.item()) for o in outputs]
@@ -452,10 +426,9 @@ if __name__ == "__main__":
   devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else (Device.DEFAULT, )
 
   tokenizer = GLMTokenizer(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/tokenizer.json")))
+  kv_cache = DSAKVCache(len(config.layers), config.indexers, config.max_context, config.kv_latent_dim + config.attn_rope_dim, config.idx_attn_dim, config.max_batch)
   model = GLMModel(config, devices)
   loaded_model = load_model(model, devices, 3)
-
-  kv_cache = DSAKVCache(len(config.layers), config.indexers, config.max_context, config.kv_latent_dim + config.attn_rope_dim, config.idx_attn_dim, config.max_batch)
 
   template = jinja2.Template(str(fetch("https://huggingface.co/zai-org/GLM-5.2-FP8/resolve/main/chat_template.jinja").read_text()))
   prompt_one = {
@@ -503,26 +476,22 @@ if __name__ == "__main__":
     ]
   }
 
-  #TODO: right now position ids due to left padding is messed up make position ids as a tensor and use that
-  # Prefill
   prefill = True
-  step_t, to_write, input_tokens = prefill_encode_and_pad(tokenizer, [prompt_one, prompt_two, prompt_three])
-  batches = [True for _ in step_t]
+  input_tokens, positional_ids = prefill_encode_and_pad(tokenizer, [prompt_one, prompt_two, prompt_three])
+  batches = [True for _ in range(input_tokens.shape[0])]
 
   while True:
     if prefill:
-      outputs = model(input_tokens, step_t, to_write, kv_cache)
-      input_tokens = outputs.reshape(len(batches), 1)
-      step_t = [w for w in to_write]
-      to_write = [1 for _ in to_write]
+      outputs = model(input_tokens, positional_ids, kv_cache)
+      positional_ids = positional_ids[:, -1] + 1
       prefill = False
 
     else:
-      outputs = model(input_tokens, step_t, to_write, kv_cache)
-      step_t = [s + w for s, w in zip(step_t, to_write)]
-      to_write = [1 for _ in step_t]
-      input_tokens = outputs.reshape(len(batches), 1)
+      outputs = model(input_tokens, positional_ids, kv_cache)
+      positional_ids = positional_ids + 1
 
+    positional_ids = positional_ids.reshape(len(batches), 1)
+    input_tokens = outputs.reshape(len(batches), 1)
     ids, decoded_outputs = stream_decode(tokenizer, outputs)
     for b, (id, tok) in enumerate(zip(ids, decoded_outputs)):
       if not batches[b]: continue
