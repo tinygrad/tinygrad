@@ -1130,10 +1130,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
     return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
-    kernel = fxn(*placeholders).call(*contig_srcs, grad_fxn=grad_fxn)
-    return [s.after(kernel) for s in contig_srcs]
+    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
+    return [s.after(kernel) for s in srcs]
 
 @dataclass(frozen=True)
 class KernelInfo:
