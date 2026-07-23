@@ -879,12 +879,16 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
 
   def test_floordiv_lt(self):
-    # x//d<c <=> x<c*d for d>0
+    # x//d<c <=> x<c*d for d>0, and <=> c*d<x for d<0
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
     self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<8)")
     self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<10)")
-    self.helper_test_variable((idx//-4<-3), 0, 1, "((idx//-4)<-3)")
+    self.helper_test_variable((idx//-4<-3), 0, 1, "(12<idx)")
+    self.helper_test_variable((idx//-4<-5), 0, 1, "(20<idx)")
+    self.helper_test_variable((idx//-4<-6), 0, 0, "False")
+    self.helper_test_variable(((idx-10)//-4<0), 0, 1, "(8<(idx+-2))")
+    self.helper_test_variable(((idx-20)//-4<2), 0, 1, "(12<idx)")
 
   def test_nested_div_mod_negative_inner_divisor(self):
     # (x % (k*c)) // c -> (x // c) % k requires k>0; (x % (k*c)) % c -> x % c is unconditional for c>0
