@@ -187,7 +187,7 @@ class NIRRenderer(Renderer):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r: dict[UOp, Any] = {}
-    self.param_idx, ranges = 0, []
+    self.param_idx, ranges = 0, [] # type: (int, list[Any])
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
@@ -203,18 +203,29 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
-        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
-        nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
-        mesa.nir_push_loop(self.b)
-        self.r[u] = nload(self.b, AddrSpace.REG, i, u)
-        nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        if u.dtype == dtypes.void:
+          # a RANGE with no bound is a loop header: just open the loop, the END adds the conditional backedge
+          ranges.append(None)
+          mesa.nir_push_loop(self.b)
+        else:
+          ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
+          nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
+          mesa.nir_push_loop(self.b)
+          self.r[u] = nload(self.b, AddrSpace.REG, i, u)
+          nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
       elif u.op == Ops.END:
         r = u.src[1]
-        next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
-        # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
-        nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
-        nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
-        mesa.nir_pop_loop(self.b, None)
+        if r.dtype == dtypes.void:
+          # loop again while the condition is true
+          nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+          ranges.pop()
+          mesa.nir_pop_loop(self.b, None)
+        else:
+          next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
+          # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
+          nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+          nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
+          mesa.nir_pop_loop(self.b, None)
       else:
         d: mesa.nir_def|None = self.def_rewrite.rewrite(u, ctx=self)
         if d is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
