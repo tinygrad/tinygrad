@@ -227,7 +227,6 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
-  @slow
   def test_backprop_conv_wino(self):
     with Context(WINO=1): self.test_backprop_conv()
 
