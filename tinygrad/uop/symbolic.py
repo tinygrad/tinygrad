@@ -262,8 +262,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: (x<c.arg*d.arg) if d.arg > 0 else (x>c.arg*d.arg) if d.arg < 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
-  ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
-  ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1 if y.op is not Ops.CONST else None),
+  ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
   # *** rules from symbolic ***
   # generic lt folding
   (UPat.var("x", dtypes.weakint)<UPat.cvar("c"), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
