@@ -332,9 +332,8 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
       for candidate in candidates:
         # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-        newuops = [uop.substitute({X:newX}) for X,newX in candidate]
-        if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
-        newuops = [u.simplify().substitute({newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
+        if any(X not in uop.backward_slice_with_self for X,_ in candidate): continue  # skip if a branch var isn't in uop
+        newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
         if all_same(newuops): uop = newuops[0]
         elif uop.op is Ops.STACK and len(uop.src) == 2:
           if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
