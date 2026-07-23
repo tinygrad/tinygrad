@@ -250,13 +250,15 @@ class Scheduler:
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
-              idx = self.rngs.index(a)
+              # relookup by arg: a prior PADTO may have replaced this range uop
+              idx = [r.arg for r in self.rngs].index(a.arg)
+              a = axes[i] = self.rngs[idx]
               if (a.vmax+1) % tc.dims[i] != 0:
                 if opt_level < 2: raise KernelOptError("tc padding requires opt_level >= 2")
                 # apply_opt should return the updated range?
                 self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
                 axes[i] = self.rngs[idx]
-          except KernelOptError: continue
+          except (KernelOptError, ValueError): continue
 
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
           warp = UOp.range(tc.threads, -1, AxisType.WARP)

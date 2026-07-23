@@ -119,8 +119,8 @@ def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int
   outs, ins = base.arg.outs, base.arg.ins
   if not len(outs) or any((b:=rawbufs[i]) is None or _to_np_dtype(b.dtype) is None for i in base.arg.globals): return None  # can't validate
   rng, inplace = np.random.default_rng(1337), [i for i in ins if i in outs]
-  for i in base.arg.globals:  # fill inputs deterministically so base/candidate see identical data
-    d = rng.standard_normal((b:=rawbufs[i]).size).astype(_to_np_dtype(b.dtype)) if dtypes.is_float(b.dtype) else np.zeros(b.size, _to_np_dtype(b.dtype))
+  for i in base.arg.globals:  # small ints keep reduces exact under reordering: catches real miscompiles, not fp reassociation
+    d = rng.integers(-2, 3, (b:=rawbufs[i]).size).astype(_to_np_dtype(b.dtype)) if dtypes.is_float(b.dtype) else np.zeros(b.size, _to_np_dtype(b.dtype))
     b.allocator._copyin(b._buf, memoryview(bytearray(d.tobytes())))
   snap = {i:bytearray(rawbufs[i].as_memoryview()) for i in inplace}
   def restore():
@@ -129,7 +129,7 @@ def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int
     _beam_exec(base, var_vals, rawbufs)
     ref = {i:rawbufs[i].numpy().copy() for i in outs}
   except Exception: return None
-  rtol, atol = getenv("BEAM_VALIDATE_RTOL", 1e-2), getenv("BEAM_VALIDATE_ATOL", 1e-2)
+  rtol, atol = getenv("BEAM_VALIDATE_RTOL", 1e-4), getenv("BEAM_VALIDATE_ATOL", 1e-4)
   def validate(cand:Scheduler) -> bool:
     restore()
     try:
