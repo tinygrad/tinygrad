@@ -339,7 +339,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
   all_field_defs = " ".join(field_def(fn, hi, lo, enc, eb) for enc, (flds, eb) in encodings.items() for fn, hi, lo in flds)
   _ALL_DSL = ["BitField", "EnumBitField", "FixedBitField", "NULL", "SBaseField", "SGPRField", "SRsrcField",
               "SSrcField", "SrcField", "VDSTYField", "VGPRField"]
-  dsl_names = ["Inst"] + [n for n in _ALL_DSL if n in all_field_defs]
+  dsl_names = ["Inst"] + [n for n in _ALL_DSL if n in all_field_defs] + ["InsOp"]
   # also re-export register names so `from ins import *` still provides them to downstream users
   _DSL_REGS = ["s", "v", "src", "VCC_LO", "VCC_HI", "VCC", "EXEC_LO", "EXEC_HI", "EXEC", "NULL", "OFF", "M0",
                "SCC", "VCCZ", "EXECZ", "ttmp", "INV_2PI", "SDWA", "DPP", "DPP16", "LIT", "SRC_LDS_DIRECT"]
@@ -448,7 +448,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
       elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
       elif op_to_suffix.get(op): cls = f"{fmt}{op_to_suffix[op]}"
       else: cls = fmt
-      lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
+      lines.append(f"{name.lower()}{msuf.lower()} = InsOp(functools.partial({cls}, {fmt}Op.{name}{msuf}))")
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_operands(types: dict, enums: dict, arch: str, path: pathlib.Path) -> None:

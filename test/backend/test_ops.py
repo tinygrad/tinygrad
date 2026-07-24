@@ -894,6 +894,7 @@ class TestOps(unittest.TestCase):
     self.assertEqual(Tensor(-1).contiguous().div(4, rounding_mode="trunc").item(), 0)  # NOTE this is trunc-div behaviour
 
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "RDNA3", "RDNA3 isa sin too slow")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
@@ -904,6 +905,7 @@ class TestOps(unittest.TestCase):
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "RDNA3", "RDNA3 isa sin too slow")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([], lambda: torch.tensor(2.0).cos(), lambda: Tensor(2).cos(), forward_only=True)
@@ -914,6 +916,7 @@ class TestOps(unittest.TestCase):
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "RDNA3", "RDNA3 isa sin too slow")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)

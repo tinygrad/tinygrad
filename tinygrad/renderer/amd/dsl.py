@@ -1,5 +1,6 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
+import tinygrad.dtype
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -66,6 +67,8 @@ class Reg:
 src = Reg(0, 512)
 
 # Slices for each region (inclusive end)
+FLAT_SCRATCH_LO = src[102]
+FLAT_SCRATCH_HI = src[103]
 s = src[0:105]           # SGPR0-105
 VCC_LO = src[106]
 VCC_HI = src[107]
@@ -145,10 +148,11 @@ class EnumBitField(BitField):
 
 import struct
 def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+def _f16(f: float) -> int: return struct.unpack('H', struct.pack('e', f))[0]
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
-  _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+  _FLOAT_ENC = {0.0: 128, 0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
   def __init__(self, hi: int, lo: int, default=s[0]):
     super().__init__(hi, lo, default)
@@ -161,7 +165,7 @@ class SrcField(BitField):
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
     if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
+    elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
     elif isinstance(val, int): offset = 255  # literal
@@ -248,7 +252,7 @@ OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 def _needs_literal(val) -> bool:
   """Check if a value needs a literal constant (can't be encoded inline)."""
   if val is None or isinstance(val, Reg): return False
-  if isinstance(val, float): return val not in SrcField._FLOAT_ENC
+  if isinstance(val, (float, tinygrad.dtype.ConstFloat)): return float(val) not in SrcField._FLOAT_ENC
   if isinstance(val, int): return not (0 <= val <= 64 or -16 <= val < 0)
   return False
 
@@ -266,6 +270,15 @@ def _canonical_name(name: str) -> str | None:
   if name in ('vdst', 'sdst', 'sdata'): return 'd'
   if name in ('data', 'vdata', 'data0', 'vsrc'): return 'data'
   return None
+
+class InsOp(functools.partial):
+  @property
+  def opc(self): return str(self).lower()
+  @property
+  def group(self): return self.func.__name__
+  def __repr__(self): return self.args[0].name
+  def _key(self): return (self.func.__name__, *[str(a) for a in self.args])
+  def __lt__(self, other): return self._key() < other._key()
 
 class Inst:
   _fields: list[tuple[str, BitField]]
@@ -324,10 +337,14 @@ class Inst:
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
     # For _LIT classes, capture literal value from SrcFields that encode to 255
     literal_val = None
+    op_operands = OPERANDS.get(vals.get('op'), {})
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):
-        literal_val = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+        if isinstance(val, float):
+          # 16-bit operands (e.g. v_mov_b16) need the fp16 bit pattern in the low half of the literal
+          literal_val = _f16(val) if op_operands.get(name, (None, 32, None))[1] == 16 else _f32(val)
+        else: literal_val = val & 0xFFFFFFFF
     if literal_val is not None and 'literal' in vals:
       vals['literal'] = literal_val
     # Set all field values

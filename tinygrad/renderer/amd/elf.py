@@ -2,7 +2,7 @@
 import ctypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ceildiv, round_up
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import ProgramInfo, UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
@@ -12,7 +12,8 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
-def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
+def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
+  prginfo: ProgramInfo = prg.arg
   insts = [u.arg for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
@@ -35,12 +36,11 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  sink, n_bufs, n_vars, lds_size, gids = prg.src[0], 0, 0, 0, set()
+  sink, lds_size, n_bufs, n_vars, gids = prg.src[0], 0, len(prginfo.globals), len(prginfo.vars), set([0, 1, 2])
+  # Hack for now, derive from local_size/global_size?
+  # - maybe just add which kernel shape indices are used to program info ex. gidx_used, lidx_used or sum
   for u in sink.toposort():
-    if u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: n_vars += 1
-    elif u.op is Ops.PARAM: n_bufs += 1
-    elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
-    elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
+    if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
@@ -60,6 +60,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
   desc.group_segment_fixed_size = lds_size
+  desc.private_segment_fixed_size = scratch_size
   desc.kernarg_size = n_bufs * 8 + n_vars * 4
   desc.kernel_code_entry_byte_offset = -len(text)
 
@@ -71,7 +72,9 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
-  desc.compute_pgm_rsrc2 = (2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+  desc.compute_pgm_rsrc2 = (1 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT |
+                            2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+                            2 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT |
                             int(0 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X_SHIFT |
                             int(1 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
