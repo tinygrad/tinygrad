@@ -149,11 +149,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
    lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
-  # copying mselect to same device is just mselect (no NOOP kernel)
-  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
-
-  # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+  # copy to same device is a no-op
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
   # copy on reshape is reshape on copy
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
@@ -527,27 +524,23 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
-def convert_copy_to_store(ctx, x:UOp, existing_buf:UOp|None=None):
-  # x is the copy
-  input_src = x.src[0]
-  # if the src doesn't have buffer identity, we need to contiguous it
+def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
+  input_src = copy.src[0]
   if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
-  # flatten the input
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
     if not existing_buf.has_buffer_identity(after_ok=True): return None
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
-  else:
-    # create the output buffer
-    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), x.dtype, device=x.device))
-    # reshape back to input
-    return buf.after(buf.store(input_src)).reshape(x.shape)
+  # create the output buffer
+  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+  # reshape back to input
+  return buf.after(buf.store(input_src)).reshape(copy.shape)
 
-pm_copy_is_store = PatternMatcher([
-  (UPat(name="existing_buf").store(UPat(Ops.COPY, name="x")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="x"), convert_copy_to_store),
+pm_copy_to_store = PatternMatcher([
+  (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
+  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
 ])
 
 @profile_matches
@@ -556,7 +549,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
-  tsink = graph_rewrite(tsink, pm_copy_is_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
+  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
