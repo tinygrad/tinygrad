@@ -92,7 +92,10 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # materialize straight into t
   if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
+  storage_view = s
+  while storage_view.op in {Ops.AFTER, Ops.MULTI}: storage_view = storage_view.src[0]
+  if storage_view.base.op is Ops.BUFFER and storage_view.contiguous_view_offset() == 0 \
+     and storage_view.numel() == storage_view.buf_uop.numel(): return t
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
@@ -171,7 +174,11 @@ def finalize_after(ctx:AllocCtx, x:UOp):
   # tagged: untag and map each original pre-rewrite UOp to the stripped buffer; the untagged result is reprocessed as untagged
   ret = x.replace(tag=None)
   replace_uop = ret
-  while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
+  after_replace:list[UOp] = []
+  while replace_uop.op in {Ops.AFTER, Ops.MULTI, Ops.RESHAPE}:
+    if replace_uop.op is not Ops.AFTER: after_replace.append(replace_uop)
+    replace_uop = replace_uop.src[0]
+  for a in reversed(after_replace): replace_uop = a.replace(src=(replace_uop,)+a.src[1:])
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
