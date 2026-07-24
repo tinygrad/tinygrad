@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, K
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -154,6 +154,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+
+  # copy on reshape is reshape on copy
+  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
   # ** store rules **
 
@@ -522,12 +525,17 @@ def split_store(x:UOp) -> UOp|None:
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
-  if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
+  #if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
+  #  raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
   return kernel
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
+])
+
+pm_copy_is_store = PatternMatcher([
+  (UPat(Ops.COPY, name="x"), lambda ctx,x:
+   (buf:=UOp(Ops.BUFFER, src=(shape_to_shape_arg(x.max_shape),), arg=ParamArg(next(ctx), x.dtype, device=x.device))).after(buf.store(x.src[0]))),
 ])
 
 @profile_matches
@@ -535,6 +543,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+
+  tsink = graph_rewrite(tsink, pm_copy_is_store, ctx=itertools.count(0), name="convert copy to store")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
