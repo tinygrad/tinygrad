@@ -168,7 +168,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
       else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return None
 

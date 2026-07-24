@@ -117,14 +117,30 @@ class GPTOSS:
     w_q, w_e8, _ = quantize_mxfp8(w)
     return w_q, w_e8.is_param_(False)
 
-  def _attn_mask(self, seqlen:int, sliding:bool, dtype) -> Tensor:
+  def _attn_mask(self, seqlen:int, dtype) -> Tensor:
     i, j = Tensor.arange(seqlen).reshape(seqlen, 1), Tensor.arange(seqlen).reshape(1, seqlen)
-    allowed = j <= i
-    if sliding: allowed = allowed & (i - j < self.sliding_window)
-    return allowed.where(0.0, -1e30).cast(dtype).contiguous()
+    return (j <= i).where(0.0, -1e30).cast(dtype).contiguous()
 
-  def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wqkv_scale:Tensor,
-                wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
+  def _sliding_attention(self, xq:Tensor, xk:Tensor, xv:Tensor, sinks:Tensor) -> Tensor:
+    bsz, seqlen, H, hd = xq.shape
+    KV, R, W = self.n_kv_heads, self.n_rep, self.sliding_window
+    assert seqlen % W == 0, f"seqlen {seqlen} must be a multiple of sliding_window {W} for banded attention"
+    nb = seqlen // W
+    q = xq.reshape(bsz, seqlen, KV, R, hd).permute(0, 2, 3, 1, 4).reshape(bsz, KV, R, nb, W, hd).float()
+    k, v = (x.permute(0, 2, 1, 3).reshape(bsz, KV, 1, nb, W, hd).float() for x in (xk, xv))
+    kk, vv = (x.pad((None, None, None, (1, 0), None, None))[:, :, :, :nb].cat(x, dim=-2) for x in (k, v))
+    sc = (q @ kk.transpose(-1, -2)) * self.sm_scale   # (B,KV,R,nb,W,2W)
+    i, j, pv = Tensor.arange(W).reshape(W, 1), Tensor.arange(2 * W).reshape(1, 2 * W), Tensor.arange(nb).reshape(nb, 1, 1) >= 1
+    sc = ((j > i) & (j <= i + W) & (pv | (j >= W))).where(sc, -float("inf"))
+    sink = sinks.reshape(1, KV, R, 1, 1, 1).float()
+    m = sc.max(-1, keepdim=True).maximum(sink)
+    e = (sc - m).exp()
+    p = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
+    attn = p @ vv.cast(dtypes.bfloat16)
+    return attn.reshape(bsz, KV, R, seqlen, hd).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, H * hd)
+
+  def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, *, attention_norm:Tensor, wqkv:Tensor,
+                wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
     x_normed, rrms = rmsnorm(x, self.norm_eps)
     qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
@@ -132,16 +148,23 @@ class GPTOSS:
     xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
 
-    xq = xq.cast(dtypes.bfloat16).reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
-    xk = xk.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    xv = xv.cast(dtypes.bfloat16).permute(0, 2, 1, 3).unsqueeze(2)
-    scores = (xq @ xk.transpose(-2, -1)).float() * self.sm_scale + mask
-    sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
-    m = scores.max(-1, keepdim=True).maximum(sink)
-    e = (scores - m).exp()
-    w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
-    attn = (w @ xv).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
+    if sliding:
+      attn = self._sliding_attention(xq, xk, xv, sinks)
+    elif getenv("HK_FLASH_ATTENTION"):
+      from extra.thunder.amd.fa import flash_attention
+      attn, *_ = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks)
+      attn = attn.reshape(bsz, seqlen, self.n_heads * self.head_dim)
+    else:
+      xqm = xq.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
+      xkm, xvm = xk.permute(0, 2, 1, 3).unsqueeze(2), xv.permute(0, 2, 1, 3).unsqueeze(2)
+      scores = (xqm @ xkm.transpose(-2, -1)).float() * self.sm_scale + mask
+      sink = sinks.reshape(1, self.n_kv_heads, self.n_rep, 1, 1).float()
+      m = scores.max(-1, keepdim=True).maximum(sink)
+      e = (scores - m).exp()
+      w = (e / (e.sum(-1, keepdim=True) + (sink - m).exp())).cast(dtypes.bfloat16)
+      attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
     return out, [x_normed, rrms, attn]
@@ -165,8 +188,8 @@ class GPTOSS:
     return out, [x_normed, rrms]
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
-    attn, attn_saves = self.attention(x, freqs_cis, mask, **attn_kwargs)
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
+    attn, attn_saves = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
     h = h + ffn
@@ -183,8 +206,7 @@ class GPTOSS:
     h = self.tok_embeddings(tokens)
     bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :seqlen, :, :, :]
-    mask_full = self._attn_mask(seqlen, False, dtypes.float32)
-    mask_sliding = self._attn_mask(seqlen, True, dtypes.float32)
+    mask_full = None if getenv("HK_FLASH_ATTENTION") else self._attn_mask(seqlen, dtypes.float32)
     for i in range(self.n_layers):
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wqkv_scale=self.wqkv_scale[i],
                          wqkv_bias=self.wqkv_bias[i], wo=self.wo[i], wo_scale=self.wo_scale[i], wo_bias=self.wo_bias[i],
@@ -192,8 +214,7 @@ class GPTOSS:
       ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], gate=self.gate[i], gate_bias=self.gate_bias[i],
                         w_gate_up=self.w_gate_up[i], w_gate_up_scale=self.w_gate_up_scale[i], w_gate_up_bias=self.w_gate_up_bias[i],
                         w_down=self.w_down[i], w_down_scale=self.w_down_scale[i], w_down_bias=self.w_down_bias[i])
-      mask = mask_sliding if i % 2 == 0 else mask_full
-      h, *_ = self.run_layer(h, freqs_cis, mask, attn_kwargs, ffn_kwargs, save=save)
+      h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
     logits = self.norm(h) @ self.output.T
     return logits

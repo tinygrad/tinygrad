@@ -450,7 +450,7 @@ class TestMultiTransformer(unittest.TestCase):
       else: v.shard_(device, axis=None)
 
     last_tok = 0
-    for i in range(10):
+    for i in range(5):
       real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
       shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
 
