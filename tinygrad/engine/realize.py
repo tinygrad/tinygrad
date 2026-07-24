@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, dedup
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
@@ -242,12 +242,18 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
+def assert_all_same_devices(ast:UOp):
+  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM])
+  assert len(devices) == 1, f"device mismatch: {devices}"
+
 pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),), name="call", allow_any_len=True),
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True),
    lambda call, dst, src, r:
      call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
      if dst.device != src.device else None),
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
 
 pm_compile = PatternMatcher([
