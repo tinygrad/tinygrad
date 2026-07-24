@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = ["numpy", "tinygrad @ git+https://github.com/dwahdany/tinygrad.git@hlb_cifar_10s"]
+# ///
 # tinygrad implementation of airbench94: https://github.com/KellerJordan/cifar10-airbench (https://arxiv.org/abs/2404.00498)
 # trains CIFAR-10 to ~94% in 9.9 epochs / 476 steps, run with DEFAULT_FLOAT=HALF
-import time
+# the <10s record config in one shot (run twice, first run beam searches): SPEEDRUN=1 uv run examples/hlb_cifar10_fast.py
+import time, os, contextlib
 start_tm = time.perf_counter()
+if os.getenv("SPEEDRUN"):  # the 4090 record env, see hlb_cifar10_fast_README.md. must be set before tinygrad imports
+  for k,v in dict(DEV="CUDA", DEFAULT_FLOAT="HALF", BS="1024", EPOCHS="8.0", TTA="2", MATMUL_CONV="1", CONTIG="1", SCHEDULE_CACHE="1",
+                  PROGRAM_CACHE="1", JITBEAM="4", BEAM_ESTIMATE="0", BEAM_TC_SELECT="4", BEAM_VALIDATE="1", IGNORE_JIT_FIRST_BEAM="1",
+                  LOG_INTERVAL="0", BEAM_TIMEOUT_SEC="60", TARGET_EVAL_ACC_PCT="93.5",
+                  PARALLEL=str(min(os.cpu_count() or 8, 12))).items(): os.environ.setdefault(k, v)
 import math, tarfile, ctypes
 import numpy as np
 from tinygrad import Tensor, nn, dtypes, TinyJit, Variable, Device
 from tinygrad.helpers import getenv, colored, Context, fetch
 from tinygrad.nn import optim
-from extra.bench_log import BenchEvent, WallTimeEvent
+try: from extra.bench_log import BenchEvent, WallTimeEvent
+except ImportError: BenchEvent, WallTimeEvent = type("BenchEvent", (), {"FULL": None}), lambda e: contextlib.nullcontext()  # standalone uv run
 import_tm = time.perf_counter()
 
 BS           = getenv("BS", 1024)
