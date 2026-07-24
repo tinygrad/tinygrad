@@ -6,11 +6,11 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace
 from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
+from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
-from tinygrad.helpers import colored, ansilen, printable
+from tinygrad.helpers import colored, ansilen, printable, Target
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
 
@@ -1141,6 +1141,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     kernel = fxn(*placeholders).call(*contig_srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in contig_srcs]
 
+  def to_elf(self) -> TinyELF:
+    assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
+    sig = tuple((u.arg.slot, u.dtype, u._shape) for u in self.src[1].src if u.op is Ops.PARAM)
+    return TinyELF(self.arg.function_name, self.src[3].arg, sig)
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
@@ -1162,7 +1167,7 @@ class ProgramInfo:
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
-  aux: tuple = ()
+  target: Target = Target()
 
   @property
   def function_name(self): return to_function_name(self.name)
@@ -1180,7 +1185,7 @@ class ProgramInfo:
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
-  def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
+  def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
     _vars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
@@ -1200,7 +1205,7 @@ class ProgramInfo:
       if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
 
 @dataclass(frozen=True)
 class CallInfo:

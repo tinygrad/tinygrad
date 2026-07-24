@@ -1,7 +1,7 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
+from tinygrad.device import Compiled, Compiler, CompileError, Program, TinyELF, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -45,9 +45,9 @@ class MetalDevice(Compiled):
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
-    super().__init__(device, MetalAllocator(self), [MetalRenderer],
-      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
-      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
+    super().__init__(device, MetalAllocator(self), [MetalRenderer], MetalProgram,
+                     MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
+                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -111,13 +111,13 @@ class MetalCompiler(Compiler):
       ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
-class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
-    self.dev, self.name, self.lib = dev, name, lib
-    data = objc.dispatch_data_create(lib, len(lib), None, None)
+class MetalProgram(Program[MetalDevice]):
+  def __init__(self, dev:MetalDevice, obj:TinyELF):
+    self.dev, self.name, self.lib = dev, obj.name, obj.lib
+    data = objc.dispatch_data_create(obj.lib, len(obj.lib), None, None)
     self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
     error_check(error_lib)
-    self.fxn = self.library.newFunctionWithName(to_ns_str(name)).retained()
+    self.fxn = self.library.newFunctionWithName(to_ns_str(obj.name)).retained()
     descriptor = metal.MTLComputePipelineDescriptor.new()
     descriptor.setComputeFunction(self.fxn)
     descriptor.setSupportIndirectCommandBuffers(True)
@@ -127,8 +127,9 @@ class MetalProgram:
     # cache these msg calls
     self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    if prod(local_size) > self.max_total_threads:
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=(1,1,1), vals:tuple[int, ...]=(), wait=False,
+               **kw):
+    if prod(unwrap(local_size)) > self.max_total_threads:
       exec_width = self.pipeline_state.threadExecutionWidth()
       memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
       raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
@@ -139,7 +140,7 @@ class MetalProgram:
     encoder.setComputePipelineState(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
     for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
-    encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
+    encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*unwrap(local_size)))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()

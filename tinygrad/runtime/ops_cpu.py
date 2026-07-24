@@ -13,7 +13,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, KernelInfo
+from tinygrad.uop.ops import sint, KernelInfo, ProgramInfo
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
@@ -86,13 +86,13 @@ class LVPArgsState(CLikeArgsState):
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
 
-class CPUProgram(HCQProgram):
+class CPUProgram(HCQProgram['CPUDevice']):
   rt_lib = None
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, native=False, **kwargs):
-    self.runtimevars = runtimevars or {}
+  def __init__(self, dev:CPUDevice, obj:TinyELF):
+    self.runtimevars = info.runtimevars
 
     LVP = isinstance(dev.renderer, LVPRenderer) and not native
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -162,7 +162,8 @@ class CPUDevice(HCQCompiled):
     # TODO: move to hcq2
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
-      self.prgs = {f: self.runtime(f.__name__, do_to_program(v, ClangRenderer(self.renderer.target)).src[3].arg, native=True) for f,v in prgs.items()}
+      self.prgs = {f: self.runtime(f.__name__, (p:=do_to_program(v, ClangRenderer(self.renderer.target))).src[3].arg, p.arg, native=True)
+                   for f,v in prgs.items()}
 
   @functools.cached_property
   def ring(self) -> Buffer: return Buffer(self.device, RING_SLOTS * CMD_SIZE, dtypes.uint64, preallocate=True)

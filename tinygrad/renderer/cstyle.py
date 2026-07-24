@@ -303,8 +303,6 @@ class ClangRenderer(CStyleLanguage):
     self.compiler = ClangCompiler(target.arch.split(","))
 
 class OpenCLRenderer(CStyleLanguage):
-  has_aux = True
-
   # language options
   kernel_typedef = "__kernel void"
   buffer_prefix = "__global "
@@ -335,13 +333,6 @@ class OpenCLRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
-
-  def aux(self, uops:list[UOp]):
-    arg_dtypes:list[list[tuple[int, DType, tuple|None]]] = []
-    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
-      arg_dtypes[u.arg.slot].append((i, u.dtype, u._shape))
-    return tuple(tuple(a) for a in arg_dtypes),
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
                                       if (d != dtypes.half or "cl_khr_fp16" in self.target.arch) and
