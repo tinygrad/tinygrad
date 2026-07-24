@@ -283,6 +283,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(-128, 128, dtype=torch.int8), lambda: Tensor.arange(-128, 128, dtype=dtypes.int8), forward_only=True)
     helper_test_op([], lambda: torch.arange(127, -129, -1, dtype=torch.int8),
                    lambda: Tensor.arange(127, -129, -1, dtype=dtypes.int8), forward_only=True)
+    # an int range too large for default_int picks int64
+    self.assertEqual(Tensor.arange(2**31, 2**31+3).dtype, dtypes.int64)
     # overflow: tinygrad raises (torch silently wraps)
     with self.assertRaises(OverflowError): Tensor.arange(2**33, dtype=dtypes.int)
     with self.assertRaises(OverflowError): Tensor.arange(129, dtype=dtypes.int8)            # last=128 overflows
