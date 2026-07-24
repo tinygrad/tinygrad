@@ -30,8 +30,8 @@ IP_HWIDS = {hwip: am.hw_id_map[hwip] for hwip in IP_VERSIONS}
 GC_INFO = dict(gc_num_se=2, gc_num_cu_per_sh=8, gc_num_sh_per_se=2, gc_num_rb_per_se=4,
                gc_num_tccs=8, gc_wave_size=32, gc_max_waves_per_simd=16, gc_max_scratch_slots_per_cu=32, gc_lds_size=64)
 
-def _build_ip_regs(prefix, hwip) -> dict[str, AMDReg]:
-  try: return import_asic_regs(prefix, IP_VERSIONS[hwip], cls=functools.partial(AMDReg, bases={0: IP_BASES[hwip]}))
+def _build_ip_regs(prefix, hwip, version=None) -> dict[str, AMDReg]:
+  try: return import_asic_regs(prefix, version or IP_VERSIONS[hwip], cls=functools.partial(AMDReg, bases={0: IP_BASES[hwip]}))
   except Exception: return {}
 
 class MockMMU:
@@ -167,8 +167,12 @@ class MockSDMA(MockIPBlock):
                             self.gpu.mmu.addr_to_host(rptr_addr), self.gpu.mmu.addr_to_host(wptr_addr))
 
 class MockGFX(MockIPBlock):
-  def __init__(self, gpu, mmio):
-    super().__init__(gpu, mmio, _build_ip_regs('gc', am.GC_HWIP))
+  def __init__(self, gpu, mmio, gc_version=None):
+    super().__init__(gpu, mmio, _build_ip_regs('gc', am.GC_HWIP, gc_version))
+    # Register transactions/cache handshakes are modeled; unsigned RS64 payload execution is intentionally not emulated.
+    self.faults = {'dc_invalidate_timeout': False, 'ic_invalidate_timeout': False}
+    self.write_log:list[tuple[str, int]] = []
+    self.selector = (0, 0, 0, 0)
     self._pt_base = (self.reg('regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32'), self.reg('regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32'))
     self._pt_start = (self.reg('regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32'), self.reg('regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32'))
     self._gc_inv_ack = self.reg('regGCVM_INVALIDATE_ENG17_ACK')
@@ -177,16 +181,30 @@ class MockGFX(MockIPBlock):
 
   def read(self, reg:int) -> int:
     if reg == self.reg('regCP_STAT') or reg == self.reg('regRLC_SAFE_MODE'): return 0
-    if reg == self.reg('regRLC_RLCS_BOOTLOAD_STATUS'): return 0x2
+    if reg == self.reg('regRLC_RLCS_BOOTLOAD_STATUS'): return self._regs['regRLC_RLCS_BOOTLOAD_STATUS'].encode(bootload_complete=1)
     if reg == self._gc_inv_ack: return 0x1
     return super().read(reg)
 
   def write(self, reg:int, val:int):
     super().write(reg, val)
+    name = self._a2n.get(reg, '')
+    self.write_log.append((name, val))
+    if name == 'regGRBM_GFX_CNTL':
+      bf = self._regs[name].decode(val)
+      self.selector = tuple(bf.get(x, 0) for x in ('meid', 'pipeid', 'queueid', 'vmid'))
+    # GFX11 RS64 cache invalidation completes deterministically unless explicitly faulted.
+    if name == 'regCP_MEC_DC_OP_CNTL' and self._regs[name].decode(val).get('invalidate_dcache') and not self.faults['dc_invalidate_timeout']:
+      self.mmio.regs[reg] = val | self._regs[name].encode(invalidate_dcache_complete=1)
+    if name == 'regCP_CPC_IC_OP_CNTL' and self._regs[name].decode(val).get('invalidate_cache') and not self.faults['ic_invalidate_timeout']:
+      self.mmio.regs[reg] = val | self._regs[name].encode(invalidate_cache_complete=1)
     if reg == self.reg('regCP_HQD_DEQUEUE_REQUEST'):
       if self._hqd_active is not None: self.mmio.regs[self._hqd_active] = 0
     if reg == self._hqd_active and val == 1: self._activate_pm4_queue()
     if reg == self._gc_inv_req: self.gpu.mmu.invalidate(self.get_pt_base(), self.get_va_base())
+
+  def inject_fault(self, name:str, enabled=True):
+    if name not in self.faults: raise ValueError(f"unknown MockGFX fault {name}")
+    self.faults[name] = enabled
 
   def _activate_pm4_queue(self):
     ring_addr = self._read_pair((self.reg('regCP_HQD_PQ_BASE'), self.reg('regCP_HQD_PQ_BASE_HI'))) << 8
