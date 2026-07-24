@@ -21,6 +21,8 @@ actions += [Opt(op=OptOps.LOCAL, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=6, a
 actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0, getenv("TC", 1)))]
 # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2), getenv("TC", 1))) for axis in range(9)]
+# tc_select=-1 only ever tries the first dtype-matching tensor core: BEAM_TC_SELECT=N also seeds tcs 0..N-1 (m8n16k8 wins on some shapes)
+if (tcsel:=getenv("BEAM_TC_SELECT", 0)): actions += [Opt(op=OptOps.TC, axis=axis, arg=(sel, getenv("TC_OPT", 2), getenv("TC", 1))) for sel in range(tcsel) for axis in range(9)]
 actions += [Opt(op=OptOps.SWAP, axis=axis_0, arg=axis_1) for axis_0 in range(5) for axis_1 in range(axis_0+1, 5)]
 actions += [Opt(op=OptOps.THREAD, axis=axis, arg=amt) for amt in [2,3,4,5,8,12,16,24,32,64] for axis in range(3)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
