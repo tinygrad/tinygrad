@@ -832,12 +832,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not len(ad) or not all_same(ad): return None
       return ad[0]
     return None
+  # never returns self so safe to cache
+  @functools.cached_property
+  def _after_buf_uop(self) -> UOp: return self.src[0].buf_uop.base
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
-    if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
+    if (base:=self.base).op is Ops.AFTER: return base._after_buf_uop
     s = self
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
     return s

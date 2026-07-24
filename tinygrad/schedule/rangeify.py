@@ -10,7 +10,7 @@ from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLI
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op, base_reads
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -60,13 +60,11 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.backward_slice_with_self: return None
+  hazards = [s for s,r in base_reads(src, target.base).items() if r and not (s.op is Ops.SHRINK and s is target)]
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
+  if any(s.op in {Ops.PERMUTE, Ops.FLIP} for s in hazards) or \
+     (any(s.op is Ops.SHRINK for s in hazards) and target.op_in_backward_slice_with_self(Ops.SHRINK)):
+    return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
