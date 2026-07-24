@@ -1,5 +1,6 @@
 from __future__ import annotations
 import platform, sys, os, ctypes, functools, mmap, threading, array
+from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import Buffer, BufferSpec, TinyELF
@@ -65,7 +66,7 @@ class CPUComputeQueue(HWQueue):
     args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
     assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
     for tid in range(1 if lvp else (global_size or (1,))[0]):
-      if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
+      if not lvp and 'core_id' in prg.runtimevars: args[prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
     return self
   def wait(self, signal, value=0): return self._cmd(wait_prog, (signal.base_buf,), (value,))
@@ -164,7 +165,7 @@ class CPUDevice(HCQCompiled):
     # TODO: move to hcq2
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
-      self.prgs = {f: self.runtime(do_to_program(v, ClangRenderer(self.renderer.target)).to_elf()) for f,v in prgs.items()}
+      self.prgs = {f: self.runtime(do_to_program(v, ClangRenderer(replace(self.renderer.target, renderer="CLANG"))).to_elf()) for f,v in prgs.items()}
 
   @functools.cached_property
   def ring(self) -> Buffer: return Buffer(self.device, RING_SLOTS * CMD_SIZE, dtypes.uint64, preallocate=True)
