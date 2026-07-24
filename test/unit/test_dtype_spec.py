@@ -86,6 +86,8 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor(2.34), dtypes.default_float, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])
     _assert_eq(Tensor([1]), dtypes.default_int, [1])
+    # list elements are python scalars; a numpy scalar in a list has no inferred dtype (use np.array or state a dtype)
+    with self.assertRaises(RuntimeError): Tensor([np.int32(1)])
     _assert_eq(Tensor([1.1]), dtypes.default_float, [1.1])
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))

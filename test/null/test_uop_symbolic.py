@@ -967,6 +967,28 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((x<2).where(a, b)+(x<2).where(a, 0))")
 
+  def test_where_combine_cross_zero(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable(cond.where(a, a.ufix(0)) + cond.where(b.ufix(0), b), 0, 3, "(x<2).where(a, b)")
+    self.helper_test_variable(cond.where(a, a.ufix(0)) + cond.where(a.ufix(0), a), 0, 3, "a")
+
+  def test_where_or_dual(self):
+    m1 = Variable("x", 0, 3) < 2
+    m2 = Variable("y", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable(m1.where(a, m2.where(a, b)), 0, 3, "((x<2)|(y<2)).where(a, b)")
+
+  def test_bool_ne_false(self):
+    cond = Variable("x", 0, 3) < 2
+    self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
+
+  def test_bitcast_chain(self):
+    a = Variable("a", 0, 3)
+    self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
+
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
     a = Variable("a", 0, 3)

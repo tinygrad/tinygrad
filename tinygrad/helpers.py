@@ -511,6 +511,18 @@ def capstone_flatdump(lib: bytes, arch:str):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
+def _find_llvm_objdump():
+  if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
+  # Try ROCm path first, then versioned, then unversioned
+  for p in ['/opt/rocm/llvm/bin/llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20', 'llvm-objdump']:
+    if shutil.which(p): return p
+  raise FileNotFoundError("llvm-objdump not found")
+
+def amdgpu_disassemble(lib:bytes):
+  asm = system(f"{_find_llvm_objdump()} -d -", input=lib).splitlines()
+  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
+  print("\n".join(asm))
+
 def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:

@@ -184,8 +184,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if stop is None: stop, start = start, 0
-    if dtype is None: dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
+    if dtype is None:
+      dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
+      # an int range too large for default_int picks int64
+      if dtype is dtypes.default_int and (lo < dtype.min or dtype.max < hi): dtype = dtypes.int64
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
@@ -977,11 +980,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # helper function commonly used for indexing
   def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
-    from tinygrad.uop.ops import sint_to_uop
     if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
     offset = self.ndim - self._resolve_dim(dim) - 1
-    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
-    return self.eq(type(self).arange(num_classes, dtype=dt).reshape((num_classes,) + (1,) * offset))
+    return self.eq(type(self).arange(num_classes).reshape((num_classes,) + (1,) * offset))
 
   def one_hot(self, num_classes:int) -> Self:
     """
