@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import itertools
 
 # ---- (UOp, dtype) -> Instruction tables ----
-dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16" }
+dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
@@ -491,15 +491,11 @@ def bufreg(ctx, x:UOp):
   nx = nbase.index(0)
   return nx.replace(src=nx.src + x.src[2:])
 
-wmma_op = {
-  (dtypes.float32, dtypes.float16) : RDNA3Ops.v_wmma_f32_16x16x16_f16,
-  (dtypes.float32, dtypes.bfloat16) : RDNA3Ops.v_wmma_f32_16x16x16_bf16,
-  (dtypes.float16, dtypes.float16) : RDNA3Ops.v_wmma_f16_16x16x16_f16,
-  (dtypes.bfloat16, dtypes.bfloat16) : RDNA3Ops.v_wmma_bf16_16x16x16_bf16,
-}
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
-  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{dt_to_isa[wmma.arg[1]]}")
+  srcdt = dt_to_isa[wmma.arg[1]]
+  if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
+  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
   return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(make_vgpr(ctx, width=8),))
 
 # ---- lowering passes ----
