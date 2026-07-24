@@ -12,6 +12,7 @@ from examples.mlperf.helpers import get_training_state, load_training_state
 from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
+from typing import Iterator
 
 def train_resnet():
   from extra.models import resnet
@@ -359,7 +360,6 @@ def train_retinanet():
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from tinygrad.helpers import colored
-  from typing import Iterator
 
   import numpy as np
 
@@ -2072,6 +2072,234 @@ def train_stable_diffusion():
   t3-t2: {t3-t2:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}, total_train_time:{total_train_time:.2f}
   """)
     t6 = time.perf_counter()
+
+def train_flux():
+  from examples.mlperf.dataloader import batch_load_flux
+  from examples.mlperf.helpers import (
+    generate_labels,
+    create_pos_enc_for_latents,
+    pack_latents,
+    unpack_latents
+  )
+  from examples.mlperf.models.flux import Flux
+
+  config = {}
+
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
+  SEED = config["SEED"] = getenv("SEED")
+  NUM_STEPS = config["NUM_STEPS"] = getenv("NUM_STEPS", 30000)
+  BS = config["BS"] = getenv("BS", 16)
+  FREE_INTERMEDIATE = config["FREE_INTERMEDIATE"] = getenv("FREE_INTERMEDIATE")
+  BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
+  EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
+  FAKEDATA = getenv("FAKEDATA")
+  BENCHMARK = getenv("BENCHMARK")
+
+  train_num_samples, val_num_samples = 1099776, 29696
+  target_eval_loss = 0.586
+  gbs = BS
+  eval_freq_step = math.ceil(262144 / gbs)
+  lr, lr_eps = 1e-4, 1e-8
+
+  Tensor.manual_seed(SEED)
+
+  # model
+  model = Flux(
+    guidance_embed=False,
+    in_channels=64,
+    vec_in_dim=768,
+    context_in_dim=4096,
+    hidden_size=3072,
+    mlp_ratio=4.0,
+    num_heads=24,
+    depth=19,
+    depth_single_blocks=38,
+    axes_dim=[16, 56, 56],
+    theta=10000,
+    qkv_bias=True
+  )
+  model.init_weights()
+  model.shard(GPUS)
+
+  # optim
+  optim = AdamW(get_parameters(model), lr=lr, eps=lr_eps)
+  for p in optim.params: p.grad = Tensor.zeros_like(p, dtype=optim.param_dtype)
+  grads = [p.grad for p in optim.params]
+
+  @TinyJit
+  @Context(TRAINING=1)
+  def minibatch(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
+    inputs, noise, labels, latent_dims = prepare_inputs(sample)
+    latent_noise_pred = model(**inputs)
+
+    pred = unpack_latents(latent_noise_pred, latent_dims)
+    tgt = noise - labels
+    loss = (pred - tgt).square().mean()
+
+    for p, g in zip(optim.params, loss.gradient(*optim.params)):
+      if isinstance(p.device, tuple) and g.uop.axis != p.uop.axis:
+        g = g.to(p.device[0]).shard(p.device, p.uop.axis)
+      p.grad.assign(g)
+
+    return loss.float().to("CPU").realize(*grads)
+
+  @TinyJit
+  def optim_step(optim:AdamW):
+    optim.step()
+
+  @TinyJit
+  @Context(TRAINING=0)
+  def eval_step(model:Flux, sample:dict[str, Tensor], timesteps:Tensor) -> Tensor:
+    inputs, noise, labels, latent_dims = prepare_inputs(sample, timesteps=timesteps)
+    latent_noise_pred = model(**inputs)
+
+    pred = unpack_latents(latent_noise_pred, latent_dims)
+    tgt = noise - labels
+    loss = (pred - tgt).square().mean(axis=[1, 2, 3]).sum()
+
+    return loss
+
+  # data iters
+  def get_fake_data(val:bool):
+    num_samples = val_num_samples if val else train_num_samples
+    for _ in range(num_samples // BS):
+      sample = {
+        "t5_encodings": Tensor.randn(BS, 256, 4096, dtype=dtypes.bfloat16),
+        "clip_encodings": Tensor.randn(BS, 768, dtype=dtypes.bfloat16),
+        "mean": Tensor.randn(BS, 16, 32, 32, dtype=dtypes.bfloat16),
+        "logvar": Tensor.randn(BS, 16, 32, 32, dtype=dtypes.bfloat16),
+      }
+
+      if val:
+        sample["timestep"] = Tensor.rand(BS)
+
+      yield sample
+
+  def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
+    if FAKEDATA: return get_fake_data(val)
+    return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
+
+  # helpers
+  def prepare_inputs(sample:dict[str, Tensor], timesteps:Tensor|None = None) -> tuple[dict[str, Tensor], Tensor, Tensor, tuple[int, int]]:
+    for k in sample: sample[k].shard_(GPUS, axis=None)
+    labels = generate_labels(sample["mean"], sample["logvar"])
+    clip_enc, t5_enc = sample["clip_encodings"], sample["t5_encodings"]
+
+    if timesteps is not None:
+      timesteps = timesteps / 8.0
+    else:
+      timesteps = Tensor.rand(BS)
+
+    timesteps.shard_(GPUS, axis=None)
+
+    noise = Tensor.randn_like(labels)
+    sigmas = timesteps.view(-1, 1, 1, 1)
+    latents = (1 - sigmas) * labels + sigmas * noise
+
+    b, _, latent_h, latent_w = latents.shape
+    latent_pos_enc = create_pos_enc_for_latents(b, (latent_dims := (latent_h, latent_w)), GPUS)
+    text_pos_enc = Tensor.zeros(b, t5_enc.shape[1], 3, device=GPUS)
+
+    latents = pack_latents(latents)
+
+    return (
+      {"img": latents, "img_ids": latent_pos_enc, "txt": t5_enc, "txt_ids": text_pos_enc, "y": clip_enc, "timesteps": timesteps},
+      noise,
+      labels,
+      latent_dims
+    )
+
+  # wandb
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb.init(config=config, project="MLPerf-flux.1")
+
+  train_iter, val_iter = get_data_iter(False), get_data_iter(True)
+
+  # training loop
+  i = 0
+  step_times = []
+
+  while i < NUM_STEPS:
+    GlobalCounters.reset()
+
+    st = time.perf_counter()
+    sample = next(train_iter)
+    mst = time.perf_counter()
+    data_time = mst - st
+
+    loss = minibatch(model, optim, sample).item()
+
+    gt = time.perf_counter()
+    optim_step(optim)
+    et = time.perf_counter()
+
+    optim_time = et - gt
+    dev_time = (gt - mst) + optim_time
+    step_time = et - st
+    gbs_time = gt - st
+
+    if BENCHMARK: step_times.append(step_time)
+
+    i += 1
+
+    mem_gb = GlobalCounters.mem_used / 1e9
+    gflops = GlobalCounters.global_ops / 1e9 / dev_time
+    tqdm.write(
+        f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+        f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
+
+    if WANDB:
+      wandb.log({
+        "train/loss": loss,
+        "train/lr": lr,
+        "train/step_time": step_time,
+        "train/gbs_time": gbs_time,
+        "train/optim_time": optim_time,
+        "train/dev_time": dev_time,
+        "train/data_time": data_time,
+        "train/mem": mem_gb,
+        "train/GFLOPS": gflops
+      })
+
+    if i == BENCHMARK:
+      median_step_time = sorted(step_times)[BENCHMARK // 2]
+      estimated_total_minutes = int(median_step_time * NUM_STEPS / 60)
+      print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+      print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
+            f"epoch global_mem: {GlobalCounters.global_mem:_}")
+
+    # eval loop
+    if i % eval_freq_step == 0 or (BENCHMARK and i == BENCHMARK):
+      if FREE_INTERMEDIATE:
+        if minibatch.captured is not None:
+          minibatch.captured.free_intermediates()
+
+        if optim_step.captured is not None:
+          optim_step.captured.free_intermediates()
+
+      eval_loss, eval_samples = Tensor.zeros((), device=GPUS), 0
+      for j, sample in tqdm(enumerate(val_iter), total=(val_total := val_num_samples // BS)):
+        loss = eval_step(model, sample, timesteps=sample.pop("timestep"))
+        eval_loss += loss
+        eval_samples += sample["mean"].shape[0]
+
+        if BENCHMARK and (j + 1) == min(BENCHMARK, val_total):
+          return
+
+      if FREE_INTERMEDIATE and eval_step.captured is not None: eval_step.captured.free_intermediates()
+
+      avg_loss = (eval_loss / eval_samples).float().to("CPU").item()
+
+      tqdm.write(f"eval/avg_loss: {avg_loss:.4f}")
+
+      if WANDB:
+        wandb.log({"eval/avg_loss": avg_loss})
+
+      if avg_loss <= target_eval_loss:
+        tqdm.write("target eval loss reached")
+        break
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')

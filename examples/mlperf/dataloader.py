@@ -1,8 +1,9 @@
 import os, random, pickle, queue, struct, math, functools, hashlib, time
-from typing import List
+from typing import List, Generator
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
+import io
 import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX
@@ -777,6 +778,82 @@ def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
   return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
 
+# flux
+
+class FluxDataset:
+  def __init__(self, dataset, empty_enc_dir:str|None=None, seed:int|None=None, cfg_prob:float=0.1, is_infinite:bool=True):
+    self.dataset = dataset
+    self.empty_enc_dir = Path(empty_enc_dir) if empty_enc_dir else None
+    self.cfg_prob = cfg_prob
+    self.is_infinite = is_infinite
+    self.rng = random.Random(seed)
+
+  def __iter__(self):
+    iterator = iter(self.dataset)
+
+    while True:
+      try:
+        sample = next(iterator)
+      except StopIteration:
+        if self.is_infinite:
+          iterator = iter(self.dataset)
+        else:
+          break
+
+      sample_preproc = self._preprocess_data(sample)
+
+      if "image" in sample_preproc and sample_preproc["image"] is None:
+        print(f"Low quality image {sample_preproc['id']} is skipped in FluxDataset")
+        return None
+
+      if self.cfg_prob > 0.0 and self.rng.random() < self.cfg_prob:
+        assert self.empty_enc_dir is not None, f"empty_enc_dir is {self.empty_enc_dir}"
+        sample_preproc["t5_encodings"] = Tensor(self.t5_empty_enc).cast(dtypes.bfloat16)
+        sample_preproc["clip_encodings"] = Tensor(self.clip_empty_enc).cast(dtypes.bfloat16)
+
+      yield sample_preproc
+
+  @functools.cached_property
+  def t5_empty_enc(self) -> np.ndarray:
+    return np.load(self.empty_enc_dir / "t5_empty.npy")[0]
+
+  @functools.cached_property
+  def clip_empty_enc(self) -> np.ndarray:
+    return np.load(self.empty_enc_dir / "clip_empty.npy")[0]
+
+  def _preprocess_data(self, sample:dict[str, str|bytes]) -> dict[str, Tensor]:
+    sample = sample.copy()
+    sample.pop("__key__")
+
+    sample = {k: self._deserialize_data(v) if k != "timestep" else Tensor.full((), v) for k, v in sample.items()}
+    return sample
+
+  def _deserialize_data(self, data:bytes) -> Tensor:
+    return Tensor(np.load(io.BytesIO(data))).bitcast(dtypes.bfloat16)
+
+def iterate_flux_dataset(dataset:FluxDataset, batch_size:int) -> Generator[dict[str, Tensor], None, None]:
+  dataset_iter = iter(dataset)
+  while True:
+    batch = []
+    while len(batch) < batch_size:
+      try:
+        sample = next(dataset_iter)
+      except StopIteration:
+        break
+
+      batch.append(sample)
+
+    if not batch: return
+    batch = {k: Tensor.stack(*[s[k] for s in batch]) for k in batch[0].keys()}
+    yield batch
+
+def batch_load_flux(batch_size:int, val:bool, base_dir:str, empty_enc_dir:str|None=None, seed:int|None=None, cfg_prob:float=0.1, is_infinite:bool=True) -> Generator[dict[str, Tensor], None, None]:
+  from datasets import load_from_disk
+
+  ds = load_from_disk(Path(base_dir) / ("coco_preprocessed" if val else "cc12m_preprocessed"))
+  dataset = FluxDataset(ds, empty_enc_dir, seed=seed, cfg_prob=cfg_prob, is_infinite=is_infinite)
+  return iterate_flux_dataset(dataset, batch_size)
+
 if __name__ == "__main__":
   def load_unet3d(val):
     assert not val, "validation set is not supported due to different sizes on inputs"
@@ -816,6 +893,18 @@ if __name__ == "__main__":
       min_ = min(min_, tokens.shape[1])
     print(f"max seq length: {max_}")
     print(f"min seq length: {min_}")
+
+  def load_flux(val):
+    BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
+    EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
+
+    bs = 4
+    seed = 1234
+    total_num_samples = math.ceil((29696 if val else 1099776) / bs)
+    cfg_prob = 0.0 if val else 0.1
+
+    for _ in tqdm(batch_load_flux(bs, val, BASEDIR, EMPTYENCDIR, seed=seed, cfg_prob=cfg_prob, is_infinite=False), total=total_num_samples):
+      pass
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
