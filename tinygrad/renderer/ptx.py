@@ -116,18 +116,13 @@ string_rewrite = PatternMatcher([
   # simple
   (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [] if x.addrspace == AddrSpace.REG else [
     f".shared .align 16 .b8 local{x.arg.slot}[{x.max_numel()*x.dtype.itemsize}];", f"mov.u64 {ctx.r[x]}, local{x.arg.slot}[0];"]),
-  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:"),
+  # loop (ranges are rewritten to loops in codegen), a bool src is a one-time entry guard for possibly zero trip counts
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx, l:
+    [f"@!{ctx.r[g]} bra WAITLOOP_EXIT_{ctx.uops.index(l)};", f"WAITLOOP_{ctx.uops.index(l)}:"] \
+    if (g:=next((s for s in l.src if s.dtype is dtypes.bool), None)) is not None else f"WAITLOOP_{ctx.uops.index(l)}:"),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
-    f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
-  (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
-    f"mov.u32 {ctx.r[r]}, -1;",
-    f"bra END_{ctx.r[r][1:]};",
-    "LOOP_" + f"{ctx.r[r][1:]}:"]),
-  (UPat(Ops.END, name="x", src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda ctx, x, r: [
-    "END_" + f"{ctx.r[r][1:]}:",
-    ctx.code_for_op[Ops.ADD](ctx.r[r], ctx.r[r], "1", dtypes.int, ctx.types[dtypes.int]),
-    ctx.code_for_op[Ops.CMPLT](ctx.r[x], ctx.r[r], ctx.r[r.src[0]], dtypes.int, ctx.types[dtypes.int]),
-    f"@{ctx.r[x]} bra LOOP_{ctx.r[r][1:]};"]),
+    [f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"] +
+    ([f"WAITLOOP_EXIT_{ctx.uops.index(l)}:"] if any(s.dtype is dtypes.bool for s in l.src) else [])),
   (UPat(Ops.IF, name="x"), lambda ctx, x: f"@!{ctx.r[x.src[0]]} bra IF_{ctx.r[x.src[0]][1:]}_{ctx.uops.index(x)};"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
@@ -136,6 +131,7 @@ string_rewrite = PatternMatcher([
 
 class PTXRenderer(Renderer):
   suffix = "PTX"
+  supports_ranges = False
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
