@@ -89,7 +89,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x in (dtypes.ints + (dtypes.weakint, dtypes.index))
+  def is_int(x: DType) -> bool: return x in (dtypes.ints + (dtypes.weakint,))
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x in dtypes.uints
@@ -111,8 +111,7 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  weakint: Final[DType] = DType.new(0, 800, "weakint", None)
-  index: Final[DType] = DType.new(0, 800, "index", None)  # NOTE: not in the promo lattice: index math never mixes dtypes
+  weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # NOTE: not in the promo lattice: index math never mixes dtypes
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
@@ -154,7 +153,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  weaks = (weakint, weakfloat)
+  weaks = (weakfloat,)
   all = floats + ints + (bool,) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
@@ -164,12 +163,13 @@ if (env_default_float := getenv("DEFAULT_FLOAT", "")):
 DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
 def strong_dtype(dtype:DType) -> DType:
-  return dtypes.default_int if dtype == dtypes.weakint else dtypes.default_float if dtype == dtypes.weakfloat else dtype
+  # TODO: weakint
+  return dtypes.default_float if dtype == dtypes.weakfloat else dtype
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support complex type
-promo_lattice = { dtypes.bool: [dtypes.weakint], dtypes.weakint: [dtypes.int8, dtypes.uint8],
-  dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
+# TODO: weakint
+promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.weakfloat],
   dtypes.weakfloat: [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.fp8e4m3fnuz, dtypes.fp8e5m2fnuz],
@@ -185,8 +185,8 @@ def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "index", "_"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "index":"index", "weakfloat":"weakfloat"}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
@@ -194,7 +194,7 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
-    case dtypes.weakint | dtypes.index: return dt0 in dtypes.ints
+    case dtypes.weakint: return dt0 in dtypes.ints
     case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
     case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)

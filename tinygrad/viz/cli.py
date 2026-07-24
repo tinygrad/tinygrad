@@ -47,6 +47,7 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def to_str(k:str, v) -> str:
+  if isinstance(v, str): return f"{k} {v}"
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
   return f"{k}={v}"

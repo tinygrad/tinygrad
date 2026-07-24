@@ -3,6 +3,7 @@ from tinygrad import Tensor
 from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid, dtypes
 from tinygrad.engine.realize import run_linear
+from tinygrad.uop.ops import Ops, UOp
 
 class TestInvalidTensor(unittest.TestCase):
   def _invalid_test_helper(self, out, expected):
@@ -131,6 +132,16 @@ class TestInvalidTensor(unittest.TestCase):
     idx = (Tensor.arange(4) < 2).where(Tensor([0, 1, 2, 3]), Invalid)
     out = Tensor([1.0, 2.0, 3.0, 4.0])[idx]
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
+
+  def test_uop_where_keeps_invalid_bare(self):
+    cond = UOp.const(dtypes.weakint, 0) < UOp.const(dtypes.weakint, 1)
+    idx = UOp(Ops.STACK, src=tuple(UOp.const(dtypes.weakint, x) for x in range(3)))
+    out = cond.where(idx, UOp.invalid())
+    self.assertIs(cond.op, Ops.CMPLT)
+    self.assertIs(idx.op, Ops.STACK)
+    self.assertIs(out.op, Ops.WHERE)
+    self.assertIs(out.src[2].op, Ops.CONST)
+    self.assertIs(out.src[2].arg, Invalid)
 
 if __name__ == '__main__':
   unittest.main()

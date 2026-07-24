@@ -617,6 +617,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
   def Div(x:Tensor,y:Tensor): return x.div(y, rounding_mode='trunc' if dtypes.is_int(x.dtype) else None)
+  # ONNX Pow is (T, T1) -> T, the output takes the base dtype while Tensor.pow promotes base and exponent
+  def Pow(x:Tensor,y:Tensor): return x.pow(y).round().cast(x.dtype) if dtypes.is_int(x.dtype) else x.pow(y)
   def Less(x:Tensor,y:Tensor): return x < y
   def LessOrEqual(x:Tensor,y:Tensor): return x <= y
   def Greater(x:Tensor,y:Tensor): return x > y
@@ -1297,7 +1299,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   return {
     # Tensor ops
-    **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
+    **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops

@@ -69,6 +69,18 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertLess(min(tms), 4)  # best-of-5 is robust to CI scheduling pauses; new code takes ~60ms
     self.assertEqual(len(words), 50001)
 
+  def test_llama_continued_conversation(self):
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world", [15339, 220, 128009, 14957])
+    self._test_coding(self.llama_tok, "hello <|eot_id|>world again", [15339, 220, 128009, 14957, 1578])
+    self._test_coding(self.llama_tok, "hello changed <|eot_id|>world again", [15339, 5614, 220, 128009, 14957, 1578])
+
+  def test_long_cached_prompt_matches_fresh_tokenization(self):
+    prefix = "system tools\n" * 700 + "<|eot_id|>"
+    first, changed = prefix + "run tower of hanoi", prefix + "run ls /"
+    expected = self.llama_tok.encode(changed)
+    self.llama_tok.encode(first)
+    self.assertEqual(self.llama_tok.encode(changed), expected)
+
   def test_tekken_from_gguf_kv(self):
     kv = {
       "tokenizer.ggml.tokens": ["<unk>", "<s>", "</s>", "[INST]", "[/INST]", "hello"],

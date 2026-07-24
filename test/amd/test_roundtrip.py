@@ -121,7 +121,8 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     arch = self.arch
 
     from tinygrad.runtime.support.elf import elf_loader
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
     from tinygrad.helpers import DEV
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)

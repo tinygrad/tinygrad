@@ -183,10 +183,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
-    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
-  def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
+    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
+  def _as_buffer(self, src:MetalBuffer) -> memoryview: return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

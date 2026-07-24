@@ -15,12 +15,22 @@ class TestWinograd(unittest.TestCase):
     out = Tensor.conv2d(x,w)
     self.assertEqual(len(out.schedule_linear().src), 4)
 
-  def test_backward_kernels(self):
-    x,w = Tensor.empty(1,4,9,9).realize(), Tensor.empty(4,4,3,3).realize()
-    out = Tensor.conv2d(x,w, padding=1)
-    out.mean().backward()
-    backward_schedule = x.grad.schedule_linear(w.grad)
-    self.assertEqual(len(backward_schedule.src), 4)
+  def test_backward_counters(self):
+    # contiguous_backward on the pooled input keeps the input-transform adjoint out of the overlap accumulation, so
+    # winograd backward runs in a fraction of the direct-conv flops; NOOPT=1 keeps the raw flop ratio from drifting with the optimizer
+    IC, OC, H = 64, 64, 28
+    x,w = Tensor.empty(1,IC,H,H,device="NULL").realize(), Tensor.empty(OC,IC,3,3,device="NULL").realize()
+    x.requires_grad = w.requires_grad = True
+    def backward_ops(wino):
+      x.grad = w.grad = None
+      GlobalCounters.reset()
+      with Context(NOOPT=1, WINO=wino):
+        Tensor.conv2d(x,w,padding=1).mean().backward()
+        Tensor.realize(x.grad, w.grad)
+      return GlobalCounters.global_ops
+    ops_wino, ops_normal = backward_ops(1), backward_ops(0)
+    print(f"backward ops: normal {ops_normal} wino {ops_wino} ratio {ops_wino/ops_normal:.2f}")
+    self.assertLess(ops_wino/ops_normal, 0.35)
 
   def test_counters(self):
     IC, OC, H = 64, 64, 28

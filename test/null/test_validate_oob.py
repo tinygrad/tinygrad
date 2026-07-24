@@ -90,6 +90,13 @@ class TestValidateOOB(unittest.TestCase):
       to_uops_list([buf.index(r & 15).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r & 31).load(dtype=dtypes.int)])  # 0..31 oob
+      # align masks round down to a multiple of 2^k
+      to_uops_list([buf.index((r & -4).valid(r < 16)).load(dtype=dtypes.int)])  # 0..12 valid
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(r & -2).load(dtype=dtypes.int)])  # 0..100 oob
+      # other masks can't be modeled as mod
+      with self.assertRaisesRegex(RuntimeError, "z3 int AND only supports"):
+        to_uops_list([buf.index(r & 21).load(dtype=dtypes.int)])
 
   def test_max(self):
     with Context(CHECK_OOB=1, SPEC=2):
@@ -126,7 +133,7 @@ class TestValidateOOB(unittest.TestCase):
       buf0 = UOp.param(0, dtypes.int, (16,))
       buf1 = UOp.param(1, dtypes.int, (64,))
       r = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = buf0.index(r.valid(r < 8)).load(dtype=dtypes.int).cast(dtypes.index)
+      ld0 = buf0.index(r.valid(r < 8)).load(dtype=dtypes.int).cast(dtypes.weakint)
       to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32))).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])  # oob
@@ -135,7 +142,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, (16,))
       buf_int = UOp.param(1, dtypes.int, (8,))
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.index, 16),), arg="gidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.weakint, 16),), arg="gidx0")
       ld_bool = buf_bool.index(gidx).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool)).load()])  # gidx 0..15, buf_int size 8

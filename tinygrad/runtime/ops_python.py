@@ -48,7 +48,6 @@ class PythonProgram:
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
-    void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.STORE}
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
       pbufs: list[memoryview] = list(bufs)
@@ -57,11 +56,15 @@ class PythonProgram:
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.op not in void_ops]
-        src_dtypes = [v.dtype for v in u.src if v.op not in void_ops]
+        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
-          i = self.uop_to_index[u.src[1]]
+          if len(u.src) == 3:
+            # conditional backedge on a loop: jump back while the condition is true
+            if values[u.src[2]][0]: i = self.uop_to_index[u.src[1]]
+            else: i += 1
+          else: i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
@@ -71,7 +74,7 @@ class PythonProgram:
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
           continue

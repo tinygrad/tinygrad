@@ -61,7 +61,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
     buf = buf.src[0]
     if byte_offset % buf.dtype.itemsize != 0: return None
     offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.index, offset)), src.numel())
+  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(dtypes.weakint, offset)), src.numel())
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
@@ -151,7 +151,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
-   lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+   lambda x: None if x.tag is None else x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
@@ -180,8 +180,9 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, b.src[0].expr if b.op is Ops.BIND else None,
-                   b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
+                   b._min_max if b.op is Ops.BIND else None, name=b.src[0].expr if b.op is Ops.BIND else None,
+                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL,
+                   multiple_of=b.src[0].arg.multiple_of if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
@@ -193,7 +194,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.index)), name="b"), replace_input_buffer),
+  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.weakint)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
