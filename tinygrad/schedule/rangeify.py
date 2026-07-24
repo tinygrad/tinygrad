@@ -530,11 +530,18 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
+pm_copy_is_store = PatternMatcher([
+  (UPat(Ops.COPY, name="x"), lambda ctx,x:
+   (buf:=UOp(Ops.BUFFER, src=(shape_to_shape_arg(x.max_shape),), arg=ParamArg(next(ctx), x.dtype, device=x.device))).after(buf.store(x.src[0]))),
+])
+
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+
+  tsink = graph_rewrite(tsink, pm_copy_is_store, ctx=itertools.count(0), name="convert copy to store")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
