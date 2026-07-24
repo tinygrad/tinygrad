@@ -1314,6 +1314,8 @@ class UPat(OpMixin):
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)
 
   # copied from UOp
+  def sink(*srcs:UPat|None, **kwargs):  # pylint: disable=no-self-argument
+    return UPat(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
   def index(self, *srcs:UPat|None, **kwargs):
     return UPat(Ops.INDEX, src=(self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):

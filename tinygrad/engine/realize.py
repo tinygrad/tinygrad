@@ -242,21 +242,12 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
-def store_to_copy(call:UOp, sink:UOp) -> UOp|None:
-  if sink.op is not Ops.SINK: return None
-  params = [u for u in sink.toposort() if u.op is Ops.PARAM]
-  if len(params) != 2: return None
-  if not params[0].arg.device or not params[1].arg.device or params[0].arg.device == params[1].arg.device: return None
-  stores = [u for u in sink.toposort() if u.op is Ops.STORE]
-  if len(stores) != 1: return None
-  # only convert pure copies — the stored value must be a load, not a computed value
-  if stores[0].src[1].op is not Ops.INDEX: return None
-  dest_param, src_param = sorted(params, key=lambda p: p.arg.slot)
-  copy_ast = UOp(Ops.COPY, dtype=src_param.dtype, src=(src_param,), arg=dest_param.arg.device)
-  return call.replace(src=(copy_ast,) + call.src[1:])
-
 pm_copy_from_store = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), store_to_copy),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),), name="call", allow_any_len=True),
+   lambda call, dst, src, r:
+     call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
+     if dst.device != src.device else None),
 ])
 
 pm_compile = PatternMatcher([
