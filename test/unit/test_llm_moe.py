@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.llm.model import TransformerBlock, TransformerConfig
+from tinygrad.llm.model import ExpertWeights, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
   return TransformerConfig(
@@ -12,6 +12,20 @@ def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=
     num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
 
 class TestMoEFeedForward(unittest.TestCase):
+  def test_packed_expert_decode_only_dispatch(self):
+    class PackedWeight:
+      calls = 0
+      def matvec(self, x:Tensor, rows:Tensor) -> Tensor:
+        self.calls += 1
+        return Tensor.zeros(*x.shape[:-1], 3)
+
+    expert = ExpertWeights(num_experts=4, in_features=8, out_features=3)
+    expert.packed_weight = packed = PackedWeight()
+    expert(Tensor([[[0, 1]]]), Tensor.zeros(1, 1, 1, 8)).realize()
+    self.assertEqual(packed.calls, 1)
+    expert(Tensor([[[0, 1], [2, 3]]]), Tensor.zeros(1, 2, 1, 8)).realize()
+    self.assertEqual(packed.calls, 1)
+
   def test_moe_feed_forward(self):
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2

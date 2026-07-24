@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
-from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.gguf import gguf_load, GGMLQuantizedTensor
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -17,6 +17,8 @@ class ExpertWeights:
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
+    if x.shape[1] == 1 and hasattr(self, "packed_weight"):
+      return self.packed_weight.matvec(x.expand(*sel.shape, x.shape[-1]), sel)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
@@ -324,10 +326,13 @@ class Transformer:
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
                 realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf,
+      preserve_quantized=lambda name, typ: typ in (12, 13) and ".ffn_" in name and "_exps.weight" in name)
 
     # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
+    packed_state = {k:v for k,v in state_dict.items() if isinstance(v, GGMLQuantizedTensor)}
+    state_dict = {k:(v.dequantized() if isinstance(v, GGMLQuantizedTensor) else v).cast('float16') if getenv("HALF", 1) else
+                  (v.dequantized() if isinstance(v, GGMLQuantizedTensor) else v) for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -383,6 +388,9 @@ class Transformer:
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    for name, packed in packed_state.items():
+      _, block_idx, expert_name, _ = name.split(".")
+      getattr(model.blk[int(block_idx)], expert_name).packed_weight = packed.cast('float16') if getenv("HALF", 1) else packed
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())

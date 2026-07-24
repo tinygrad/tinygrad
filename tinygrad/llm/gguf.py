@@ -1,10 +1,12 @@
 import functools, io, pathlib, re, struct
-from typing import Any, Callable
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Self
 
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType, DTypeLike, to_dtype
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 @functools.lru_cache(None)
@@ -19,6 +21,56 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 # quant types {ggml_type: (number of elements, number of bytes)}
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
+
+def _ggml_qk_matvec(out:UOp, x:UOp, raw:UOp, rows:UOp, ggml_type:int) -> UOp:
+  routes, outputs, K = out.shape[0], out.shape[1], x.shape[1]
+  _, block_bytes = _GGML_QUANT[ggml_type]
+  row_bytes = K // 256 * block_bytes
+  route, output = UOp.range(routes, 0, AxisType.GLOBAL), UOp.range(outputs, 1, AxisType.GLOBAL)
+  k = UOp.range(K, 2, AxisType.REDUCE)
+  block, within = k.cast(dtypes.int64) // 256, k.cast(dtypes.int64) % 256
+  group, lane = within // 32, within % 32
+  base = (rows[route].cast(dtypes.int64) * outputs + output.cast(dtypes.int64)) * row_bytes + block * block_bytes
+  def fp16(offset:int) -> UOp:
+    bits = raw[base + offset].cast(dtypes.uint16).bitwise_or(raw[base + offset + 1].cast(dtypes.uint16).lshift(8))
+    return bits.bitcast(dtypes.float16).cast(dtypes.float)
+  scale_group = group % 4
+  scale_lo, min_lo = raw[base + 4 + scale_group].bitwise_and(63), raw[base + 8 + scale_group].bitwise_and(63)
+  scale_hi = raw[base + 12 + scale_group].bitwise_and(15).bitwise_or(raw[base + 4 + scale_group].rshift(6).lshift(4))
+  min_hi = raw[base + 12 + scale_group].rshift(4).bitwise_or(raw[base + 8 + scale_group].rshift(6).lshift(4))
+  scale, min_scale = (group < 4).where(scale_lo, scale_hi), (group < 4).where(min_lo, min_hi)
+  qs_offset = 48 if ggml_type == 13 else 16
+  qbyte = raw[base + qs_offset + (group // 2) * 32 + lane]
+  quant = (group % 2).eq(0).where(qbyte.bitwise_and(15), qbyte.rshift(4)).cast(dtypes.float)
+  if ggml_type == 13: quant = quant + raw[base + 16 + lane].rshift(group).bitwise_and(1).cast(dtypes.float) * 16
+  weight = fp16(0) * scale.cast(dtypes.float) * quant - fp16(2) * min_scale.cast(dtypes.float)
+  value = (x[route, k].cast(dtypes.float) * weight).reduce(k, arg=Ops.ADD)
+  return out[route, output].store(value.cast(out.dtype)).end(route, output).sink(
+    arg=KernelInfo(name=f"ggml_q{4 if ggml_type == 12 else 5}_k_matvec_{routes}_{outputs}_{K}", opts_to_apply=()))
+
+@dataclass(frozen=True, slots=True)
+class GGMLQuantizedTensor:
+  raw:Tensor
+  shape:tuple[int, ...]
+  ggml_type:int
+  dtype:DType = dtypes.float32
+
+  def cast(self, dtype:DTypeLike) -> Self: return replace(self, dtype=to_dtype(dtype))
+
+  def dequantized(self) -> Tensor:
+    return ggml_data_to_tensor(self.raw, prod(self.shape), self.ggml_type).reshape(self.shape).cast(self.dtype)
+
+  def matvec(self, x:Tensor, rows:Tensor|None=None) -> Tensor:
+    assert self.ggml_type in (12, 13), f"packed matvec only supports Q4_K and Q5_K, got {self.ggml_type}"
+    assert len(self.shape) in (2, 3) and self.shape[-1] == x.shape[-1] and self.shape[-1] % 256 == 0
+    leading, outputs, K = x.shape[:-1], self.shape[-2], self.shape[-1]
+    if rows is None: rows = Tensor.zeros(*leading, dtype=dtypes.int32, device=x.device)
+    assert rows.shape == leading and self.raw.device == x.device
+    routes = prod(leading)
+    out = Tensor.empty(routes, outputs, dtype=self.dtype, device=x.device)
+    ret = Tensor.custom_kernel(out, x.reshape(routes, K), self.raw.reshape(-1), rows.reshape(routes),
+                               fxn=functools.partial(_ggml_qk_matvec, ggml_type=self.ggml_type))[0]
+    return ret.reshape(*leading, outputs)
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -129,7 +181,12 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+def _ggml_nbytes(n:int, ggml_type:int) -> int:
+  if (dtype := _GGML_NATIVE.get(ggml_type)) is not None: return n * dtype.itemsize
+  block_elems, block_bytes = _GGML_QUANT[ggml_type]
+  return n // block_elems * block_bytes
+
+def _gguf_parse(tensor: Tensor, preserve_quantized:Callable[[str, int], bool]|None=None) -> tuple[dict, dict[str, Tensor|GGMLQuantizedTensor]]:
   # TODO: remove the need for copy to default device
   tensor = tensor.to(None).realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
@@ -145,7 +202,12 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  state_dict:dict[str, Tensor|GGMLQuantizedTensor] = {}
+  for name, dims, typ, off in t_infos:
+    shape, n = tuple(reversed(dims)), prod(dims)
+    raw = tensor[data_start + off:data_start + off + _ggml_nbytes(n, typ)]
+    state_dict[name] = GGMLQuantizedTensor(raw, shape, typ) if preserve_quantized is not None and preserve_quantized(name, typ) else \
+      ggml_data_to_tensor(raw, n, typ).reshape(shape)
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
@@ -154,7 +216,8 @@ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
   return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
 
-def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
+def gguf_load(fn: Tensor|str|pathlib.Path, preserve_quantized:Callable[[str, int], bool]|None=None) -> \
+    tuple[dict, dict[str, Tensor|GGMLQuantizedTensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
 
@@ -169,8 +232,8 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), preserve_quantized)
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), preserve_quantized)[1])
   return kv, sd
