@@ -60,13 +60,17 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.backward_slice_with_self: return None
-  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  base = target.base
   reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
+  shrink_unsafe: bool|None = None
+  # don't walk below AFTER (prior kernel)
+  for s in src.toposort(gate=lambda s: s.op not in {Ops.CONTIGUOUS, Ops.AFTER}):
+    reaches_base[s] = reaches = any(c is base or reaches_base.get(c) for c in s.src)
+    if not reaches: continue
+    # PERMUTE and FLIP reorder indices SHRINK can have overlapping regions when dest is also shrunk
+    if s.op is Ops.SHRINK and shrink_unsafe is None: shrink_unsafe = target.op_in_backward_slice_with_self(Ops.SHRINK)
+    if s.op in {Ops.PERMUTE, Ops.FLIP} or (s.op is Ops.SHRINK and s is not target and shrink_unsafe):
+      return target.store(src.contiguous())
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None

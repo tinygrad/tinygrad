@@ -22,8 +22,11 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   if src.op in {Ops.COPY, Ops.SLICE} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
-  # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.backward_slice_with_self: ctx[src] = None
+  # WAR hazard (TestAssign.test_assign_double_diamond_reduce) dont walk below AFTER/CONTIGUOUS (other kernels)
+  base, reaches = dest.base, {}
+  for s in src.toposort(gate=lambda s: s.op not in {Ops.AFTER, Ops.CONTIGUOUS}):
+    reaches[s] = any(c is base or reaches.get(c) for c in s.src)
+  if src is base or reaches.get(src): ctx[src] = None
 
 pm_generate_realize_map = PatternMatcher([
   # always realize

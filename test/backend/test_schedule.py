@@ -211,6 +211,20 @@ class TestLimitBufs(unittest.TestCase):
     t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
     self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
 
+class TestAssignScaling(unittest.TestCase):
+  def test_assign_chain_linear_scaling(self):
+    def sched_time(n):
+      with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+        x = Tensor.zeros(16).contiguous().realize()
+        for _ in range(n): x = x.assign(x + 1)
+        with Context(SCACHE=0):
+          st = time.perf_counter()
+          x.schedule_linear()
+          return time.perf_counter() - st
+    sched_time(200)
+    t1, t2 = min(sched_time(200) for _ in range(3)), min(sched_time(1600) for _ in range(3))
+    self.assertLess(t2/t1, 20, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
+
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
     Tensor.manual_seed(0)
