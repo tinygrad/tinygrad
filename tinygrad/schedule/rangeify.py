@@ -533,10 +533,19 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
-pm_copy_is_store = PatternMatcher([
-  (UPat(Ops.COPY, name="x"), lambda ctx,x:
-   (buf:=UOp(Ops.BUFFER, src=(shape_to_shape_arg(x.max_shape),), arg=ParamArg(next(ctx), x.dtype, device=x.device))).after(buf.store(x.src[0]))),
-])
+def convert_copy_to_store(ctx, x:UOp):
+  # x is the copy
+  input_src = x.src[0]
+  # if the src doesn't have buffer identity, we need to contiguous it
+  if not input_src.has_buffer_identity(): input_src = input_src.contiguous()
+  # flatten the input
+  input_src = input_src.flatten()
+  # create the output buffer
+  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), x.dtype, device=x.device))
+  # reshape back to input
+  return buf.after(buf.store(input_src)).reshape(x.shape)
+
+pm_copy_is_store = PatternMatcher([(UPat(Ops.COPY, name="x"), convert_copy_to_store),])
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:

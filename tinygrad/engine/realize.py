@@ -244,7 +244,7 @@ pm_beam = PatternMatcher([
 
 def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
-  assert len(devices) == 1, f"device mismatch: {devices}"
+  assert len(devices) <= 1, f"device mismatch: {devices}"
 
 pm_copy_from_store = PatternMatcher([
   # TODO: make RANGE optional in a cleaner way
@@ -260,6 +260,7 @@ pm_copy_from_store = PatternMatcher([
    lambda call, dst, src, r:
      call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
      if dst.device != src.device else None),
+  # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
 
