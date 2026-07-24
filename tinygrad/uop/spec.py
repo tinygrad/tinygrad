@@ -67,6 +67,7 @@ spec_shared = PatternMatcher([
    lambda w: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in w.src[1:])),
   (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
    lambda x,y: x.dtype == y.dtype or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
+  (UPat((Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR), name="x"), lambda x: False if any(dtypes.is_float(s.dtype) for s in x.src) else None),
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype or None),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(y.dtype == x.dtype or y.dtype in dtypes.weaks for y in x.src)),

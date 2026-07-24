@@ -1,6 +1,6 @@
 from typing import Callable
 import functools
-from tinygrad.dtype import dtypes, promo_lattice
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.renderer import Renderer
 
@@ -35,8 +35,10 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
     if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
-  # promo_lattice needs to return an unsigned type if the type is unsigned
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and next_dtype in ren.supported_dtypes():
+  # the next integer width that holds x*m
+  widen = {dtypes.int8:dtypes.int16, dtypes.int16:dtypes.int32, dtypes.int32:dtypes.int64, dtypes.int64:dtypes.uint64,
+           dtypes.uint8:dtypes.uint16, dtypes.uint16:dtypes.uint32, dtypes.uint32:dtypes.uint64}
+  if (next_dtype := widen.get(x.dtype)) is not None and next_dtype in ren.supported_dtypes():
     if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None

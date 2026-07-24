@@ -1,5 +1,5 @@
 import unittest, threading, time, json
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -66,20 +66,18 @@ class TestLLMServer(unittest.TestCase):
       self.assertEqual(chunk.model, "test-model")
 
   def test_stream_with_usage(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=True,
-      stream_options={"include_usage": True}
-    )
-
-    chunks = list(stream)
+    def generate(ids, **kwargs):
+      for token in (300, 301, 999):
+        ids.append(token)
+        yield token
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      chunks = list(self.client.chat.completions.create(
+        model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
 
-    self.assertIsNotNone(last_chunk.usage)
-    self.assertIsNotNone(last_chunk.usage.prompt_tokens)
-    self.assertIsNotNone(last_chunk.usage.completion_tokens)
-    self.assertIsNotNone(last_chunk.usage.total_tokens)
+    self.assertEqual(last_chunk.usage.prompt_tokens, 3)
+    self.assertEqual(last_chunk.usage.completion_tokens, 2)
+    self.assertEqual(last_chunk.usage.total_tokens, 5)
 
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
