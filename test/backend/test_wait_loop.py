@@ -82,7 +82,6 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
 
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "loops are not supported in X86")
 class TestWaitLoop(unittest.TestCase):
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
@@ -109,7 +108,6 @@ class TestWaitLoop(unittest.TestCase):
     self.assertEqual(c.item(), 12)
 
 @unittest.skipUnless(Device.DEFAULT in ("CPU", "AMD", "NV"), "need proper uncached=True handling")
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "loops are not supported in X86")
 class TestVolatileLoops(unittest.TestCase):
   def test_async_wait_ext(self):
     sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
