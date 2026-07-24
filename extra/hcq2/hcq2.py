@@ -37,22 +37,8 @@ class HCQInfo:
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
-def unwrap_after(uop):
-  while uop.op is Ops.AFTER: uop = uop.src[0]
-  return uop
-
 def unwrap_mstack(u):
   return tuple(x for s in u.src for x in unwrap_mstack(s)) if u.op is Ops.MSTACK else (unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,))
-
-def make_getaddr(u, device=None):
-  if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM): return u
-  return UOp(Ops.GETADDR, dtypes.uint64, src=(u,), arg=device or to_tuple(u.device)[0])
-
-def make_ins(op, *srcs):
-  return UOp(Ops.INS, arg=op, src=tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs))
-
-def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
-  return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "temp")
 
 def make_patch(buf:UOp, off:sint, val:UOp) -> UOp:
   return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(buf.dtype))
@@ -67,19 +53,25 @@ def make_cmdbuf(lin, devs):
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
     blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
-  cmdbuf = make_placeholder(devs, len(blob) // 4, dtypes.uint32, name="cmdbuf")
+  cmdbuf = UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   return cmdbuf.after(make_binary_patch(cmdbuf, blob), *[make_patch(cmdbuf, off, s) for off, s in patches])
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
 def make_signal(devs, queue="COMPUTE:0", sentinel=False):
-  return make_placeholder(devs, 1, dtypes.uint64, "sentinel_signal" if sentinel else f"{queue}_timeline_signal", unique=False)
+  return UOp.placeholder((1,), dtypes.uint64, 0, device=devs).rtag("sentinel_signal" if sentinel else f"{queue}_timeline_signal")
 def make_signal_value(devs, queue="COMPUTE:0"):
-  return make_placeholder(devs, 1, dtypes.uint64, f"{queue}_timeline_value", unique=False)
+  return UOp.placeholder((1,), dtypes.uint64, 0, device=devs).rtag(f"{queue}_timeline_value")
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)))
 def get_submit(ast:UOp) -> UOp: return next(u for u in ast.toposort() if u.op is Ops.CUSTOM_FUNCTION and u.arg == "submit_cmdbuf")
+
+def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
+  data, info = prg.arg
+  buf = UOp.placeholder((data.kernargs_alloc_size // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("kernargs")
+  words = [w for gi in info.globals for w in data64_le(get_call_arg_uops(call)[gi].getaddr(devs))] + list(info.vars)
+  return buf.after(*[make_patch(buf, i * 4, w) for i, w in enumerate(words)])
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -180,19 +172,18 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
   waited |= finalizer_waited
 
   src = []
-  for tag, ((call, _), (devices, queue), cmds) in enumerate(zip(batch, batch_info, call_waits)):
+  for tag, ((call, _), (devices, queue), q) in enumerate(zip(batch, batch_info, call_waits)):
     # first queue use, sync prior device work with main signal
     if batch_info.index((devices, queue)) == tag:
-      epoch = UOp(Ops.INS, arg="wait", src=(make_signal(devices), make_signal_value(devices).index(0) - 1))
-      cmds = [UOp(Ops.INS, arg="barrier", src=()), epoch] + cmds
+      q = [UOp(Ops.INS, arg="barrier", src=()), UOp(Ops.INS, arg="wait", src=(make_signal(devices), make_signal_value(devices).index(0) - 1))] + q
 
     # and make hcq call
     info = HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), devices, queue)
-    cmds = [*cmds, call.replace(arg=replace(call.arg, aux=info))]
+    q += [call.replace(arg=replace(call.arg, aux=info))]
 
     # signal queue timeline if someone waits for us
-    if tag in waited: cmds += [UOp(Ops.INS, arg="store", src=(make_signal(devices, queue), make_signal_value(devices, queue).index(0) + tag))]
-    src.append(UOp.custom_function("hcq", make_submit(*cmds, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
+    if tag in waited: q += [UOp(Ops.INS, arg="store", src=(make_signal(devices, queue), make_signal_value(devices, queue).index(0) + tag))]
+    src.append(UOp.custom_function("hcq", make_submit(*q, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
   return src + finalizers
 
 def sched_hcq_batches(l:UOp) -> UOp:
@@ -237,15 +228,6 @@ def merge_queues(linear:UOp) -> UOp:
 pm_merge_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), merge_queues)])
 
 # *****************
-# 4.1. hcq lowering: programs
-
-def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
-  data, info = prg.arg
-  buf = make_placeholder(devs, data.kernargs_alloc_size // 4, dtypes.uint32, name="kernargs")
-  words = [w for gi in info.globals for w in data64_le(make_getaddr(get_call_arg_uops(call)[gi], devs))] + list(info.vars)
-  return buf.after(*[make_patch(buf, i * 4, w) for i, w in enumerate(words)])
-
-# *****************
 # 4.2. hcq lowering: ops to ir
 
 def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
@@ -287,16 +269,17 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 # *****************
 
 def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
-  bare = {g: g.replace(src=(unwrap_after(g.src[0]),)) for g in gaddrs}
+  bare = {g: g.replace(src=(g.src[0].without_after,)) for g in gaddrs}
 
   order = sorted(dedup(bare.values()), key=lambda g: ((b:=unwrap_mstack(g.buf_uop)[0]).arg.slot, repr(b.tag)))
-  slots, table = {g:i for i,g in enumerate(order)}, make_placeholder(call.arg.aux.device, len(order), dtypes.uint64, name)
+  slots = {g:i for i,g in enumerate(order)}
+  table = UOp.placeholder((len(order),), dtypes.uint64, next(UOp.unique_num), device=call.arg.aux.device).rtag(name)
 
   reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(dtypes.int, slots[bare[g]])).load() for g in gaddrs}
   return reads, (table.after(*[make_patch(table, i * table.dtype.itemsize, addr) for addr, i in slots.items()]),) if slots else ()
 
 def make_blob_bufs(call:UOp, blobs:list[UOp]) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
-  bufs = {b: make_placeholder(call.arg.aux.device, b.max_numel(), b.dtype, "template") for b in blobs}
+  bufs = {b: UOp.placeholder((b.max_numel(),), b.dtype, next(UOp.unique_num), device=call.arg.aux.device).rtag("template") for b in blobs}
   return bufs, tuple(buf.after(make_binary_patch(buf, b.src[0].arg)) for b,buf in bufs.items())
 
 def rm_rt_uops(call:UOp) -> UOp|None:
@@ -323,7 +306,7 @@ def replace_params(call:UOp) -> UOp|None:
   by_root = {p.src[0]: p for p in patched}
   c_args = [by_root.get(a, a) for a in args]
 
-  sub = {unwrap_after(u): UOp.param(i, u.dtype, shape=unwrap_after(u).shape, device=u.device) for i,u in enumerate(c_args)} | \
+  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device) for i,u in enumerate(c_args)} | \
         {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
@@ -333,7 +316,7 @@ pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTIO
 
 def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   base = bv.src[0].after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ())
-  itemsize = bv.src[0].dtype.itemsize if unwrap_after(bv.src[0]).op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
+  itemsize = bv.src[0].dtype.itemsize if bv.src[0].without_after.op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
   return UOp(Ops.GETADDR, dtypes.uint64, src=(base,), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
 
 pm_early_simplify = PatternMatcher([
@@ -354,7 +337,7 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
       offs[b] = round_up(sizes.get(b.tag, 0), 128 // b.dtype.itemsize)
       sizes[b.tag] = offs[b] + b.max_numel()
   counts = collections.Counter(b.tag for b in bufs)
-  bases = {b.tag:make_placeholder(b.device, sizes[b.tag], b.dtype, b.tag) for b in bufs if counts[b.tag] > 1}
+  bases = {b.tag:UOp.placeholder((sizes[b.tag],), b.dtype, next(UOp.unique_num), device=b.device).rtag(b.tag) for b in bufs if counts[b.tag] > 1}
   subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(dtypes.weakint, offs.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
 pm_pack_placeholders = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
