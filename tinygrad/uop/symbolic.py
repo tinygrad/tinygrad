@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math, struct
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, resolve
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -377,6 +377,28 @@ def reduce_mul_chain(r:UOp) -> UOp|None:
     else: inside.append(m)
   if len(outside) == 0: return None
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
+
+def _pull_sum_factors(r:UOp, x:UOp, p:UOp|None=None) -> UOp|None:
+  if r.arg[0] is not Ops.ADD or not r.arg[1]: return None
+  # a factor broadcast (size-1 or absent) along every reduced axis can leave the sum: sum(a*b) -> b*sum(a)
+  axes = p.marg[:r.arg[1]] if p is not None else tuple(range(r.arg[1]))
+  inside:list[UOp] = []
+  outside:list[UOp] = []
+  for f in x.split_uop(Ops.MUL):
+    u = f
+    while u.op is Ops.EXPAND: u = u.src[0]
+    off = x.ndim - u.ndim
+    if u._shape is None or any(a >= off and resolve(u.shape[a-off] != 1) for a in axes): inside.append(f)
+    else: outside.append(u.reshape(tuple(s for i,s in enumerate(u.shape) if i+off not in axes)))
+  if not outside: return None
+  inner = (inside[0].uprod(*inside[1:]) if inside else x.const_like(1)).expand(x.shape)
+  return r.replace(src=(p.replace(src=(inner,)) if p is not None else inner,)) * outside[0].uprod(*outside[1:])
+
+# TODO: we need two because _rop emits REDUCE and REDUCE(PERMUTE)
+pm_pull_sum_factors = PatternMatcher([
+  (UPat(Ops.MUL, name="x").f(Ops.PERMUTE, name="p").reduce(name="r"), _pull_sum_factors),
+  (UPat(Ops.MUL, name="x").reduce(name="r"), _pull_sum_factors),
+])
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   keep, drop = partition(cond.split_uop(Ops.AND), lambda c: any(r in x.ranges for r in c.ranges))
