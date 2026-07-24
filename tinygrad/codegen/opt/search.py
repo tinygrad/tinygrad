@@ -147,7 +147,8 @@ beam_pool, BEAM_DEBUG, BEAM_VALIDATE = None, getenv("BEAM_DEBUG"), getenv("BEAM_
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
-  if BEAM_VALIDATE: key["validate"] = 1  # validated results are a distinct (correct-only) cache namespace
+  # validated results are a distinct (correct-only) namespace. folded into suffix: a new column breaks existing cache dbs
+  if BEAM_VALIDATE: key["suffix"] += "_validated"
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
     for o in val[len(s.applied_opts):]: ret.apply_opt(o)
