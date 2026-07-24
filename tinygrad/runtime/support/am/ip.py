@@ -207,6 +207,12 @@ class AM_SMU(AM_IP):
     clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
     if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
+    if self.adev.ip_ver[am.GC_HWIP] in {(9,4,3), (9,5,0)}:
+      gfx_min = self._send_msg(self.smu_mod.PPSMC_MSG_GetMinGfxDpmFreq, 0, read_back_arg=True)
+      gfx_max = self._send_msg(self.smu_mod.PPSMC_MSG_GetMaxGfxDpmFreq, 0, read_back_arg=True)
+      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinGfxClk, gfx_min if level is None else (gfx_min if level == 0 else gfx_max))
+      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxGfxClk, gfx_max if level is None else (gfx_min if level == 0 else gfx_max))
+
     if level is None:
       for clck in clks:
         with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16, timeout=20)
