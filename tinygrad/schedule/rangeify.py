@@ -541,7 +541,9 @@ def convert_copy_to_store(ctx, x:UOp, existing_buf:UOp|None=None):
   # flatten the input
   input_src = input_src.flatten()
   if existing_buf is not None:
-    # if there's already a buffer, we can just use it
+    # if the existing buffer is not a full buffer, we can't use it
+    if not existing_buf.has_buffer_identity(): return None
+    # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   else:
     # create the output buffer

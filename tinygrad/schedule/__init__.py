@@ -136,7 +136,7 @@ pm_schedule = PatternMatcher([
 
 def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
-  assert len(devices) <= 1, f"device mismatch: {devices}"
+  if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
 def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
