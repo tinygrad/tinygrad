@@ -3,7 +3,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
 
@@ -101,27 +101,12 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
-  # loop (a RANGE with no src is an unbounded loop header)
-  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
+  # loop (ranges are rewritten to loops in codegen), a bool src is a one-time entry guard for possibly zero trip counts
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l:
+    f"  br i1 {ctx[g]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_{ctx[l][1:]}:" \
+    if (g:=next((s for s in l.src if s.dtype is dtypes.bool), None)) is not None else f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
     f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
-
-  # range
-  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
-   f"  br label %loop_entry_{range_str(r)}\n"
-   f"loop_entry_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_latch_{range_str(r)}:\n"
-   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
-   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
-   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
-   f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
-   f"loop_body_{range_str(r)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
-   f"  br label %loop_footer_{range_str(r)}\n"
-   f"loop_footer_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_exit_{range_str(r)}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
@@ -132,6 +117,7 @@ base_rewrite = PatternMatcher([
 
 class LLVMRenderer(Renderer):
   supports_float4 = True
+  supports_ranges = False
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}

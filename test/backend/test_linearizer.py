@@ -59,6 +59,7 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_ranges, "test inspects ranges, which are rewritten to loops on this renderer")
   def test_late_bias_load(self):
     img = Tensor.empty(1, 3, 16, 16)
     w = Tensor.empty(16, 3, 3, 3)
@@ -238,6 +239,7 @@ class TestLinearizer(unittest.TestCase):
         helper_arg_acc_dtype(d.conv2d(w, dtype=acc_dtype), expected_dtype)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_ranges, "test inspects ranges, which are rewritten to loops on this renderer")
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
@@ -299,6 +301,7 @@ class TestLinearizer(unittest.TestCase):
     program = to_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
     assert not any(u.op == Ops.WHERE for u in tuple(program.src[1].src)), "found where where where should be folded"
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_ranges, "test inspects ranges, which are rewritten to loops on this renderer")
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       ast = helper_linearizer_opt(t)

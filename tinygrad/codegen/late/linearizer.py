@@ -1,7 +1,7 @@
 import heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str, ParamArg, AxisType
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
@@ -93,3 +93,42 @@ pm_split_ends = PatternMatcher([
   # split the ends
   (UPat(Ops.END, name="e"), do_split_ends),
 ])
+
+def ranges_to_loops(sink:UOp) -> UOp:
+  # rewrite bounded ranges to bound-less loops with a register counter: i = 0; loop { body; i += 1; loop again while i < bound }
+  slot = max((u.arg.slot for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG), default=-1) + 1
+  ends = [u for u in sink.toposort() if u.op is Ops.END and any(x.op is Ops.RANGE and x.dtype is not dtypes.void for x in u.src[1:])]
+  # e.ranges over-approximates nesting (it flows ranges through ordering deps), so compute true nesting from the body slices
+  # NOTE: uop identity is not stable (the uop cache is weak), all lookups are by uop key
+  end_for_range = {r.key: e for e in ends for r in e.src[1:] if r.op is Ops.RANGE and r.dtype is not dtypes.void}
+  body_ends = {e.key: {u.key for u in e.src[0].toposort()} for e in ends}
+  repl: dict[UOp, UOp] = {}
+  range_to_loop: dict[bytes, UOp] = {}
+  for e in ends:
+    # the counter init is placed after the enclosing loops so it resets every outer iteration, the loop header depends on it so it runs first
+    enclosing = tuple(r for r in e.ranges if (er:=end_for_range.get(r.key)) is not None and e.key in body_ends[er.key])
+    e = e.substitute(repl)
+    assert len(e.src) == 2, f"expected a split END with one range, got {len(e.src)-1} ranges"
+    r = e.src[1]
+    i = UOp(Ops.BUFFER, src=(UOp.const(dtypes.int, 1),), arg=ParamArg(slot, r.dtype, addrspace=AddrSpace.REG))
+    slot += 1
+    z = UOp.const(dtypes.int, 0)
+    init = i.after(*enclosing).index(z).store(UOp.const(r.dtype, 0))
+    i = i.after(init)
+    # a do-while can't skip its first iteration, so a range with a possibly zero bound gets a one-time entry guard on the loop header
+    guard = () if r.src[0].vmin >= 1 else (UOp.const(r.dtype, 0) < r.src[0],)
+    l = range_to_loop[r.key] = UOp(Ops.RANGE, dtypes.void, src=(init,)+guard, arg=(r.arg[0], AxisType.LOOP))
+    iv = i.after(l).index(z).load()
+    inc = iv + UOp.const(r.dtype, 1)
+    body = e.src[0].substitute({r: iv})
+    # the counter store is part of the loop body, an AFTER body can't be in a GROUP so sequence it with a dep instead
+    ret = body.after(i.index(z).store(inc)) if body.op is Ops.AFTER else UOp.group(body, i.index(z).store(inc))
+    repl[e] = ret.end(l, inc < r.src[0])
+    # keep the tracked loop headers up to date: their init deps on enclosing ranges get rewritten by the same substitution
+    for k in range_to_loop: range_to_loop[k] = range_to_loop[k].substitute({r: iv})
+  if not len(repl): return sink
+  out = sink.substitute(repl)
+  # ordering deps on the old ranges (scope AFTERs outside the loop bodies) point at the loop headers
+  fix = {a: a.replace(src=(a.src[0],) + tuple(range_to_loop[s.key] if s.key in range_to_loop else s for s in a.src[1:]))
+         for a in out.toposort() if a.op is Ops.AFTER and any(s.key in range_to_loop for s in a.src[1:])}
+  return out.substitute(fix) if len(fix) else out
