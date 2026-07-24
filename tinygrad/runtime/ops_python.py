@@ -6,8 +6,8 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile
-from tinygrad.device import Buffer, Compiled, Compiler, Allocator
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, unwrap
+from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
@@ -39,14 +39,15 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
         out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
   return out
 
-class PythonProgram:
-  def __init__(self, name:str, lib:bytes, **kwargs):
-    self.uops: list[UOp] = pickle.loads(lib)
+class PythonProgram(Program['PythonDevice']):
+  def __init__(self, dev:'PythonDevice', obj:TinyELF):
+    self.uops: list[UOp] = pickle.loads(obj.lib)
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op == Ops.END}
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=(1,1,1), vals:tuple[int, ...]=(), wait=False,
+               **kw):
     st = time.perf_counter()
-    warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
+    warp = list(itertools.product(*[range(x) for x in unwrap(local_size)[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
