@@ -1,9 +1,7 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
+import sys, argparse, codecs, typing, re, unicodedata, json, time, gc
 from typing import TYPE_CHECKING
-from tinygrad import nn
-from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
+from tinygrad.helpers import BEAM, DEBUG, JIT_BATCH_SIZE, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -20,28 +18,36 @@ class SimpleTokenizer:
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
     # 0x323b0 is one past the max codepoint in unicode categories L/N/Z (0x323af is max L)
-    # compact adjacent codepoints into ranges: listing them all makes re spend seconds on large prompts
+    # Compact adjacent codepoints into ranges. Build L/N/Z together: scanning Unicode three times is measurable at server startup.
+    runs: dict[str, list[tuple[int, int]]] = {pre:[] for pre in "LNZ"}
+    for cp in range(0x323b0):
+      if (pre:=unicodedata.category(chr(cp))[0]) not in runs: continue
+      if runs[pre] and cp == runs[pre][-1][1]+1: runs[pre][-1] = (runs[pre][-1][0], cp)
+      else: runs[pre].append((cp, cp))
     def ucat_range(pre:str) -> str:
-      cps = enumerate(cp for cp in range(0x323b0) if unicodedata.category(chr(cp)).startswith(pre))
-      runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
-      return "".join(re.escape(chr(g[0][1])) + (f"-{re.escape(chr(g[-1][1]))}" if len(g) > 1 else "") for g in runs)
+      def esc(cp:int) -> str: return f"\\U{cp:08x}"
+      return "".join(esc(st) if st == en else f"{esc(st)}-{esc(en)}" for st,en in runs[pre])
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
       f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
-    self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
+    byte_translation = str.maketrans(self._byte_decoder)
+    self._normal_tokens = {tok.translate(byte_translation).encode("latin1"): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
+    self._encode_cache: tuple[str, tuple[int, ...], list[tuple[int, int]]]|None = None
     self.preset = preset
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
-    vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"],
+    normal_tokens: dict[str, int] = {}
+    special_tokens: dict[str, int] = {}
+    for idx,(tok,token_type) in enumerate(zip(kv["tokenizer.ggml.tokens"], kv["tokenizer.ggml.token_type"])):
+      (normal_tokens if token_type == 1 else special_tokens)[tok] = idx
+    return SimpleTokenizer(normal_tokens, special_tokens, kv["tokenizer.ggml.pre"],
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
       eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id'))
 
@@ -60,10 +66,23 @@ class SimpleTokenizer:
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
     pos = 0
-    for match in self._split_to_sentence.finditer(text):
+    checkpoints: list[tuple[int, int]] = []
+    if self._encode_cache is not None:
+      old_text, old_tokens, old_checkpoints = self._encode_cache
+      if text == old_text: return list(old_tokens)
+      common, limit = 0, min(len(text), len(old_text))
+      while common+4096 <= limit and text[common:common+4096] == old_text[common:common+4096]: common += 4096
+      common += next((i for i,(a,b) in enumerate(zip(text[common:limit], old_text[common:limit])) if a != b), limit-common)
+      if (checkpoint := next((x for x in reversed(old_checkpoints) if x[0] <= common), None)) is not None:
+        pos, token_pos = checkpoint
+        tokens, checkpoints = list(old_tokens[:token_pos]), [x for x in old_checkpoints if x[0] <= pos]
+    for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
       pos = match.end(0)
-    return tokens + self._encode_sentence(text[pos:])
+      checkpoints.append((pos, len(tokens)))
+    tokens += self._encode_sentence(text[pos:])
+    self._encode_cache = text, tuple(tokens), checkpoints
+    return tokens
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def stream_decoder(self) -> typing.Callable[..., str]:
@@ -112,7 +131,8 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, enable_thinking:bool=False,
+             preserve_thinking:bool=False) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -134,15 +154,16 @@ def main():
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
+  parser.add_argument("--beam", type=int, help="Kernel optimization beam width")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
+  model_path = fetch(models.get(args.model, args.model))
+  model, kv = Transformer.from_gguf(model_path, args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
-  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
-        f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
+  print(f"using model \"{model_name}\" with {model_path.stat().st_size:,} bytes and {model.parameter_count:,} params, "
+        f"max context {model.max_context} on {model.token_embd.weight.device}")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -163,9 +184,13 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    # run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+    amd_server = bool(args.serve) and str(model.token_embd.weight.device).startswith("AMD")
+    beam = args.beam if args.beam is not None else 2 if amd_server else BEAM.value
+    print(f"warming serving JITs with BEAM={beam}")
+    batch_size = 448 if amd_server else JIT_BATCH_SIZE.value
+    with Context(DEBUG=DEBUG.value, BEAM=beam, JIT_BATCH_SIZE=batch_size, PARALLEL_COMPILE=12 if amd_server else 0):
+      model.warmup()
+    if args.serve: gc.freeze()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

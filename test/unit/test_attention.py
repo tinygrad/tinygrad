@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes
+from tinygrad import Device, Tensor, dtypes
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, topk_softmax,
 )
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -67,7 +67,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    return block._attention(x_norm, start_pos).realize().numpy()
+    out = block._attention(x_norm, start_pos).realize()
+    assert block.pending_state is not None
+    Tensor.realize(block.conv_state.assign(block.pending_state[0]), block.recurrent_state.assign(block.pending_state[1]))
+    return out.numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
@@ -86,8 +89,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x_float = x.astype(np.float32)
     return (x_float / np.sqrt((x_float * x_float).mean(axis=-1, keepdims=True) + eps)) * weight.astype(np.float32)
 
-  def _normalize_np(self, x:np.ndarray, eps:float=1e-12) -> np.ndarray:
-    return x / np.maximum(np.sqrt((x * x).sum(axis=-1, keepdims=True)), eps)
+  def _normalize_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:
+    return x / np.sqrt((x * x).sum(axis=-1, keepdims=True) + eps)
 
   def _softplus_np(self, x:np.ndarray) -> np.ndarray:
     return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
@@ -198,6 +201,28 @@ class TestPairwiseTopk(unittest.TestCase):
         expected = set(np.argsort(-data[b, t])[:5].tolist())
         self.assertEqual(set(sel.numpy()[b, t].tolist()), expected)
         np.testing.assert_allclose(vals.numpy()[b, t], data[b, t][sel.numpy()[b, t]])
+
+  def test_256_experts_matches_numpy(self):
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((256, 256) if Device.DEFAULT.startswith("AMD") else (4, 3, 256), dtype=np.float32)
+    # Include ties crossing wave boundaries to cover deterministic expert selection.
+    data[..., [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
+    expected = np.apply_along_axis(lambda row:np.lexsort((-np.arange(256), row))[-8:], -1, data)
+    x = Tensor(data)
+    for _ in range(5 if Device.DEFAULT.startswith("AMD") else 1):
+      vals, sel = pairwise_topk(x, 8)
+      np.testing.assert_equal(sel.numpy(), expected)
+      np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
+
+  def test_256_experts_softmax_matches_reference(self):
+    rng = np.random.default_rng(123)
+    data = rng.standard_normal((256, 256) if Device.DEFAULT.startswith("AMD") else (4, 3, 256), dtype=np.float32)
+    data[..., [7, 39, 71, 103, 135, 167, 199, 231]] = 10.0
+    probs, sel = topk_softmax(Tensor(data), 8)
+    selected = np.take_along_axis(data, sel.numpy(), axis=-1)
+    expected = np.exp(selected - selected.max(axis=-1, keepdims=True))
+    expected /= expected.sum(axis=-1, keepdims=True)
+    np.testing.assert_allclose(probs.numpy(), expected, rtol=2e-6, atol=2e-7)
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,7 +1,8 @@
-import functools, io, pathlib, re, struct
+import functools, io, pathlib, re, struct, weakref
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -20,7 +21,14 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
-def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
+_quantized_tensors:weakref.WeakKeyDictionary[UOp, tuple[UOp, int]] = weakref.WeakKeyDictionary()
+
+def get_ggml_quantization(tensor:Tensor) -> tuple[Tensor, int]|None:
+  if (meta:=_quantized_tensors.get(tensor.uop)) is None: return None
+  packed, ggml_type = meta
+  return Tensor(packed), ggml_type
+
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int, contiguous:bool=True) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
@@ -42,7 +50,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
+    if contiguous: blocks = blocks.contiguous()
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -130,8 +139,7 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
 def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
+  tensor = tensor.realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
   magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
@@ -145,7 +153,14 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  state_dict = {}
+  for name, dims, typ, off in t_infos:
+    n, shape = prod(dims), tuple(reversed(dims))
+    decoded = ggml_data_to_tensor(data:=tensor[data_start + off:], n, typ).reshape(*shape)
+    if typ in _GGML_QUANT:
+      block_size, type_size = _GGML_QUANT[typ]
+      _quantized_tensors[decoded.uop] = (data[:n//block_size*type_size].uop, typ)
+    state_dict[name] = decoded
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
@@ -169,8 +184,8 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)).to(None))
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp).to(None))[1])
   return kv, sd

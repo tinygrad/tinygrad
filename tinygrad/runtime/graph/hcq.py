@@ -39,7 +39,8 @@ class HCQGraph(MultiGraphRunner):
     for j, runtime in enumerate(self.runtimes):
       if runtime is None: continue
       argsbuf = self.kernargs_bufs[runtime.dev].offset(kargs_alloc[runtime.dev].alloc(runtime.kernargs_alloc_size, 16))
-      self.ji_args[j] = runtime.fill_kernargs(self.hcq_bufs[j], self.calls[j][1].arg.vars, argsbuf)
+      self.ji_args[j] = runtime.fill_kernargs(tuple(self.hcq_bufs[j][i] for i in self.calls[j][1].arg.globals),
+                                             self.calls[j][1].arg.vars, argsbuf)
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any

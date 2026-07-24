@@ -260,30 +260,21 @@ pm_cast_float_alu = PatternMatcher([
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
+def optimize_sink(ast:UOp, ren:Renderer) -> UOp:
+  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
+  sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
+  sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
+  sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
+  return apply_opts(sink, ren, beam=ast.arg.beam)
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
-  # preprocess
-  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
-
-  # first we optimize
-  if optimize:
-    # collapse loads reduce (indexing by a tensor)
-    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
-
-    # split ranges
-    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
-
-    # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
-
-    # optimize (schedule) the AST
-    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
-
-    # do postrange optimization, BEAM or hand_coded_optimizations
-    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+  # preprocess and optimize
+  sink = optimize_sink(ast, ren) if optimize else graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
 
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
@@ -455,8 +446,15 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
-def to_program(ast:UOp, renderer:Renderer) -> UOp:
+def program_cache_key(ast:UOp, renderer:Renderer) -> tuple:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+  return (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+
+def parallel_to_program(args:tuple[UOp, Renderer, tuple]) -> tuple[tuple, UOp]:
+  ast, renderer, key = args
+  return key, do_to_program(ast, renderer)
+
+def to_program(ast:UOp, renderer:Renderer) -> UOp:
+  key = program_cache_key(ast, renderer)
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg
