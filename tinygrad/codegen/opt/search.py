@@ -126,7 +126,7 @@ def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int
   def restore():
     # scrub outs with a sentinel so candidates that skip writes can't inherit the previous correct output
     for i in outs:
-      if i not in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(b'\xcd'*rawbufs[i].nbytes))
+      if i not in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(bytearray(b'\xcd'*rawbufs[i].nbytes)))
     for i in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(snap[i]))
   try:
     _beam_exec(base, var_vals, rawbufs)
