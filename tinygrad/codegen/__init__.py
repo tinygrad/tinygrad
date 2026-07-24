@@ -26,7 +26,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
-from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
+from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -88,25 +88,20 @@ expander2 = PatternMatcher([
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
-def broadcast_binary(x:UOp):
+def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
   if any(s is None for s in shapes) or all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
-  return x.replace(src=tuple(src_reshaped))
+  shape = _broadcast_shape(*shapes)
+  return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
   shapes = [u.shape[:-1] for u in b.src]
   if all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp+(u.shape[-1],)).expand(broadcasted+(u.shape[-1],))
-                  for u,shp in zip(b.src, shaped_aligned)]
+  shape = _broadcast_shape(*shapes)
+  src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
+    src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
 pm_wmma_add = PatternMatcher([
@@ -119,8 +114,8 @@ pm_wmma_add = PatternMatcher([
     lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.arg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.arg)),
 ])
 
-unbroadcast = pm_wmma_add+PatternMatcher([
-  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+pm_expand_broadcast = pm_wmma_add+PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
@@ -302,7 +297,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
