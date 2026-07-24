@@ -22,7 +22,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_mops
-from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize, ranges_to_loops
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
@@ -349,15 +349,18 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+  if SPEC: type_verify(sink, spec_program)
+
+  # rewrite bounded ranges to loops for renderers without range support, after validation like instruction selection
+  if not ren.supports_ranges: sink = ranges_to_loops(sink)
+
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
-
-  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
-  if SPEC: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink

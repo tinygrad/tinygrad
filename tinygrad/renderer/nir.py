@@ -3,7 +3,7 @@ from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
 from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
 import base64, ctypes, struct, functools, inspect, itertools
@@ -117,6 +117,7 @@ def nidx(b:mesa.nir_builder, buf, off, space, itemsize, gate=None) -> mesa.nir_d
 class NIRRenderer(Renderer):
   suffix = "NIR"
   nir_options: bytes
+  supports_ranges = False
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
@@ -187,8 +188,7 @@ class NIRRenderer(Renderer):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r: dict[UOp, Any] = {}
-    self.param_idx = 0
-    ranges: list[mesa.nir_def|None] = []
+    self.param_idx, loop_ifs = 0, []
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
@@ -204,29 +204,17 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.max_numel()*u.dtype.itemsize
       elif u.op == Ops.RANGE:
-        if u.dtype == dtypes.void:
-          # a RANGE with no bound is a loop header: just open the loop, the END adds the conditional backedge
-          ranges.append(None)
-          mesa.nir_push_loop(self.b)
-        else:
-          ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
-          nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype))
-          mesa.nir_push_loop(self.b)
-          self.r[u] = nload(self.b, AddrSpace.REG, i, u)
-          nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        # ranges are rewritten to loops in codegen: just open the loop, the END adds the conditional backedge
+        # a bool src is a one-time entry guard for possibly zero trip counts
+        assert u.dtype == dtypes.void, "NIRRenderer does not support ranges"
+        guard = next((s for s in u.src if s.dtype is dtypes.bool), None)
+        loop_ifs.append(mesa.nir_push_if(self.b, self.r[guard]) if guard is not None else None)
+        mesa.nir_push_loop(self.b)
       elif u.op == Ops.END:
-        r = u.src[1]
-        if r.dtype == dtypes.void:
-          # loop again while the condition is true
-          nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
-          ranges.pop()
-          mesa.nir_pop_loop(self.b, None)
-        else:
-          next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
-          # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
-          nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
-          nstore(self.b, AddrSpace.REG, ranges.pop(), next_i),
-          mesa.nir_pop_loop(self.b, None)
+        # loop again while the condition is true
+        nif(self.b, self.r[u.src[2]], lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        mesa.nir_pop_loop(self.b, None)
+        if (nif_ref:=loop_ifs.pop()) is not None: mesa.nir_pop_if(self.b, nif_ref)
       else:
         d: mesa.nir_def|None = self.def_rewrite.rewrite(u, ctx=self)
         if d is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")

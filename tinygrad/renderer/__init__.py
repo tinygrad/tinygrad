@@ -73,6 +73,8 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+  # renderers without range support get all bounded ranges rewritten to loops in codegen
+  supports_ranges: bool = True
 
   compiler: Compiler = Compiler()
 
