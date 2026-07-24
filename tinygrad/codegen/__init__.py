@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, COMPILE_UOPS_MAX
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic, COMPILE_UOPS_MAX, getenv, diskcache_get, diskcache_put, code_key
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
@@ -467,9 +467,9 @@ def _to_program_key(ast:UOp, renderer:Renderer) -> tuple:
   return (ast.key, type(renderer).__name__, renderer.target, *[x.value for x in config])
 def _disk_key(key:tuple) -> str:
   import hashlib
-  return hashlib.sha256(repr((key[0].hex(),)+key[1:]).encode()).hexdigest()
+  # code_key: cached programs embed rendered source+binary, they're stale the moment codegen changes
+  return hashlib.sha256(repr((key[0].hex(),)+key[1:]+(code_key(),)).encode()).hexdigest()
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  from tinygrad.helpers import getenv, diskcache_get, diskcache_put
   key = _to_program_key(ast, renderer)
   if (prg:=to_program_cache.get(key)) is None:
     if getenv("PROGRAM_CACHE") and (prg:=diskcache_get("program_v0", _disk_key(key))) is not None:

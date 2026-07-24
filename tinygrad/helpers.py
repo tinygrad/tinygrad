@@ -384,6 +384,12 @@ cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Lib
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
 VERSION = 22
+
+@functools.cache
+def code_key() -> str:
+  # identity of the loaded tinygrad source: ast-keyed caches (schedule/program) go stale when the code that produced them changes
+  fs = sorted(f for m in list(sys.modules.values()) if (f:=getattr(m, "__file__", None)) is not None and f"tinygrad{os.sep}" in f)
+  return hashlib.sha256(b''.join(f"{f}:{(st:=os.stat(f)).st_size}:{st.st_mtime_ns}".encode() for f in fs)).hexdigest()
 _db_connection = None
 def _reset_db_connection(): # a forked child can't share the parent's sqlite connection, drop it so it reconnects
   global _db_connection

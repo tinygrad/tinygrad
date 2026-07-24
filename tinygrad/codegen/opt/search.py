@@ -22,7 +22,8 @@ actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0, getenv("TC", 1)))]
 # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2), getenv("TC", 1))) for axis in range(9)]
 # tc_select=-1 only ever tries the first dtype-matching tensor core: BEAM_TC_SELECT=N also seeds tcs 0..N-1 (m8n16k8 wins on some shapes)
-if (tcsel:=getenv("BEAM_TC_SELECT", 0)): actions += [Opt(op=OptOps.TC, axis=axis, arg=(sel, getenv("TC_OPT", 2), getenv("TC", 1))) for sel in range(tcsel) for axis in range(9)]
+if (tcsel:=getenv("BEAM_TC_SELECT", 0)):
+  actions += [Opt(op=OptOps.TC, axis=axis, arg=(sel, getenv("TC_OPT", 2), getenv("TC", 1))) for sel in range(tcsel) for axis in range(9)]
 actions += [Opt(op=OptOps.SWAP, axis=axis_0, arg=axis_1) for axis_0 in range(5) for axis_1 in range(axis_0+1, 5)]
 actions += [Opt(op=OptOps.THREAD, axis=axis, arg=amt) for amt in [2,3,4,5,8,12,16,24,32,64] for axis in range(3)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
@@ -68,10 +69,6 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
     with Context(COMPILE_UOPS_MAX=getenv("BEAM_UOPS_MAX", 3000)):
       prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
     et = time.perf_counter() - st
-    uops = prg.src[1].src
-    if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
-      if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
-      raise RuntimeError("too many uops")
     ret = (prg, et)
   except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
@@ -127,19 +124,21 @@ def get_beam_validator(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str, int
     b.allocator._copyin(b._buf, memoryview(bytearray(d.astype(_to_np_dtype(b.dtype)).tobytes())))
   snap = {i:bytearray(rawbufs[i].as_memoryview()) for i in inplace}
   def restore():
+    # scrub outs with a sentinel so candidates that skip writes can't inherit the previous correct output
+    for i in outs:
+      if i not in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(b'\xcd'*rawbufs[i].nbytes))
     for i in inplace: rawbufs[i].allocator._copyin(rawbufs[i]._buf, memoryview(snap[i]))
   try:
     _beam_exec(base, var_vals, rawbufs)
     ref = {i:rawbufs[i].numpy().copy() for i in outs}
   except Exception: return None
-  rtol, atol = getenv("BEAM_VALIDATE_RTOL", 1e-4), getenv("BEAM_VALIDATE_ATOL", 1e-4)
   def validate(cand:Scheduler) -> bool:
     restore()
     try:
       _beam_exec(to_program(cand.copy().get_optimized_ast(name_override="test"), cand.ren), var_vals, rawbufs)
-      for i in outs: np.testing.assert_allclose(rawbufs[i].numpy(), ref[i], rtol=rtol, atol=atol)
+      for i in outs: np.testing.assert_allclose(rawbufs[i].numpy(), ref[i], rtol=1e-4, atol=1e-4)
     except Exception as e:
-      if BEAM_DEBUG: print(f"BEAM_VALIDATE maxdiff {max((float(np.abs(rawbufs[i].numpy().astype(np.float32)-ref[i].astype(np.float32)).max()) for i in outs), default=float('nan')):.4g} {type(e).__name__}")
+      if BEAM_DEBUG: print(f"BEAM_VALIDATE {type(e).__name__}")
       return False
     return True
   return validate
