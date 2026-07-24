@@ -18,10 +18,14 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
       ret.append(apply_shrink(x, i).contiguous())
   return ms.replace(src=tuple(ret))
 
+def lower_broadcast_copy(c:UOp, x:UOp):
+  if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
+  if (sx:=x.simplify()).device is None and sx.base.op is Ops.CONST: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
+  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
-  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
-    UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
