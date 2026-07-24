@@ -29,10 +29,16 @@ lr_bias = lr * BIAS_SCALER
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
-act = Tensor.gelu if getenv("GELU") else Tensor.quick_gelu
+act = Tensor.quick_gelu
 
+# NOTE: .contiguous() keeps each conv/matmul a clean single-reduce GEMM kernel for beam
+c = (lambda t: t.contiguous()) if getenv("CONTIG", 1) else (lambda t: t)
+# NOTE: .contiguous_backward() materializes the grad at the act input: the bn bias grad becomes a cheap reduce
+# instead of a mega-fused kernel that recomputes the whole transposed conv (6ms -> ~1ms)
+cb = (lambda t: t.contiguous_backward()) if getenv("CBW", 1) else (lambda t: t)
+
+# frozen whitening conv weights: eigenvectors of the input patch covariance scaled by 1/sqrt(eigenvalue), and their negations
 def whitening(X:Tensor, kernel_size=2, eps=5e-4) -> Tensor:
-  """frozen whitening conv weights: eigenvectors of the input patch covariance scaled by 1/sqrt(eigenvalue), and their negations"""
   def _patches(data:Tensor, patch_size=(kernel_size, kernel_size)):
     h, w = patch_size
     c = data.shape[1]
@@ -44,8 +50,8 @@ def whitening(X:Tensor, kernel_size=2, eps=5e-4) -> Tensor:
   eigvecs_scaled = eigvecs / np.sqrt(np.flip(eigvals, 0) + eps)[:, None, None, None]
   return Tensor(np.concatenate([eigvecs_scaled, -eigvecs_scaled]).astype(np.float32)).cast(dtypes.default_float).contiguous().is_param_(False)
 
+# airbench identity init: the first in_channels filters form an identity kernel, the rest keep the default init
 def dirac_init(w:Tensor) -> Tensor:
-  """airbench identity init: the first in_channels filters form an identity kernel, the rest keep the default init"""
   cout, cin, kh, kw = w.shape
   # NOTE: built from numpy so the weight is buffer-backed, a pure-const tensor is not a valid optimizer param
   eye = np.zeros((cin, cin, kh, kw), dtype=np.float32)
@@ -54,16 +60,16 @@ def dirac_init(w:Tensor) -> Tensor:
   return (eye_t if cout == cin else eye_t.cat(w[cin:], dim=0)).contiguous()
 
 class BatchNorm(nn.BatchNorm):
-  """airbench batchnorm: eps 1e-12, batch stats only, kept in fp32, scale frozen at 1, bias trainable"""
   def __init__(self, sz:int):
     super().__init__(sz, track_running_stats=False, eps=1e-12, momentum=0.4)
     self.weight = Tensor.ones(sz, dtype=dtypes.float32).is_param_(False)
     self.bias = Tensor.zeros(sz, dtype=dtypes.float32).contiguous()
 
 class MatmulConv2d(nn.Conv2d):
-  # im2col conv-as-GEMM: BEAM applies correct tensor cores to matmuls, unlike direct-conv backward (which miscompiles)
+  # im2col conv-as-GEMM: GEMM-shaped kernels beam much better than direct conv
   def __call__(self, x:Tensor) -> Tensor:
     if not getenv("MATMUL_CONV", 0): return super().__call__(x)
+    assert self.kernel_size == (3,3) and self.stride == 1 and self.padding == 1, "im2col path hardcodes 3x3/stride 1/pad 1"
     bs, cin, _, _ = x.shape; cout, _, ky, kx = self.weight.shape
     p = x.pad((1, 1, 1, 1))._pool((ky, kx)); oy, ox = p.shape[2:4]
     p = p.permute(0, 2, 3, 1, 4, 5).reshape(bs*oy*ox, cin*ky*kx)
@@ -77,11 +83,6 @@ class ConvGroup:
     self.norm1, self.norm2 = BatchNorm(channels_out), BatchNorm(channels_out)
   def __call__(self, x:Tensor) -> Tensor:
     # batchnorms are computed in fp32 islands, idiom from hlb_cifar10
-    # NOTE: .contiguous() forces the conv into its own kernel; without it BEAM fuses conv+pool+bn and miscompiles
-    c = (lambda t: t.contiguous()) if getenv("CONTIG", 1) else (lambda t: t)
-    # NOTE: .contiguous_backward() materializes the grad at the act input: the bn bias grad becomes a cheap reduce
-    # instead of a mega-fused kernel that recomputes the whole transposed conv (6ms -> ~1ms)
-    cb = (lambda t: t.contiguous_backward()) if getenv("CBW", 1) else (lambda t: t)
     x = act(cb(self.norm1(c(self.conv1(x)).max_pool2d(2).float()).cast(dtypes.default_float)))
     return act(cb(self.norm2(c(self.conv2(x)).float()).cast(dtypes.default_float)))
 
@@ -94,16 +95,12 @@ class CifarNet:
     self.linear = nn.Linear(256, 10, bias=False)
   def __call__(self, x:Tensor) -> Tensor:
     # pad to 32x32 because the whitening conv creates 31x31 images that are awfully slow to compute with, hack from hlb_cifar10
-    # NOTE: .contiguous() isolates each matmul/conv into its own kernel so BEAM's WMMA opt doesn't fuse with a downstream reduce and miscompile
-    c = (lambda t: t.contiguous()) if getenv("CONTIG", 1) else (lambda t: t)
-    cb = (lambda t: t.contiguous_backward()) if getenv("CBW", 1) else (lambda t: t)
     x = c(act(cb(self.whiten(x)))).pad((1, 0, 0, 1))
     x = x.sequential([self.group1, self.group2, self.group3])
     return self.linear(c(x.max((2, 3)))) / 9.
 
+# nn.datasets.cifar bounces every batch through a fresh pinned buffer (~0.5s), stream the tar through one reused pinned buffer instead (~90ms)
 def cifar_fast() -> tuple[Tensor, Tensor, Tensor, Tensor]:
-  """nn.datasets.cifar bounces every batch through a fresh pinned buffer (~0.5s of cuMemHostAlloc+memmove on slow cores),
-  this streams the tar through one reused 30MB pinned buffer with sync HtoD copies instead (~90ms)"""
   from tinygrad.device import BufferSpec
   from tinygrad.runtime.ops_cuda import cuda, check
   fp = fetch('https://data.brainchip.com/dataset-mirror/cifar10/cifar-10-binary.tar.gz', gunzip=True)
@@ -134,9 +131,8 @@ def random_crop(X:Tensor, crop_size=32) -> Tensor:
   X = X.gather(-1, (low_x + idx_x).expand(X.shape[0], X.shape[1], X.shape[2], crop_size))
   return X.gather(-2, (low_y + idx_y).expand(X.shape[0], X.shape[1], crop_size, crop_size))
 
+# airbench schedule: warmup 0.2x -> 1x over the first 23% of steps, anneal to 0.07x; lr is 0 from freeze_step on (whiten bias after 3 epochs)
 class TriangularLR:
-  """airbench schedule: warmup 0.2x -> 1x over the first 23% of steps, then anneal 1x -> 0.07x.
-  from freeze_step on, lr is exactly 0, which freezes the params (used for the whiten bias after 3 epochs)"""
   def __init__(self, opt:optim.Optimizer, base_lr:float, total_steps:int, freeze_step:int=0):
     self.opt, self.base_lr, self.warmup, self.total, self.freeze = opt, base_lr, int(0.23 * total_steps), total_steps, freeze_step
     self.counter = Tensor([0], dtype=dtypes.float32, device=opt.device)
@@ -151,8 +147,8 @@ def jit_now(j:TinyJit) -> TinyJit:
   j.cnt = 1  # skip the uncaptured warmup call, capture on the first call (the kernels are all in the warm cache anyway)
   return j
 
+# airbench lookahead/EMA: every 5 steps ema = decay*ema + (1-decay)*net, and the net is pulled back onto the ema
 class Lookahead:
-  """airbench lookahead/EMA: every 5 steps ema = decay*ema + (1-decay)*net, and the net is pulled back onto the ema"""
   def __init__(self, params:list[Tensor]):
     self.params, self.ema = params, [p.detach().clone().is_param_(False) for p in params]
   @jit_now
