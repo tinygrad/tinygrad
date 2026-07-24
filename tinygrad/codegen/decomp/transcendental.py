@@ -226,7 +226,7 @@ def xlog2(d:UOp) -> UOp:
   denormal_exp = 10 if d.dtype == dtypes.float16 else 64
   FLT_MIN = d.const_like({dtypes.float16: 6.1e-5, dtypes.float32: 1e-4, dtypes.float64: 1e-4}[d.dtype])
   is_denormal = d<FLT_MIN
-  a = is_denormal.where(d * (2 ** denormal_exp), d)
+  a = is_denormal.where(d * (2.0 ** denormal_exp), d)
 
   e = ilogb2k(a * (1.0 / 0.75)).cast(a.dtype)
   m = ldexp3k(a, -e)
