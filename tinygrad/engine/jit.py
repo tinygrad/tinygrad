@@ -195,11 +195,12 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  captured_var_vals: dict[str, int]
 
   @functools.cached_property
   def linear(self) -> UOp: return link_linear(self._linear, jit=True)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.captured_var_vals)
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
@@ -214,7 +215,7 @@ class CapturedJit(Generic[ReturnType]):
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
-    run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
+    run_linear(self.linear, self.captured_var_vals | var_vals, input_uops=concrete, jit=True)
     return self.ret
 
   def free_intermediates(self):
@@ -254,8 +255,11 @@ class TinyJit(Generic[ReturnType]):
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self._captured_var_vals: dict[str, int] = {}
 
-  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
+  def add_linear(self, linear:UOp, var_vals:dict[str, int]):
+    self._linears.append(linear)
+    self._captured_var_vals = merge_dicts([self._captured_var_vals, var_vals])
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -282,6 +286,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
+      self._captured_var_vals = {}
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
@@ -294,16 +299,17 @@ class TinyJit(Generic[ReturnType]):
       # combine all captured linears into one, memory plan, and graph split
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
+      all_var_vals = self._captured_var_vals | var_vals
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        run_linear(onetime_linear, var_vals)
+        run_linear(onetime_linear, all_var_vals)
 
       # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
       held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      self.captured = CapturedJit(ret, linear, names, expected_input_info, self._captured_var_vals)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
