@@ -1,25 +1,29 @@
 # hlb_cifar10_fast — CIFAR-10 speedrun (airbench94 port)
 
-Attempt at the tinygrad bounty *"<10s (wall time) hlb_cifar training on anything"* (≥93.5% eval, single eval at end, warm generic caches allowed).
+tinygrad bounty *"<10s (wall time) hlb_cifar training on anything"* (≥93.5% eval, single eval at end, warm generic caches allowed): **ACHIEVED on a single RTX 4090.**
 
-## What works (validated, RTX 4090 + H100)
-- **Correct recipe:** airbench94 port trains to **93.94%** (4090) / **94.28%** (H100) eval at 9.9 epochs, BS=512. Reliable, deterministic.
-- Run: `DEFAULT_FLOAT=HALF MATMUL_CONV=1 TC_OPT=2 CONTIG=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1 TARGET_EVAL_ACC_PCT=93.5 python3 examples/hlb_cifar10_fast.py`
-- Knobs: `BS EPOCHS TTA(2/1/0) MATMUL_CONV TC_OPT CONTIG BEAM_VALIDATE SCHEDULE_CACHE PROGRAM_CACHE`.
+## Record (2026-07-24, RTX 4090, warm caches)
+**9.79s / 9.79s / 9.94s / 9.98s @ 93.88 / 93.60 / 93.59 / 93.57%** across 4 seeds (1337/7/2024/42) — every run <10s and ≥93.5%.
 
-## Contributions (committed on branch hlb_cifar_10s)
-1. **airbench94 port** (`examples/hlb_cifar10_fast.py`): patch-whitening frozen conv, dirac init, fp32 BN islands, triangular LR, decoupled bias/wd groups, alternating flip, lookahead-EMA pullback, TTA.
-2. **Persistent schedule/program disk caches** + **fork-safe sqlite connection** (`helpers.py`, `schedule/__init__.py`, `codegen/__init__.py`): cut JIT scheduling/lowering ~65s→~5.7s warm, bit-identical. Same legality as the existing binary/beam caches.
-3. **BEAM output validation** (`BEAM_VALIDATE=1`, `codegen/opt/search.py`): rejects numerically-wrong beam candidates against the un-optimized kernel. Fixes a real tinygrad TC/WMMA **miscompile** on backward-conv shapes (beam otherwise collapses training 72%→13%).
-4. **MatmulConv2d** (`MATMUL_CONV=1`): im2col conv-as-GEMM so the default heuristic applies *correct* tensor cores with no beam (matmul TC is correct where conv-backward TC miscompiles). Eager 12 TFLOPS / 48ms-step, bit-identical to nn.Conv2d.
+```sh
+export PYTHONPATH=. DEV=CUDA DEFAULT_FLOAT=HALF CACHEDB=/dev/shm/tg.db
+export BS=1024 EPOCHS=8.0 TTA=2 MATMUL_CONV=1 CONTIG=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1
+export JITBEAM=4 BEAM_ESTIMATE=0 BEAM_TC_SELECT=4 BEAM_VALIDATE=1 IGNORE_JIT_FIRST_BEAM=1 LOG_INTERVAL=0
+time python3 examples/hlb_cifar10_fast.py    # 1st run: beam search (~2h, one-time, cached)
+time python3 examples/hlb_cifar10_fast.py    # 2nd run: the record
+```
+All caches are generic and content-keyed (beam/compile/schedule/program) — user-code changes invalidate them naturally, nothing ever needs manual deletion. CACHEDB on tmpfs because overlayfs breaks sqlite WAL locking. More margin: `EPOCHS=8.25` = ~10.2s @ ≥93.75 worst-seed. Full recipe: `EPOCHS=9.9` = ~11.5s @ 94.05.
 
-## Status on <10s: NOT achieved — blocked by beam-search limits
-- Fastest **reliable + correct** config is eager matmul-conv (~70 ms/step, ~72s total for 9.9 ep) on both 4090 and H100. H100 eager is *not* faster (default TC doesn't exploit it).
-- <10s needs beam-quality tensor cores (~40–200 TFLOPS). But beam is impractical for this model:
-  - **direct-conv** kernels are beamable but the backward TC **miscompiles** (worked around, not fixed, by BEAM_VALIDATE — which then strips backward TC → slow).
-  - **matmul-conv** kernels are correct under default TC but too **large to beam**: parallel pool workers OOM (`BrokenPipe`), `BEAM_ESTIMATE` hits `inf→int OverflowError`, serial beam hangs, and searches exceed the per-kernel timeout.
-- Root fix for <10s: repair the tinygrad conv-backward TC codegen so direct-conv (FLOP-efficient, beamable) beams correctly. That's a core codegen change beyond this attempt.
+H100 note: same config ties the 4090 (11.5s at 9.9ep) — tinygrad emits sm_89-style mma.sync for sm_90; wgmma/TMA would be needed to exploit it.
 
-## Reproduce accuracy
-`time DEFAULT_FLOAT=HALF MATMUL_CONV=1 TC_OPT=2 CONTIG=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1 CACHEDB=/dev/shm/tg.db EPOCHS=9.9 BS=512 TARGET_EVAL_ACC_PCT=93.5 python3 examples/hlb_cifar10_fast.py`
-(run twice; second run warm-cache. CACHEDB on tmpfs — overlayfs breaks sqlite WAL locking.)
+## Contributions (branch hlb_cifar_10s; 74.7s -> 9.8s)
+1. **airbench94 port** (`examples/hlb_cifar10_fast.py`): patch-whitening frozen conv, dirac init, fp32 BN islands, triangular LR, decoupled bias/wd groups, alternating flip, lookahead-EMA, TTA. Plus: `contiguous_backward()` barriers (the scheduler otherwise mega-fuses bn-bias grads with a full transposed-conv recompute, 6ms @ 2.9TFLOPS), im2col `MatmulConv2d` (convs as single-reduce GEMMs = the shape tensor cores like), jit-Variable batch offsets, eval capture overlapped with the GPU queue drain, pinned-buffer cifar load.
+2. **gpudims fix**: WARP folded into threadIdx.x high bits scrambled WMMA lane ownership when TC kernels stacked ≥3 LOCALs — deterministic miscompile, cause of beam training collapse (72%→13%). Warp now owns threadIdx.x whole.
+3. **BEAM_VALIDATE=1**: beam candidates validated against the unoptimized kernel on sparse-integer inputs (reduce reorders exact — only real miscompiles fail). Caught the gpudims bug; zero rejects since the fix.
+4. **BEAM_TC_SELECT=N**: beam's tc_select=-1 only ever tries the first dtype-matching tensor core; seeding explicit tc choices (m8n16k8 vs m16n8k16) is worth 14-34% on the hot GEMMs. With BEAM_ESTIMATE=0 (exact timing; scaled timing mispicks followups).
+5. **Pre-compile uops gate** (`COMPILE_UOPS_MAX`): BEAM_UOPS_MAX was checked after nvrtc already ran; pathological candidates wedged workers for hours (C call holds the GIL, SIGALRM useless).
+6. **Persistent schedule/program caches** + fork-safe sqlite (~65s of python scheduling -> warm).
+7. **jit capture fixes** (`engine/`): identity-keyed runtime cache, direct CALL build, local_size early-out — capture stopped re-hashing 130k-uop graphs (1.5->1.1s).
+
+## Reproduce accuracy only (no beam, eager tensor cores)
+`DEFAULT_FLOAT=HALF MATMUL_CONV=1 TC_OPT=2 CONTIG=1 EPOCHS=9.9 BS=512 python3 examples/hlb_cifar10_fast.py` -> 93.94% (4090) / 94.28% (H100), ~75s.
