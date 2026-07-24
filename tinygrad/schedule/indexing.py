@@ -23,7 +23,8 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
   # WAR hazard (TestAssign.test_assign_double_diamond_reduce) dont walk below AFTER/CONTIGUOUS (other kernels)
-  base, reaches = dest.base, {}
+  base = dest.base
+  reaches: dict[UOp, bool] = {}
   for s in src.toposort(gate=lambda s: s.op not in {Ops.AFTER, Ops.CONTIGUOUS}):
     reaches[s] = any(c is base or reaches.get(c) for c in s.src)
   if src is base or reaches.get(src): ctx[src] = None
