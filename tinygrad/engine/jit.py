@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite, CallInfo
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
@@ -27,7 +27,8 @@ def create_graph_call(batch:list[UOp]) -> UOp:
   # all external inputs are PARAMs
   input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
   cf = UOp(Ops.CUSTOM_FUNCTION, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
-  return cf.call(*input_list)
+  # NOTE: build the CALL directly, cf.call's no-leaking-ranges assert walks every uop in every program in the batch
+  return UOp(Ops.CALL, src=(cf, *input_list), arg=CallInfo())
 
 def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   new_src: list[UOp] = []

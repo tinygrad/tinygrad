@@ -85,8 +85,10 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
+  # NOTE: check local_size/global_size before prg.device, that walks the whole program graph
+  if prg.arg.local_size is not None or not all_int(prg.arg.global_size): return None
   device = to_tuple(prg.device)[0]
-  if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
+  if not Device[device].renderer.has_local: return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
     bufs = [UOp.from_buffer(b.allocate()) for b in bufs_from_ast(prg.src[0], device)]
@@ -108,19 +110,22 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 
 # **************** runtime cache ****************
 
-runtime_cache: dict[tuple[bytes, str], Any] = {}
+runtime_cache: weakref.WeakKeyDictionary[UOp, dict[str, Any]] = weakref.WeakKeyDictionary()
 def get_runtime(device:str, ast:UOp, cache=True):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
-  if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
+  # NOTE: keyed on uop identity (uops are interned), ast.key would hash the whole program graph
+  if (runtime:=runtime_cache.setdefault(ast, {}).get(device)) is None:
     runtime = Device[device].runtime(ast.arg.function_name, ast.src[3].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
-    if cache: runtime_cache[key] = runtime
+    if cache: runtime_cache[ast][device] = runtime
   return runtime
 
 graph_cache:weakref.WeakKeyDictionary[UOp, Any] = weakref.WeakKeyDictionary()
 def get_graph_runtime(ast:UOp, input_uops:tuple[UOp, ...]|None=None):
   assert ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph", "get_graph_runtime should only be called with a graph ast"
   if (runtime:=graph_cache.get(ast)) is None and input_uops is not None:
-    graph_cache[ast] = runtime = Device[ast.device if isinstance(ast.device, str) else ast.device[0]].graph(ast, input_uops=input_uops)
+    # NOTE: device from the first kernel arg, ast.device would walk every program in the batch
+    dev = get_call_arg_uops(ast.src[0].src[0])[0].device
+    graph_cache[ast] = runtime = Device[dev if isinstance(dev, str) else dev[0]].graph(ast, input_uops=input_uops)
   return runtime
 
 # **************** run linear ****************
