@@ -1035,6 +1035,21 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     for v, s in zip(views, shapes):
       np.testing.assert_allclose(v.numpy(), np.ones(s))
 
+  def test_slice_assign_to_shared_buffer(self):
+    x = Tensor([1, 2], dtype=dtypes.int32).contiguous().realize()
+    reader = x + 10
+    x[:1].assign(Tensor([9], dtype=dtypes.int32))
+    Tensor.realize(reader, x)
+    self.assertEqual(reader.tolist(), [11, 12])
+    self.assertEqual(x.tolist(), [9, 2])
+
+  def test_slice_assign_does_not_rewrite_view_wrapped_reader(self):
+    x = Tensor([1, 2], dtype=dtypes.int32).contiguous().realize()
+    reader = (x + 10).reshape(1, 2)
+    x[:1].assign(Tensor([9], dtype=dtypes.int32))
+    Tensor.realize(reader, x)
+    self.assertEqual(reader.tolist(), [[11, 12]])
+    self.assertEqual(x.tolist(), [9, 2])
 
 class TestAfterCachePatterns(unittest.TestCase):
   def test_double_store_after(self):
