@@ -113,8 +113,8 @@ class TestJit(unittest.TestCase):
       if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
       prev = o
 
-    # Checking that 2 graphs are inited.
-    assert len(jf.captured.linear.src) == 2
+    # Checking that 3 graphs are inited.
+    assert len(jf.captured.linear.src) == 3
     for si in jf.captured.linear.src:
       assert call_is_graph(si)
 

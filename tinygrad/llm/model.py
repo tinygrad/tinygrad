@@ -79,11 +79,11 @@ def _amd_wave_sum(value:UOp, lane:UOp, lane_count:int, wave:UOp|None=None) -> UO
 
 @functools.cache
 def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.index)
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.weakint)
   token_tile = 8 if out.shape[0] % 8 == 0 else 1
   wave_count = 4 if token_tile == 1 else 1
   token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // wave_count, 1)
-  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.index, 0)
+  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.weakint, 0)
   output = output_block * wave_count + wave
   tokens = tuple(token_block * token_tile + i for i in range(token_tile))
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
@@ -113,7 +113,7 @@ def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fea
 @functools.cache
 def _q8_linear_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
   raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
-  raw_offset = raw_offset.cast(dtypes.index)
+  raw_offset = raw_offset.cast(dtypes.weakint)
   def load_word(byte_offset:UOp) -> UOp:
     word_index, half_aligned = byte_offset // 4, (byte_offset & 2).ne(0)
     word = raw[word_index]
@@ -122,7 +122,7 @@ def _q8_linear_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, i
   token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // 16, 1)
   lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
   # The codegen may factor this range into several local dimensions. Read the physical wave lane directly.
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.cast(dtypes.int32),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.index)
+  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.cast(dtypes.int32),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
   physical_col, physical_half = hw_lane % 16, hw_lane // 16
   output = output_block * 16 + physical_col
   input_tokens = tuple(token_block * token_tile + tile * 16 + physical_col for tile in range(token_tile // 16))
@@ -177,7 +177,7 @@ def _q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UO
     for group_offset in range(0, group_count, lane_count):
       group = (lane + group_offset).valid(lane + group_offset < group_count)
       block = output_idx * group_count + group
-      base, odd = raw_offset.cast(dtypes.index) + block * 8 + block // 2, (block & 1).ne(0)
+      base, odd = raw_offset.cast(dtypes.weakint) + block * 8 + block // 2, (block & 1).ne(0)
       accs = [UOp.const(dtypes.int32, 0)] * token_tile
       for word_idx in range(8):
         word = odd.where(raw[base + 1 + word_idx], (raw[base + word_idx] >> 16) | (raw[base + 1 + word_idx] << 16))
@@ -208,13 +208,13 @@ def _q8_linear_concat_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:
   for group_offset in range(0, group_count, lane_count):
     group = (lane + group_offset).valid(lane + group_offset < group_count)
     block0, block1 = output0 * group_count + group, output1 * group_count + group
-    base0, odd0 = offset0.cast(dtypes.index) + block0 * 8 + block0 // 2, (block0 & 1).ne(0)
-    base1, odd1 = offset1.cast(dtypes.index) + block1 * 8 + block1 // 2, (block1 & 1).ne(0)
+    base0, odd0 = offset0.cast(dtypes.weakint) + block0 * 8 + block0 // 2, (block0 & 1).ne(0)
+    base1, odd1 = offset1.cast(dtypes.weakint) + block1 * 8 + block1 // 2, (block1 & 1).ne(0)
     accs = [UOp.const(dtypes.int32, 0)] * token_tile
     if shared_raw:
       local_output = first.where(output, output - out_features0)
       block = local_output * group_count + group
-      offset = first.where(offset0, offset1).cast(dtypes.index)
+      offset = first.where(offset0, offset1).cast(dtypes.weakint)
       base, odd = offset + block * 8 + block // 2, (block & 1).ne(0)
       for word_idx in range(8):
         word = odd.where(raw0[base + 1 + word_idx], (raw0[base + word_idx] >> 16) | (raw0[base + 1 + word_idx] << 16))
@@ -237,7 +237,7 @@ def _q8_linear_concat_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:
 
 @functools.cache
 def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.index)
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.weakint)
   output_tile = 2
   output_block, lane = UOp.range(out_features // output_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   outputs, group_count = tuple(output_block * output_tile + i for i in range(output_tile)), in_features // 32
@@ -360,8 +360,8 @@ def _iq3_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, group
     qi = ((qs[word_idx // 4] >> (8 * (word_idx % 4))) & 255).cast(dtypes.uint16) + \
       (((qh >> word_idx) & 1).cast(dtypes.uint16) << 8)
     sign_bits = (signs >> (word_idx * 4)) & 15
-    sign_mask = lut[512 + sign_bits.cast(dtypes.index)]
-    word = (lut[qi.cast(dtypes.index)] ^ sign_mask) + (sign_mask & 0x01010101)
+    sign_mask = lut[512 + sign_bits.cast(dtypes.weakint)]
+    word = (lut[qi.cast(dtypes.weakint)] ^ sign_mask) + (sign_mask & 0x01010101)
     dot = _amd_dp4a(word, xq[xidx, group, word_idx], dot)
   scale = 1 + 2 * ((load_word(base + 106) >> (4 * subgroup).cast(dtypes.uint32)) & 15).cast(dtypes.float32)
   dbits = (load_word(base) & 0xffff).cast(dtypes.uint16)
@@ -379,8 +379,8 @@ def _packed_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, gr
       qbase, shift = base + 8 + subgroup * 16 + (word_idx % 4) * 4, 4 * (word_idx // 4)
       packed = raw[qbase // 4]
       nibbles = tuple((packed >> (8*i + shift)) & 15 for i in range(4))
-      low = lut[(nibbles[0] | (nibbles[1] << 4)).cast(dtypes.index)].cast(dtypes.uint32)
-      high = lut[(nibbles[2] | (nibbles[3] << 4)).cast(dtypes.index)].cast(dtypes.uint32)
+      low = lut[(nibbles[0] | (nibbles[1] << 4)).cast(dtypes.weakint)].cast(dtypes.uint32)
+      high = lut[(nibbles[2] | (nibbles[3] << 4)).cast(dtypes.weakint)].cast(dtypes.uint32)
       dot = _amd_dp4a(low | (high << 16), xq[xidx, group, word_idx], dot)
     low_offset = base + 4 + subgroup // 2
     low_byte = (raw[low_offset // 4] >> (8 * (low_offset % 4)).cast(dtypes.uint32)) & 255
@@ -420,13 +420,13 @@ def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
     route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // output_tile, 1)
   group_count, lane_count = in_features // 32, min(32, in_features // 32)
   lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
-  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.index, 0)
+  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.weakint, 0)
   outputs = tuple(output_block * output_tile * wave_count + wave * output_tile + i for i in range(output_tile)) if wave_count > 1 else \
     tuple(output_block * output_tile + i for i in range(output_tile))
   if ggml_type in (21, 23):
     raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
 
-  expert, xidx = sel[route].cast(dtypes.index), route // routes_per_input
+  expert, xidx = sel[route].cast(dtypes.weakint), route // routes_per_input
   values = [sum((_packed_group_dot(raw, lut, xq, xd, expert, xidx, (lane + offset).valid(lane + offset < group_count), output,
                                     out_features, in_features, ggml_type)
                  for offset in range(0, group_count, lane_count)), UOp.const(dtypes.float32, 0)) for output in outputs]
@@ -538,9 +538,9 @@ def _biased_sigmoid_topk_kernel(out:UOp, sel:UOp, x:UOp, bias:UOp, k:int, normal
   _, indices, ready = _topk_256_sort(values, indices, next_values, next_indices, ready, lane)
   valid = lane < k
   index = indices.after(ready)[(256 - k + lane).valid(valid)]
-  prob = x[outer, index.cast(dtypes.index)].sigmoid()
+  prob = x[outer, index.cast(dtypes.weakint)].sigmoid()
   if normalize:
-    prob = prob / sum((x[outer, indices.after(ready)[256-k+i].cast(dtypes.index)].sigmoid() for i in range(k)),
+    prob = prob / sum((x[outer, indices.after(ready)[256-k+i].cast(dtypes.weakint)].sigmoid() for i in range(k)),
                       UOp.const(x.dtype, 0))
   stores = (out[outer, lane.valid(valid)].store(prob), sel[outer, lane.valid(valid)].store(index))
   return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="biased_sigmoid_topk_256", opts_to_apply=()))

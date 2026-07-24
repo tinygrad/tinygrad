@@ -77,12 +77,13 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
     q_head = kv_head*G + head_group*DECODE_HEAD_TILE + wave*heads_per_wave + head
     scores = tuple(wave_reduce_sum(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, key_kvals)),
                                        UOp.const(dtypes.float, 0)), lane + wave*WARP_SIZE) / math.sqrt(D) for key_kvals in kvals)
-    new_max = row_max[head]
+    prev_acc, prev_max, prev_sum = acc.after(offset)[head], row_max.after(offset)[head], row_sum.after(offset)[head]
+    new_max = prev_max
     for is_valid, score in zip(valid, scores): new_max = new_max.maximum(is_valid.where(score, UOp.const(dtypes.float, -math.inf)))
-    alpha = ((row_max[head]-new_max)*LOG2E).exp2()
+    alpha = ((prev_max-new_max)*LOG2E).exp2()
     betas = tuple(is_valid.where(((score-new_max)*LOG2E).exp2(), UOp.const(dtypes.float, 0)) for is_valid,score in zip(valid, scores))
-    updates += [acc[head].store(acc[head]*alpha + sum((UOp.stack(*value)*beta for value,beta in zip(vvals, betas)), acc[head].const_like(0))),
-                row_sum[head].store(row_sum[head]*alpha + sum(betas, UOp.const(dtypes.float, 0))), row_max[head].store(new_max)]
+    updates += [acc[head].store(prev_acc*alpha + sum((UOp.stack(*value)*beta for value,beta in zip(vvals, betas)), acc[head].const_like(0))),
+                row_sum[head].store(prev_sum*alpha + sum(betas, UOp.const(dtypes.float, 0))), row_max[head].store(new_max)]
   update = UOp.group(*updates).end(offset)
   acc, row_max, row_sum = acc.after(update), row_max.after(update), row_sum.after(update)
 
