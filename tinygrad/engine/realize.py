@@ -243,7 +243,7 @@ pm_beam = PatternMatcher([
 ])
 
 def assert_all_same_devices(ast:UOp):
-  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM])
+  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   assert len(devices) == 1, f"device mismatch: {devices}"
 
 pm_copy_from_store = PatternMatcher([
