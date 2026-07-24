@@ -86,10 +86,9 @@ class MetalGraph(GraphRunner):
     encoder.executeCommandsInBuffer_withRange(self.icb, self.range)
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(f"batched {len(self.calls)}"))
+    self.dev.track_inflight(command_buffer)
     command_buffer.commit()
     self.command_buffer = command_buffer
-
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()

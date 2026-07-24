@@ -1,4 +1,4 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
+import subprocess, pathlib, struct, ctypes, ctypes.util, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
@@ -11,6 +11,13 @@ REQUEST_TYPE_COMPILE = 13
 
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 DLL("CoreGraphics", "CoreGraphics")
+
+# https://clang.llvm.org/docs/Block-ABI-Apple.html
+_NSConcreteStackBlock = ctypes.c_void_p.in_dll(ctypes.CDLL(ctypes.util.find_library("System")), "_NSConcreteStackBlock")
+class _BlockDescriptor(ctypes.Structure): _fields_ = [("reserved", ctypes.c_ulong), ("size", ctypes.c_ulong)]
+class _BlockLiteral(ctypes.Structure):
+  _fields_ = [("isa", ctypes.c_void_p), ("flags", ctypes.c_int32), ("reserved", ctypes.c_int32),
+              ("invoke", ctypes.c_void_p), ("descriptor", ctypes.c_void_p)]
 
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
@@ -33,7 +40,7 @@ class MetalDevice(Compiled):
     self.sysdevice = metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
+    self.mtl_buffers_in_flight: set[metal.MTLCommandBuffer] = set()
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
@@ -50,13 +57,26 @@ class MetalDevice(Compiled):
       arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight:
+    for cbuf in list(self.mtl_buffers_in_flight):
       wait_check(cbuf)
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
+
+  def track_inflight(self, cbuf:metal.MTLCommandBuffer):
+    @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+    def handler(_, _cb): self.mtl_buffers_in_flight.discard(cbuf)
+    setattr(cbuf, "_h", handler)  # keep CFUNCTYPE alive while cbuf is in the set
+    d = _BlockDescriptor(0, ctypes.sizeof(_BlockLiteral))
+    b = _BlockLiteral()
+    b.isa = _NSConcreteStackBlock.value
+    b.flags = b.reserved = 0
+    b.invoke = ctypes.cast(handler, ctypes.c_void_p).value
+    b.descriptor = ctypes.cast(ctypes.pointer(d), ctypes.c_void_p).value
+    objc.msg("addCompletedHandler:", None, [ctypes.c_void_p])(cbuf, ctypes.byref(b))
+    self.mtl_buffers_in_flight.add(cbuf)
 
 class MetalCompiler(Compiler):
   # Opening METAL after LLVM doesn't fail because ctypes.CDLL opens with RTLD_LOCAL but MTLCompiler opens it's own llvm with RTLD_GLOBAL
@@ -142,8 +162,8 @@ class MetalProgram:
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
+    self.dev.track_inflight(command_buffer) # Need to make sure to always track before commit to command buffer
     command_buffer.commit()
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
@@ -173,12 +193,12 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       src_command_buffer.encodeSignalEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
       dest_command_buffer = dest_dev.mtl_queue.commandBuffer().retained()
       dest_command_buffer.encodeWaitForEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
+      dest_dev.track_inflight(dest_command_buffer)
       dest_command_buffer.commit()
-      dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1
     src_command_buffer.setLabel(to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
+    src_dev.track_inflight(src_command_buffer)
     src_command_buffer.commit()
-    src_dev.mtl_buffers_in_flight.append(src_command_buffer)
     # Transfers currently synchronize the completion. Otherwise, copies can sometimes lead to incorrect values.
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
