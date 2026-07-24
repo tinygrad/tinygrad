@@ -210,6 +210,8 @@ code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{c
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
 llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
+# weakints will break SPEC verification
+def _idx(i:int) -> UOp: return UOp.const(dtypes.int16, i)
 class AMDLLVMRenderer(LLVMRenderer):
   has_local = True
   shared_max = HIPRenderer.shared_max
@@ -276,9 +278,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
           src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
           if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
-          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
+          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(_idx(j//2)) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
             for j in range(x.max_numel()*2)))),
-          arg=(*x.arg[:4], None)).index(i*2)
+          arg=(*x.arg[:4], None)).index(_idx(i*2))
           for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
         (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
           src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))

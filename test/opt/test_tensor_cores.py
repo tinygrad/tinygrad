@@ -72,6 +72,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      # int WMMA not supported on AMD MOCKGPU
+      if (Device.DEFAULT == "AMD" and "MOCK" in str(DEV)) and  tc.dtype_in in dtypes.ints: continue
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @Context(ALLOW_TF32=1)
