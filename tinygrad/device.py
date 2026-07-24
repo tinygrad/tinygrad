@@ -293,7 +293,7 @@ class TinyELF:
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
-  def __call__(self, *bufs:Any, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                wait=False) -> float|None: pass
 
 class Compiled:
