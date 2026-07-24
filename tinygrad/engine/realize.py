@@ -246,20 +246,18 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   assert len(devices) <= 1, f"device mismatch: {devices}"
 
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+  if dst.device == src.device and not dst.device.startswith("DISK"): return None
+  return call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
+
 pm_copy_from_store = PatternMatcher([
   # TODO: make RANGE optional in a cleaner way
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True),
-   lambda call, dst, src:
-     call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
-     if dst.device != src.device else None),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True),
-   lambda call, dst, src, r:
-     call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
-     if dst.device != src.device else None),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
