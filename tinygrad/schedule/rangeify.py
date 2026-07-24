@@ -517,17 +517,8 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
-  # SINK requires all buffers on the same device, but COPY is cross-device
-  if ret.op is Ops.STORE: stored = ret.src[1]
-  elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
-  else: raise RuntimeError(f"unknown kernel type {ret.op}")
-  if stored.op is Ops.COPY: ret = stored.replace(src=stored.src + ret.ended_ranges)
-  else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
-
-  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
-  #if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
-  #  raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
-  return kernel
+  # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
