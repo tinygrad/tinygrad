@@ -440,7 +440,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])
     alpha = sorted(sz)
     # align all tensors to alphabet, multiply, sum non-output, permute to output order
-    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
+    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]) if s else x
           for s, x in zip(inputs, xs)]
     return xs[0].uprod(*xs[1:]).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
 
@@ -831,7 +831,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
-    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
+    x_unsqueezed = x.unsqueeze(-2)
     x_cummax = x.cummax(-1)[0].detach()
     mask = type(self).ones(last_dim_size, last_dim_size, buffer=False, dtype=dtypes.bool).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
