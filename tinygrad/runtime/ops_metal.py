@@ -127,9 +127,8 @@ class MetalProgram(Program[MetalDevice]):
     # cache these msg calls
     self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=(1,1,1), vals:tuple[int, ...]=(), wait=False,
-               **kw):
-    if prod(unwrap(local_size)) > self.max_total_threads:
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+    if prod(local_size) > self.max_total_threads:
       exec_width = self.pipeline_state.threadExecutionWidth()
       memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
       raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
@@ -140,7 +139,7 @@ class MetalProgram(Program[MetalDevice]):
     encoder.setComputePipelineState(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
     for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
-    encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*unwrap(local_size)))
+    encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()

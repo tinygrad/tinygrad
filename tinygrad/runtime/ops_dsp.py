@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
+import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, Program, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
@@ -289,8 +289,7 @@ class MockDSPRenderer(DSPRenderer):
 
 class MockDSPProgram(Program[DSPDevice]):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.lib = obj.lib
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=(1,1,1), vals:tuple[int, ...]=(), wait=False,
-               **kw):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
