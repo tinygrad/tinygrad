@@ -199,8 +199,7 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.empty(N, N)
 
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
@@ -209,8 +208,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.randn(N, N).to(devs)
     c = Tensor(Tensor.empty(N//2, N, device=devs).uop.multi(0), device=devs)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
   # NOTE: grad_fxn doesn't work with pyrender
@@ -233,14 +231,9 @@ class TestCustomKernel(unittest.TestCase):
     real_grad_a, real_grad_b = a.grad, b.grad
     Tensor.realize(ref, real_grad_a, real_grad_b)
 
-    err = (tst - ref).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_a - real_grad_a).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_b - real_grad_b).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(ref, atol=1e-3).item())
+    self.assertTrue(grad_a.allclose(real_grad_a, atol=1e-3).item())
+    self.assertTrue(grad_b.allclose(real_grad_b, atol=1e-3).item())
 
   def test_simple_qkv(self):
     N, d = 8, 4
@@ -253,8 +246,7 @@ class TestCustomKernel(unittest.TestCase):
     O_ref = ((Q @ K.T) / (d ** 0.5)) @ V
 
     Tensor.realize(O_custom, O_ref)
-    err = (O_custom - O_ref).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(O_custom.allclose(O_ref, atol=1e-3).item())
 
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6

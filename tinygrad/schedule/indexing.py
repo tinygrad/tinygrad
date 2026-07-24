@@ -2,7 +2,7 @@ from typing import Iterator
 import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, broadcast_axes
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
@@ -52,16 +52,22 @@ class IndexingContext:
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
-    # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
-    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
+    # if a range has a 1 src, it's the same as UOp.const(dtypes.weakint, 0)
+    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.weakint, 0)
+
+def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  if x.op not in GroupOp.Broadcastable: return rngs
+  baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
+  return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
   for i, s in enumerate(x.src):
     new_src = s
+    src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
     # shape args of movement ops are at src[1:] and should not be indexed
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
-      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*ctx.range_map[x][0])
+      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
@@ -77,7 +83,7 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
         new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
+        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(src_rngs) if i in realized_ranges])
     new_srcs.append(new_src)
   return new_srcs
 
@@ -136,7 +142,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
     acc *= s
-  combined_axes = UOp.const(dtypes.index, 0).usum(axes_in)
+  combined_axes = UOp.const(dtypes.weakint, 0).usum(axes_in)
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
@@ -188,15 +194,21 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
-    if x.dtype == dtypes.index: continue  # TODO: why do I need this?
+    if x.dtype == dtypes.weakint: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    # ranges the consumers iterate that this node broadcasts over
+    ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
+             for i in broadcast_axes(x.shape, c.shape)]
+    broadcast_ending_ranges = list(UOp.sink(*ended).ranges)
+    # fusion decision: REDUCE before the broadcast
+    if x.op is Ops.REDUCE: ending_ranges[x] += broadcast_ending_ranges
 
     # *** the ranges on the output are
     #  1. new if this op is realized
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
+    consumer_rngs = [broadcast_rngs(c, x, rctx.range_map[c][0]) for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
@@ -248,6 +260,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
         out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+    ending_ranges[x] += broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \

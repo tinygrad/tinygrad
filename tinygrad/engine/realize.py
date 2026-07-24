@@ -91,11 +91,13 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    bufs = [UOp.from_buffer(b.allocate()) for b in bufs_from_ast(prg.src[0], device)]
+    # reuse one loaded runtime across candidates, only launch dims vary
+    bufs, runtime = [b.allocate() for b in bufs_from_ast(prg.src[0], device)], get_runtime(device, prg, cache=False)
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return time_call(prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size))).call(*bufs))
+        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
+                       vals=prg.arg.vals({}), wait=True)
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -168,7 +170,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
       else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return None
 

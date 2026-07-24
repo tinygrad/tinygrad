@@ -382,7 +382,7 @@ class TestTensorUOpStack(unittest.TestCase):
     self.assertIs(_t(2, 3).uop.stack(w.uop).dtype, dtypes.float32)
   def test_stack_index_dtype(self):
     # index is outside the promotion lattice, equal dtypes bypass promotion
-    self.assertEqual(UOp.const(dtypes.index, 1).stack(UOp.const(dtypes.index, 2)).shape, (2,))
+    self.assertEqual(UOp.const(dtypes.weakint, 1).stack(UOp.const(dtypes.weakint, 2)).shape, (2,))
 
 class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_basic(self):

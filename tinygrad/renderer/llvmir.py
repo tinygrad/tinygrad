@@ -7,6 +7,8 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
 
+def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
+
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
   if count > 1: return f"<{count} x {ldt(dt, 1, ptr)}>"
@@ -72,13 +74,16 @@ base_rewrite = PatternMatcher([
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
-   f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
-   f"  store {ldt(var.dtype, idx.max_numel())} {ctx[var]}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
@@ -95,6 +100,11 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+
+  # loop (a RANGE with no src is an unbounded loop header)
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
+    f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
 
   # range
   (UPat(Ops.RANGE, name="r"), lambda ctx,r:
@@ -187,7 +197,7 @@ class CPULLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
     self.compiler = CPULLVMCompiler(target.arch.split(","))
 
   # FIXME: fp16 works on non-osx, but only if the cpu supports it
@@ -248,7 +258,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
+    from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
     self.compiler, self.tensor_cores, self.is_cdna = AMDLLVMCompiler(target.arch), tc.get_amd(target.arch), HIPRenderer.is_cdna(target.arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:

@@ -100,8 +100,8 @@ class MultiBuffer:
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
-               uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
+               initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
@@ -113,6 +113,7 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
@@ -171,12 +172,13 @@ class Buffer:
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     self._bufs.clear()
-  def __reduce__(self):
-    buf = None
+  def __reduce_ex__(self, protocol):
+    buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
-    if self.is_allocated(): buf = bytearray(self.as_memoryview())
+    if self.is_allocated():
+      buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
@@ -189,9 +191,11 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
-  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
+      if not no_sync: self.allocator.dev.synchronize()
+      return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
