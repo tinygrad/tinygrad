@@ -176,7 +176,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
-  linear = graph_rewrite(linear, pm_copy_from_store, name="copy from store", walk=True)
+  linear = graph_rewrite(linear, pm_copy_from_store, name="copy from store")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

@@ -537,12 +537,12 @@ def convert_copy_to_store(ctx, x:UOp, existing_buf:UOp|None=None):
   # x is the copy
   input_src = x.src[0]
   # if the src doesn't have buffer identity, we need to contiguous it
-  if not input_src.has_buffer_identity(): input_src = input_src.contiguous()
+  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   # flatten the input
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
-    if not existing_buf.has_buffer_identity(): return None
+    if not existing_buf.has_buffer_identity(after_ok=True): return None
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   else:

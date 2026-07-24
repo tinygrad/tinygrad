@@ -863,9 +863,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
     return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
 
-  def has_buffer_identity(self):
+  def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
-    if self.op in {Ops.RESHAPE, Ops.MULTI, Ops.MSELECT}: return self.src[0].has_buffer_identity()
+    if self.op in {Ops.RESHAPE, Ops.MULTI, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
+    if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
