@@ -14,10 +14,10 @@ from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
 from tinygrad.engine.jit import DepsTracker
 
-HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
-
 # *****************
 # 0. helpers
+
+HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
@@ -54,8 +54,8 @@ def make_ins(op, *srcs):
 def make_placeholder(devs, size:int, dtype, name=None, unique=True) -> UOp:
   return UOp.param(next(UOp.unique_num) if unique else 0, dtype, shape=(size,), device=devs).rtag(name or "temp")
 
-def make_patch(buf:UOp, off:sint, val:UOp, dtype=None) -> UOp:
-  return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(dtype or buf.dtype))
+def make_patch(buf:UOp, off:sint, val:UOp) -> UOp:
+  return buf.index(UOp.const(dtypes.int, off // buf.dtype.itemsize)).store(val.simplify().cast(buf.dtype))
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
@@ -72,10 +72,10 @@ def make_cmdbuf(lin, devs):
 
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
-def make_signal(devs, queue=None, sentinel=False):
-  return make_placeholder(devs, 1, dtypes.uint64, "sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal", unique=False)
-def make_signal_value(devs, queue=None):
-  return make_placeholder(devs, 1, dtypes.uint64, (queue, "timeline_value") if queue else "timeline_value", unique=False)
+def make_signal(devs, queue="COMPUTE:0", sentinel=False):
+  return make_placeholder(devs, 1, dtypes.uint64, "sentinel_signal" if sentinel else f"{queue}_timeline_signal", unique=False)
+def make_signal_value(devs, queue="COMPUTE:0"):
+  return make_placeholder(devs, 1, dtypes.uint64, f"{queue}_timeline_value", unique=False)
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)))
@@ -154,9 +154,10 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     waited |= cur_waited
 
     # wait the syncs, store the device epoch; value bumps are a separate call: no lane may bump until every lane has patched its waits
-    store = UOp(Ops.INS, arg="store", src=(make_signal(devs), (tl:=make_signal_value(devs)).index(zero)))
+    store = UOp(Ops.INS, arg="store", src=(make_signal(devs), (tl:=make_signal_value(devs)).index(zero) + n))
     submit = make_submit(*waits, store, devs=devs, queue="COMPUTE:0")
-    upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), n) for qn in dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)])]
+    upd = [(tl, n + 1)] + [(make_signal_value(devs, queue=qn), n)
+                           for qn in dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)]) if qn != "COMPUTE:0"]
     bump = UOp.barrier(*[s.index(zero, dtype=s.dtype).store(s.index(zero) + inc) for s, inc in upd])
     finalizers += [UOp.custom_function("hcq", b.sink()).call(aux=HCQInfo("hcq_finalizer", Estimates(), devs, "COMPUTE:0")) for b in (submit, bump)]
   return finalizers, waited
@@ -474,8 +475,6 @@ class HCQ2Compiled(Compiled):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].timeline_signal()),
-      (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].timeline_value()),
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
       (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, jit=ctx[1]))
     ])
@@ -491,13 +490,13 @@ class HCQ2Compiled(Compiled):
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
-  def timeline_signal(self, queue:str|None=None, init_value:int=0) -> Buffer:
+  def timeline_signal(self, queue:str="COMPUTE:0", init_value:int=0) -> Buffer:
     buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   @functools.cache
-  def timeline_value(self, queue:str|None=None, init_value:int=1) -> Buffer:
+  def timeline_value(self, queue:str="COMPUTE:0", init_value:int=1) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
