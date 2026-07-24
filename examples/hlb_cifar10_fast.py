@@ -181,6 +181,7 @@ if __name__ == "__main__":
     init_tm = time.perf_counter()
 
     # *** training ***
+    @jit_now
     @TinyJit
     @Context(TRAINING=1)
     def train_step(X:Tensor, Y:Tensor, off:Variable) -> Tensor:
