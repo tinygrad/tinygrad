@@ -355,7 +355,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"), lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
+  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
+    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally

@@ -3,7 +3,6 @@ from tinygrad import Tensor, UOp
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear
-from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.uop.ops import Ops, KernelInfo
 
 def wait_loop_kernel(C:UOp) -> UOp:
