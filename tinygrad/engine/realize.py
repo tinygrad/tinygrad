@@ -247,6 +247,13 @@ def assert_all_same_devices(ast:UOp):
   assert len(devices) == 1, f"device mismatch: {devices}"
 
 pm_copy_from_store = PatternMatcher([
+  # TODO: make RANGE optional in a cleaner way
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
+                name="call", allow_any_len=True),
+   lambda call, dst, src:
+     call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
+     if dst.device != src.device else None),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True),
