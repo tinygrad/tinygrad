@@ -158,6 +158,11 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy on reshape is reshape on copy
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
+  # reshaping on STORE can be a NOOP
+  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
+                        UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
+   lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
+
   # ** store rules **
 
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
