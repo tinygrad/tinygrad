@@ -73,8 +73,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     print(Tensor.full((2, 3), False).numpy())
     ```
     """
-    # TODO: enable this check
-    # if not buffer: assert device is None, "buffer=False does not support device specification"
+    if not buffer: assert device is None, "buffer=False does not support device specification"
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
@@ -98,7 +97,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     if isinstance(self.device, tuple):
       if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
       return self._multi_like(lambda shape, dev: type(self).full(shape, fill_value, dtype=dtype or self.dtype, device=dev, buffer=buffer))
-    return type(self).full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device, buffer=buffer)
+    return type(self).full(self.shape, fill_value, dtype=dtype or self.dtype, device=(self.device if device is None else device) if buffer else device, buffer=buffer)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
