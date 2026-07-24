@@ -225,6 +225,10 @@ class TestGGUFGEMV(unittest.TestCase):
     buf += q_data.tobytes()
 
     _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
+    if qtype in (GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K):
+      _, packed_tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None), preserve_quantized=lambda name, typ: name == "weight")
+      self.assertIsInstance(packed_tensors["weight"], GGMLQuantizedTensor)
+      np.testing.assert_equal(packed_tensors["weight"].dequantized().numpy(), tensors["weight"].numpy())
 
     x = rng.standard_normal(cols).astype(np.float32)
     with np.errstate(all='ignore'):
