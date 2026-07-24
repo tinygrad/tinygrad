@@ -3,10 +3,10 @@
 # trains CIFAR-10 to ~94% in 9.9 epochs / 476 steps, run with DEFAULT_FLOAT=HALF
 import time
 start_tm = time.perf_counter()
-import math
+import math, tarfile, ctypes
 import numpy as np
-from tinygrad import Tensor, nn, dtypes, TinyJit, Variable
-from tinygrad.helpers import getenv, colored, Context
+from tinygrad import Tensor, nn, dtypes, TinyJit, Variable, Device
+from tinygrad.helpers import getenv, colored, Context, fetch
 from tinygrad.nn import optim
 from extra.bench_log import BenchEvent, WallTimeEvent
 import_tm = time.perf_counter()
@@ -101,6 +101,25 @@ class CifarNet:
     x = x.sequential([self.group1, self.group2, self.group3])
     return self.linear(c(x.max((2, 3)))) / 9.
 
+def cifar_fast() -> tuple[Tensor, Tensor, Tensor, Tensor]:
+  """nn.datasets.cifar bounces every batch through a fresh pinned buffer (~0.5s of cuMemHostAlloc+memmove on slow cores),
+  this streams the tar through one reused 30MB pinned buffer with sync HtoD copies instead (~90ms)"""
+  from tinygrad.device import BufferSpec
+  from tinygrad.runtime.ops_cuda import cuda, check
+  fp = fetch('https://data.brainchip.com/dataset-mirror/cifar10/cifar-10-binary.tar.gz', gunzip=True)
+  with tarfile.open(fp) as tf: offs = {m.name: m.offset_data for m in tf.getmembers()}
+  raw = Tensor.empty(6, 10000, 3073, dtype=dtypes.uint8).realize()
+  base, dev, sz = raw.uop.buffer.ensure_allocated()._buf, Device[raw.device], 10000*3073
+  check(cuda.cuCtxSetCurrent(dev.context))
+  host = dev.allocator.alloc(sz, BufferSpec(host=True))
+  with open(fp, 'rb') as f:
+    for i, n in enumerate([f"cifar-10-batches-bin/data_batch_{i}.bin" for i in range(1, 6)] + ["cifar-10-batches-bin/test_batch.bin"]):
+      f.seek(offs[n]); f.readinto((ctypes.c_char*sz).from_address(host.value))
+      check(cuda.cuMemcpyHtoD_v2(cuda.CUdeviceptr_v2(base.value + i*sz), host, sz))
+  dev.allocator.free(host, sz, BufferSpec(host=True))
+  train, test = raw[:5].reshape(-1, 3073), raw[5]
+  return train[:, 1:].reshape(-1, 3, 32, 32), train[:, 0], test[:, 1:].reshape(-1, 3, 32, 32), test[:, 0]
+
 # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
 def pad_reflect(X:Tensor, size=2) -> Tensor:
   X = X[..., :, 1:size+1].flip(-1).cat(X, X[..., :, -(size+1):-1].flip(-1), dim=-1)
@@ -149,7 +168,7 @@ if __name__ == "__main__":
     Tensor.manual_seed(SEED)
 
     # *** data ***
-    X_train, Y_train, X_test, Y_test = nn.datasets.cifar()
+    X_train, Y_train, X_test, Y_test = cifar_fast() if Device.DEFAULT.startswith("CUDA") and getenv("FAST_DATA", 1) else nn.datasets.cifar()
     assert X_test.shape[0] % EVAL_BS == 0, f"{EVAL_BS=} must divide {X_test.shape[0]}"
     mean, std = Tensor(cifar_mean, dtype=dtypes.float32).reshape(1, 3, 1, 1), Tensor(cifar_std, dtype=dtypes.float32).reshape(1, 3, 1, 1)
     def normalize(x:Tensor) -> Tensor: return ((x.float()/255 - mean)/std).cast(dtypes.default_float)
@@ -201,18 +220,6 @@ if __name__ == "__main__":
       perm = Tensor.randperm(X.shape[0], device=X.device)
       return X[perm], Y[perm]
 
-    vi = Variable("i", 0, (steps_per_epoch - 1) * BS)
-    i = 0
-    for epoch in range(math.ceil(total_steps / steps_per_epoch)):
-      Xa, Ya = epoch_aug(X_train, Y_train, Tensor([epoch % 2 == 1]))
-      for j in range(min(steps_per_epoch, total_steps - i)):
-        loss = train_step(Xa, Ya, vi.bind(j * BS))
-        i += 1
-        if i % EMA_EVERY == 0: ema.update(Tensor([EMA_BASE**EMA_EVERY * (i/total_steps)**3], dtype=dtypes.float32))
-        if LOG_INTERVAL and (i % LOG_INTERVAL == 0 or i == total_steps): print(f"step {i:4d}/{total_steps}, loss {loss.item():8.2f}")
-    ema.update(Tensor([1.0], dtype=dtypes.float32))  # the final pullback is just a decay=1.0 update
-    train_tm = time.perf_counter()
-
     # *** evaluation: airbench TTA (TTA=2: mirror+1px translations 6 views; TTA=1: mirror 2 views; TTA=0: 1 view) ***
     @jit_now
     @TinyJit
@@ -225,7 +232,23 @@ if __name__ == "__main__":
       return (logits.argmax(axis=1) == y).cast(dtypes.int32).sum()
 
     vj = Variable("j", 0, X_test.shape[0] - EVAL_BS)
+    # NOTE: allocated pre-train: realizing a NEW kernel later would block in cuModuleLoadData (it syncs the context) until the queue drains
     correct = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize()
+
+    vi = Variable("i", 0, (steps_per_epoch - 1) * BS)
+    i = 0
+    for epoch in range(math.ceil(total_steps / steps_per_epoch)):
+      Xa, Ya = epoch_aug(X_train, Y_train, Tensor([epoch % 2 == 1]))
+      for j in range(min(steps_per_epoch, total_steps - i)):
+        loss = train_step(Xa, Ya, vi.bind(j * BS))
+        i += 1
+        if i % EMA_EVERY == 0: ema.update(Tensor([EMA_BASE**EMA_EVERY * (i/total_steps)**3], dtype=dtypes.float32))
+        if LOG_INTERVAL and (i % LOG_INTERVAL == 0 or i == total_steps): print(f"step {i:4d}/{total_steps}, loss {loss.item():8.2f}")
+    ema.update(Tensor([1.0], dtype=dtypes.float32))  # the final pullback is just a decay=1.0 update
+    train_tm = time.perf_counter()
+
+    # NOTE: the eval jit capture (~0.2s cpu) rides the async train-queue drain: it only records buffer pointers and
+    # its kernels are stream-ordered after all train work, so they see the final weights
     for j in range(0, X_test.shape[0], EVAL_BS): correct.assign(correct + eval_step(X_test, Y_test, vj.bind(j))).realize()
     num_correct, num_test = correct.item(), X_test.shape[0]
     eval_acc_pct = 100.0 * num_correct / num_test
