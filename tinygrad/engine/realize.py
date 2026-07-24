@@ -242,25 +242,6 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
-def assert_all_same_devices(ast:UOp):
-  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
-  assert len(devices) <= 1, f"device mismatch: {devices}"
-
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
-  if dst.device == src.device and not dst.device.startswith("DISK"): return None
-  return call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
-
-pm_copy_from_store = PatternMatcher([
-  # TODO: make RANGE optional in a cleaner way
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
-  # if it wasn't copy, it currently can't be cross device
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
-])
 
 pm_compile = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
@@ -284,7 +265,6 @@ pm_exec = PatternMatcher([
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = graph_rewrite(linear, pm_copy_from_store, name="copy from store", walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_compile
