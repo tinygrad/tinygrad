@@ -1,4 +1,4 @@
-from tinygrad.dtype import dtypes, AddrSpace, truncate, DType
+from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import itertools
 
 # ---- (UOp, dtype) -> Instruction tables ----
-dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64" }
+dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16" }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
@@ -59,7 +59,9 @@ def _cvt_ins(dtin, dtout):
 # ---- helpers ----
 def reg(u:UOp): return rs[0] if len((rs := rdefs(u))) >= 1 else None
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
-def const(dt, v:int) -> UOp: return UOp.const(dt,truncate[dt](v)).rtag()
+def const(dt, v) -> UOp:
+  if isinstance(v, InvalidType): return UOp.const(dt,v).rtag()
+  return UOp.const(dt,truncate[dt](v)).rtag()
 def make_vgpr(ctx, width:int=1) -> Register: return ctx.vreg(GP_VGPRS, width=width)
 # NOTE: v_mov_b16 breaks min 1 register per value invariant, but its required for f16
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
@@ -215,6 +217,8 @@ def load(ctx, addr:UOp, x:UOp, gate:UOp|None = None, alt:UOp|None = None):
   tupins = imap[nbytes] if nbytes > 2 else imap[nbytes][not (dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype))]
   folded = fold_address(ctx, addr)
   nx = x.ins(_insspace(tupins, base), src=folded, tag=(vreg,))
+  # ADDR as a control flow edge to ensure alt is placed in same block doesn't always work
+  # - failing avg_pool2d_ceil
   if gate is not None:
     if alt.op is Ops.GROUP: packed = alt.replace(src=tuple(s.replace(src=s.src + folded, tag=(vreg.sub(i),)) for i,s in enumerate(alt.src)), tag=(vreg,))
     else: packed = vmov(alt).replace(src=(alt,) + folded, tag=(vreg,))
@@ -468,7 +472,7 @@ def lower_end(ctx, x:UOp):
 def gethalf(x:UOp, buf:UOp, idx:UOp):
   i = idx.arg
   b32 = buf.index(UOp.const(dtypes.int, i // 2)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: return (b32 >> const(dtypes.uint32,16)).bitcast(x.dtype)
+  if i % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(dtypes.uint32,16))),), arg=x.dtype) # NOTE: manual construction, needs to be cleaned
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
@@ -493,31 +497,41 @@ wmma_op = {
   (dtypes.float16, dtypes.float16) : RDNA3Ops.v_wmma_f16_16x16x16_f16,
   (dtypes.bfloat16, dtypes.bfloat16) : RDNA3Ops.v_wmma_bf16_16x16x16_bf16,
 }
-def render_wmma(ctx, x:UOp):
-  a,b,acc = x.src
-  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[a.dtype]}_16x16x16_{dt_to_isa[b.dtype]}")
-  return UOp(Ops.INS, arg=ins, src=(a,b,acc), tag=(make_vgpr(ctx, width=8),))
+def render_wmma(ctx, wmma:UOp):
+  a,b,acc = wmma.src
+  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{dt_to_isa[wmma.arg[1]]}")
+  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(make_vgpr(ctx, width=8),))
 
 # ---- lowering passes ----
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.dtype import to_storage_scalar
+pm_gfx1100_wmma = PatternMatcher([
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
+    src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
+      for j in range(x.max_numel()*2)))),
+    arg=(*x.arg[:4], None)).index(i*2)
+    for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
+  (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
+    src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
+    if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
+])
+
 extra_matcher = PatternMatcher([
+  # how to handle const invalid?
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(dtypes.uint16, to_storage_scalar(x.arg, dtypes.bfloat16)).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
   # prevent 64 bit immediate from being realized into 2 regs for shift
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
-]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,))
-
+]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + pm_gfx1100_wmma
+ 
 # TODO: Ops.NEG should be 0 - x, 64 bit consts should also be folded into imm field when possible
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 # cast i8 -> i16/i32 = bfe
 # NOTE: down casting float to int should round first then reduce precision
 pre_isel_matcher = PatternMatcher([
-  # NOTE: does src order matter for upat?, maybe thats an arg
-  # (UPat(Ops.ADD, src=[UPat(Ops.MUL, src=(UPat.var("a"), UPat.cvar("c"))), UPat.var("b")], name="x"), lambda ctx,x,a,b,c: x.replace(op=Ops.SUB, src=(b, a)) if c.arg == -1.0 else None),
   # realize bool const as sgpr mask
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
@@ -527,7 +541,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"), lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
   (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat(Ops.CDIV, name="x"), idiv),
-  # TODO: handle gated bool load/store
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
@@ -557,7 +570,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half), name="x"), lambda y,x: long2double(y).cast(dtypes.float).cast(x.dtype)),
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
-  # NOTE: this only works because we assume upper half is right, widen cast is noop
   (UPat(Ops.MUL, dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
   # expand 64 bit where, 2 cndmasks
@@ -571,7 +583,7 @@ pre_isel_matcher = PatternMatcher([
 # TODO: u64/i64 -> f64?
 isel_matcher = PatternMatcher([
   (UPat(name="x").bitcast(), lambda x: x),
-  (UPat(Ops.WMMA, name="x"), render_wmma),
+  (UPat(Ops.WMMA, name="wmma"), render_wmma),
   # control flow
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -584,7 +596,7 @@ isel_matcher = PatternMatcher([
   # TODO: add fma/mad fuse detection to alu()
   # fused multiply add, use FMAC in the future?
   ((UPat(Ops.MUL, dtype=dtypes.floats, name="a") + UPat.var("b")).named("x"), lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
-  # (UPat(Ops.ADD, dtype=dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"), lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
+  (UPat(Ops.ADD, dtype=dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"), lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # cast
   (UPat.var("y", dtypes.int).cast(dtypes.uint, name="x"), lambda y,x: y), # noop?
   (UPat.var("y").cast(name="x"), cvt),
@@ -595,10 +607,10 @@ isel_matcher = PatternMatcher([
   # mem ops
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(allow_any_len=True, name="x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
+  # alu
+  (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # 16 bit indexes get expanded into extract moves/shifts, this only works for const indexes (everything but load/store?)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x", dtype=(dtypes.half,dtypes.int16,dtypes.uint16)), gethalf),
-  # unified alu experiment
-  (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   # barrier
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: None if x.addrspace is not AddrSpace.REG else bufreg(ctx, x)),
@@ -635,7 +647,8 @@ def encode(ctx, x:UOp):
     if reg(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.DS:
-    kw = dict(addr=_immorreg(oprs[0]), offset1=_immorreg(oprs[1]))
+    offs = _immorreg(oprs[1])
+    kw = dict(addr=_immorreg(oprs[0]), offset0=offs&0xFF, offset1=offs>>8)
     if reg(x) is None: kw["data0"]=_fuse(rdefs(oprs[3]))
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
