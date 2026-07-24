@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast
-import ctypes, functools, hashlib
+import ctypes, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
@@ -54,7 +54,7 @@ class CLProgram(Program['CLDevice']):
 
   def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
                wait=False, **kw) -> float|None:
-    for i, (slot, dt, shape) in enumerate(self.signature):
+    for i, (_, slot, dt, shape) in enumerate(self.signature):
       b = bufs[slot] if slot < len(bufs) else ctypes.c_int32(vals[slot-len(bufs)])
       if is_image_shape(shape):
         pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
