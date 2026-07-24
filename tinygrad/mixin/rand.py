@@ -269,7 +269,7 @@ class RandMixin(OpMixin):
     if replacement or num_samples == 1:
       cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
       unif_samples = type(self).rand(num_samples, cdf.shape[0], 1).to(self.device)  # type: ignore[attr-defined]
-      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+      indices = (unif_samples >= cdf).sum(2).permute((1, 0))
     else:
       # Efraimidis-Spirakis
       indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]

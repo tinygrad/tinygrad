@@ -339,6 +339,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.ones(256,256).max(1)[0], lambda: Tensor.ones(256,256).max(1), forward_only=True)
 
   def test_where(self):
+    helper_test_op([], lambda: torch.where(torch.tensor([True, False]), 1, 3).type(torch.int32),
+                   lambda: Tensor([True, False]).where(1, 3), forward_only=True)
     helper_test_op(
       [(100,)],
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32),
@@ -525,6 +527,7 @@ class TestOps(unittest.TestCase):
 
   def test_add(self):
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
+    helper_test_op([], lambda: torch.tensor(1)+0.5, lambda: Tensor(1)+0.5, forward_only=True)
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y)
     helper_test_op([(), ()], lambda x,y: x+y)
   def test_add3(self):
@@ -903,6 +906,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
+    helper_test_op([], lambda: torch.tensor(2.0).cos(), lambda: Tensor(2).cos(), forward_only=True)
     helper_test_op([()], lambda x: x.cos())
     if not ((DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
       helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
@@ -981,6 +985,8 @@ class TestOps(unittest.TestCase):
 
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
+    # int scalar input: the python coefficients in the decomposition must stay float
+    helper_test_op([], lambda: torch.tensor(2.0).exp(), lambda: Tensor(2).exp(), forward_only=True)
     helper_test_op(None, torch.exp, Tensor.exp, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp, Tensor.exp)
   def test_exp2(self):
