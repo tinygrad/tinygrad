@@ -3,7 +3,7 @@ import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, broadcast_axes
-from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
+from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
@@ -60,14 +60,21 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
   return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 
+# TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
+def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL, Ops.BIND}: return ()
+  if op in GroupOp.Movement|{Ops.INDEX, Ops.SLICE, Ops.STAGE, Ops.REDUCE, Ops.COPY, Ops.AFTER, Ops.END}: return src[:1]
+  return src
+
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
+  # shape/bound/index args that are not data src should not be indexed
+  data_src_count = len(data_srcs(x.op, x.src))
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    # shape args of movement ops are at src[1:] and should not be indexed
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
-      if x in ctx.range_map and not (x.op in GroupOp.Movement and i > 0): new_src = new_src.index(*src_rngs)
+      if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
@@ -180,7 +187,11 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
-    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort(gate_kernel_sink))
+    tsink_toposort = tsink.toposort(gate_kernel_sink)
+    consumer_map: dict[UOp, dict[UOp, None]] = {x:{} for x in tsink_toposort}
+    for c in tsink_toposort:
+      for x in data_srcs(c.op, c.src):
+        if x in consumer_map: consumer_map[x][c] = None
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
@@ -194,7 +205,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
-    if x.dtype == dtypes.weakint: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
     # ranges the consumers iterate that this node broadcasts over
     ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
