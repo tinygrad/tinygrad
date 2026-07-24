@@ -1,10 +1,12 @@
 import functools, io, pathlib, re, struct
-from typing import Any, Callable
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Self
 
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType, DTypeLike, to_dtype
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 @functools.lru_cache(None)
@@ -19,6 +21,56 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 # quant types {ggml_type: (number of elements, number of bytes)}
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
+
+def _ggml_qk_matvec(out:UOp, x:UOp, raw:UOp, rows:UOp, ggml_type:int) -> UOp:
+  routes, outputs, K = out.shape[0], out.shape[1], x.shape[1]
+  _, block_bytes = _GGML_QUANT[ggml_type]
+  row_bytes = K // 256 * block_bytes
+  route, output = UOp.range(routes, 0, AxisType.GLOBAL), UOp.range(outputs, 1, AxisType.GLOBAL)
+  k = UOp.range(K, 2, AxisType.REDUCE)
+  block, within = k.cast(dtypes.int64) // 256, k.cast(dtypes.int64) % 256
+  group, lane = within // 32, within % 32
+  base = (rows[route].cast(dtypes.int64) * outputs + output.cast(dtypes.int64)) * row_bytes + block * block_bytes
+  def fp16(offset:int) -> UOp:
+    bits = raw[base + offset].cast(dtypes.uint16).bitwise_or(raw[base + offset + 1].cast(dtypes.uint16).lshift(8))
+    return bits.bitcast(dtypes.float16).cast(dtypes.float)
+  scale_group = group % 4
+  scale_lo, min_lo = raw[base + 4 + scale_group].bitwise_and(63), raw[base + 8 + scale_group].bitwise_and(63)
+  scale_hi = raw[base + 12 + scale_group].bitwise_and(15).bitwise_or(raw[base + 4 + scale_group].rshift(6).lshift(4))
+  min_hi = raw[base + 12 + scale_group].rshift(4).bitwise_or(raw[base + 8 + scale_group].rshift(6).lshift(4))
+  scale, min_scale = (group < 4).where(scale_lo, scale_hi), (group < 4).where(min_lo, min_hi)
+  qs_offset = 48 if ggml_type == 13 else 16
+  qbyte = raw[base + qs_offset + (group // 2) * 32 + lane]
+  quant = (group % 2).eq(0).where(qbyte.bitwise_and(15), qbyte.rshift(4)).cast(dtypes.float)
+  if ggml_type == 13: quant = quant + raw[base + 16 + lane].rshift(group).bitwise_and(1).cast(dtypes.float) * 16
+  weight = fp16(0) * scale.cast(dtypes.float) * quant - fp16(2) * min_scale.cast(dtypes.float)
+  value = (x[route, k].cast(dtypes.float) * weight).reduce(k, arg=Ops.ADD)
+  return out[route, output].store(value.cast(out.dtype)).end(route, output).sink(
+    arg=KernelInfo(name=f"ggml_q{4 if ggml_type == 12 else 5}_k_matvec_{routes}_{outputs}_{K}", opts_to_apply=()))
+
+@dataclass(frozen=True, slots=True)
+class GGMLQuantizedTensor:
+  raw:Tensor
+  shape:tuple[int, ...]
+  ggml_type:int
+  dtype:DType = dtypes.float32
+
+  def cast(self, dtype:DTypeLike) -> Self: return replace(self, dtype=to_dtype(dtype))
+
+  def dequantized(self) -> Tensor:
+    return ggml_data_to_tensor(self.raw, prod(self.shape), self.ggml_type).reshape(self.shape).cast(self.dtype)
+
+  def matvec(self, x:Tensor, rows:Tensor|None=None) -> Tensor:
+    assert self.ggml_type in (12, 13), f"packed matvec only supports Q4_K and Q5_K, got {self.ggml_type}"
+    assert len(self.shape) in (2, 3) and self.shape[-1] == x.shape[-1] and self.shape[-1] % 256 == 0
+    leading, outputs, K = x.shape[:-1], self.shape[-2], self.shape[-1]
+    if rows is None: rows = Tensor.zeros(*leading, dtype=dtypes.int32, device=x.device)
+    assert rows.shape == leading and self.raw.device == x.device
+    routes = prod(leading)
+    out = Tensor.empty(routes, outputs, dtype=self.dtype, device=x.device)
+    ret = Tensor.custom_kernel(out, x.reshape(routes, K), self.raw.reshape(-1), rows.reshape(routes),
+                               fxn=functools.partial(_ggml_qk_matvec, ggml_type=self.ggml_type))[0]
+    return ret.reshape(*leading, outputs)
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """

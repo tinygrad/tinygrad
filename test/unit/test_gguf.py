@@ -1,7 +1,7 @@
 import os, struct, unittest, tempfile, pathlib, sys
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc
-from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load, GGMLQuantizedTensor
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -245,6 +245,32 @@ class TestGGUFGEMV(unittest.TestCase):
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)
+
+class TestGGUFPackedMatvec(unittest.TestCase):
+  def _packed(self, shape:tuple[int, ...], qtype:GGMLQuantizationType) -> tuple[GGMLQuantizedTensor, Tensor]:
+    block_size, type_size = GGML_QUANT_SIZES[qtype]
+    rng = np.random.default_rng(42)
+    raw = rng.integers(0, 256, size=np.prod(shape) // block_size * type_size, dtype=np.uint8).reshape(-1, type_size)
+    raw[:, :4] = (rng.standard_normal((raw.shape[0], 2)) * 0.01).astype(np.float16).view(np.uint8).reshape(-1, 4)
+    raw_tensor = Tensor(raw.flatten())
+    return GGMLQuantizedTensor(raw_tensor, shape, qtype.value), ggml_data_to_tensor(raw_tensor, int(np.prod(shape)), qtype.value).reshape(shape)
+
+  def _test_matrix(self, qtype:GGMLQuantizationType):
+    packed, weight = self._packed((3, 512), qtype)
+    x = Tensor(np.random.default_rng(1).standard_normal((2, 512)).astype(np.float32))
+    np.testing.assert_allclose(packed.matvec(x).numpy(), (x @ weight.T).numpy(), atol=1e-3, rtol=1e-4)
+
+  def _test_selected(self, qtype:GGMLQuantizationType):
+    packed, weight = self._packed((4, 3, 512), qtype)
+    rows = Tensor([[[3, 1], [0, 3]]])
+    x = Tensor(np.random.default_rng(1).standard_normal((1, 2, 2, 512)).astype(np.float32))
+    expected = (x.unsqueeze(-2) @ weight[rows].transpose(-1, -2)).squeeze(-2)
+    np.testing.assert_allclose(packed.matvec(x, rows).numpy(), expected.numpy(), atol=1e-3, rtol=1e-4)
+
+  def test_matrix_q4_k(self): self._test_matrix(GGMLQuantizationType.Q4_K)
+  def test_matrix_q5_k(self): self._test_matrix(GGMLQuantizationType.Q5_K)
+  def test_selected_q4_k(self): self._test_selected(GGMLQuantizationType.Q4_K)
+  def test_selected_q5_k(self): self._test_selected(GGMLQuantizationType.Q5_K)
 
 class TestGGUFGC(unittest.TestCase):
   def test_gguf_load_no_tensor_leak(self):
