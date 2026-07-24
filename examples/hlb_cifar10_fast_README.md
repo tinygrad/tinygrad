@@ -5,6 +5,11 @@ tinygrad bounty *"<10s (wall time) hlb_cifar training on anything"* (rules: ≥9
 ## Record (2026-07-24, RTX 4090, warm caches)
 Per seed: **1337: 9.79s @ 93.88** | **42: 9.98s @ 93.57** | **7: 9.79s @ 93.60** | **2024: 9.94s @ 93.59** — every run <10s and ≥93.5%.
 
+One-liner (uv installs tinygrad from this branch via the script's inline deps; run it twice — first run beam-searches ~2h, second is the record):
+```sh
+SPEEDRUN=1 uv run https://raw.githubusercontent.com/dwahdany/tinygrad/hlb_cifar_10s/examples/hlb_cifar10_fast.py
+```
+Or from a checkout:
 ```sh
 export PYTHONPATH=. DEV=CUDA DEFAULT_FLOAT=HALF CACHEDB=/dev/shm/tg.db
 export BS=1024 EPOCHS=8.0 TTA=2 MATMUL_CONV=1 CONTIG=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1
