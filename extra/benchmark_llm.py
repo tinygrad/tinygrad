@@ -78,7 +78,8 @@ def main() -> None:
   parser.add_argument("--max-context", type=int, default=32768)
   parser.add_argument("--prompt-tokens", type=int, nargs="+", default=[128, 2048, 8192])
   parser.add_argument("--decode-tokens", type=int, default=32)
-  parser.add_argument("--decode-position", type=int, help="Benchmark decode at this position without prefilling preceding KV entries")
+  parser.add_argument("--decode-position", type=int, nargs="+",
+                      help="Benchmark decode at one or more positions without prefilling preceding KV entries")
   parser.add_argument("--chunk-size", type=int, default=256)
   parser.add_argument("--beam", type=int, default=2, help="Kernel optimization beam width")
   parser.add_argument("--jit-batch-size", type=int, default=448, help="Kernels per JIT graph (server default: 448)")
@@ -90,7 +91,7 @@ def main() -> None:
   if args.chunk_size < 1: parser.error("--chunk-size must be positive")
   if args.decode_position is None and max(args.prompt_tokens) + args.decode_tokens >= args.max_context:
     parser.error("prompt plus decode tokens must fit within --max-context")
-  if args.decode_position is not None and args.decode_position + args.decode_tokens >= args.max_context:
+  if args.decode_position is not None and max(args.decode_position) + args.decode_tokens >= args.max_context:
     parser.error("decode position plus decode tokens must fit within --max-context")
 
   path = fetch(models.get(args.model, args.model))
@@ -100,7 +101,7 @@ def main() -> None:
   with Context(BEAM=args.beam, JIT_BATCH_SIZE=args.jit_batch_size, PARALLEL_COMPILE=12): model.warmup(args.chunk_size)
   gc.freeze()
 
-  results = [benchmark_decode_position(model, args.decode_position, args.decode_tokens)] if args.decode_position is not None else \
+  results = [benchmark_decode_position(model, pos, args.decode_tokens) for pos in args.decode_position] if args.decode_position is not None else \
     [benchmark(model, synthetic_prompt(n, vocab_size, salt=i+1), args.decode_tokens, args.chunk_size)
      for i, n in enumerate(args.prompt_tokens)]
   if args.json:
