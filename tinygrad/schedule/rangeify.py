@@ -522,8 +522,8 @@ def split_store(x:UOp) -> UOp|None:
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
-  if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
+  #if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
+  #  raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
   return kernel
 
 split_kernels = PatternMatcher([

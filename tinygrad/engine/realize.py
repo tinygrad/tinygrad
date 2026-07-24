@@ -242,6 +242,23 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
+def store_to_copy(call:UOp, sink:UOp) -> UOp|None:
+  if sink.op is not Ops.SINK: return None
+  params = [u for u in sink.toposort() if u.op is Ops.PARAM]
+  if len(params) != 2: return None
+  if not params[0].arg.device or not params[1].arg.device or params[0].arg.device == params[1].arg.device: return None
+  stores = [u for u in sink.toposort() if u.op is Ops.STORE]
+  if len(stores) != 1: return None
+  # only convert pure copies — the stored value must be a load, not a computed value
+  if stores[0].src[1].op is not Ops.INDEX: return None
+  dest_param, src_param = sorted(params, key=lambda p: p.arg.slot)
+  copy_ast = UOp(Ops.COPY, dtype=src_param.dtype, src=(src_param,), arg=dest_param.arg.device)
+  return call.replace(src=(copy_ast,) + call.src[1:])
+
+pm_copy_from_store = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), store_to_copy),
+])
+
 pm_compile = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
     call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
@@ -264,6 +281,7 @@ pm_exec = PatternMatcher([
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
+  linear = graph_rewrite(linear, pm_copy_from_store, name="copy from store", walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_compile
