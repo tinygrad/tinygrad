@@ -229,6 +229,12 @@ class TestFloatDType(TestDType):
     _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
              [0, 0, 1])
 
+  def test_float_half_float_preserves_rounding(self):
+    values = np.array([1.0003, -2.0007, 123.456], dtype=np.float32)
+    got = Tensor(values).cast(dtypes.float16).cast(dtypes.float32).numpy()
+    expected = values.astype(np.float16).astype(np.float32)
+    np.testing.assert_array_equal(got, expected)
+
 @unittest.skipUnless(dtypes.double in supported_dtypes, f"no double on {Device.DEFAULT}")
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
