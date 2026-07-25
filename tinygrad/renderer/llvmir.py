@@ -42,8 +42,14 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   N,M,K = wmma.arg[0]
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype]}" + \
-           f".{N}x{M}x{K}{dt_map[wmma.arg[1]]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
+    scaled = K == 128
+    args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src] + ["i32 0", "i32 0"] # (cbsz, blgp)
+    # scaled mfma call require E8M0 scale args, byte = 0x7F = 127, scale = 2^(127 - 127) = 1.0
+    if scaled: args.extend(["i32 0", "i32 127", "i32 0", "i32 127"]) # (opsel, scale_a, opsel, scale_b)
+    else: args.extend(["i32 0"])
+
+    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{"scale." if scaled else ""}{dt_map[wmma.src[-1].dtype]}" + \
+           f".{N}x{M}x{K}{dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"}(" + ", ".join(args) + ")"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
@@ -265,6 +271,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
+          if x.arg[0][2] == 128 and x.src[0].dtype.itemsize <= 8 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
           lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
           if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
