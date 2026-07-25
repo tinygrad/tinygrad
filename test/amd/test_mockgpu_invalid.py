@@ -7,15 +7,16 @@ class TestMockGPUInvalidInstruction(unittest.TestCase):
     """Test that unsupported instructions raise immediately through the full MOCKGPU stack."""
     test_code = '''
 import struct
+from dataclasses import replace
 from tinygrad import Device, Tensor
 from tinygrad.engine.realize import compile_linear
-from tinygrad.runtime.ops_amd import AMDProgram
 
 dev = Device["AMD"]
 a = Tensor([1.0]).realize()
 b = a + 1
 linear = compile_linear(b.schedule_linear())
-lib = bytearray(linear.src[-1].src[0].src[3].arg)
+compiled_prg = linear.src[-1].src[0]
+lib = bytearray(compiled_prg.src[3].arg)
 
 # Find s_endpgm (0xBFB00000) and replace with V_MOVRELD_B32 (op=66) which has no pcode
 # VOP1 encoding: bits[31:25]=0x7E, op=bits[16:9], so op=66 -> 66<<9 = 0x8400
@@ -27,7 +28,7 @@ for i in range(0, len(lib) - 4, 4):
     break
 assert found, "s_endpgm not found"
 
-patched_prg = AMDProgram(dev, "patched", bytes(lib))
+patched_prg = dev.runtime(replace(compiled_prg.to_elf(), name="patched", lib=bytes(lib)))
 b.uop.buffer.allocate()
 patched_prg(b.uop.buffer._buf, a.uop.buffer._buf, global_size=(1,1,1), local_size=(1,1,1))
 dev.synchronize()
