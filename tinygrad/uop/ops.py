@@ -1705,25 +1705,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
-def select_dtype(u:UOp):
-  return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
-def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
-  src = u.src[:-2]+(x.cast(dt), y.cast(dt))
-  return src[0].alu(u.op, *src[1:]).cast(u.dtype)
+def select_dtype(u:UOp): return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
+def lower_weakint_node(u:UOp) -> UOp|None:
+  start, src = (1 if u.op is Ops.WHERE else 0), tuple(s.src[0] if s.op is Ops.CAST and s.dtype is dtypes.weakint else s for s in u.src)
+  if src == u.src or any(s.dtype is dtypes.weakint for s in src[start:]): return None
+  dt = least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary else unwrap(dtype_from_uop(u.op, src, u.arg))
+  return u.replace(dtype=None, src=src[:start]+tuple(s.cast(dt) for s in src[start:])).cast(u.dtype)
 pm_lower_weakint = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(Ops.CONST, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype)),
-  # Binary can widen the dtype, WHERE cannot
-  (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))),
-   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),
-  (UPat(Ops.WHERE, dtypes.weakint, src=(UPat(), UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint)), name="u"),
-   lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(x.dtype, y.dtype))),
-  # in a weakint WHERE, an Invalid branch takes the dtype of the other branch
-  (UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(dtypes.weakint), UPat(Ops.CONST, arg=Invalid)),
-   lambda gate,idx: idx.valid(gate).cast(dtypes.weakint)),
-  (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.weakint)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.weakint)),
-  (UPat(Ops.STACK, src=UPat().cast(dtypes.weakint), name="v"),
-    lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt) for s in v.src)).cast(dtypes.weakint)),
+  # Binary can widen from the bounds, all other nodes derive from the lowered sources
+  (UPat(GroupOp.Binary|{Ops.WHERE, Ops.RANGE, Ops.STACK}, name="u"), lower_weakint_node),
   # special can only be int32
   (UPat(Ops.SPECIAL, src=(UPat.var("var").cast(dtypes.weakint),), name="u"),
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),
