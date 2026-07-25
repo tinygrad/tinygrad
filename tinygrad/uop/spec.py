@@ -159,9 +159,6 @@ spec_tensor = PatternMatcher([
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
 
-  # inputs to movement ops
-  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
-
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
   (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(), UPat()), name="x"), lambda x: x.src[1].shape == x.src[2].shape),
