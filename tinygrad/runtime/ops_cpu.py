@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array
+import platform, sys, os, ctypes, functools, mmap, threading, array, itertools
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, partition
@@ -55,14 +55,14 @@ def worker_prog():
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
 
-def host_wait(dst:UOp, val:UOp) -> UOp:
-  return (cur:=dst.after(loop:=UOp.loop(0)).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
+def host_wait(ctx, dst:UOp, val:UOp) -> UOp:
+  return (cur:=dst.after(loop:=UOp.loop(next(ctx))).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
 
 pm_host_opsel = PatternMatcher([(UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait)])
 
 def encode_host_queue(q:UOp) -> UOp:
   # TODO: subset of hcq2 for now
-  spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
+  spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, ctx=itertools.count(), walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
   assert store.op is Ops.INS and store.arg == "store", f"host queue cannot encode {store.op} {store.arg}"
   return store.src[0].after(*spins).index(UOp.const(dtypes.int, 0)).store(store.src[1])
 
