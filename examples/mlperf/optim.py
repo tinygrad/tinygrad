@@ -109,7 +109,7 @@ class GradAccClipAdamW(Optimizer):
         if self.zero: w_q, w_e8 = self._zero_gather(w_q), self._zero_gather(w_e8)
         new_e8 = w_e8.reshape(t._inv_scale.shape)
         t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
-        ret = w_q.reshape(new_w.shape)
+        ret = w_q.reshape(t.shape)
         return ret.shard_like(t) if offloaded else ret
       from examples.mlperf.models.flat_llama import FP8_MAX
       if IMMEDIATE_SCALE:
