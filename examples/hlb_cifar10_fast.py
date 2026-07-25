@@ -8,7 +8,7 @@
 import time, os, contextlib
 start_tm = time.perf_counter()
 if os.getenv("SPEEDRUN"):  # the 4090 record env, see hlb_cifar10_fast_README.md. must be set before tinygrad imports
-  for k,v in dict(DEV="CUDA", DEFAULT_FLOAT="HALF", BS="1024", EPOCHS="8.0", TTA="2", MATMUL_CONV="1", CONTIG="1", SCHEDULE_CACHE="1",
+  for k,v in dict(DEV="CUDA", DEFAULT_FLOAT="HALF", BS="1024", EPOCHS="7.5", TTA="2", MATMUL_CONV="1", CONTIG="1", SCHEDULE_CACHE="1",
                   PROGRAM_CACHE="1", JITBEAM="4", BEAM_ESTIMATE="0", BEAM_TC_SELECT="4", BEAM_VALIDATE="1", IGNORE_JIT_FIRST_BEAM="1",
                   LOG_INTERVAL="0", BEAM_TIMEOUT_SEC="60", TARGET_EVAL_ACC_PCT="93.5",
                   PARALLEL=str(min(os.cpu_count() or 8, 12))).items(): os.environ.setdefault(k, v)

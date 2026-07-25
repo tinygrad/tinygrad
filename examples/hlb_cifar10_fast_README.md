@@ -2,8 +2,8 @@
 
 tinygrad bounty *"<10s (wall time) hlb_cifar training on anything"* (rules: ≥93.5% eval, one eval at the end, "running twice to cache is okay" — generic caches only): **ACHIEVED on a single RTX 4090.**
 
-## Record (RTX 4090, warm caches; ~9.8s wall/seed)
-Per seed acc (LABEL_SMOOTHING 0.1): **1337: 93.96** | **42: 93.81** | **7: 93.70** | **2024: 94.01** — worst-seed 93.70, every run <10s and ≥93.5%. (Earlier LS=0.2 gave worst-seed 93.57; 0.1 lifts all four seeds, wall-neutral.)
+## Record (RTX 4090, warm caches; ~8.9s printed / ~9.3s strict wall/seed)
+Per seed acc (EPOCHS 7.5, LABEL_SMOOTHING 0.1): **1337: 93.78** | **42: 93.73** | **7: 93.64** | **2024: 93.76** — worst-seed 93.64, every run <10s and ≥93.5%. (EPOCHS=8.0 lifts worst-seed to 93.70 but costs ~0.5s -> ~9.9s strict; 7.5 is the default since the bounty is judged on wall time and accuracy only needs to clear 93.5. Earlier LS=0.2 gave worst-seed 93.57; 0.1 lifts all four seeds.)
 
 The measured process (the wall time that counts — `time` the python process, not a launcher):
 ```sh
@@ -11,13 +11,15 @@ git clone -b hlb_cifar_10s --depth 1 https://github.com/dwahdany/tinygrad && cd 
 time SPEEDRUN=1 PYTHONPATH=. python3 examples/hlb_cifar10_fast.py    # 1st run: beam search (~2h, one-time, cached)
 time SPEEDRUN=1 PYTHONPATH=. python3 examples/hlb_cifar10_fast.py    # 2nd run: the record
 ```
-`SPEEDRUN=1` sets the whole record env (BS=1024 EPOCHS=8.0 TTA=2 MATMUL_CONV=1 CONTIG=1 JITBEAM=4 BEAM_ESTIMATE=0 BEAM_TC_SELECT=4 BEAM_VALIDATE=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1 ...), every knob individually overridable. The script prints its internal `total`; true process wall is that + ~0.5s (interpreter startup before the timer + teardown after the final print).
+`SPEEDRUN=1` sets the whole record env (BS=1024 EPOCHS=7.5 TTA=2 MATMUL_CONV=1 CONTIG=1 JITBEAM=4 BEAM_ESTIMATE=0 BEAM_TC_SELECT=4 BEAM_VALIDATE=1 SCHEDULE_CACHE=1 PROGRAM_CACHE=1 ...), every knob individually overridable. The script prints its internal `total`; true process wall is that + ~0.4s (interpreter startup before the timer + teardown after the final print).
+
+**Run from a local filesystem.** `import`ing the 211 tinygrad modules off a network/FUSE mount (NFS, MooseFS, sshfs, ...) adds seconds of variable latency per run and is not representative — `pip install`/`uv` land on local disk, so measure there. On such a box the phase breakdown is GPU-bound: ~8.3s GPU training (85%), ~0.7s eval, and <1s for import+data+init combined.
 
 Try-it one-liner, no checkout (uv resolves the branch + deps itself — NOT the benchmark harness, the uv wrapper adds seconds of package management around the process):
 ```sh
 SPEEDRUN=1 uv run https://raw.githubusercontent.com/dwahdany/tinygrad/hlb_cifar_10s/examples/hlb_cifar10_fast.py
 ```
-All caches are generic and content-keyed — beam/compile by content, schedule/program additionally by a tinygrad source stamp — so code changes invalidate them naturally, nothing ever needs manual deletion. On overlayfs set CACHEDB=/dev/shm/tg.db (overlayfs breaks sqlite WAL locking). Big-box beam knobs: PARALLEL=12 (nproc workers OOM on 256-core boxes), BEAM_TIMEOUT_SEC=60. More margin: `EPOCHS=8.25` = ~10.2s @ ≥93.75 worst-seed.
+All caches are generic and content-keyed — beam/compile by content, schedule/program additionally by a tinygrad source stamp — so code changes invalidate them naturally, nothing ever needs manual deletion. On overlayfs set CACHEDB=/dev/shm/tg.db (overlayfs breaks sqlite WAL locking). Big-box beam knobs: PARALLEL=12 (nproc workers OOM on 256-core boxes), BEAM_TIMEOUT_SEC=60. More accuracy margin at a time cost: `EPOCHS=8.0` = ~9.9s strict @ 93.70 worst-seed, `EPOCHS=8.25` = ~10.2s @ ≥93.75.
 
 H100 note: same trainer ties the 4090 (11.5s vs 11.6s, at EPOCHS=8.5/TTA=1) — tinygrad emits sm_89-style mma.sync for sm_90; wgmma/TMA would be needed to exploit it.
 
