@@ -107,6 +107,12 @@ class TestTorchBackend(unittest.TestCase):
     x = torch.arange(6., device=device)
     with self.assertRaises(RuntimeError): torch.add(x[:-1], 10, out=x[1:])
 
+  def test_out_disjoint_input_is_allowed(self):
+    # torch permits an out= that shares a base with an input as long as they do not overlap
+    x, xc = torch.arange(6., device=device), torch.arange(6.)
+    torch.add(x[:3], 10, out=x[3:]); torch.add(xc[:3], 10, out=xc[3:])
+    np.testing.assert_equal(x.cpu().numpy(), xc.numpy())
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)

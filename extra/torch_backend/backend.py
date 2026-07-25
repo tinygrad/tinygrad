@@ -555,6 +555,8 @@ def wrap_out(f):
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.device == assigned.device or out.device is None or assigned.device is None, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
+    # an out= that is a view has to be written through its base, and _apply_inplace gives a deviceless base its buffer first
+    if canonical_base(out) is not out: return _apply_inplace(out, assigned) or out
     if out.device is None and assigned.device is not None: out.replace(out.empty_like(device=assigned.device))
     return out.assign(assigned)
   return _wrap_out
