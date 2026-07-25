@@ -15,7 +15,7 @@ from tinygrad.codegen.late.linearizer import linearize
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
-from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
+from tinygrad.runtime.ops_python import PythonRenderer
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
   if ren is None: ren = Renderer(Target())
@@ -83,14 +83,15 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple[int, ...]=()):
-  allocator = Device['PYTHON'].allocator
+  dev = Device['PYTHON']
+  allocator = dev.allocator
   bufs = []
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp.param(0, uop.dtype, (1,))
   prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
-  prog = PythonProgram("run", PythonCompiler().compile(prg.src[2].arg))
+  prog = dev.runtime(prg.to_elf())
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs, vals=vals)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
 
