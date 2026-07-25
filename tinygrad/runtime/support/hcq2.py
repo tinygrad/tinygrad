@@ -468,7 +468,7 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, jit=ctx[1]))
     ])
 
-    super().__init__(device, allocator, compilers, runtime or (lambda *a, **kw: None), None, arch=arch)
+    super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
     self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
     self.rt_allocator = BumpAllocator(64 << 20, wrap=False)
