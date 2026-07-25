@@ -290,7 +290,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(MOCKGPU and isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CUDARenderer)), "PTX indexes differently. might be ok?")
   def test_where_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    b = a.shrink(((1, 2), None)).pad(((1, 2), None))
+    b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool()
     a.assign(b.where(2, a))
     linear, var_vals = a.linear_with_vars()
     assert len(linear.src) == 1
@@ -424,7 +424,7 @@ def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
   return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
-  for buf in bufs: buf.copyin(np.zeros((buf.size*buf.dtype.itemsize,), dtype=np.uint8).data)
+  for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):

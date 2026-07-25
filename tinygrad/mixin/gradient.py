@@ -1,18 +1,13 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
-  def broadcast_to_input(x:UOp) -> UOp: return x._broadcast_to(ret.src[0].shape)
-  if op == Ops.ADD: return (broadcast_to_input(ctx),)
-  if op == Ops.MAX:
-    assert ret.op is Ops.REDUCE, "only works on REDUCE"
-    mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
-    count = mask._rop(Ops.ADD, tuple(range(ret.arg[1])))
-    return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
-  if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
+  if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
+  if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
+  if op == Ops.MUL: return (ctx * ret / ret.src[0],)
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
@@ -67,9 +62,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
-  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, tuple(range(len(ret.marg))))
-     .reshape(ret.src[0].shape).cast(ctx.dtype), None)),
+  (UPat(Ops.EXPAND), lambda ctx: (ctx, None)),
   (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[0]-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
@@ -119,6 +112,9 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
+      # a shaped edge's gradient is summed to its source's shape
+      if k._shape is not None and v._shape is not None and k._shape != v._shape:
+        v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
       if k in grads and grads[k].op is not Ops.NOOP:
         if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
           grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else

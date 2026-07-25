@@ -40,7 +40,7 @@ class BatchNorm:
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
-    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -348,12 +348,12 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
       dnum = UOp.variable("_device_num", 0, ndev-1)
       offset = dnum * local_vocab_size
-      global_token_id = idx_flat[i].cast(dtypes.index)
+      global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
       in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size)) & j_ok
       grad_val = in_range.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     else:
-      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.index)
+      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
       grad_val = j_ok.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"

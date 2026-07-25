@@ -31,8 +31,8 @@ class TestHCQ(unittest.TestCase):
 
   def setUp(self):
     TestHCQ.d0.synchronize()
-    TestHCQ.a.uop.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
-    TestHCQ.b.uop.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
+    TestHCQ.a.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+    TestHCQ.b.uop.buffer.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 0)))))
     TestHCQ.d0.synchronize() # wait for copyins to complete
 
   # Test signals

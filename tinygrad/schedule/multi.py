@@ -1,5 +1,5 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, broadcast_axes, _broadcast_shape
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -18,10 +18,14 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
       ret.append(apply_shrink(x, i).contiguous())
   return ms.replace(src=tuple(ret))
 
+def lower_broadcast_copy(c:UOp, x:UOp):
+  if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
+  if (sx:=x.simplify()).device is None and sx.base.op is Ops.CONST: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
+  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
-  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
-    UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"),)), lambda c,x:
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
@@ -47,20 +51,17 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   assert all_same(devices), f"all buffers must have the same device {devices}"
   dcount = len(devices[0])
 
+  out_shape = _broadcast_shape(*[x.shape for x in msrcs])
   srcs:list[UOp] = []
   for mlb in msrcs:
-    if mlb.axis is None:
-      # no axis, shard it
-      assert mlb.op is not Ops.MULTI
-      srcs.append(mlb._shard(axis, dcount))
+    src_axis = axis - (len(out_shape)-len(mlb.shape))
+    if mlb.axis == src_axis:
+      # same axis, just copy through
+      srcs.append(mlb.src[0])
     else:
-      assert mlb.op is Ops.MULTI
-      if mlb.axis == axis:
-        # same axis, just copy through
-        srcs.append(mlb.src[0])
-      else:
-        # axis mismatch, copy to all devices, and shard it correctly
-        srcs.append(copy_multi(mlb, mlb.device)._shard(axis, dcount))
+      # otherwise every device gets the full copy, sharded iff this src has the axis (broadcast srcs stay whole)
+      full = mlb if mlb.axis is None else copy_multi(mlb, mlb.device)
+      srcs.append(full if axis in broadcast_axes(mlb.shape, out_shape) else full._shard(src_axis, dcount))
   return srcs
 
 def alu_multi(root:UOp):
@@ -148,7 +149,7 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
+  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name, p.arg.addrspace).multi(p.axis)
 
 # NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([

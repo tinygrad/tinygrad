@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Callable, Self
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype, strong_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -77,10 +77,14 @@ class CreationMixin(DTypeMixin, MovementMixin):
     # if not buffer: assert device is None, "buffer=False does not support device specification"
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
-    dt = to_dtype(dtype) if dtype is not None else None
-    val = cls.const(dt or (fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)), fill_value)
+    dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
+    # materializing commits an inferred weak width
+    if dtype is None and buffer: dt = strong_dtype(dt)
+    val = cls.const(dt, fill_value)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
-    return val.clone(device=device) if buffer else val
+    if not buffer or val._uop.base.arg is not Invalid or val.dtype == dt: return val.clone(device=device) if buffer else val
+    ret = val.empty_like(dt, device)
+    return cls._wrap_uop(ret._uop.after(ret._uop.store(val._uop)))
 
   def full_like(self, fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, buffer=True) -> Self:
     """

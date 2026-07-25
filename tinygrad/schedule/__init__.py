@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 
 # **** schedule linearizer
 
@@ -134,6 +134,39 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
+def assert_all_same_devices(ast:UOp):
+  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
+  if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
+
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  return call.replace(src=(UOp(Ops.COPY, dtype=src.dtype, src=(src,), arg=dst.device),) + call.src[1:])
+
+def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
+  # NOTE: this is a codegen for SDMA devices
+  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
+  from tinygrad.schedule.rangeify import pm_mops
+  from tinygrad.uop.symbolic import sym
+  sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges in copy")
+  return call.replace(src=(sink,) + call.src[1:])
+
+pm_copy_from_store = PatternMatcher([
+  # simplify copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
+
+  # replace this with a copy if it's a copy
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
+  # if it wasn't copy, it currently can't be cross device
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
+])
+
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # big_sink srcs are all the Tensors
@@ -141,6 +174,9 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
+
+  # create copies
+  linear = graph_rewrite(linear, pm_copy_from_store, name="create COPY kernels for SDMA")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

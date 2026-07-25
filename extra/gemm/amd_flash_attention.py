@@ -13,7 +13,7 @@ WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD = 4  # pad LDS rows to reduce bank conflicts
 
-WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
+WMMA_ARG = (WMMA_M, WMMA_N, WMMA_K), 'AMD', 32
 LOG2E = math.log2(math.e)
 
 def warp_shfl_xor(val, offset, lane):
@@ -97,7 +97,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
-  qk = UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), WMMA_ARG)
+  qk = UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), *WMMA_ARG)
   qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
   S_reg = S_reg.after(qk_done)
 
@@ -158,7 +158,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = KV_lds_v.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
-  pv = UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), WMMA_ARG)
+  pv = UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), *WMMA_ARG)
 
   # end KV tile loop
   n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).barrier().end(n_tile)

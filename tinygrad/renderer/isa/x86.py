@@ -13,7 +13,7 @@ from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions, DEFINE is a register placeholder that defines a register without emitting an instruction
-  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto()
+  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto(); LOOP_CMP = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -86,7 +86,7 @@ class X86GroupOp:
                 X86Ops.CMPi, X86Ops.IMULi, X86Ops.LEA}
 
   # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress so the second src is actually the first
-  ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.SHL, X86Ops.SHR, X86Ops.SAR, X86Ops.IMUL, X86Ops.CMP,
+  ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.IMUL, X86Ops.CMP,
                 X86Ops.VADDSS, X86Ops.VADDSD, X86Ops.VADDPS, X86Ops.VADDPD, X86Ops.VSUBSS, X86Ops.VSUBSD, X86Ops.VSUBPS, X86Ops.VSUBPD,
                 X86Ops.VMULSS, X86Ops.VMULSD, X86Ops.VMULPS, X86Ops.VMULPD, X86Ops.VDIVSS, X86Ops.VDIVSD, X86Ops.VDIVPS, X86Ops.VDIVPD,
                 X86Ops.VPADDB, X86Ops.VPADDW, X86Ops.VPADDD, X86Ops.VPADDQ, X86Ops.VPSUBB, X86Ops.VPSUBW, X86Ops.VPSUBD, X86Ops.VPSUBQ,
@@ -99,8 +99,9 @@ class X86GroupOp:
 
   # X86Ops that can write to memory
   WriteMem = {X86Ops.MOVm, X86Ops.MOVi, X86Ops.VMOVSSm, X86Ops.VMOVSDm, X86Ops.VMOVUPSm, X86Ops.VMOVDm, X86Ops.VMOVQm,
-              X86Ops.ADDi, X86Ops.SUBi, X86Ops.ANDi, X86Ops.ORi, X86Ops.XORi, X86Ops.SHLi, X86Ops.SHRi, X86Ops.SARi, X86Ops.SETNE,
-              X86Ops.SETE, X86Ops.SETL, X86Ops.SETB, X86Ops.VCVTPS2PH, X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ}
+              X86Ops.ADDi, X86Ops.SUBi, X86Ops.ANDi, X86Ops.ORi, X86Ops.XORi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR,
+              X86Ops.SARi, X86Ops.SETNE, X86Ops.SETE, X86Ops.SETL, X86Ops.SETB,
+              X86Ops.VCVTPS2PH, X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ}
 
   # X86Ops that read flags
   ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
@@ -272,6 +273,11 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   # this move "cleanses" the register constraints (rax/rdx) of idiv as that only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
+# a variable shift count implicitly reads cl so it goes in rcx, the shifted value can't be in rcx
+def shift(x:UOp, op:X86Ops) -> UOp:
+  val = x.ins(X86Ops.MOV, src=(x.src[0],), tag=tuple(r for r in WGPR if r is not RCX))
+  return x.ins(op, src=(val, x.ins(X86Ops.MOV, src=(x.src[1],), tag=(RCX,))))
+
 # a memory address operand is (base, index, displacement, size). size is the element size, it scales the index and is the memory operand width.
 # it is materialized as an immediate so the address stays correct if the base register is ever spilled and refilled
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
@@ -322,6 +328,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
   if x.arg is X86Ops.DEFINE and x.tag is not None: return None
+  if x.arg is X86Ops.LOOP_CMP: return None
   # this is an immediate
   if x.arg is X86Ops.FRAME_INDEX: return None
   # no register definition
@@ -347,6 +354,9 @@ isel_matcher = PatternMatcher([
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
+  # really all a backedge END is is an IF with a tag referencing the RANGE start label
+  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
+    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
@@ -452,9 +462,9 @@ isel_matcher = PatternMatcher([
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) ^ UPat.cvar("c"), lambda a,c: a.ins(X86Ops.XORi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   (UPat(Ops.SUB, dtypes.ints, (UPat.var("a"), UPat.cvar("c"))), lambda a,c: a.ins(X86Ops.SUBi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   # scalar int binary with register
-  (UPat.var("a", dtypes.ints) << UPat.var("b"), lambda a,b: a.ins(X86Ops.SHL, src=(a, b))),
-  (UPat.var("a", dtypes.uints) >> UPat.var("b"), lambda a,b: a.ins(X86Ops.SHR, src=(a, b))),
-  (UPat.var("a", dtypes.sints) >> UPat.var("b"), lambda a,b: a.ins(X86Ops.SAR, src=(a, b))),
+  ((UPat(dtype=dtypes.ints) << UPat()).named("x"), lambda x: shift(x, X86Ops.SHL)),
+  ((UPat(dtype=dtypes.uints) >> UPat()).named("x"), lambda x: shift(x, X86Ops.SHR)),
+  ((UPat(dtype=dtypes.sints) >> UPat()).named("x"), lambda x: shift(x, X86Ops.SAR)),
   (UPat.var("a", dtypes.ints) + UPat.var("b"), lambda a,b: a.ins(X86Ops.ADD, src=(a, b))),
   (UPat.var("a", dtypes.ints) * UPat.var("b"), lambda a,b: a.ins(X86Ops.IMUL, src=(a, b))),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b"), lambda a,b: a.ins(X86Ops.AND, src=(a, b))),
@@ -556,22 +566,37 @@ pre_regalloc_matcher = PatternMatcher([
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.arg[:-1])
-  acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
   label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_{loop_label}")
-  cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].op is Ops.CONST else X86Ops.CMP, src=(acc, x.src[0]))
-  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
-  ctx.loop_label[acc] = loop_label
-  return (acc, [acc, label, cmp, jump_out])
+  # loop, cmp on backedge all we need is a jmp tag
+  if x.dtype is dtypes.void: return (label, [label])
+  else:
+    acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
+    cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].op is Ops.CONST else X86Ops.CMP, src=(acc, x.src[0]))
+    jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
+    ctx.loop_label[acc] = loop_label
+    return (acc, [acc, label, cmp, jump_out])
+
+def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
+  end_label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
+  jmp = UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
+  return (inc, [inc, jmp, end_label])
+
+def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
+  cond = x.replace(op=x.tag, src=x.src[:2])
+  jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
+  return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.stack_size + x.tag), [nx])),
+  # expand the cmp here so we can preserve rng src edge to get label from ctx
+  (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: lower_range(ctx, x)),
+  (UPat(Ops.RANGE, name="x"), lower_range),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
-  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}"),
-   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
+  (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], greg(x)), nx] if greg(x) != greg(x.src[0]) else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
@@ -651,7 +676,8 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   if x.arg in X86GroupOp.WriteMem:
     if len(x.src) > 4: address, rest = x.src[:4], x.src[4:]
     else: address, rest = (x, None, None, None), x.src
-    return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *rest[:1]))
+    imm_uop = rest[:1] if rest and rest[0].op is Ops.CONST else (None,)
+    return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *imm_uop))
 
   if x.arg in X86GroupOp.Rm1st:
     if len(x.src) > 3: address, rest = x.src[:4], x.src[4:]
@@ -704,8 +730,9 @@ encodings = {
   # int division
   X86Ops.IDIV: lambda x: encode(x, 0xF7, reg=7), X86Ops.DIV: lambda x: encode(x, 0xF7, reg=6),
   # scalar int binary
-  X86Ops.SHLi: lambda x: encode(x, 0xC1, reg=4),
-  X86Ops.SHRi: lambda x: encode(x, 0xC1, reg=5), X86Ops.SARi: lambda x: encode(x, 0xC1, reg=7),
+  X86Ops.SHL: lambda x: encode(x, 0xD3, reg=4), X86Ops.SHLi: lambda x: encode(x, 0xC1, reg=4),
+  X86Ops.SHR: lambda x: encode(x, 0xD3, reg=5), X86Ops.SHRi: lambda x: encode(x, 0xC1, reg=5),
+  X86Ops.SAR: lambda x: encode(x, 0xD3, reg=7), X86Ops.SARi: lambda x: encode(x, 0xC1, reg=7),
   X86Ops.ADD: lambda x: encode(x, 0x03), X86Ops.ADDi: lambda x: encode(x, 0x81, reg=0),
   X86Ops.SUB: lambda x: encode(x, 0x2B), X86Ops.SUBi: lambda x: encode(x, 0x81, reg=5),
   X86Ops.AND: lambda x: encode(x, 0x23), X86Ops.ANDi: lambda x: encode(x, 0x81, reg=4),
@@ -784,6 +811,7 @@ class X86Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
+    if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
@@ -836,6 +864,7 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS or u.arg is X86Ops.DEFINE: continue
+      if u.arg is X86Ops.LOOP_CMP: continue
       if u.arg is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue

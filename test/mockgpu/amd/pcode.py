@@ -837,16 +837,16 @@ class Parser:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
-        for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint64) << _u64(i * 8))
+        for i in range(8): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
         val = mindex(idx).load().cast(dt)
       elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
         lo = mindex(idx).load().cast(dtypes.uint32)
-        hi = mindex(idx + _const(dtypes.int, 1)).load().cast(dtypes.uint32)
+        hi = mindex(idx + _const(adt, 1)).load().cast(dtypes.uint32)
         val = (lo | (hi << _u32(8))).cast(dt)
       else:
         val = _u32(0)
-        for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint32) << _u32(i * 8))
+        for i in range(4): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
       idx = addr >> _const(addr.dtype, 2)
       val = mindex(idx)

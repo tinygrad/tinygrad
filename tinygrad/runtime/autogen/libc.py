@@ -1194,6 +1194,65 @@ def funlockfile(__stream:c.POINTER[FILE]) -> None: ...
 def __uflow(_0:c.POINTER[FILE]) -> int: ...
 @dll.bind(ctypes.c_int32, c.POINTER[FILE], ctypes.c_int32)
 def __overflow(_0:c.POINTER[FILE], _1:int) -> int: ...
+@c.record
+class fd_set(c.Struct):
+  SIZE = 128
+  fds_bits: c.Array[ctypes.c_int64, Literal[16]]
+__fd_mask: TypeAlias = ctypes.c_int64
+fd_set.register_fields([('fds_bits', c.Array[ctypes.c_int64, Literal[16]], 0)])
+@c.record
+class struct_timeval(c.Struct):
+  SIZE = 16
+  tv_sec: int
+  tv_usec: int
+__time_t: TypeAlias = ctypes.c_int64
+__suseconds_t: TypeAlias = ctypes.c_int64
+struct_timeval.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_usec', ctypes.c_int64, 8)])
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[fd_set], c.POINTER[fd_set], c.POINTER[fd_set], c.POINTER[struct_timeval])
+def select(__nfds:int, __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timeval]) -> int: ...
+@c.record
+class struct_timespec(c.Struct):
+  SIZE = 16
+  tv_sec: int
+  tv_nsec: int
+__syscall_slong_t: TypeAlias = ctypes.c_int64
+struct_timespec.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_nsec', ctypes.c_int64, 8)])
+@c.record
+class __sigset_t(c.Struct):
+  SIZE = 128
+  __val: c.Array[ctypes.c_uint64, Literal[16]]
+__sigset_t.register_fields([('__val', c.Array[ctypes.c_uint64, Literal[16]], 0)])
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[fd_set], c.POINTER[fd_set], c.POINTER[fd_set], c.POINTER[struct_timespec], c.POINTER[__sigset_t])
+def pselect(__nfds:int, __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timespec], __sigmask:c.POINTER[__sigset_t]) -> int: ...
+@c.record
+class sem_t(c.Struct):
+  SIZE = 32
+  __size: c.Array[ctypes.c_char, Literal[32]]
+  __align: int
+sem_t.register_fields([('__size', c.Array[ctypes.c_char, Literal[32]], 0), ('__align', ctypes.c_int64, 0)])
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t], ctypes.c_int32, ctypes.c_uint32)
+def sem_init(__sem:c.POINTER[sem_t], __pshared:int, __value:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t])
+def sem_destroy(__sem:c.POINTER[sem_t]) -> int: ...
+@dll.bind(c.POINTER[sem_t], c.POINTER[ctypes.c_char], ctypes.c_int32)
+def sem_open(__name:c.POINTER[ctypes.c_char], __oflag:int) -> c.POINTER[sem_t]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t])
+def sem_close(__sem:c.POINTER[sem_t]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def sem_unlink(__name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t])
+def sem_wait(__sem:c.POINTER[sem_t]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t], c.POINTER[struct_timespec])
+def sem_timedwait(__sem:c.POINTER[sem_t], __abstime:c.POINTER[struct_timespec]) -> int: ...
+clockid_t: TypeAlias = ctypes.c_int32
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t], clockid_t, c.POINTER[struct_timespec])
+def sem_clockwait(__sem:c.POINTER[sem_t], clock:clockid_t, __abstime:c.POINTER[struct_timespec]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t])
+def sem_trywait(__sem:c.POINTER[sem_t]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t])
+def sem_post(__sem:c.POINTER[sem_t]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[sem_t], c.POINTER[ctypes.c_int32])
+def sem_getvalue(__sem:c.POINTER[sem_t], __sval:c.POINTER[ctypes.c_int32]) -> int: ...
 MREMAP_MAYMOVE = 1
 MREMAP_FIXED = 2
 MREMAP_DONTUNMAP = 4
@@ -4346,6 +4405,7 @@ _PRINTF_NAN_LEN_MAX = 4
 RENAME_NOREPLACE = (1 << 0)
 RENAME_EXCHANGE = (1 << 1)
 RENAME_WHITEOUT = (1 << 2)
+_SEMAPHORE_H = 1
 PROT_READ = 0x1
 PROT_WRITE = 0x2
 PROT_EXEC = 0x4

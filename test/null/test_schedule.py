@@ -1472,6 +1472,18 @@ class TestSchedule(unittest.TestCase):
     x.softmax().sum().backward()
     run_linear(*check_schedule(x.grad, 4))
 
+  def test_logsumexp_backward(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64).realize()
+    x.logsumexp(-1).sum().backward()
+    run_linear(*check_schedule(x.grad, 3))
+
+  def test_logcumsumexp_backward(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 512).realize()
+    x.logcumsumexp(-1).sum().backward()
+    run_linear(*check_schedule(x.grad, 3))
+
   def test_scaled_dot_product_attention_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
     out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m)

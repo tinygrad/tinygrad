@@ -6,7 +6,7 @@ try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, select_by_name, unwrap
 from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
-from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
+from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -329,7 +329,7 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
     assert None not in vals
     self.bind_sints_to_buf(*cast(tuple[sint, ...], vals), buf=self.buf, fmt='I', offset=len(prefix or []) * 4 + len(bufs) * 8)
 
-class HCQProgram(Generic[HCQDeviceType]):
+class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, name:str, kernargs_alloc_size:int, lib:bytes|None=None, base:int|None=None):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
     self.prof_prg_counter = next(self.dev.prof_prg_counter)
@@ -389,9 +389,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   cpu_devices: list[HCQCompiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime, signal_t:Type[SignalType]|None=None,
-               comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20),
-               sigalloc_size=0x1000, can_recover:bool=False, arch=None):
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime:type[Program]|None,
+               signal_t:Type[SignalType]|None=None, comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None,
+               kernargs_size=(16 << 20), sigalloc_size=0x1000, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -546,13 +546,13 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, max_copyout_size:int|None=None, **kwargs):
+  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, **kwargs):
     super().__init__(dev, **kwargs)
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
-    self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
+    self.b_timeline, self.b_next = [0] * len(self.b), 0
 
-  def _map(self, buf:HCQBuffer):
-    if self.dev in buf.mapped_devs: return
+  def _map(self, buf:HCQBuffer) -> HCQBuffer:
+    if self.dev in buf.mapped_devs: return buf
     if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
 
@@ -560,6 +560,7 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     # Devices can save mappings and internal metadata as a new buffer.
     if (mb:=self._do_map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
+    return buf
 
   @suppress_finalizing
   def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
@@ -617,7 +618,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
                      dev_suff="SDMA:0"):
-      for i in range(0, dest.nbytes, cp_size:=(self.max_copyout_size or self.b[0].size)):
+      for i in range(0, dest.nbytes, cp_size:=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(self.b[0], src.offset(i), lsize:=min(cp_size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)

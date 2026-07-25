@@ -1,9 +1,9 @@
 import numpy as np
-import functools, unittest, ctypes
+import functools, unittest
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Context, from_mv
+from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import run_linear, compile_linear
@@ -31,7 +31,7 @@ def make_buffer(device, size=BUF_SIZE, fill=False):
   buf = Buffer(device, size, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
-      buf.copyin(Tensor(np.random.randint(-10000, 10000, size=size, dtype=np.int32)).realize().uop.base.realized.as_memoryview())
+      buf.copy_from(Tensor(np.random.randint(-10000, 10000, size=size, dtype=np.int32)).realize().uop.base.realized)
   return buf
 
 def make_view(base, offset_elems, size_elems):
@@ -55,15 +55,12 @@ def run_schedule(calls:list[UOp]):
   run_linear(UOp(Ops.LINEAR, src=tuple(calls)))
 
 def zero_bufs(bufs):
-  for b in bufs:
-    mv = memoryview(bytearray(b.nbytes))
-    ctypes.memset(from_mv(mv), 0, len(mv))
-    b.copyin(mv)
+  for b in bufs: b.copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=memoryview(bytearray(b.nbytes))))
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
   def skip_if_no_offset(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, "_offset"): self.skipTest("device does not support _offset")
+    if Device.DEFAULT in {"WEBGPU", "CL"}: self.skipTest("device does not support _offset")
 
   def skip_if_not_multigraph(self):
     graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
@@ -213,8 +210,8 @@ class TestGraph(unittest.TestCase):
 
   def test_graph_offset_bufs(self):
     self.skip_if_not_multigraph()
+    self.skip_if_no_offset()
     d0 = Device.DEFAULT
-    if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
 
     b0 = make_buffer(d0, fill=True)
     b1 = make_view(b0, 0, b0.size)

@@ -4,7 +4,7 @@ import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
@@ -89,11 +89,13 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    bufs = [UOp.from_buffer(b.allocate()) for b in bufs_from_ast(prg.src[0], device)]
+    # reuse one loaded runtime across candidates, only launch dims vary
+    bufs, runtime = [b.allocate() for b in bufs_from_ast(prg.src[0], device)], get_runtime(device, prg, cache=False)
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return time_call(prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size))).call(*bufs))
+        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
+                       vals=prg.arg.vals({}), wait=True)
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -110,9 +112,8 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
-  assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.arg.function_name, ast.src[3].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
+    runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
   return runtime
 
@@ -166,9 +167,8 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
-        src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-      else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
+      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+      else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:

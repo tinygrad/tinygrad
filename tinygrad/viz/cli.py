@@ -47,6 +47,7 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def to_str(k:str, v) -> str:
+  if isinstance(v, str): return f"{k} {v}"
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
   return f"{k}={v}"
@@ -217,7 +218,8 @@ def main(args) -> None:
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
+  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli", epilog="DEBUG modes (cumulative): 3=base AST, 4=generated source, "
+                                   "5=rewrite steps and kernel graph, 6=all UOp graphs, 7=all rewrites")
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")

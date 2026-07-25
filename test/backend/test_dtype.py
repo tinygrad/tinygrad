@@ -8,7 +8,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
-from test.helpers import rand_for_dtype
+from test.helpers import rand_for_dtype, min_normal
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
@@ -25,10 +25,10 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if dtype not in supported_dtypes and dtype not in dtypes.fp8s+(dtypes.half,dtypes.bfloat16): return []
   return dts
 
-def _to_torch_storage_type(dtype:DType):
-  if dtype == dtypes.bfloat16: return torch.float32
-  if dtype in dtypes.fp8s: return torch.float32
-  return _to_torch_dtype(dtype)
+def _to_torch_storage(a:Tensor) -> torch.Tensor:
+  # tolist() of an fp8 Tensor gives floats, so convert and store in uint8
+  if a.dtype in dtypes.fp8s: return torch.tensor([float_to_fp8(x, a.dtype) for x in a.flatten().tolist()], dtype=torch.uint8).reshape(a.shape)
+  return torch.tensor(a.tolist(), dtype=_to_torch_dtype(a.dtype))
 
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
@@ -46,12 +46,15 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
+  if a.is_floating_point() and dtypes.is_float(target_dtype) and (mn:=min_normal(target_dtype)) >= min_normal(a.dtype):
+    # subnormals are zero, so an input below the target's min normal casts to 0
+    a = (a.abs() < mn).where(0, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
   _test_op(lambda: a.cast(target_dtype), target_dtype, expected)
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype)).tolist()
+  expected = _to_torch_storage(a).view(_to_torch_dtype(target_dtype)).tolist()
   if target_dtype in dtypes.fp8s: expected = [fp8_to_float(x, target_dtype) for x in expected]
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected)
 
@@ -61,10 +64,12 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if cls.DTYPE is None: raise unittest.SkipTest("base class")
-    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=cls.DTYPE in supported_dtypes)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=cls.DTYPE in supported_dtypes and cls.DTYPE not in dtypes.fp8s)
 
   def test_to_np(self):
-    _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
+    a = Tensor(self.DATA, dtype=self.DTYPE)
+    self.assertEqual(a.dtype, self.DTYPE)
+    _test_to_np(a, _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
   def test_casts_to(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
@@ -273,10 +278,11 @@ class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
+    a = Tensor(data, dtype=dt1)
+    expected = _to_torch_storage(a).view(_to_torch_dtype(dt2))
     if dt2 in dtypes.fp8s:
       expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
-    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
+    _test_op(lambda: a.bitcast(dt2), dt2, expected.tolist())
 
   def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
@@ -292,6 +298,11 @@ class TestBitCast(unittest.TestCase):
     a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
     b = a.bitcast(dtypes.float32)
     assert b.numpy()[0,0] == 1.
+
+  def test_bitcast_bf16_from_cast(self):
+    # a bfloat16 from a cast holds bfloat16 bits. 1.0 is 0x3f80 in bfloat16, which is 1.875 in half
+    a = Tensor([1.0], dtype=dtypes.float32).cast(dtypes.bfloat16)
+    assert a.bitcast(dtypes.half).numpy()[0] == 1.875
 
 class TestInt16DType(TestDType): DTYPE = dtypes.int16
 

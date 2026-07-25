@@ -23,14 +23,14 @@ static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC");
 
 // fused silu*mul backward, three outputs in a single HBM pass:
 //   1) fp8  grad_xw13_fp8  — delayed-scale quantize using grad_amax_state (mailbox to matmul bwd)
-//   2) fp32 grad_amax_buf  — per-WG partial |grad_xw13|, reduced into next step's grad_amax_state
+//   2) fp32 grad_amax_next — scalar |grad_xw13| via global atomic max
 //   3) fp32 grad_amax_out  — delayed grad amax used for quantize/GEMM epilogue scale
 // grad_amax_state is read for the fp8 scale. The store of new_grad_amax into grad_amax_state's
 // buffer is built in Python as a separate effect and threaded into grad_a via .after(store).
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_bwd_w13(
     __hip_fp8_storage_t*  __restrict__ grad_xw13_fp8_out,    // fp8,  2*N_ELEMS
-    float*                __restrict__ grad_amax_buf,        // fp32, NUM_WG per-WG partials
+    float*                __restrict__ grad_amax_next,       // fp32 scalar, initialized to 0 before launch
     float*                __restrict__ grad_amax_out,        // fp32 scalar delayed grad amax
     const __hip_bfloat16* __restrict__ xw13,                 // bf16, 2*N_ELEMS
     const __hip_bfloat16* __restrict__ grad_x2,              // bf16, N_ELEMS
@@ -92,5 +92,6 @@ fused_silu_mul_bwd_w13(
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0) grad_amax_buf[wg] = sdata[0];
+  if (tid == 0 && sdata[0] > *grad_amax_next)
+    atomicMax(reinterpret_cast<int32_t*>(grad_amax_next), __float_as_int(sdata[0]));
 }

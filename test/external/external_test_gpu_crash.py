@@ -5,7 +5,8 @@ These tests intentionally cause GPU faults to verify error handling.
 Run with: DEV=AMD python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re, importlib
-from tinygrad.device import Device
+from tinygrad.device import Device, TinyELF
+from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
 
 RDNA3_CDNA3_MAP = {"v_mov_b32_e32": "v_mov_b32_e32", "s_mov_b32": "s_mov_b32", "s_waitcnt": "s_waitcnt", "s_endpgm": "s_endpgm",
@@ -42,8 +43,8 @@ class TestGPUCrash(unittest.TestCase):
       self.fail("Device not working before test")
 
   def _run(self, code: str):
-    from tinygrad.runtime.ops_amd import AMDProgram
-    prg = AMDProgram(self.dev, "test", self.compiler.compile(assemble(code, is_cdna=self.is_cdna)))
+    prg = self.dev.runtime(TinyELF(self.compiler.compile(assemble(code, is_cdna=self.is_cdna)), "test",
+                                   Target("AMD", arch=self.dev.arch), ()))
     prg(self.dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)
 
   def _run_insts(self, insts: list[Inst]):

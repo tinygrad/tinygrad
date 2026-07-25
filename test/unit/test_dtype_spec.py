@@ -86,6 +86,8 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor(2.34), dtypes.default_float, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])
     _assert_eq(Tensor([1]), dtypes.default_int, [1])
+    # list elements are python scalars; a numpy scalar in a list has no inferred dtype (use np.array or state a dtype)
+    with self.assertRaises(RuntimeError): Tensor([np.int32(1)])
     _assert_eq(Tensor([1.1]), dtypes.default_float, [1.1])
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
@@ -148,6 +150,9 @@ class TestAutoCastType(unittest.TestCase):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+
+  def test_int_sqrt(self):
+    _assert_eq(Tensor([1, 4, 9, 16]).sqrt(), dtypes.default_float, [1, 2, 3, 4])
 
   @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and d in supported_dtypes]))
   def test_int_to_float_unary_func(self, dtype):

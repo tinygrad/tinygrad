@@ -1285,7 +1285,7 @@ def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1462,6 +1462,8 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    for nxt in fp8_next_amax: nxt.assign(0)
+    for nxt in fp8_next_grad_amax: nxt.assign(0)
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
@@ -1480,7 +1482,8 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
@@ -1665,7 +1668,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1753,11 +1756,12 @@ def train_gptoss():
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
-  # realize everything here
-  if optim.master_params: Tensor.realize(*optim.master_params)
+  if optim.master_params:
+    for m in optim.master_params: m.realize()
   Tensor.realize(*optim.params, *fp8_inv_scales)
 
   @TinyJit
+  @Context(TRAINING=1)
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
@@ -1772,7 +1776,8 @@ def train_gptoss():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
