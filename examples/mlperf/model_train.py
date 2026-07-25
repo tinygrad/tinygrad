@@ -1285,7 +1285,7 @@ def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1482,7 +1482,8 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
@@ -1667,7 +1668,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1775,7 +1776,8 @@ def train_gptoss():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)

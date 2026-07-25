@@ -205,7 +205,8 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.uint64
+    # uint64 has no common integer supertype with any signed int (JAX JEP), they all defer up to weakfloat
+    for st in dtypes.sints: assert least_upper_dtype(st, dtypes.uint64) == dtypes.weakfloat
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
@@ -224,8 +225,9 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.fp8e5m2, dtypes.uint64) == dtypes.fp8e5m2
 
   def test_weakint_promo(self):
-    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.weakint)
-    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.int8)
+    assert least_upper_dtype(dtypes.weakint, dtypes.weakint) == dtypes.weakint
+    assert least_upper_dtype(dtypes.bool, dtypes.weakint) == dtypes.weakint
+    assert least_upper_dtype(dtypes.weakint, dtypes.int8) == dtypes.int8
 
   def test_weakfloat_promo(self):
     # weakfloat is a float, but is not one of dtypes.floats
