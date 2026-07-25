@@ -98,6 +98,21 @@ class TestTorchBackend(unittest.TestCase):
   def test_empty_strided_default_dtype(self):
     self.assertEqual(torch.empty_strided((2,3), (1,2), device=device).dtype, torch.get_default_dtype())
 
+  @unittest.expectedFailure  # TODO: empty_strided ignores the requested strides, the backend treats everything as contiguous
+  def test_empty_strided_honors_strides(self):
+    self.assertEqual(tuple(torch.empty_strided((2,3), (1,2), device=device).stride()), (1,2))
+
+  @unittest.expectedFailure  # TODO: torch refuses an out= that overlaps an input, we compute silently
+  def test_out_overlapping_input_is_rejected(self):
+    x = torch.arange(6., device=device)
+    with self.assertRaises(RuntimeError): torch.add(x[:-1], 10, out=x[1:])
+
+  def test_out_disjoint_input_is_allowed(self):
+    # torch permits an out= that shares a base with an input as long as they do not overlap
+    x, xc = torch.arange(6., device=device), torch.arange(6.)
+    torch.add(x[:3], 10, out=x[3:]); torch.add(xc[:3], 10, out=xc[3:])
+    np.testing.assert_equal(x.cpu().numpy(), xc.numpy())
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
