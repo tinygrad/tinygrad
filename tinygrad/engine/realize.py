@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, contextlib, weakref, array
+import time, random, itertools, math, contextlib, weakref, array, collections
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
@@ -20,6 +20,34 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op in (Ops.COPY, Ops.SLICE): return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
+
+class DepsTracker:
+  def __init__(self):
+    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
+    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+
+  @staticmethod
+  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
+
+  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
+    wait_nodes = []
+    for i,buf in enumerate(bufs):
+      key, s, e = self._key(buf)
+      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
+      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
+    for i,buf in enumerate(bufs):
+      key, s, e = self._key(buf)
+      if i in write:
+        for dmap in [self.w_dependency_map, self.r_dependency_map]:
+          kept = []
+          for st,en,dep in dmap[key]:
+            if st < min(s, en): kept.append((st, min(s, en), dep))
+            if max(e, st) < en: kept.append((max(e, st), en, dep))
+          dmap[key] = kept
+        self.w_dependency_map[key].append((s, e, new_dependency))
+      else: self.r_dependency_map[key].append((s, e, new_dependency))
+    return list({id(x):x for x in wait_nodes}.values())
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -260,20 +288,17 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
+# hcq2 is imported here, not at the top: it needs the helpers above
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link  # noqa: E402
+
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_compile
-    linear = hcq_compile(linear, input_uops, jit=jit)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, jit=jit)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp, jit=False) -> UOp:
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_link
-    linear = hcq_link(linear, jit=jit)
-  return linear
+def link_linear(linear:UOp, jit=False) -> UOp: return hcq_link(linear, jit=jit) if getenv("HCQ2") else linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)

@@ -1,12 +1,12 @@
 from typing import TypeVar, Generic, Callable, Any
-import functools, collections
+import functools
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
 from tinygrad.renderer import Estimates
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime, DepsTracker
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -87,34 +87,6 @@ def _check_no_non_tensor_return(ret):
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
-
-class DepsTracker:
-  def __init__(self):
-    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-
-  @staticmethod
-  def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
-
-  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = self._key(buf)
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = self._key(buf)
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for st,en,dep in dmap[key]:
-            if st < min(s, en): kept.append((st, min(s, en), dep))
-            if max(e, st) < en: kept.append((max(e, st), en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
 
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):

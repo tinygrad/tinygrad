@@ -299,6 +299,9 @@ class Program(Generic[DeviceType]):
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
+  pm_lower:Any = None
+  pm_bufferize:Any = None
+
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
     from tinygrad.renderer import Renderer
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
