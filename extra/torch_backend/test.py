@@ -343,6 +343,21 @@ class TestTorchBackend(unittest.TestCase):
     assert b.shape == (4, 2, 3)
     np.testing.assert_equal(b.cpu().numpy(), a.cpu().numpy().transpose(2, 0, 1))
 
+  def test_batchnorm_backward_realized_stats(self):
+    # the saved stats are a function of input in training, so grad_input must flow through them even when handed in realized.
+    # the backward eps is unused in training: torch differentiates the save_invstd it was given
+    x0, g0 = torch.randn(8, 4, 3, 3), torch.randn(8, 4, 3, 3)
+    def run(dev, bwd_eps):
+      x, go = x0.to(dev), g0.to(dev)
+      w, b = torch.linspace(0.5, 2.0, 4).to(dev), torch.zeros(4, device=dev)
+      rm, rv = torch.zeros(4, device=dev), torch.ones(4, device=dev)
+      out, sm, si = torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+      grads = torch.ops.aten.native_batch_norm_backward(go, x, w, rm, rv, sm.clone().detach(), si.clone().detach(),
+                                                        True, bwd_eps, [True,True,True])
+      return [t.cpu().numpy() for t in grads]
+    for bwd_eps in [1e-5, 0.3]:
+      for got, want in zip(run(device, bwd_eps), run("cpu", bwd_eps)): np.testing.assert_allclose(got, want, atol=1e-4, rtol=1e-3)
+
   def test_batchnorm_unsqueeze(self):
     bn = torch.nn.BatchNorm2d(4).to(device)
     x = torch.randn(8, 4, 3, 3, device=device)
@@ -772,6 +787,12 @@ class TestBackendHelpers(unittest.TestCase):
   def test_unwrap_rejects_foreign_tensor(self):
     # unwrap casts to the tiny impl, so a tensor from another backend must be refused rather than reinterpreted
     with self.assertRaises(RuntimeError): extra.torch_backend.backend.unwrap(torch.ones(4))
+
+  def test_update_metadata_rejects_foreign_tensor(self):
+    # resizing a tensor we don't own would expose memory past its allocation
+    t = torch.ones(4)
+    with self.assertRaises(RuntimeError): extra.torch_backend.backend.mod.update_metadata(t, [8], [1], 0)
+    self.assertEqual(t.shape, (4,))
 
   def test_unwrap_parameter_and_detached(self):
     # nn.Parameter and detach rebuild the base OpaqueTensorImpl, which unwrap still has to accept
