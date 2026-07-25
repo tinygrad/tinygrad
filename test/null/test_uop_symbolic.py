@@ -987,7 +987,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
 
   def test_bitcast_chain(self):
-    a = Variable("a", 0, 3)
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
 
   def test_negation_in_where(self):
