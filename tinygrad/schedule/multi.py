@@ -1,6 +1,6 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, broadcast_axes, _broadcast_shape
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, Invalid
 from tinygrad.schedule.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
@@ -42,6 +42,34 @@ _early_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), handle_allreduce),
 ])
 if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + replace_allreduce
+
+# ***** symbolic multi rewrite (SYMBOLIC_MULTI) *****
+# replaces MULTI/MSELECT/MSTACK with the symbolic _device_num representation:
+#   MULTI(x, axis) -> x._unshard(axis): PAD with _device_num-dependent bounds back to full shape, other shards Invalid
+#   MSELECT(x, i) -> dnum==i ? x : Invalid
+#   MSTACK(srcs)  -> STACK(srcs).index(dnum), lowered to nested dnum==k ? src_k : Invalid
+# the per-device specialization binds _device_num at exec time (unwrap_multi in engine/realize.py)
+
+def _dnum(ndev:int) -> UOp: return UOp.variable("_device_num", 0, ndev-1)
+
+def mselect_to_where(ms:UOp) -> UOp:
+  return _dnum(len(ms.src[0].device)).eq(ms.arg).where(ms.src[0], ms.src[0].const_like(Invalid))
+
+def mstack_to_stack_index(ms:UOp) -> UOp:
+  return UOp(Ops.STACK, src=ms.src).index(_dnum(len(ms.src)))
+
+def index_stack_to_where(stack:UOp, var:UOp) -> UOp:
+  ret = stack.src[0].const_like(Invalid)
+  for k in range(len(stack.src)-1, -1, -1): ret = var.eq(k).where(stack.src[k], ret)
+  return ret
+
+symbolic_multi_pm = PatternMatcher([
+  (UPat(Ops.MULTI, src=(UPat(),), name="multi"), lambda multi: multi.src[0]._unshard(multi.arg)),
+  (UPat(Ops.MSELECT, src=(UPat(),), name="ms"), mselect_to_where),
+  (UPat(Ops.MSTACK, name="ms"), mstack_to_stack_index),
+  # lower INDEX into a value-STACK to nested selects (must fire before the pointer-INDEX spec in codegen)
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="stack"), UPat.var("var"))), index_stack_to_where),
+])
 
 # ***** multi functions *****
 
@@ -128,7 +156,7 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   if isinstance(device, str):
     pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
     return pieces[0].cat(*pieces[1:], dim=multi.axis)
-  return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
+  return multi.src[0]._unshard_fill(multi.axis).allreduce(Ops.ADD, device)
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
 

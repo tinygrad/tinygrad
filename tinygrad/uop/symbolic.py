@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math, struct
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, identity_element
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -95,6 +95,32 @@ pm_remove_invalid = PatternMatcher([
   (invalid_pat, lambda i: i.const_like(0)),
 ])
 
+# Invalid in a reduce input means "no data": those lanes must contribute the reduce identity, not poison the accumulator.
+# this must run after pm_data_invalid gate lifting (gates float to the top of the reduce input) and before codegen builds
+# the accumulator loop, otherwise acc+where(c,x,Invalid) gate-lifts and one invalid lane poisons the whole reduction.
+# only WHERE alt gates whose condition involves a reduce range are rewritten: those are "this element has no data".
+# an Invalid behind a reduce-range-independent gate (e.g. gather with an Invalid index) poisons the whole lane: keep it.
+def _invalid_to_identity(u:UOp, ident:UOp, red_ranges:frozenset[UOp]) -> UOp|None:
+  if u.op is Ops.WHERE:
+    if u.src[2].base.op is Ops.CONST and u.src[2].base.arg is Invalid and u.src[2].dtype == ident.dtype:
+      alt = ident if not red_ranges.isdisjoint(u.src[0].ranges) else None
+    else: alt = _invalid_to_identity(u.src[2], ident, red_ranges)
+    then = _invalid_to_identity(u.src[1], ident, red_ranges)
+    if alt is None and then is None: return None
+    return u.replace(src=(u.src[0], u.src[1] if then is None else then, u.src[2] if alt is None else alt))
+  if u.op in GroupOp.Elementwise-{Ops.WHERE}:
+    new_srcs = tuple(_invalid_to_identity(s, ident, red_ranges) for s in u.src)
+    if all(n is None for n in new_srcs): return None
+    return u.replace(src=tuple(s if n is None else n for s,n in zip(u.src, new_srcs)))
+  return None
+
+def reduce_invalid_identity(r:UOp) -> UOp|None:
+  red_ranges = frozenset(x for x in r.src[1:] if x.op is Ops.RANGE)
+  new_src = _invalid_to_identity(r.src[0], r.const_like(identity_element(r.arg[0], r.dtype)), red_ranges)
+  return r.replace(src=(new_src,)+r.src[1:]) if new_src is not None else None
+
+pm_invalid_reduce_identity = PatternMatcher([(UPat(Ops.REDUCE, name="r"), reduce_invalid_identity)])
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -177,6 +203,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # nested where with the same condition in the then position: c ? (c ? t : f) : f2 -> c ? t : f2
+  (UPat.var("c").where(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("f2")), lambda c,t,f,f2: c.where(t, f2)),
   # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
   (UPat.var("a").where(UPat.var("c"), UPat.var("b").where(UPat.var("c"), UPat.var("d"))), lambda a,b,c,d: (a|b).where(c,d)),
 ])+mop_cleanup

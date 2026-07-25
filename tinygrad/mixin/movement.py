@@ -265,7 +265,8 @@ class MovementMixin:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    return self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
+    # NOTE: this calls the overridden pad (OpMixin.pad when available) so the fill is an explicit 0, not Invalid
+    return self.pad(tuple((0, 0) if ns is None else (0, ns-s) for s, ns in zip(self.shape, argfix(shape, *args), strict=True)))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""

@@ -600,7 +600,8 @@ class TestSchedule(unittest.TestCase):
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
     # TODO: this should be 3 if fix store hazard worked correctly
-    check_schedule(p, 4)
+    # NOTE: pad now always has an explicit fill mask (internal PAD is Invalid-filled), which materializes here
+    check_schedule(p, 5)
 
   def test_conv2d(self, allowed=4, dtype=dtypes.float):
     old_default_float, dtypes.default_float = dtypes.default_float, dtype

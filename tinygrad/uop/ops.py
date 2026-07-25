@@ -224,6 +224,7 @@ class recursive_property(property):
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.op import OpMixin
+from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.rand import RandMixin
 
 # NOTE: this should be frozen, but frozen is slower
@@ -702,6 +703,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:
+    bsz, dcount = self.shape[axis], len(self.device)
+    dnum = UOp.variable("_device_num", 0, dcount-1)
+    # raw PAD with _device_num-dependent bounds: the other shards' regions are Invalid ("no data"), never a fill value
+    return MovementMixin.pad(self, tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
+
+  def _unshard_fill(self, axis:int) -> UOp:
+    # 0-filled variant of _unshard for ALU allreduce: materialized pad regions must be explicit 0, not gated-stale Invalid
     bsz, dcount = self.shape[axis], len(self.device)
     dnum = UOp.variable("_device_num", 0, dcount-1)
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))

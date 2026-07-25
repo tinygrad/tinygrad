@@ -286,8 +286,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
     base = MovementMixin.pad(X, pads)
-    if value == 0: return base
-    return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, value)
+    if base is X: return X  # no padding, nothing to fill
+    # the fill is always explicit: internal PAD fills with Invalid, so the mask is required for every value (incl. 0)
+    # for 0 use a literal that loses every promotion: a Python 0.0 would promote int/bool tensors to float, int 0 bool to int
+    fill = (False if X.dtype == dtypes.bool else 0) if value == 0 else value
+    return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, fill)
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     # shrink first for negative pads, then wrap the non-negative remainder

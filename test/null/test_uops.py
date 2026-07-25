@@ -8,6 +8,7 @@ from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym
+from tinygrad.mixin.movement import MovementMixin
 from test.helpers import eval_uop, to_uops_list
 
 class TestDTypeFromUOp(unittest.TestCase):
@@ -436,7 +437,7 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_2d(self): self._check(UOp.empty(2,5)[1, 2:4], 7)
   def test_shrink_to_one(self): self._check(UOp.empty(10)[1], 1)
   def test_expand_is_none(self): self._check(UOp.empty(1).expand(2), None)
-  def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
+  def test_shrink_invalid(self): self._check(MovementMixin.pad(UOp.empty(4), ((2,2),))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
 
 if __name__ == '__main__':

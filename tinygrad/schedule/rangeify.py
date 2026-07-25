@@ -4,14 +4,14 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, pm_invalid_reduce_identity
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
-from tinygrad.schedule.multi import multi_pm
+from tinygrad.schedule.multi import multi_pm, symbolic_multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
 # creation can recurse a lot
@@ -545,7 +545,8 @@ pm_copy_to_store = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  # SYMBOLIC_MULTI replaces the per-shard multi_pm rules with the symbolic _device_num representation (Stage 1)
+  tsink = graph_rewrite(sink, symbolic_multi_pm if getenv("SYMBOLIC_MULTI") else multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
@@ -555,6 +556,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  # Invalid (from internal PAD) in reduce inputs contributes the reduce identity, must run after gate lifting
+  tsink = graph_rewrite(tsink, pm_invalid_reduce_identity, name="reduce invalid to identity")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
