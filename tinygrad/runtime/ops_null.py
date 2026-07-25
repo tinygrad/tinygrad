@@ -17,7 +17,7 @@ class NullRenderer(CStyleLanguage):
     return assemble_linear(prg, lin, self.target.arch)
 
 class NullProgram(Program['NullDevice']):
-  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name = dev, obj.name
+  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name = dev.device, obj.name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     with cpu_profile(self.name, self.device): return 1e-3
 
