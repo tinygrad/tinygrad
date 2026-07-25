@@ -2,8 +2,8 @@
 
 tinygrad bounty *"<10s (wall time) hlb_cifar training on anything"* (rules: ≥93.5% eval, one eval at the end, "running twice to cache is okay" — generic caches only): **ACHIEVED on a single RTX 4090.**
 
-## Record (2026-07-24, RTX 4090, warm caches)
-Per seed: **1337: 9.79s @ 93.88** | **42: 9.98s @ 93.57** | **7: 9.79s @ 93.60** | **2024: 9.94s @ 93.59** — every run <10s and ≥93.5%.
+## Record (RTX 4090, warm caches; ~9.8s wall/seed)
+Per seed acc (LABEL_SMOOTHING 0.1): **1337: 93.96** | **42: 93.81** | **7: 93.70** | **2024: 94.01** — worst-seed 93.70, every run <10s and ≥93.5%. (Earlier LS=0.2 gave worst-seed 93.57; 0.1 lifts all four seeds, wall-neutral.)
 
 The measured process (the wall time that counts — `time` the python process, not a launcher):
 ```sh

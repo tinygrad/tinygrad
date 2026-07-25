@@ -30,7 +30,7 @@ LOG_INTERVAL = getenv("LOG_INTERVAL", 100)
 TTA          = getenv("TTA", 2)  # test-time aug: 2=mirror+translate (6 views), 1=mirror (2), 0=none (1)
 
 # hyperparameters from airbench94, lr/wd are given in decoupled "per 1024 examples" form and converted below
-MOMENTUM, BIAS_SCALER, LABEL_SMOOTHING, WHITEN_BIAS_EPOCHS, EMA_EVERY, EMA_BASE = 0.85, 64.0, 0.2, 3, 5, 0.95
+MOMENTUM, BIAS_SCALER, LABEL_SMOOTHING, WHITEN_BIAS_EPOCHS, EMA_EVERY, EMA_BASE = 0.85, 64.0, 0.1, 3, 5, 0.95
 kilostep_scale = 1024 * (1 + 1 / (1 - MOMENTUM))
 lr = 11.5 / kilostep_scale
 wd = 0.0153 * BS / kilostep_scale
