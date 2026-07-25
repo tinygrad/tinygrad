@@ -1,6 +1,6 @@
-import ctypes, functools
+import ctypes
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
-from tinygrad.device import Compiled, LRUAllocator, BufferSpec
+from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Program, TinyELF
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -15,7 +15,7 @@ class HIPDevice(Compiled):
     self.arch = init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t, lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
 
-    super().__init__(device, HIPAllocator(self), [HIPRenderer], functools.partial(HIPProgram, self), arch=self.arch)
+    super().__init__(device, HIPAllocator(self), [HIPRenderer], HIPProgram, arch=self.arch)
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(hip.hipGetDeviceCount(x))).value
 
@@ -23,12 +23,12 @@ class HIPDevice(Compiled):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
 
-class HIPProgram:
-  def __init__(self, dev:HIPDevice, name:str, lib:bytes, **kwargs):
-    self.dev, self.name, self.lib = dev, name, lib
+class HIPProgram(Program[HIPDevice]):
+  def __init__(self, dev:HIPDevice, obj:TinyELF):
+    self.dev, self.name, self.lib = dev, obj.name, obj.lib
     check(hip.hipSetDevice(self.dev.device_id))
-    self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
-    self.prg = init_c_var(hip.hipFunction_t, lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
+    self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), obj.lib)))
+    self.prg = init_c_var(hip.hipFunction_t, lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, obj.name.encode("utf-8"))))
 
   @suppress_finalizing
   def __del__(self):

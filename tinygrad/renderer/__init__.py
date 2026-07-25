@@ -64,7 +64,6 @@ class Renderer:
   has_local: bool = True
   has_threads: bool = False
   has_shared: bool = True
-  has_aux: bool = False # additional program info, eg. image shapes
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
@@ -80,7 +79,6 @@ class Renderer:
   def __reduce__(self): return self.__class__, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def asm(self, prg:UOp, lin:UOp) -> bytes: raise NotImplementedError("needs an assembler")
-  def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
   def supported_dtypes(self) -> set[DType]:
     # double can't be bitcast to anything without long support
     return set(dtypes.all) - ({dtypes.double} if dtypes.long in EMULATED_DTYPES.tolist(dtypes) else set())

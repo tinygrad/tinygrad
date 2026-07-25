@@ -26,8 +26,14 @@ def run_program(prg:UOp, bufs:list[Buffer]):
   for u,b in zip(buf_uops, bufs): buffers[u] = b
   run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
+def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
+  supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+  if unsupported := [f"{name}={dtype}" for name,dtype in (("dtype_in", dtype_in), ("dtype_out", dtype_out)) if dtype not in supported_dtypes]:
+    raise unittest.SkipTest(f"tensor core requires unsupported renderer dtype: {', '.join(unsupported)}")
+
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
+  _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule_linear()
@@ -47,6 +53,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     except KernelOptError: pass
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
+  _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)

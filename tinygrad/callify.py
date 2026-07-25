@@ -179,10 +179,9 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
+  if b.op is Ops.BIND: return b.param_like(len(ctx.replacements)-1)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, name=b.src[0].expr if b.op is Ops.BIND else None,
-                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL,
-                   multiple_of=b.src[0].arg.multiple_of if b.op is Ops.BIND else None)
+                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),

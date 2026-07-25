@@ -1,11 +1,11 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
+from typing import Any, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap
 from tinygrad.dtype import DType, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -283,12 +283,25 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
+@dataclass
+class TinyELF:
+  lib: bytes
+  name: str
+  target: Target
+  # tuple of (name, slot, dtype, shape)
+  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+
+class Program(Generic[DeviceType]):
+  def __init__(self, dev:DeviceType, obj:TinyELF): pass
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
+               wait=False) -> float|None: pass
+
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime, graph=None, arch=None):
+  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
     from tinygrad.renderer import Renderer
-    self.device, self.allocator, self.runtime, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
+    self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.arch = arch
     self.cached_renderer:dict[Any, Renderer] = {}
 
@@ -299,6 +312,8 @@ class Compiled:
   def compiler(self) -> Compiler:
     if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
     return ret
+
+  def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
   def _renderer_name(self, r:type[Renderer]) -> str:
     return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
