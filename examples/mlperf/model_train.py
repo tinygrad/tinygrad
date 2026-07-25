@@ -1668,7 +1668,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
