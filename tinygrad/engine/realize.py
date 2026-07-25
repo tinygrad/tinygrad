@@ -216,6 +216,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False))
+  for d in call.arg.aux.device: Device[d].ring_doorbell()
 
   st = time.perf_counter()
   for d in call.arg.aux.device:
@@ -266,13 +267,13 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_compile
+    from tinygrad.runtime.support.hcq2 import hcq_compile
     linear = hcq_compile(linear, input_uops, jit=jit)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def link_linear(linear:UOp, jit=False) -> UOp:
   if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_link
+    from tinygrad.runtime.support.hcq2 import hcq_link
     linear = hcq_link(linear, jit=jit)
   return linear
 

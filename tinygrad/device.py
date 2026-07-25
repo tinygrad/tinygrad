@@ -316,6 +316,13 @@ class Compiled:
     """
     return 1
 
+  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
+
+  def ring_doorbell(self):
+    """
+    Tell the device about work queued for it, for queues whose submit can't do it itself.
+    """
+    # override this in your device implementation
   def synchronize(self):
     """
     Synchronize all pending operations on the device.

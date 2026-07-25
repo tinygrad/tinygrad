@@ -500,8 +500,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")
 
-  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
-
   def rdma_dev(self):
     for i in itertools.count():
       if (dev:=next((d for d in HCQCompiled.peer_groups[self.peer_group] if type(d).__name__ == 'RDMADevice'), None)): return dev
@@ -517,10 +515,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
 class HCQBuffer:
   def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None,
-               owner:HCQCompiled|None=None):
+               owner:Compiled|None=None):
     self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
     self._devs, self.owner = ([owner] if owner is not None else []), owner
-    self._mappings:dict[HCQCompiled, HCQBuffer] = {} # mapping to the other devices
+    self._mappings:dict[Compiled, HCQBuffer] = {} # mapping to the other devices
 
   def offset(self, offset:int=0, size:int|None=None) -> HCQBuffer:
     return HCQBuffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
