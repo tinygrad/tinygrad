@@ -5,7 +5,7 @@
 # tinygrad implementation of airbench94: https://github.com/KellerJordan/cifar10-airbench (https://arxiv.org/abs/2404.00498)
 # trains CIFAR-10 to ~94% in 9.9 epochs / 476 steps, run with DEFAULT_FLOAT=HALF
 # the <10s record config in one shot (run twice, first run beam searches): SPEEDRUN=1 uv run examples/hlb_cifar10_fast.py
-import time, os, sys, contextlib
+import time, os, contextlib
 start_tm = time.perf_counter()
 if os.getenv("SPEEDRUN"):  # the 4090 record env, see hlb_cifar10_fast_README.md. must be set before tinygrad imports
   for k,v in dict(DEV="CUDA", DEFAULT_FLOAT="HALF", BS="1024", EPOCHS="8.0", TTA="2", MATMUL_CONV="1", CONTIG="1", SCHEDULE_CACHE="1",
@@ -274,7 +274,3 @@ if __name__ == "__main__":
     if (target := getenv("TARGET_EVAL_ACC_PCT", 0.0)):
       if eval_acc_pct >= target: print(colored(f"{eval_acc_pct=} >= {target}", "green"))
       else: raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
-
-  # wall time ends at process exit: skip ~0.3s of teardown (gc over the uop graphs, cuda context destructors)
-  sys.stdout.flush()
-  os._exit(0)
