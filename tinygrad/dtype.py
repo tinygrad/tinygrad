@@ -162,8 +162,7 @@ if (env_default_float := getenv("DEFAULT_FLOAT", "")):
 DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
 def strong_dtype(dtype:DType) -> DType:
-  # TODO: weakint
-  return dtypes.default_float if dtype == dtypes.weakfloat else dtype
+  return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support complex type
