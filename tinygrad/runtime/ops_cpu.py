@@ -1,8 +1,8 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array
+import platform, sys, os, ctypes, functools, mmap, threading, array, itertools
 from dataclasses import replace
 from typing import cast
-from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, partition
 from tinygrad.device import Buffer, BufferSpec, TinyELF
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -15,7 +15,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, KernelInfo
+from tinygrad.uop.ops import sint, KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
 
@@ -54,6 +54,17 @@ def worker_prog():
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
+
+def host_wait(ctx, dst:UOp, val:UOp) -> UOp:
+  return (cur:=dst.after(loop:=UOp.loop(next(ctx))).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
+
+pm_host_opsel = PatternMatcher([(UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait)])
+
+def encode_host_queue(q:UOp) -> UOp:
+  # TODO: subset of hcq2 for now
+  spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, ctx=itertools.count(), walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
+  assert store.op is Ops.INS and store.arg == "store", f"host queue cannot encode {store.op} {store.arg}"
+  return store.src[0].after(*spins).index(UOp.const(dtypes.int, 0)).store(store.src[1])
 
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
@@ -149,6 +160,20 @@ class CPUAllocator(HCQAllocator):
   def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQCompiled):
+  pm_lower = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_host_queue)])
+
+  pm_bufferize = PatternMatcher([
+    (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline("sentinel", (1 << 64) - 1)),
+    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_signal"), lambda ctx: ctx[0].timeline("signal", 0)),
+    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_value"), lambda ctx: ctx[0].timeline("value", 1)),
+  ])
+
+  @functools.cache
+  def timeline(self, tag:str, init_value:int) -> Buffer:
+    (buf:=Buffer(self.device, 1, dtypes.uint64, preallocate=True)).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
+    return buf
+
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram, HCQSignal,
       functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
