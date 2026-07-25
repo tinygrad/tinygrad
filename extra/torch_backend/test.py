@@ -769,6 +769,14 @@ class TestTorchBackend(unittest.TestCase):
 
 from tinygrad import Tensor
 class TestBackendHelpers(unittest.TestCase):
+  def test_unwrap_rejects_foreign_tensor(self):
+    # unwrap casts to the tiny impl, so a tensor from another backend must be refused rather than reinterpreted
+    with self.assertRaises(RuntimeError): extra.torch_backend.backend.unwrap(torch.ones(4))
+
+  def test_unwrap_parameter_and_detached(self):
+    # nn.Parameter and detach rebuild the base OpaqueTensorImpl, which unwrap still has to accept
+    extra.torch_backend.backend.unwrap(torch.nn.Parameter(torch.ones(4, device="tiny")))
+    extra.torch_backend.backend.unwrap(torch.ones(4, device="tiny").detach())
 
   def test_calculate_storage_offset_no_shrink(self):
     t = Tensor.ones(3, 4)

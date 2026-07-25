@@ -126,7 +126,9 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
 
 py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  // shallow_copy_and_detach (nn.Parameter, aten.detach) rebuilds the base OpaqueTensorImpl, so that is the type every tiny tensor has
+  auto* opaque_impl = dynamic_cast<at::OpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  TORCH_CHECK(opaque_impl != nullptr, "expected a tiny tensor, got a ", tensor.device().str(), " one. move it with .to(\"tiny\") first");
   std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
