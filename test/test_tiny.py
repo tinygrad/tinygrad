@@ -31,9 +31,13 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(16).contiguous() + Tensor.ones(16).contiguous()
     self.assertListEqual(out.tolist(), [2]*16)
 
+  def test_stack(self):
+    out = Tensor.stack(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
+    self.assertListEqual(out.flatten().tolist(), [1]*8+[0]*8)
+
   def test_cat(self):
-    out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
-    self.assertListEqual(out.tolist(), [1]*8+[0]*8)
+    out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(5).contiguous())
+    self.assertListEqual(out.tolist(), [1]*8+[0]*5)
 
   def test_sum(self, N=getenv("SUM_N", 256)):
     out = Tensor.ones(N).contiguous().sum()
