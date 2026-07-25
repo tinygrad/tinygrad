@@ -779,21 +779,17 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
   grad_out_t, input_t = unwrap(grad_out), unwrap(input)
-  weight_t = unwrap(weight) if weight is not None else None
-  save_mean_t = unwrap(save_mean)
-  save_invstd_t = unwrap(save_invstd)
-  out = input_t.batchnorm(weight_t, None, save_mean_t, save_invstd_t)
-  targets = [t for t, m in zip([input_t, weight_t], output_mask[:2]) if t is not None and m]
-  if targets:
-    grads = out.gradient(*targets, gradient=grad_out_t)
-    grad_input = grads.pop(0) if output_mask[0] else None
-    grad_weight = grads.pop(0) if output_mask[1] and weight_t is not None else None
-  else:
-    grad_input, grad_weight = None, None
-  grad_bias = grad_out_t.sum(axis=tuple(x for x in range(grad_out_t.ndim) if x != 1)) if output_mask[2] else None
-  return (wrap(grad_input) if grad_input is not None else None,
-          wrap(grad_weight) if grad_weight is not None else None,
-          wrap(grad_bias) if grad_bias is not None else None)
+  dims, shape = tuple(x for x in range(input_t.ndim) if x != 1), (1, -1) + (1,)*(input_t.ndim-2)
+  # training differentiates the batch stats it was given, eval treats the running stats as constants
+  if train: mean, invstd = unwrap(save_mean), unwrap(save_invstd)
+  else: mean, invstd = unwrap(running_mean), unwrap(running_var).add(eps).rsqrt()
+  xhat = (input_t - mean.reshape(shape)) * invstd.reshape(shape)
+  grad_bias, grad_weight = grad_out_t.sum(axis=dims), (grad_out_t * xhat).sum(axis=dims)
+  grad_input = grad_out_t if not train else \
+    grad_out_t - (grad_bias.reshape(shape) + xhat * grad_weight.reshape(shape)) / (input_t.numel() // input_t.shape[1])
+  grad_input = grad_input * invstd.reshape(shape) * (unwrap(weight).reshape(shape) if weight is not None else 1)
+  return (wrap(grad_input) if output_mask[0] else None, wrap(grad_weight) if output_mask[1] else None,
+          wrap(grad_bias) if output_mask[2] else None)
 
 # _pad_circular is not CompositeImplicitAutograd (unlike reflect/replicate pad)
 # we need torch.autograd.Function with explicit AutogradPrivateUse1 registration
