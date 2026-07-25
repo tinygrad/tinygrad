@@ -12,7 +12,7 @@ if os.getenv("SPEEDRUN"):  # the 4090 record env, see hlb_cifar10_fast_README.md
                   PROGRAM_CACHE="1", JITBEAM="4", BEAM_ESTIMATE="0", BEAM_TC_SELECT="4", BEAM_VALIDATE="1", IGNORE_JIT_FIRST_BEAM="1",
                   LOG_INTERVAL="0", BEAM_TIMEOUT_SEC="60", TARGET_EVAL_ACC_PCT="93.5",
                   PARALLEL=str(min(os.cpu_count() or 8, 12))).items(): os.environ.setdefault(k, v)
-import math, tarfile, ctypes, pathlib, shutil
+import math, tarfile, ctypes
 import numpy as np
 from tinygrad import Tensor, nn, dtypes, TinyJit, Variable, Device
 from tinygrad.helpers import getenv, colored, Context, fetch
@@ -114,11 +114,6 @@ def cifar_fast() -> tuple[Tensor, Tensor, Tensor, Tensor]:
   from tinygrad.device import BufferSpec
   from tinygrad.runtime.ops_cuda import cuda, check
   fp = fetch('https://data.brainchip.com/dataset-mirror/cifar10/cifar-10-binary.tar.gz', gunzip=True)
-  # stage in tmpfs: memory-tight boxes evict the page cache between runs, re-reading 184MB off slow disk costs seconds
-  with contextlib.suppress(OSError):
-    shm = pathlib.Path("/dev/shm/tinygrad_cifar10.tar")
-    if not shm.is_file() or shm.stat().st_size != fp.stat().st_size: shutil.copyfile(fp, shm)
-    fp = shm
   with tarfile.open(fp) as tf: offs = {m.name: m.offset_data for m in tf.getmembers()}
   raw = Tensor.empty(6, 10000, 3073, dtype=dtypes.uint8).realize()
   base, dev, sz = raw.uop.buffer.ensure_allocated()._buf, Device[raw.device], 10000*3073
