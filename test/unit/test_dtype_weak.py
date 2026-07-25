@@ -1,4 +1,4 @@
-import tempfile, unittest
+import tempfile, unittest, math
 
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context
@@ -135,6 +135,20 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(empty.data().format, strong.fmt)
       self.assertEqual(empty.numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(empty.tolist(), [])
+
+
+class TestSignedUint64Weakfloat(unittest.TestCase):
+  # int64 and uint64 have no common integer supertype (JAX JEP), so the join defers to weakfloat instead of wrapping
+  def test_no_wrap(self):
+    r = Tensor([-1], dtype=dtypes.int64, device="CPU") + Tensor([1], dtype=dtypes.uint64, device="CPU")
+    self.assertEqual((r.dtype, r.item()), (dtypes.weakfloat, 0.0))
+
+  def test_weakfloat_lowers(self):
+    i64, u64 = Tensor([-1], dtype=dtypes.int64, device="CPU"), Tensor([3], dtype=dtypes.uint64, device="CPU")
+    r = i64 + u64 + Tensor([2], dtype=dtypes.float16, device="CPU")  # a concrete consumer takes the join
+    self.assertEqual((r.dtype, r.cast(dtypes.float32).item()), (dtypes.half, 4.0))
+    self.assertEqual((i64 < u64).item(), True)  # comparison meets at float
+    self.assertAlmostEqual((i64 + u64).sin().item(), math.sin(2), places=5)  # Unary lowers before transcendental
 
 
 if __name__ == "__main__":
