@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -121,12 +121,12 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked
-  if not all_same([x.shape for x in b.src]): return None
+  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
+  if not all(x.shape == b.shape or x.base.arg is Invalid for x in b.src): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+    src.append(b.replace(src=tuple(x.base if x.base.arg is Invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):

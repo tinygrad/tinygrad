@@ -169,7 +169,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return arg
     case Ops.CONST:
       # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
-      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is the lattice bottom, typed by its consumer
+      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is always bool, the promo lattice bottom
       if isinstance(arg, bool): return dtypes.bool
       if isinstance(arg, int): return None
       if isinstance(arg, float): return dtypes.weakfloat
@@ -184,9 +184,11 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    if op is Ops.CONST and arg is Invalid: dtype = dtypes.bool
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     # CONST derives its dtype by value only when the constructor omits one; an explicit (strong) const dtype is legal until the field is removed
-    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    if SPEC == 2 and op is not Ops.CONST and not any(s.base.arg is Invalid for s in src) and \
+       (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -603,7 +605,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
-      stk = [UOp(Ops.CONST, dtype, arg=dtype.const(c), src=()) for c in b]
+      stk = [UOp.const(dtype, c) for c in b]
       ret = UOp.stack(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
@@ -630,15 +632,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE, src=(self.permute(perm),), arg=(op, len(reduce_axis)))
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
-  def invalid(): return UOp.const(dtypes.weakint, Invalid)
+  def invalid(): return UOp.const(dtypes.bool, Invalid)
   def valid(self, cond):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
-    assert dtypes.is_int(self.dtype), "Can only call get_idx on index dtype"
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
-    assert dtypes.is_int(self.dtype), "Can only call get_valid on index dtype"
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
@@ -1706,7 +1706,7 @@ def lower_alu_dtype(u:UOp, x:UOp, y:UOp, dt:DType) -> UOp:
   return src[0].alu(u.op, *src[1:]).cast(u.dtype)
 pm_lower_weakint = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
-  (UPat(Ops.CONST, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
+  (UPat(Ops.CONST, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype)),
   # Binary can widen the dtype, WHERE cannot
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))),
    lambda u,x,y: lower_alu_dtype(u, x, y, least_upper_dtype(select_dtype(u), x.dtype, y.dtype))),

@@ -224,8 +224,9 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.fp8e5m2, dtypes.uint64) == dtypes.fp8e5m2
 
   def test_weakint_promo(self):
-    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.weakint)
-    with self.assertRaises(KeyError): least_upper_dtype(dtypes.weakint, dtypes.int8)
+    assert least_upper_dtype(dtypes.weakint, dtypes.weakint) == dtypes.weakint
+    assert least_upper_dtype(dtypes.bool, dtypes.weakint) == dtypes.weakint
+    assert least_upper_dtype(dtypes.weakint, dtypes.int8) == dtypes.int8
 
   def test_weakfloat_promo(self):
     # weakfloat is a float, but is not one of dtypes.floats

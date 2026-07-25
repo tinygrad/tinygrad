@@ -5,6 +5,7 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
 from tinygrad.uop.validate import uops_to_z3
 
@@ -1330,7 +1331,8 @@ class TestInvalidIndex(unittest.TestCase):
   def test_invalid_times_0(self):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())*0
-    self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+    self.assertIs(idx.simplify(), (ridx<5).where(UOp.const(dtypes.weakint, 0), UOp.invalid()),
+                  "multiplying an index by 0 should preserve the invalid")
 
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
@@ -1384,11 +1386,7 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     idx = buf.index(a.valid(valid))
     expr = cond.where(idx, idx.const_like(0))
     out = graph_rewrite(expr, pm_move_where_on_load)
-    # any WHERE in the rewritten graph must have matched-dtype branches
-    for u in out.toposort():
-      if u.op is Ops.WHERE:
-        self.assertEqual(u.dtype, u.src[1].dtype, f"WHERE branch 1 dtype mismatch: {u}")
-        self.assertEqual(u.dtype, u.src[2].dtype, f"WHERE branch 2 dtype mismatch: {u}")
+    type_verify(out, spec_shared)  # Invalid matches any dtype
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):
