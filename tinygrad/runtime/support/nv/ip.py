@@ -3,7 +3,8 @@ import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
 from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch_fw, wait_cond, ceildiv
-from tinygrad.runtime.support.system import System, MMIOInterface
+from tinygrad.runtime.support.system import System
+from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 
 @dataclasses.dataclass(frozen=True)

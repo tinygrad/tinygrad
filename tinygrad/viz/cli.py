@@ -47,6 +47,7 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def to_str(k:str, v) -> str:
+  if isinstance(v, str): return f"{k} {v}"
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
   return f"{k}={v}"
@@ -155,7 +156,8 @@ def main(args) -> None:
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     markers = profile.get("markers", [])
-    interval:tuple[int, int]|None = None if not args.interval else (marker_st(markers, args.interval[0]), marker_st(markers, args.interval[1]))
+    interval:tuple[int, int]|None = None
+    if (rng:=args.interval): interval = (marker_st(markers, rng[0]), marker_st(markers, rng[1]) if len(rng) > 1 else profile["dur"])
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if not args.src else ((args.src[0],e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None, dict[str, float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
@@ -219,7 +221,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
-  parser.add_argument("--interval", nargs=2, metavar=("START", "END"), help="Optional start and end marker")
+  parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))

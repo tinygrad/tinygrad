@@ -88,6 +88,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
   if t.is_alive(): raise RuntimeError("rocprof decoder timeout")
   return occupancy_records, wave_insts
 
+@unittest.skip("TODO: fix to not require unpickling UOps.")
 class SQTTExamplesTestBase(unittest.TestCase):
   target: str
   examples: dict

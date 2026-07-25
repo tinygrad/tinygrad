@@ -3,7 +3,7 @@ import functools
 from typing import Callable
 from dataclasses import dataclass
 from tinygrad.dtype import AddrSpace, DType
-from tinygrad.mixin import ElementwiseMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -209,7 +209,7 @@ class ST:
     return cls(uop, rows, cols, layout, base_shape, ker)
 
   def swizzle(self, row, col):
-    swizzled_offset = self.base_shape.swizzle(row, col, self._uop.dtype.base.scalar())
+    swizzled_offset = self.base_shape.swizzle(row, col, self._uop.dtype.scalar())
 
     row = swizzled_offset // self.base_shape.cols
     col = swizzled_offset % self.base_shape.cols

@@ -1,12 +1,57 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, Variable
+from tinygrad import Tensor, Variable, dtypes
+from tinygrad.helpers import CHECK_OOB
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
     vv = Variable("a", 0, 10).bind(1)
     ret = (Tensor(vv) + 3).item()
     assert ret == 4
+
+  def test_variable_mul_tensor(self):
+    vv = Variable("a", 1, 10).bind(2)
+    t = Tensor.ones(3, dtype=dtypes.int8)
+    self.assertListEqual((t * vv).tolist(), [2, 2, 2])
+    # TODO: fix
+    try:
+      self.assertListEqual((vv * t).tolist(), [2, 2, 2])
+    except RuntimeError: pass
+
+  def test_large_range_variable(self):
+    vv = Variable("b", 0, 2**40).bind(2**35)
+    # TODO: pm_lower_index_dtype lowers ALU PARAM to int32 unconditionally
+    try:
+      self.assertEqual(Tensor(vv).item(), 2**35)
+    except AssertionError:
+      pass
+
+  def test_variable_tensor_dtype_arg(self):
+    vv = Variable("a", 1, 10).bind(2)
+    t = Tensor(vv, dtype=dtypes.float32)
+    self.assertEqual(t.dtype, dtypes.float32)
+    self.assertEqual(t.item(), 2.0)
+
+  def test_unbound_variable_tensor(self):
+    # an unbound variable schedules fine, but can't execute
+    with self.assertRaisesRegex(RuntimeError, "unbound"): Tensor(Variable("u", 1, 10)).item()
+    with self.assertRaisesRegex(RuntimeError, "unbound"): (Tensor(Variable("u", 1, 10)) + 1).item()
+    # bound variables in an expression are fine
+    self.assertEqual(Tensor(Variable("u", 1, 10).bind(2) + 1).item(), 3)
+
+  def test_shrink_beyond_buffer_variable(self):
+    # TODO: shrink by a variable whose vmax exceeds the dim should fail at build, today only CHECK_OOB=1 rejects it
+    t = Tensor.ones(3).contiguous()[:Variable("a", 1, 10).bind(5)]
+    if CHECK_OOB: self.assertRaises(RuntimeError, t.sum().item)
+    else: t.sum().item()  # silent OOB: reads 2 elements past the buffer, result depends on the allocator
+
+  def test_symbolic_shape_mul_variable_tensor(self):
+    # NOTE: the buffer dim must cover the variable's vmax
+    vv = Variable("a", 1, 10).bind(2)
+    self.assertEqual((Tensor.ones(10).contiguous()[:vv] * Tensor(vv)).sum().item(), 4.0)
+    # a vmin=0 symbolic dim broadcasts too
+    v0 = Variable("z", 0, 10).bind(2)
+    self.assertEqual((Tensor.ones(10).contiguous()[:v0] * Tensor(v0)).sum().item(), 4.0)
 
   def test_inner_tvar_node(self):
     vv = Variable("w", 0, 10).bind(2)

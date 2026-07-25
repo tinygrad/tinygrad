@@ -3,7 +3,7 @@ import z3
 from tinygrad import dtypes, Device
 from tinygrad.uop.validate import uops_to_z3, z3_cdiv
 from tinygrad.uop.ops import UOp
-from tinygrad.uop.decompositions import fast_idiv
+from tinygrad.codegen.decomp.op import fast_idiv
 random.seed(42)
 
 powers_of_two = [2**i for i in range(64)]
@@ -11,7 +11,7 @@ if __name__ == "__main__":
   for i in range(10_000):
     if i % 1000 == 0:
       print(f"Progress: {i}")
-    dt = random.choice(dtypes.ints + tuple(dt.vec(4) for dt in dtypes.ints))
+    dt = random.choice(dtypes.ints)
     u = UOp.variable('x', random.randint(dt.min, 0), random.randint(1, dt.max), dtype=dt)
     d = random.randint(1, max(1, u.vmax)*2)
     if d in powers_of_two: continue

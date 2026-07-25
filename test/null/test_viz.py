@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -211,9 +211,27 @@ class TestViz(unittest.TestCase):
     graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
-    # fallback to NOOP with the error message
-    nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
-    self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
+    # fallback to REWRITE_ERROR with the error message
+    self.assertIn("REWRITE_ERROR\nTraceback", graphs[2]["label"])
+    # cut after the first error, instead of going through all REWRITE_STACK_LIMIT matches
+    self.assertEqual(len(graphs), 3)
+
+  def test_walk_rewrite(self):
+    from tinygrad.uop.ops import _substitute
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      graph_rewrite(a + 4, TrackedPatternMatcher(_substitute.patterns), {a:a+1}, walk=True)
+    list(viz.get_details(0, 0))
+
+  def test_enter_calls_rewrite(self):
+    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
+    with save_viz() as viz:
+      inner = UOp.const(dtypes.int, 3)
+      call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
+      func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
+      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+    details = list(viz.get_details(0, 0))
+    self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 
   def test_const_node_visibility(self):
     with save_viz() as viz:
@@ -234,8 +252,8 @@ class TestViz(unittest.TestCase):
     self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
   def test_const_reshape_expand_folded(self):
-    # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
-    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
+    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->EXPAND chain
     a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
@@ -244,19 +262,18 @@ class TestViz(unittest.TestCase):
     excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
     self.assertIn("CONST", excluded_nodes)
     self.assertIn("STACK", excluded_nodes)
-    self.assertIn("RESHAPE", excluded_nodes)
     self.assertIn("EXPAND", excluded_nodes)
     self.assertIn("CONST1 1", graph[id(alu)]["label"])
 
   def test_stack_movement_not_folded_unless_all_const(self):
     a = UOp.variable("a", 0, 10, dtype=dtypes.int)
     c = UOp.const(dtypes.int, 1)
-    stack = a.vectorize(c)
+    stack = a.stack(c)
     reshaped = stack.reshape((1, 2))
     graph = uop_to_json(VizData(), reshaped)
     self.assertFalse(graph[id(stack)]["exclude"])
 
-    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
+    const_stack = c.stack(UOp.const(dtypes.int, 2))
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])
@@ -341,41 +358,28 @@ class TestVizGC(unittest.TestCase):
 from tinygrad import Tensor, Device, TinyJit, Variable, function
 
 class TestVizIntegration(unittest.TestCase):
-  # codegen supports rendering of code blocks
-  def test_codegen_tracing(self):
-    with save_viz() as viz:
-      ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
-      prg = do_to_program(ast, Device[Device.DEFAULT].renderer)
-    lst = viz.list_items()
-    self.assertEqual(len(lst), 3)
-    self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
-    self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
-    self.assertEqual(lst[2]["name"], prg.arg.name)
-    input_ast = next(viz.get_details(2, 0))["graph"].values()
-    for u in input_ast:
-      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
-
-  # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
+    c1 = Tensor.empty(4, device="NULL")
+    c2 = Tensor.empty(8, device="NULL")
+    # uniquely named A = B + 1 kernel
+    kernel_name = f"custom_add1_link_sched_codegen_{BEAM.value}"
+    def custom_add1(A:UOp, B:UOp): return A[0].store(B[0]+1).sink(arg=KernelInfo(kernel_name))
     with save_viz() as viz:
-      c1 = Tensor.empty(4, device="NULL").add(1)
-      c2 = Tensor.empty(8, device="NULL").add(1)
-      with Context(SCACHE=0):
-        sched = c1.schedule_linear(c2)
-      from tinygrad.engine.realize import compile_linear
-      sched = compile_linear(sched)
-      with Context(NO_COLOR=0):
-        prgs = [do_to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
+      c1 = Tensor.custom_kernel(c1, c2, fxn=custom_add1)[0]
+      c1.realize()
     lst = viz.list_items()
+    # schedule graph CALL nodes have a link to jump to codegen
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
-    with Context(NO_COLOR=1):
-      graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
+    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
-      self.assertEqual(lst[n["ref"]]["name"], prgs[i])
-      assert ansistrip(prgs[i]) in n["label"], f"CALL must contain kernel name, got {n['label']}"
+      self.assertEqual(lst[n["ref"]]["name"], kernel_name)
+      assert kernel_name[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
+    # UOp addrspace is colored
+    for u in graph.values():
+      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
 
   def test_link_sched_codegen_beam(self):
     with Context(BEAM=2):
@@ -492,6 +496,24 @@ class TestVizIntegration(unittest.TestCase):
     # Ops.BINARY shows the error message since compile failed
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
     self.assertIn(type(e.exception).__name__, bin_render)
+
+  def test_view_source_alt(self):
+    src = "void E_3(float* data0_3) {}"
+    binary = Device["CPU"].renderer.compiler.compile(src)
+    def custom_binary(X:UOp):
+      sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
+                                   UOp(Ops.BINARY, arg=binary)))
+    x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
+    with save_viz() as viz:
+      x.realize()
+    lst = viz.list_items()
+    codegen_idx = len(lst)-1
+    steps = lst[codegen_idx]["steps"]
+    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
+    assert src_idx is not None, "must have source rendering in list"
+    src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
+    self.assertEqual(src, src_render)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -804,7 +826,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with save_viz() as viz:
       with Context(DEV=f"NULL::{self.arch}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
@@ -1089,8 +1111,10 @@ class TestCLI(unittest.TestCase):
     with write_files(viz) as files, Context(NO_COLOR=1):
       flat = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end")
       aggregate = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end", "-t")
+      final = run_cli(*files, "-s", "NULL", "--interval", "interval_end", "-t")
     self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
     self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
+    assert all(s["name"].startswith("post_") for s in final), f"post_* kernels must be present in final, got {final}"
 
 if __name__ == "__main__":
   unittest.main()

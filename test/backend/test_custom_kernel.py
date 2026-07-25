@@ -7,12 +7,12 @@ from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 def custom_arange_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
-  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
+  return C[i].store(i.cast(C.dtype)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
 
 def custom_eye_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
   j = UOp.range(C.shape[1], 1)
-  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
+  return C[i, j].store((i.eq(j)).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
 
 def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -51,13 +51,13 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   i = UOp.range(dest.shape[0], 0)
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
-  store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
+  store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0)
   slice_src = src[G, :]
-  reg = UOp.placeholder((1,), dest.dtype.base, 0, addrspace=AddrSpace.REG)
+  reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
   reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
@@ -73,12 +73,12 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
 
   k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
-  qk_acc = UOp.placeholder((1,), Q.dtype.base, 0, addrspace=AddrSpace.REG)
+  qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
   qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
   qk_score = qk_acc[0] / (d ** 0.5)
 
-  out_acc = UOp.placeholder((1,), Q.dtype.base, 1, addrspace=AddrSpace.REG)
+  out_acc = UOp.placeholder((1,), Q.dtype, 1, addrspace=AddrSpace.REG)
   out_acc = out_acc.after(i, d_out)[0].set(0.0)
   out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
 
@@ -199,8 +199,7 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.empty(N, N)
 
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
@@ -209,8 +208,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.randn(N, N).to(devs)
     c = Tensor(Tensor.empty(N//2, N, device=devs).uop.multi(0), device=devs)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
   # NOTE: grad_fxn doesn't work with pyrender
@@ -233,14 +231,9 @@ class TestCustomKernel(unittest.TestCase):
     real_grad_a, real_grad_b = a.grad, b.grad
     Tensor.realize(ref, real_grad_a, real_grad_b)
 
-    err = (tst - ref).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_a - real_grad_a).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_b - real_grad_b).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(ref, atol=1e-3).item())
+    self.assertTrue(grad_a.allclose(real_grad_a, atol=1e-3).item())
+    self.assertTrue(grad_b.allclose(real_grad_b, atol=1e-3).item())
 
   def test_simple_qkv(self):
     N, d = 8, 4
@@ -253,8 +246,7 @@ class TestCustomKernel(unittest.TestCase):
     O_ref = ((Q @ K.T) / (d ** 0.5)) @ V
 
     Tensor.realize(O_custom, O_ref)
-    err = (O_custom - O_ref).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(O_custom.allclose(O_ref, atol=1e-3).item())
 
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
@@ -430,7 +422,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]

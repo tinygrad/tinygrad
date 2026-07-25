@@ -3,7 +3,7 @@ import torch
 from torchvision.utils import make_grid, save_image
 from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import trange
+from tinygrad.helpers import trange, Context
 from tinygrad.nn import optim
 from tinygrad.nn.datasets import mnist
 
@@ -86,7 +86,7 @@ if __name__ == "__main__":
   optim_g = optim.Adam(get_parameters(generator), lr=0.0002, b1=0.5)  # 0.0002 for equilibrium!
   optim_d = optim.Adam(get_parameters(discriminator), lr=0.0002, b1=0.5)
   # training loop
-  with Tensor.train():
+  with Context(TRAINING=1):
     for epoch in (t := trange(epochs)):
       loss_g, loss_d = 0.0, 0.0
       for _ in range(n_steps):

@@ -63,8 +63,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
     with Context(TRACK_MATCH_STATS=0): Tensor.realize(*[t.assign(t.detach().contiguous()) for t in get_parameters(optim)])
 
     JITCNT = getenv("JITCNT", 1)
-    Tensor.training = True
     @TinyJit
+    @Context(TRAINING=1)
     def step(x):
       optim.zero_grad()
       x.grad = None

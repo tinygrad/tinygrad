@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
-from tinygrad.helpers import DEBUG, colored, ansilen
+from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-def bold(s): return f"\033[1m{s}\033[0m"
+def bold(s): return s if NO_COLOR else f"\033[1m{s}\033[0m"
 
 def trim(s:str, length:int) -> str:
   if len(s) > length: return s[:length-3] + "..."
@@ -276,7 +276,7 @@ class SMICtx:
     return usage
 
   def draw(self, once):
-    terminal_width, terminal_height = shutil.get_terminal_size()
+    terminal_width, terminal_height = shutil.get_terminal_size(fallback=(231, 24))
     if not once and (self.prev_terminal_width != terminal_width or self.prev_terminal_height != terminal_height):
       os.system('clear')
     self.prev_terminal_width, self.prev_terminal_height = terminal_width, terminal_height

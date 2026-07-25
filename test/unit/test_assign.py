@@ -103,6 +103,16 @@ class TestAssign(unittest.TestCase):
     out = x.item()
     assert out == 1, f"expected 1, got {out}"
 
+  def test_pending_assign_chain_preserves_intermediate_reads(self):
+    x = Tensor([0.0]).contiguous().realize()
+    y0 = x + 0
+    x.assign(x + 1)
+    y1 = x + 0
+    x.assign(x + 1)
+    y2 = x + 0
+    x.assign(x + 1)
+    assert [y0.item(), y1.item(), y2.item(), x.item()] == [0.0, 1.0, 2.0, 3.0]
+
   def test_assign_add_jit(self):
     @TinyJit
     def f(x):
@@ -305,6 +315,16 @@ class TestAssign(unittest.TestCase):
     t = Tensor.arange(16).reshape(4, 4).permute(1, 0).contiguous()
     t.assign(t + 100)
     np.testing.assert_equal(t.numpy(), [[100, 104, 108, 112], [101, 105, 109, 113], [102, 106, 110, 114], [103, 107, 111, 115]])
+
+  def test_assign_corealize_order_independent(self):
+    for order in [lambda x,y: Tensor.realize(x, y), lambda x,y: Tensor.realize(y, x)]:
+      x = Tensor([1.0]).realize()
+      y = x + 10
+      x.assign(x*2)
+      x.assign(x+3)
+      order(x, y)
+      self.assertEqual(y.tolist(), [11.0])
+      self.assertEqual(x.tolist(), [5.0])
 
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
@@ -852,6 +872,28 @@ class TestAssignOrdering(unittest.TestCase):
       p_np = p_np - m_np / (1 - b_np)
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
+
+  def test_war_reader_already_depends_on_write(self):
+    x = Tensor([1.0]).contiguous().realize()
+    y = Tensor([2.0]).contiguous().realize()
+    x_expr = x + 10
+    x.assign(x * 2)
+    y.assign(y + x)
+    z = y + x_expr
+    Tensor.realize(x, y, z)
+    # TODO: z should be 15: x_expr means 11 (x captured at build time), but the read is fused past the assign and
+    # sees the new bytes. once stale readers are scheduled before the overwrite, update this to 15
+    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+
+  def test_war_multi_read_then_assign(self):
+    devices = ("CPU:0", "CPU:1")
+    for realize_reader_first in (False, True):
+      buf = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize().shard(devices, 0).realize()
+      stale = buf.to("CPU")
+      buf.assign(Tensor.full(buf.shape, 10.0, device="CPU").shard(devices, 0).contiguous().realize())
+      Tensor.realize(stale, buf) if realize_reader_first else Tensor.realize(buf, stale)
+      np.testing.assert_equal(stale.numpy(), [1., 2., 3., 4.])
+      np.testing.assert_equal(buf.numpy(), [10., 10., 10., 10.])
 
   def test_multiple_slice_assigns_then_read(self):
     """Multiple non-overlapping slice assigns then read."""

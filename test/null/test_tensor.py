@@ -12,15 +12,6 @@ x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-class TestTrainMode(unittest.TestCase):
-  def test_train_mode(self):
-    assert not Tensor.training
-    @Tensor.train()
-    def f():
-      assert Tensor.training
-    f()
-    assert not Tensor.training
-
 class TestInferenceMode(unittest.TestCase):
   def test_inference(self):
     x = Tensor(x_init)
@@ -66,7 +57,7 @@ class TestIdxUpcast(unittest.TestCase):
       if ast.op is Ops.SINK:
         renderer = Device[si.src[1].buffer.device].renderer
         prg = to_program(ast, renderer)
-        return tuple(prg.src[2].src)
+        return tuple(prg.src[1].src)
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
@@ -78,7 +69,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      self.assertFalse(idx_val.overflows(idx_val.dtype.base.scalar()))
+      self.assertFalse(idx_val.overflows(idx_val.dtype.scalar()))
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
