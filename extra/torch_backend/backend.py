@@ -224,7 +224,7 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=0):
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  storage_offset = storage_offset or tensor.storage_offset()
+  if storage_offset is None: storage_offset = tensor.storage_offset()
   return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
@@ -232,16 +232,16 @@ def _reshape_alias(tensor:torch.Tensor, size, stride):
   return _as_strided(tensor, size, stride)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
-def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
+def empty_strided(size, stride, dtype=None, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device))
   # TODO: should return with requested strides
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   if TORCH_DEBUG: print(f"empty.memory_format {size=} {dtype=} {layout=} {device=} {pin_memory=} {memory_format=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device)).contiguous()
+  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype or torch.get_default_dtype()), device=_from_torch_device(device))
   return wrap(ret)
 
 @torch.library.impl("aten::max_pool2d_with_indices", "privateuseone")

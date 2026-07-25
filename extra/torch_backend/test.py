@@ -89,6 +89,15 @@ class TestTorchBackend(unittest.TestCase):
     self.assertEqual(a.permute(1,0)[1:].storage_offset(), 1)
     self.assertEqual(a.flatten()[3:].flip(0).storage_offset(), 0)
 
+  def test_as_strided_explicit_zero_offset(self):
+    # storage_offset=0 is a real offset, not "unspecified": it must not fall back to the input's own offset
+    a = torch.arange(6., device=device)
+    np.testing.assert_equal(a[3:].as_strided((2,), (1,), 0).cpu().numpy(), [0,1])
+    np.testing.assert_equal(a[3:].as_strided((2,), (1,)).cpu().numpy(), [3,4])
+
+  def test_empty_strided_default_dtype(self):
+    self.assertEqual(torch.empty_strided((2,3), (1,2), device=device).dtype, torch.get_default_dtype())
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
