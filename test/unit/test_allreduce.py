@@ -26,7 +26,8 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      self.assertEqual(len(sinks), 26)
+      # 4 fewer than MSTACK: the reduce-scatter kernel stores straight into the scratch MSELECT, no redundant diagonal copies
+      self.assertEqual(len(sinks), 22)
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):
