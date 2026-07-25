@@ -14,7 +14,7 @@ This can:
 VIZ pkls can be viewed in two ways:
 
 1. Web browser: python -m tinygrad.viz.serve
-2. Command line: python -m tinygrad.viz.cli
+2. Command line: python -m tinygrad.viz.cli (add --json for srcipting)
 
 By default, VIZ UIs automatically load the latest files.
 
