@@ -205,7 +205,8 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.uint64
+    # uint64 has no common integer supertype with any signed int (JAX JEP), they all defer up to weakfloat
+    for st in dtypes.sints: assert least_upper_dtype(st, dtypes.uint64) == dtypes.weakfloat
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
