@@ -150,6 +150,8 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     upd = [(tl, n + 1)] + [(make_signal_value(devs, queue=qn), n)
                            for qn in dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)]) if qn != "COMPUTE:0"]
     bumps.append((devs, UOp.barrier(*[s.index(zero, dtype=s.dtype).store(s.index(zero) + inc) for s, inc in upd])))
+
+  # NOTE: submit before bumps
   fins = [UOp.custom_function("hcq", b.sink()).call(aux=HCQInfo("hcq_finalizer", Estimates(), devs, "COMPUTE:0")) for devs, b in submits + bumps]
   return fins, waited
 
@@ -511,6 +513,8 @@ class HCQ2Compiled(Compiled):
     filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fall back to mock ifaces
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")
+
+  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
   def finalize(self):
     try: self.synchronize() # try to finalize the device in any case

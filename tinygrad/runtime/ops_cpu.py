@@ -58,13 +58,10 @@ def worker_prog():
 def host_wait(dst:UOp, val:UOp) -> UOp:
   return (cur:=dst.after(loop:=UOp.loop(0)).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
 
-pm_host_opsel = PatternMatcher([
-  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP)), # a single in-order thread needs no barrier
-  (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait),
-])
+pm_host_opsel = PatternMatcher([(UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait)])
 
-# TODO: subset of hcq2 for now. the host queue has no ring: its commands run inline, spinning on each wait before storing the epoch
 def encode_host_queue(q:UOp) -> UOp:
+  # TODO: subset of hcq2 for now
   spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
   assert store.op is Ops.INS and store.arg == "store", f"host queue cannot encode {store.op} {store.arg}"
   return store.src[0].after(*spins).index(UOp.const(dtypes.int, 0)).store(store.src[1])
