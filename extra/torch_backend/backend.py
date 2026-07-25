@@ -656,35 +656,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.unfold": Tensor.unfold,
 }}
 
-# operations that need inplace treatment (use _inplace_op instead of wrap_fxn) AKA return original tensor
-inplace_ops = {
-  "aten.zero_",
-  "aten.fill_.Scalar",
-  "aten.fill_.Tensor",
-  "aten.add_.Tensor",
-  "aten.add_.Scalar",
-  "aten.mul_.Tensor",
-  "aten.mul_.Scalar",
-  "aten.floor_divide_.Tensor",
-  "aten.__ilshift__.Scalar",
-  "aten.__irshift__.Scalar",
-  "aten.relu_",
-  "aten.random_",
-  "aten.random_.from",
-  "aten.uniform_",
-  "aten.normal_",
-  "aten.logical_or_",
-  "aten.masked_fill_.Scalar",
-  "aten.masked_fill_.Tensor",
-}
-
-inplace_view_ops = {
-  "aten.squeeze_.dim",
-  "aten.unsqueeze_",
-  "aten.transpose_",
-  "aten.t_",
-}
-
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
@@ -698,7 +669,7 @@ def wrap_fxn(k,f):
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
-def wrap_inplace(k,f):
+def wrap_inplace(f):
   def nf(*args, **kwargs):
     orig = args[0]
     args, kwargs = unwrap_args(args, kwargs)
@@ -706,7 +677,7 @@ def wrap_inplace(k,f):
     return orig
   return nf
 
-def wrap_inplace_view_op(k,f):
+def wrap_inplace_view_op(f):
   def nf(*args, **kwargs):
     orig = args[0]
     args, kwargs = unwrap_args(args, kwargs)
@@ -739,11 +710,17 @@ def wrap_inplace_view_op(k,f):
     return orig
   return nf
 
+# the aten schema says how an op is called: an inplace view retargets the view, a writable first arg is inplace,
+# and a writable out arg must have come from tiny_backend_out so that wrap_out was applied
 for k,v in tiny_backend.items():
-  if k in inplace_view_ops: wrapper = wrap_inplace_view_op
-  elif k in inplace_ops: wrapper = wrap_inplace
-  else: wrapper = wrap_fxn
-  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrapper(k,v))
+  name, _, overload = k.removeprefix("aten.").partition(".")
+  op = getattr(getattr(aten, name), overload or "default")
+  writes = [a.name for a in op._schema.arguments if a.alias_info is not None and a.alias_info.is_write]
+  if torch.Tag.inplace_view in op.tags: fxn = wrap_inplace_view_op(v)
+  elif writes == [op._schema.arguments[0].name] and op._schema.returns: fxn = wrap_inplace(v)
+  elif not writes or (writes == ["out"] and k in tiny_backend_out): fxn = wrap_fxn(k, v)
+  else: raise RuntimeError(f"{k} writes {writes}: expected an inplace first arg, or an out arg with {k} in tiny_backend_out")
+  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(fxn)
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
