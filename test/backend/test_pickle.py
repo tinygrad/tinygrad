@@ -40,14 +40,24 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_dedupe_equal_buffers(self):
     print("** init")
-    # two independent buffers with identical content will serialize all together and not once each
+    # two independent buffers with identical content serialize once together, not once each
     data = np.random.randn(8192).astype(np.float32)
     a, b = Tensor(data).realize(), Tensor(data.copy()).realize()
     self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
-    one, two = len(pickle.dumps([a])), len(pickle.dumps([a, b]))
-    # adding identical content buffer costs way less than another full copy of the data
-    self.assertLess(two - one, a.nbytes() // 2)
-    np.testing.assert_equal(pickle.loads(pickle.dumps([a, b]))[1].numpy(), data)
+    for protocol in (4, 5):  # 5 wraps the payload in a PickleBuffer and is the default from python 3.14
+      one, two = len(pickle.dumps([a], protocol=protocol)), len(pickle.dumps([a, b], protocol=protocol))
+      self.assertLess(two - one, a.nbytes() // 2)
+      np.testing.assert_equal(pickle.loads(pickle.dumps([a, b], protocol=protocol))[1].numpy(), data)
+
+  def test_pickle_dedupe_equal_buffers_oob(self):
+    # a consumer that frees each out of band buffer must still round trip when contents are equal
+    data = np.random.randn(8192).astype(np.float32)
+    a, b = Tensor(data).realize(), Tensor(data.copy()).realize()
+    freed = []
+    def free(pb): freed.append(pb.release())
+    st = pickle.dumps([a, b], protocol=5, buffer_callback=free)
+    got = pickle.loads(st, buffers=[bytearray(data.tobytes()) for _ in freed])
+    np.testing.assert_equal(got[1].numpy(), data)
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")

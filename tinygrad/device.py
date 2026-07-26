@@ -98,11 +98,14 @@ class MultiBuffer:
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
-# equal-content buffers hand pickle one shared payload, so its memo writes the bytes once instead of once per buffer.
-# array is a weakref-able bytes-like, so pickle's memo holds the only strong ref and nothing is retained past the dump
-_payloads:weakref.WeakValueDictionary[bytes, array.array] = weakref.WeakValueDictionary()
-def _dedupe_payload(mv:memoryview) -> array.array:
-  if (payload:=_payloads.get(key:=hashlib.sha256(mv).digest())) is None: _payloads[key] = payload = array.array('B', mv)
+# equal-content buffers share one payload so pickle's memo writes the bytes once. the table is weak, so the memo holds the
+# only ref and nothing is retained past the dump. array is a weakref-able bytes-like for protocols without PickleBuffer
+_payloads:weakref.WeakValueDictionary[tuple[bool, bytes], Any] = weakref.WeakValueDictionary()
+def _dedupe_payload(mv:memoryview, protocol:int) -> pickle.PickleBuffer|array.array:
+  if (payload:=_payloads.get(key:=(oob:=protocol>=5, hashlib.sha256(mv).digest()))) is not None:
+    if not oob: return payload
+    with contextlib.suppress(ValueError), payload.raw(): return payload  # never reshare one the consumer freed
+  _payloads[key] = payload = pickle.PickleBuffer(mv) if oob else array.array('B', mv)
   return payload
 
 class Buffer:
@@ -186,8 +189,7 @@ class Buffer:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
     if self.is_allocated():
-      # protocol 5 hands the buffer to the consumer out of band, where pickle's memo doesn't apply and dedupe is its job
-      buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else _dedupe_payload(self.as_memoryview())
+      buf = _dedupe_payload(self.as_memoryview(), protocol)
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
   @property
   def trace_num(self) -> int:
