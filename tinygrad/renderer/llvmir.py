@@ -43,10 +43,13 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
     scaled = K == 128
-    args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src] + ["i32 0", "i32 0"] # (cbsz, blgp)
+    args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
     # scaled mfma call require E8M0 scale args, byte = 0x7F = 127, scale = 2^(127 - 127) = 1.0
-    if scaled: args.extend(["i32 0", "i32 127", "i32 0", "i32 127"]) # (opsel, scale_a, opsel, scale_b)
-    else: args.extend(["i32 0"])
+    if scaled:
+      _fmt = { dtypes.fp8e5m2:1, dtypes.fp8e4m3:0 }
+      # A/B already bitcasted at this point..., check wmma arg?
+      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"]) # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
+    else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
 
     return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{"scale." if scaled else ""}{dt_map[wmma.src[-1].dtype]}" + \
            f".{N}x{M}x{K}{dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"}(" + ", ".join(args) + ")"

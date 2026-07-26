@@ -1349,6 +1349,20 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   src0_is_vgpr = src0_off >= _c(256)
   src1_is_vgpr = src1_off >= _c(256)
 
+  scaled = isinstance(inst, irc.VOP3PX2)
+  if scaled:
+    src0_fmt = ctx.inst_field(type(inst).cbsz)
+    src1_fmt = ctx.inst_field(type(inst).blgp)
+    src0_scale = ctx.inst_field(type(inst).scale_src0)
+    src1_scale = ctx.inst_field(type(inst).scale_src1)
+    src0_scale_idx = ctx.inst_field(type(inst).opsel)
+    src1_scale_idx = ctx.inst_field(type(inst).opsel_hi)
+    # 2 bit opsel indexes into 4 e8m0 scales stored in src0/src1 scale field (32 bits)
+    # normalize w/ bias subtraction for ldexp in dots
+    src0_scale_exp = (src0_scale >> (src0_scale_idx * 8)) - 127
+    src1_scale_exp = (src1_scale >> (src1_scale_idx * 8)) - 127
+    scale_factor = UOp.exp2(src0_scale_exp + src1_scale_exp)
+
   m = _re.search(r'(\d+)X(\d+)X(\d+)', op_name)
   if m is None: raise ValueError(f"could not parse MFMA dimensions from {op_name}")
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -1412,7 +1426,9 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     elif is_f32_src:
       return raw  # already uint32 (f32 bit pattern)
     elif is_fp8:
-      return ((raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32)
+      fp8_fmt = "bf8" if "Bf8" in op_name else "fp8"
+      if scaled: fp8_fmt = "bf8" if src0_fmt == 1 else  "fp8" # assume A and B are same fmt
+      return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(dtypes.uint32, sub_idx * 8)).bitcast(dtypes.uint32)
     elif is_bf16:
       # bf16→f32 bits: just shift left by 16 (bf16 is upper 16 bits of f32)
       return ((raw >> UOp.const(dtypes.uint32, sub_idx * 16)) & UOp.const(dtypes.uint32, 0xFFFF)) << UOp.const(dtypes.uint32, 16)
@@ -1546,6 +1562,9 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
           a_val = tmp2.index(m_base * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k)).bitcast(acc_dt)
           b_val = tmp2.index(b_off + n_idx * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k)).bitcast(acc_dt)
           acc = acc + a_val * b_val
+
+        # apply block scaling after each dot
+        if scaled: acc *= scale_factor.bitcast(acc_dt)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
