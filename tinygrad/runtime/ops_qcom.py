@@ -58,7 +58,7 @@ class QCOMSignal(HCQSignal):
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
-    self.dev = dev
+    self.dev, self._buffers = dev, set()
     super().__init__()
 
   @suppress_finalizing
@@ -69,9 +69,13 @@ class QCOMComputeQueue(HWQueue):
 
   def reg(self, reg: int, *vals: int): self.q(pkt4_hdr(reg, len(vals)), *vals)
 
+  def _add_buffers(self, *bufs:HCQBuffer): self._buffers.update(buf.base for buf in bufs)
+
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
-    if write_back: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, *data64_le(self.dev.dummy_addr), 0) # dirty cache write-back.
+    if write_back:
+      self._add_buffers(self.dev.dummy_buf)
+      self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, *data64_le(self.dev.dummy_addr), 0) # dirty cache write-back.
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
     if sync: self.cmd(mesa.CP_WAIT_FOR_IDLE)
@@ -81,6 +85,7 @@ class QCOMComputeQueue(HWQueue):
     return self
 
   def signal(self, signal:QCOMSignal, value=0):
+    self._add_buffers(signal.base_buf)
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
     if self.dev.gpu_id[:2] < (7, 3):
       self.cmd(mesa.CP_EVENT_WRITE, qreg.cp_event_write_0(event=mesa.CACHE_FLUSH_TS), *data64_le(signal.value_addr), lo32(value))
@@ -91,40 +96,38 @@ class QCOMComputeQueue(HWQueue):
     return self
 
   def timestamp(self, signal:QCOMSignal):
+    self._add_buffers(signal.base_buf)
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
     self.cmd(mesa.CP_REG_TO_MEM, qreg.cp_reg_to_mem_0(reg=mesa.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True),*data64_le(signal.timestamp_addr))
     return self
 
   def wait(self, signal:QCOMSignal, value=0):
+    self._add_buffers(signal.base_buf)
     self.cmd(mesa.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=mesa.WRITE_GE, poll=mesa.POLL_MEMORY),*data64_le(signal.value_addr),
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
     return self
 
-  def _build_gpu_command(self, dev:QCOMDevice, hw_page:HCQBuffer|None=None):
+  def _build_gpu_command(self, dev:QCOMDevice, hw_page:HCQBuffer|None=None) -> HCQBuffer:
     if hw_page is None:
       hw_page_addr = dev.cmd_buf_allocator.alloc(len(self._q) * 4)
-      hw_view = to_mv(hw_page_addr, len(self._q) * 4).cast('I')
-    else: hw_page_addr, hw_view = hw_page.va_addr, hw_page.cpu_view().view(fmt='I')
-    hw_view[:] = array.array('I', self._q)
-    obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(self._q) * 4, flags=kgsl.KGSL_CMDLIST_IB)
-    submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=dev.ctx,
-                                              cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
-    return submit_req, obj
+      hw_page = dev.cmd_buf.offset(offset=int(hw_page_addr - dev.cmd_buf.va_addr), size=len(self._q) * 4)
+    hw_page.cpu_view().view(fmt='I')[:] = array.array('I', self._q)
+    return hw_page
 
   def bind(self, dev:QCOMDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
-    self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page)
+    self.hw_page = self._build_gpu_command(dev, dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True)))
     # From now on, the queue is on the device for faster submission.
     self._q = self.hw_page.cpu_view().view(fmt='I')
 
   def _submit(self, dev:QCOMDevice):
-    if self.binded_device == dev: submit_req = self.submit_req
-    else: submit_req, _ = self._build_gpu_command(dev)
-    dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
+    command = self.hw_page if self.binded_device == dev else self._build_gpu_command(dev)
+    dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, self._buffers)
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     self.bind_args_state(args_state)
+    self._add_buffers(args_state.buf, prg.lib_gpu, prg.dev._stack, *args_state.bufs)
+    if prg.samp_cnt > 0: self._add_buffers(prg.dev.border_color_buf)
 
     def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
@@ -344,10 +347,22 @@ class QCOMAllocator(HCQAllocatorBase):
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 
+class KGSLIface:
+  count = 1
+
+  def __init__(self, dev:QCOMDevice): self.dev = dev
+
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
+    obj = kgsl.struct_kgsl_command_object(gpuaddr=command.va_addr, size=size, flags=kgsl.KGSL_CMDLIST_IB)
+    req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=self.dev.ctx,
+                                       cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
+    return kgsl.IOCTL_KGSL_GPU_COMMAND(self.dev.fd, __payload=req).timestamp
+
 class QCOMDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
-    self.dummy_addr = int(self._gpu_alloc(0x1000).va_addr)
+    self.dummy_buf = self._gpu_alloc(0x1000)
+    self.dummy_addr = int(self.dummy_buf.va_addr)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
       | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
@@ -368,6 +383,7 @@ class QCOMDevice(HCQCompiled):
     info = kgsl.struct_kgsl_devinfo()
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
+    self.iface = KGSLIface(self)
 
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")

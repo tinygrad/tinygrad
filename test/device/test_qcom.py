@@ -6,6 +6,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import mv_address, Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, MMIOInterface
+from tinygrad.runtime.support.memory import BumpAllocator
 
 class TestAllocator:
   def __init__(self): self.allocations = []
@@ -17,6 +18,13 @@ class TestAllocator:
     return buf
 
   def free(self, *args): pass
+
+class RecordingIface:
+  def __init__(self): self.submissions = []
+
+  def submit(self, command, size, buffers):
+    self.submissions.append((command, size, buffers))
+    return 42
 
 class TestQCOM(unittest.TestCase):
   def test_args_use_cpu_view(self):
@@ -69,11 +77,12 @@ class TestQCOM(unittest.TestCase):
     prg = SimpleNamespace(NIR=True, wgsz=1, hregs=0, fregs=0, brnchstck=0, shared_size=1, prg_offset=0,
                           lib_gpu=HCQBuffer(0x200000, 128), pvtmem_size_per_item=0, pvtmem_size_total=0, hw_stack_offset=0,
                           image_size=128, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
-    dev = SimpleNamespace(gpu_id=(6, 0, 0), dummy_addr=0x300000, _stack=HCQBuffer(0x400000, 4096),
+    dummy = HCQBuffer(0x300000, 4096)
+    dev = SimpleNamespace(gpu_id=(6, 0, 0), dummy_buf=dummy, dummy_addr=dummy.va_addr, _stack=HCQBuffer(0x400000, 4096),
                           border_color_buf=HCQBuffer(0x500000, 4096))
     prg.dev = dev
 
-    QCOMComputeQueue(dev).exec(prg, SimpleNamespace(bind_data=[], buf=args, prg=prg), (1, 1, 1), (2, 3, 4))
+    QCOMComputeQueue(dev).exec(prg, SimpleNamespace(bind_data=[], buf=args, prg=prg, bufs=()), (1, 1, 1), (2, 3, 4))
 
     self.assertEqual(cpu_memory[4:16], struct.pack("III", 2, 3, 4))
     self.assertEqual(gpu_memory, bytes([0xaa] * len(gpu_memory)))
@@ -89,6 +98,42 @@ class TestQCOM(unittest.TestCase):
     gpu_memory, cpu_memory, _ = allocator.allocations[0]
     self.assertEqual(cpu_memory, struct.pack("II", 0x12345678, 0x9abcdef0))
     self.assertEqual(gpu_memory, bytes([0xaa] * len(gpu_memory)))
+
+  def test_queue_submits_through_interface(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+
+    allocator, iface = TestAllocator(), RecordingIface()
+    cmd_buf = allocator.alloc(64, None)
+    dev = SimpleNamespace(iface=iface, cmd_buf=cmd_buf,
+                          cmd_buf_allocator=BumpAllocator(cmd_buf.size, base=int(cmd_buf.va_addr), wrap=True))
+    queue = QCOMComputeQueue(dev)
+    queue.q(0x12345678, 0x9abcdef0)
+
+    queue.submit(dev)
+
+    command, size, buffers = iface.submissions[0]
+    self.assertEqual(command.cpu_view()[:size], struct.pack("II", 0x12345678, 0x9abcdef0))
+    self.assertEqual(buffers, set())
+    self.assertEqual(dev.last_cmd, 42)
+
+  def test_queue_submits_referenced_buffers(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+
+    allocator, iface = TestAllocator(), RecordingIface()
+    cmd_buf = allocator.alloc(4096, None)
+    args = allocator.alloc(32, None)
+    data, lib, stack, border, dummy, signal = [HCQBuffer(addr, 4096) for addr in range(0x100000, 0x700000, 0x100000)]
+    dev = SimpleNamespace(iface=iface, allocator=allocator, cmd_buf=cmd_buf,
+                          cmd_buf_allocator=BumpAllocator(cmd_buf.size, base=int(cmd_buf.va_addr), wrap=True),
+                          gpu_id=(6, 0, 0), _stack=stack, border_color_buf=border, dummy_buf=dummy, dummy_addr=dummy.va_addr)
+    prg = SimpleNamespace(dev=dev, NIR=True, wgsz=0xfc, hregs=0, fregs=0, brnchstck=0, shared_size=1, prg_offset=0,
+                          lib_gpu=lib, pvtmem_size_per_item=0, pvtmem_size_total=0, hw_stack_offset=0, image_size=128,
+                          samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
+    state = SimpleNamespace(bind_data=[], buf=args, prg=prg, bufs=(data,))
+    queue = QCOMComputeQueue(dev).exec(prg, state, (1, 1, 1), (1, 1, 1))
+    queue.signal(SimpleNamespace(value_addr=signal.va_addr, base_buf=signal), 1).submit(dev)
+
+    self.assertEqual(iface.submissions[0][2], {args, data, lib, stack, dummy, signal})
 
   # although part of the QCOM runtime, this tests flushing the CPU's dcache
   @unittest.skipUnless(isinstance(Device["CPU"].renderer, ClangRenderer) and platform.machine().lower() in {"arm64", "aarch64"},
