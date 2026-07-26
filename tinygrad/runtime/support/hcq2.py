@@ -9,7 +9,6 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
 from tinygrad.engine.realize import pm_flatten_linear
@@ -443,21 +442,25 @@ pm_resolve_patches = PatternMatcher([
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
 
-hcq_link_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+linked_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+linked_linear_cache:dict[tuple[bytes, bool], UOp] = {}
 
-def link_cache_key(a:UOp): return a.key, to_tuple(a.device)
-pm_link_cache = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: hcq_link_cache.get(link_cache_key(a)))])
+def linked_buf_key(a:UOp): return a.key, to_tuple(a.device)
+pm_linked_bufs = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: linked_buf_cache.get(linked_buf_key(a)))])
 
 @track_rewrites(lambda _,jit,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, jit=False) -> UOp:
+  if (linked:=linked_linear_cache.get(linear_key:=(linear.key, jit))) is not None: return linked
+
   cacheable = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
                if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
-  hits = {a.src[0]:hcq_link_cache[key] for a in cacheable.values() if (key:=link_cache_key(a)) in hcq_link_cache}
-  linear = graph_rewrite(linear, pm_link_cache, name="apply link cache").substitute(hits, walk=True)
+  hits = {a.src[0]:linked_buf_cache[key] for a in cacheable.values() if (key:=linked_buf_key(a)) in linked_buf_cache}
+  linear = graph_rewrite(linear, pm_linked_bufs, name="reuse linked bufs").substitute(hits, walk=True)
   linear = graph_rewrite(linear, pm_bufferize, ctx=jit, bottom_up=True, walk=True, name="bufferize placeholders")
   linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
-  for (j,i),a in cacheable.items(): hcq_link_cache.setdefault(link_cache_key(a), linear.src[j].src[i])
+  for (j,i),a in cacheable.items(): linked_buf_cache.setdefault(linked_buf_key(a), linear.src[j].src[i])
+  linked_linear_cache[linear_key] = linear
   return linear
 
 # *****************
@@ -471,18 +474,11 @@ class HCQ2Compiled(Compiled):
 
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, jit=ctx[1]))
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else
+        Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True)))
     ])
 
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
-
-    self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
-    self.rt_allocator = BumpAllocator(64 << 20, wrap=False)
-
-  def new_buffer(self, b:UOp, jit:bool) -> Buffer:
-    if jit or b.tag in HCQ_CACHE_TAGS:
-      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True))
-    return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
   def timeline_signal(self, queue:str, init_value:int=0) -> Buffer:
