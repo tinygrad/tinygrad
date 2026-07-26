@@ -621,8 +621,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.normalize(p=1, dim=0).numpy())
     ```
     """
-    if p == 0: return self / self.ne(0).sum(dim, keepdim=True).maximum(eps)
-    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+    den = self.ne(0).sum(dim, keepdim=True) if p == 0 else self.abs().pow(p).sum(dim, keepdim=True).pow(1/p)
+    return self / den.maximum(eps)
 
   def logsumexp(self, axis=None, keepdim=False) -> Self:
     """
