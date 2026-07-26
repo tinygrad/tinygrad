@@ -22,7 +22,7 @@ class FakeAllocator:
 class RecordingIface:
   def __init__(self): self.submissions, self.sleeps = [], []
 
-  def submit(self, command, size, buffers):
+  def submit(self, command, size, buffers, _var_vals=None):
     self.submissions.append((command, size, buffers))
     return 42
 

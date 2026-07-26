@@ -13,6 +13,7 @@ from tinygrad.helpers import DEV, getenv, mv_address, to_mv, round_up, data64_le
 from tinygrad.helpers import is_image_shape, next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
+from tinygrad.uop.ops import sym_infer
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -122,9 +123,14 @@ class QCOMComputeQueue(HWQueue):
     # From now on, the queue is on the device for faster submission.
     self._q = self.hw_page.cpu_view().view(fmt='I')
 
-  def _submit(self, dev:QCOMDevice):
+  def submit(self, dev:QCOMDevice, var_vals:dict[str, int]|None=None):
+    if var_vals is not None: self._apply_var_vals(var_vals)
+    self._submit(dev, var_vals or {})
+    return self
+
+  def _submit(self, dev:QCOMDevice, var_vals:dict[str, int]):
     command = self.hw_page if self.binded_device == dev else self._build_gpu_command(dev)
-    dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, self._buffers)
+    dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, self._buffers, var_vals)
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     self.bind_args_state(args_state)
@@ -402,7 +408,7 @@ class KGSLIface:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
       FileIOInterface.munmap(mem.cpu_view().addr, mem.meta[0].mmapsize)
 
-  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer], _var_vals:dict[str, int]|None=None) -> int:
     obj = kgsl.struct_kgsl_command_object(gpuaddr=command.va_addr, size=size, flags=kgsl.KGSL_CMDLIST_IB)
     req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=self.ctx,
                                        cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
@@ -446,6 +452,7 @@ class MSMIface:
     self.gpu_id = (self.chip_id >> 24, (self.chip_id >> 16) & 0xff, (self.chip_id >> 8) & 0xff)
     if self.gpu_id != (6, 3, 0): raise RuntimeError(f"MSM DRM requires Adreno 630, got chip_id={self.chip_id:#x}")
     self.queue_id = msm_drm.DRM_IOCTL_MSM_SUBMITQUEUE_NEW(self.fd, flags=0, prio=0).id
+    self.allocations: dict[int, HCQBuffer] = {}
 
   def alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     if size <= 0: raise ValueError(f"MSM allocation size must be positive, got {size}")
@@ -462,7 +469,9 @@ class MSMIface:
       raise
 
     if fill_zeroes: ctypes.memset(cpu_addr, 0, size)
-    return HCQBuffer(iova, size, meta=MSMAllocation(gem.handle, mapped_size), view=MMIOInterface(cpu_addr, size), owner=self.dev)
+    buf = HCQBuffer(iova, size, meta=MSMAllocation(gem.handle, mapped_size), view=MMIOInterface(cpu_addr, size), owner=self.dev)
+    self.allocations[iova] = buf
+    return buf
 
   def map(self, ptr:int, size:int) -> HCQBuffer:
     raise ValueError("MSM DRM does not support external pointers")
@@ -472,16 +481,27 @@ class MSMIface:
     if not isinstance(allocation:=mem.base.meta, MSMAllocation): raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
     return allocation
 
+  def _resolve_buffer(self, mem:HCQBuffer, var_vals:dict[str, int]) -> HCQBuffer:
+    if isinstance(mem.base.meta, MSMAllocation): return mem.base
+    address = sym_infer(mem.va_addr, var_vals)
+    matches = [buf for buf in self.allocations.values()
+               if int(buf.va_addr) <= address and address + mem.size <= int(buf.va_addr) + buf.size]
+    if len(matches) != 1: raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
+    return matches[0]
+
   def free(self, mem:HCQBuffer):
+    base = mem.base
     allocation = self._allocation(mem)
-    if self.fd.munmap(mem.base.cpu_view().addr, allocation.mapped_size) != 0:
+    if self.fd.munmap(base.cpu_view().addr, allocation.mapped_size) != 0:
       try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
       except OSError as e: raise RuntimeError(f"Failed to unmap and close MSM GEM handle {allocation.handle}") from e
+      self.allocations.pop(int(base.va_addr), None)
       raise RuntimeError(f"Failed to unmap MSM GEM handle {allocation.handle}")
     try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
     except OSError as e: raise RuntimeError(f"Failed to close MSM GEM handle {allocation.handle}") from e
+    self.allocations.pop(int(base.va_addr), None)
 
-  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer], var_vals:dict[str, int]|None=None) -> int:
     if size <= 0: raise ValueError(f"MSM command size must be positive, got {size}")
     if size % 4: raise ValueError(f"MSM command size must be a multiple of 4, got {size}")
     command_base = command.base
@@ -489,7 +509,8 @@ class MSMIface:
     if command_offset < 0 or size > command.size or command_offset + size > command_base.size:
       raise ValueError("MSM command range is outside its buffer")
 
-    submit_buffers = [(buf, self._allocation(buf)) for buf in {command_base, *(b.base for b in buffers)}]
+    submit_buffers = [(buf, self._allocation(buf)) for buf in
+                      {command_base, *(self._resolve_buffer(b, var_vals or {}) for b in buffers)}]
     submit_buffers.sort(key=lambda item: item[1].handle)
     bos = (msm_drm.struct_drm_msm_gem_submit_bo * len(submit_buffers))(*[
       msm_drm.struct_drm_msm_gem_submit_bo(flags=msm_drm.MSM_SUBMIT_BO_READ | msm_drm.MSM_SUBMIT_BO_WRITE,

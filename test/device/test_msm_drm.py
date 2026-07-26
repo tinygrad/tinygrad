@@ -68,7 +68,7 @@ def make_iface(fd):
   from tinygrad.runtime.ops_qcom import MSMIface
 
   iface = object.__new__(MSMIface)
-  iface.dev, iface.fd, iface.queue_id = SimpleNamespace(last_cmd=0), fd, 3
+  iface.dev, iface.fd, iface.queue_id, iface.allocations = SimpleNamespace(last_cmd=0), fd, 3, {}
   return iface
 
 
@@ -290,6 +290,31 @@ class TestMSMIface(unittest.TestCase):
 
     self.assertEqual(dev.last_cmd, 42)
     self.assertEqual(fd.submissions[0][3], [(msm_drm.MSM_SUBMIT_CMD_BUF, 0, 0, 8)])
+
+  def test_qcom_queue_resolves_symbolic_buffers_for_msm_submit(self):
+    from tinygrad.dtype import dtypes
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+    from tinygrad.uop.ops import UOp
+
+    fd = RecordingMSMFile()
+    iface = make_iface(fd)
+    command = make_buffer(11, 0x1000_0000, 0x1000, cpu=True)
+    data = make_buffer(12, 0x2000_0000, 0x1000)
+    iface.allocations = {int(data.va_addr): data}
+    dev = SimpleNamespace(iface=iface, cmd_buf=command,
+                          cmd_buf_allocator=BumpAllocator(command.size, base=int(command.va_addr), wrap=True))
+    iface.dev = dev
+
+    data_addr = UOp.variable("data_addr", 0, 0xffffffffffffffff, dtype=dtypes.uint64)
+    queue = QCOMComputeQueue(dev)
+    queue._add_buffers(HCQBuffer(data_addr, data.size))
+    queue.q(0x12345678)
+
+    queue.submit(dev, {data_addr.expr: int(data.va_addr)})
+
+    self.assertEqual(dev.last_cmd, 42)
+    _, _, bos, _ = fd.submissions[0]
+    self.assertEqual({handle for _,handle,_ in bos}, {11, 12})
 
   def test_submit_rejects_invalid_command_size(self):
     with self.assertRaisesRegex(ValueError, "multiple of 4"):
