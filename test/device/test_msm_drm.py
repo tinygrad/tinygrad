@@ -136,7 +136,20 @@ class TestMSMIface(unittest.TestCase):
     with Context(DEV="MSM+QCOM:IR3"), \
          patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128"]), \
          patch("tinygrad.runtime.ops_qcom.FileIOInterface", return_value=fd), \
-         self.assertRaisesRegex(RuntimeError, "A6xx"):
+         self.assertRaisesRegex(RuntimeError, "Adreno 630"):
+      MSMIface(SimpleNamespace(), 0)
+
+    self.assertEqual(fd.new_queues, [])
+
+  def test_init_rejects_unvalidated_a6xx_before_creating_queue(self):
+    from tinygrad.runtime.ops_qcom import MSMIface
+
+    fd = RecordingMSMFile()
+    fd.chip_id = 0x06050000
+    with Context(DEV="MSM+QCOM:IR3"), \
+         patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128"]), \
+         patch("tinygrad.runtime.ops_qcom.FileIOInterface", return_value=fd), \
+         self.assertRaisesRegex(RuntimeError, "Adreno 630"):
       MSMIface(SimpleNamespace(), 0)
 
     self.assertEqual(fd.new_queues, [])

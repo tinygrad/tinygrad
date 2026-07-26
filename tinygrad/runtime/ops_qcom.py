@@ -444,7 +444,7 @@ class MSMIface:
 
     self.chip_id = msm_drm.DRM_IOCTL_MSM_GET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=msm_drm.MSM_PARAM_CHIP_ID).value
     self.gpu_id = (self.chip_id >> 24, (self.chip_id >> 16) & 0xff, (self.chip_id >> 8) & 0xff)
-    if self.gpu_id[0] != 6: raise RuntimeError(f"MSM DRM requires an A6xx GPU, got chip_id={self.chip_id:#x}")
+    if self.gpu_id != (6, 3, 0): raise RuntimeError(f"MSM DRM requires Adreno 630, got chip_id={self.chip_id:#x}")
     self.queue_id = msm_drm.DRM_IOCTL_MSM_SUBMITQUEUE_NEW(self.fd, flags=0, prio=0).id
 
   def alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
