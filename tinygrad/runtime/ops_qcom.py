@@ -128,7 +128,7 @@ class QCOMComputeQueue(HWQueue):
     self._submit(dev, var_vals or {})
     return self
 
-  def _submit(self, dev:QCOMDevice, var_vals:dict[str, int]):
+  def _submit(self, dev:QCOMDevice, var_vals:dict[str, int]|None=None):
     command = self.hw_page if self.binded_device == dev else self._build_gpu_command(dev)
     dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, self._buffers, var_vals)
 
