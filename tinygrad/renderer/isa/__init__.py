@@ -27,7 +27,7 @@ class VRegister:
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.NOOP, Ops.AFTER, Ops.END}: return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister)))
-def rdef(u:UOp) -> tuple[VRegister|Register,...]: return rdefs(u)[0]
+def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
 class IselContext:
   def __init__(self, sink:UOp):
