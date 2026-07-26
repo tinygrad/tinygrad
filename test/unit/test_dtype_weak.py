@@ -1,6 +1,6 @@
 import tempfile, unittest, math
 
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
 from tinygrad.uop.ops import UOp, Ops
