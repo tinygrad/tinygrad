@@ -1,7 +1,7 @@
 import ctypes, itertools, platform, struct, unittest
 from types import SimpleNamespace
 from tinygrad import Device
-from tinygrad.device import TinyELF
+from tinygrad.device import BufferSpec, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import mv_address, Target
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -20,11 +20,21 @@ class TestAllocator:
   def free(self, *args): pass
 
 class RecordingIface:
-  def __init__(self): self.submissions = []
+  def __init__(self): self.submissions, self.sleeps = [], []
 
   def submit(self, command, size, buffers):
     self.submissions.append((command, size, buffers))
     return 42
+
+  def sleep(self, timeout): self.sleeps.append(timeout)
+
+class RecordingMemoryIface:
+  def __init__(self):
+    self.allocated, self.mapped, self.freed = HCQBuffer(0x1000, 16), HCQBuffer(0x2000, 16), []
+
+  def alloc(self, size, uncached=False): return self.allocated
+  def map(self, ptr, size): return self.mapped
+  def free(self, buf): self.freed.append(buf)
 
 class TestQCOM(unittest.TestCase):
   def test_args_use_cpu_view(self):
@@ -134,6 +144,30 @@ class TestQCOM(unittest.TestCase):
     queue.signal(SimpleNamespace(value_addr=signal.va_addr, base_buf=signal), 1).submit(dev)
 
     self.assertEqual(iface.submissions[0][2], {args, data, lib, stack, dummy, signal})
+
+  def test_allocator_uses_interface(self):
+    from tinygrad.runtime.ops_qcom import QCOMAllocator
+
+    iface = RecordingMemoryIface()
+    allocator = object.__new__(QCOMAllocator)
+    allocator.dev = SimpleNamespace(iface=iface)
+
+    self.assertIs(allocator._alloc(16, BufferSpec()), iface.allocated)
+    self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x1234)), iface.mapped)
+    allocator._do_free(iface.allocated, BufferSpec())
+    self.assertEqual(iface.freed, [iface.allocated])
+
+  def test_signal_sleep_uses_interface(self):
+    from tinygrad.runtime.ops_qcom import QCOMSignal
+
+    memory, iface = bytearray(16), RecordingIface()
+    owner = SimpleNamespace(iface=iface)
+    signal = QCOMSignal(HCQBuffer(0x1000, 16, view=MMIOInterface(mv_address(memoryview(memory)), 16)),
+                        owner=owner, is_timeline=True, virt=True)
+
+    signal._sleep(7)
+
+    self.assertEqual(iface.sleeps, [7])
 
   # although part of the QCOM runtime, this tests flushing the CPU's dcache
   @unittest.skipUnless(isinstance(Device["CPU"].renderer, ClangRenderer) and platform.machine().lower() in {"arm64", "aarch64"},

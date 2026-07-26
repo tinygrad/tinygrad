@@ -53,8 +53,7 @@ class QCOMSignal(HCQSignal):
 
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Sleep only for timeline signals. Do it immediately to free cpu.
-    if self.is_timeline and self.owner is not None:
-      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
+    if self.is_timeline and self.owner is not None: self.owner.iface.sleep(time_spent_since_last_sleep_ms)
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
@@ -332,7 +331,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
-    return self.dev._gpu_map(opts.external_ptr, size) if opts.external_ptr else self.dev._gpu_alloc(size)
+    return self.dev.iface.map(opts.external_ptr, size) if opts.external_ptr is not None else self.dev.iface.alloc(size, uncached=opts.uncached)
 
   def _do_copy(self, src_addr, dest_addr, size, prof_text):
     self.dev.synchronize()
@@ -343,37 +342,22 @@ class QCOMAllocator(HCQAllocatorBase):
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview: return to_mv(src.cpu_view().addr, src.size)
 
-  def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
+  def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 
 class KGSLIface:
   count = 1
+  renderers = [QCOMCLRenderer, IR3Renderer]
 
-  def __init__(self, dev:QCOMDevice): self.dev = dev
-
-  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
-    obj = kgsl.struct_kgsl_command_object(gpuaddr=command.va_addr, size=size, flags=kgsl.KGSL_CMDLIST_IB)
-    req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=self.dev.ctx,
-                                       cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
-    return kgsl.IOCTL_KGSL_GPU_COMMAND(self.dev.fd, __payload=req).timestamp
-
-class QCOMDevice(HCQCompiled):
-  def __init__(self, device:str=""):
+  def __init__(self, dev:QCOMDevice, device_id:int):
+    if device_id != 0: raise RuntimeError(f"QCOM:{device_id} does not exist (1 device available)")
+    self.dev = dev
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
-    self.dummy_buf = self._gpu_alloc(0x1000)
-    self.dummy_addr = int(self.dummy_buf.va_addr)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
       | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
-
-    self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=int(self.cmd_buf.va_addr), wrap=True)
-
-    self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
-
-    self.last_cmd:int = 0
 
     # Set max power
     struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, self.ctx, mv_address(_:=memoryview(array.array('I', [1]))), 4)
@@ -382,19 +366,13 @@ class QCOMDevice(HCQCompiled):
     # Load info about qcom device
     info = kgsl.struct_kgsl_devinfo()
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
-    self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
-    self.iface = KGSLIface(self)
-
-    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
-    if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
+    self.chip_id = info.chip_id
+    self.gpu_id = (self.chip_id >> 24, (self.chip_id >> 16) & 0xFF, (self.chip_id >> 8) & 0xFF)
 
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], QCOMProgram, QCOMSignal, functools.partial(QCOMComputeQueue, self),
-                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
-
-  def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
+  def alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
     if uncached: flags |= flag("KGSL_CACHEMODE", kgsl.KGSL_CACHEMODE_UNCACHED)
 
@@ -402,32 +380,65 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self)
+    return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self.dev)
 
-  def _gpu_map(self, ptr:int, size:int) -> HCQBuffer:
+  def map(self, ptr:int, size:int) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
     dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
-      return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
+      return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self.dev)
     except OSError as e:
-      if e.errno == 14: return HCQBuffer(va_addr=ptr, size=size, meta=(None, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
+      if e.errno == 14: return HCQBuffer(va_addr=ptr, size=size, meta=(None, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self.dev)
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
-  def _gpu_free(self, mem:HCQBuffer):
+  def free(self, mem:HCQBuffer):
     if mem.meta[0] is None: return # external (gpu) ptr
     if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr) # external (cpu) ptr
     else:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
-      FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
+      FileIOInterface.munmap(mem.cpu_view().addr, mem.meta[0].mmapsize)
+
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
+    obj = kgsl.struct_kgsl_command_object(gpuaddr=command.va_addr, size=size, flags=kgsl.KGSL_CMDLIST_IB)
+    req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=self.ctx,
+                                       cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
+    return kgsl.IOCTL_KGSL_GPU_COMMAND(self.fd, __payload=req).timestamp
+
+  def sleep(self, time_spent_since_last_sleep_ms:int):
+    kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=self.dev.last_cmd, timeout=0xffffffff)
+
+  def profile_finalize(self):
+    with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")
+
+class QCOMDevice(HCQCompiled):
+  ifaces = [KGSLIface]
+
+  def __init__(self, device:str=""):
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
+    self.iface = self._select_iface()
+    self.gpu_id = self.iface.gpu_id
+
+    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
+    if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={self.iface.chip_id:#x}")
+
+    self.dummy_buf = self.iface.alloc(0x1000)
+    self.dummy_addr = int(self.dummy_buf.va_addr)
+    self.cmd_buf = self.iface.alloc(16 << 20)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=int(self.cmd_buf.va_addr), wrap=True)
+    self.border_color_buf = self.iface.alloc(0x1000, fill_zeroes=True)
+    self.last_cmd:int = 0
+
+    super().__init__(device, QCOMAllocator(self), self.iface.renderers, QCOMProgram, QCOMSignal, functools.partial(QCOMComputeQueue, self),
+                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
   def _ensure_stack_size(self, sz):
-    if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)
+    if not hasattr(self, '_stack'): self._stack = self.iface.alloc(sz)
     elif self._stack.size < sz:
       self.synchronize()
-      self._gpu_free(self._stack)
-      self._stack = self._gpu_alloc(sz)
+      self.iface.free(self._stack)
+      self._stack = self.iface.alloc(sz)
 
   def _at_profile_finalize(self):
     super()._at_profile_finalize()
-    with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")
+    if hasattr(self.iface, "profile_finalize"): self.iface.profile_finalize()
