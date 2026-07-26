@@ -340,7 +340,8 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.map(opts.external_ptr, size) if opts.external_ptr is not None else self.dev.iface.alloc(size, uncached=opts.uncached)
+    if opts.external_ptr is not None: return self.dev.iface.map(opts.external_ptr, size, opts.external_fd)
+    return self.dev.iface.alloc(size, uncached=opts.uncached)
 
   def _do_copy(self, src_addr, dest_addr, size, prof_text):
     self.dev.synchronize()
@@ -391,7 +392,7 @@ class KGSLIface:
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
     return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self.dev)
 
-  def map(self, ptr:int, size:int) -> HCQBuffer:
+  def map(self, ptr:int, size:int, _fd:int|None=None) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
     dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
@@ -423,7 +424,7 @@ class KGSLIface:
 @dataclass(frozen=True)
 class MSMAllocation:
   handle: int
-  mapped_size: int
+  mapped_size: int|None
 
 def _open_msm_render_node(path:str) -> FileIOInterface|None:
   try: fd = FileIOInterface(path, os.O_RDWR)
@@ -473,8 +474,20 @@ class MSMIface:
     self.allocations[iova] = buf
     return buf
 
-  def map(self, ptr:int, size:int) -> HCQBuffer:
-    raise ValueError("MSM DRM does not support external pointers")
+  def map(self, ptr:int, size:int, fd:int|None=None) -> HCQBuffer:
+    if fd is None: raise ValueError("MSM DRM external pointers require a DMA-BUF fd")
+    if size <= 0: raise ValueError(f"MSM mapping size must be positive, got {size}")
+    imported = msm_drm.DRM_IOCTL_PRIME_FD_TO_HANDLE(self.fd, fd=fd)
+    try:
+      iova = msm_drm.DRM_IOCTL_MSM_GEM_INFO(self.fd, handle=imported.handle, info=msm_drm.MSM_INFO_GET_IOVA).value
+    except Exception:
+      try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=imported.handle)
+      except OSError as e: raise RuntimeError(f"MSM DMA-BUF import cleanup failed for GEM handle {imported.handle}") from e
+      raise
+
+    buf = HCQBuffer(iova, size, meta=MSMAllocation(imported.handle, None), view=MMIOInterface(ptr, size), owner=self.dev)
+    self.allocations[iova] = buf
+    return buf
 
   @staticmethod
   def _allocation(mem:HCQBuffer) -> MSMAllocation:
@@ -492,7 +505,7 @@ class MSMIface:
   def free(self, mem:HCQBuffer):
     base = mem.base
     allocation = self._allocation(mem)
-    if self.fd.munmap(base.cpu_view().addr, allocation.mapped_size) != 0:
+    if allocation.mapped_size is not None and self.fd.munmap(base.cpu_view().addr, allocation.mapped_size) != 0:
       try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
       except OSError as e: raise RuntimeError(f"Failed to unmap and close MSM GEM handle {allocation.handle}") from e
       self.allocations.pop(int(base.va_addr), None)

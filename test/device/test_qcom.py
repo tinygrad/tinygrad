@@ -1,7 +1,8 @@
 import ctypes, itertools, platform, struct, unittest
 from types import SimpleNamespace
-from tinygrad import Device
-from tinygrad.device import BufferSpec, TinyELF
+from unittest.mock import patch
+from tinygrad import Device, Tensor
+from tinygrad.device import Buffer, BufferSpec, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import mv_address, Target
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -30,10 +31,12 @@ class RecordingIface:
 
 class RecordingMemoryIface:
   def __init__(self):
-    self.allocated, self.mapped, self.freed = HCQBuffer(0x1000, 16), HCQBuffer(0x2000, 16), []
+    self.allocated, self.mapped, self.freed, self.maps = HCQBuffer(0x1000, 16), HCQBuffer(0x2000, 16), [], []
 
   def alloc(self, size, uncached=False): return self.allocated
-  def map(self, ptr, size): return self.mapped
+  def map(self, ptr, size, fd=None):
+    self.maps.append((ptr, size, fd))
+    return self.mapped
   def free(self, buf): self.freed.append(buf)
 
 class TestQCOM(unittest.TestCase):
@@ -173,8 +176,17 @@ class TestQCOM(unittest.TestCase):
 
     self.assertIs(allocator._alloc(16, BufferSpec()), iface.allocated)
     self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x1234)), iface.mapped)
+    self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x5678, external_fd=7)), iface.mapped)
+    self.assertEqual(iface.maps, [(0x1234, 16, None), (0x5678, 16, 7)])
+
     allocator._do_free(iface.allocated, BufferSpec())
     self.assertEqual(iface.freed, [iface.allocated])
+
+  def test_tensor_from_blob_passes_external_fd(self):
+    with patch.object(Buffer, "allocate", autospec=True) as allocate:
+      Tensor.from_blob(0x1234, (4,), dtype=dtypes.int, device="CPU", fd=7)
+
+    self.assertEqual(allocate.call_args.kwargs, {"external_ptr": 0x1234, "external_fd": 7})
 
   def test_signal_sleep_uses_interface(self):
     from tinygrad.runtime.ops_qcom import QCOMSignal

@@ -20,9 +20,9 @@ class RecordingMSMFile(FileIOInterface):
     self.memory = bytearray([0xaa] * mmap.PAGESIZE)
     self.cpu_addr = mv_address(memoryview(self.memory))
     self.requests, self.mmaps, self.unmaps, self.closed_handles = [], [], [], []
-    self.submissions, self.waits, self.closed_queues = [], [], []
+    self.submissions, self.waits, self.closed_queues, self.imports = [], [], [], []
     self.new_queues = []
-    self.fail_mmap, self.wait_errno, self.close_errno = False, None, None
+    self.fail_mmap, self.wait_errno, self.close_errno, self.iova_errno = False, None, None, None
     self.is_msm, self.chip_id, self.munmap_result = True, 0x06030000, 0
 
   def __del__(self): pass
@@ -30,10 +30,14 @@ class RecordingMSMFile(FileIOInterface):
   def ioctl(self, request, arg):
     self.requests.append(request)
     if request == ioctl_number(msm_drm.DRM_IOCTL_MSM_GEM_NEW): arg.handle = 17
+    elif request == ioctl_number(msm_drm.DRM_IOCTL_PRIME_FD_TO_HANDLE):
+      self.imports.append((arg.fd, arg.flags))
+      arg.handle = 19
     elif request == ioctl_number(msm_drm.DRM_IOCTL_MSM_GET_PARAM):
       if not self.is_msm: raise OSError(errno.ENOTTY, "not msm")
       arg.value = 630 if arg.param == msm_drm.MSM_PARAM_GPU_ID else self.chip_id
     elif request == ioctl_number(msm_drm.DRM_IOCTL_MSM_GEM_INFO):
+      if arg.info == msm_drm.MSM_INFO_GET_IOVA and self.iova_errno is not None: raise OSError(self.iova_errno, "iova failed")
       arg.value = 0x1234_0000 if arg.info == msm_drm.MSM_INFO_GET_IOVA else 0x8000
     elif request == ioctl_number(msm_drm.DRM_IOCTL_GEM_CLOSE):
       self.closed_handles.append(arg.handle)
@@ -203,11 +207,34 @@ class TestMSMIface(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "allocation cleanup failed"): make_iface(fd).alloc(17)
 
   def test_external_pointer_is_rejected(self):
-    with self.assertRaisesRegex(ValueError, "external pointers"): make_iface(RecordingMSMFile()).map(0x1000, 16)
+    with self.assertRaisesRegex(ValueError, "DMA-BUF fd"): make_iface(RecordingMSMFile()).map(0x1000, 16)
+
+  def test_import_dma_buf_maps_gpu_and_keeps_cpu_pointer(self):
+    fd = RecordingMSMFile()
+    iface = make_iface(fd)
+
+    buf = iface.map(fd.cpu_addr, 17, 9)
+
+    self.assertEqual((buf.va_addr, buf.size, buf.cpu_view().addr), (0x1234_0000, 17, fd.cpu_addr))
+    self.assertEqual(buf.meta.handle, 19)
+    self.assertEqual(fd.imports, [(9, 0)])
+    self.assertIs(iface.allocations[0x1234_0000], buf)
+
+    iface.free(buf)
+    self.assertEqual(fd.unmaps, [])
+    self.assertEqual(fd.closed_handles, [19])
+
+  def test_import_dma_buf_closes_handle_if_iova_lookup_fails(self):
+    fd = RecordingMSMFile()
+    fd.iova_errno = errno.EIO
+
+    with self.assertRaisesRegex(OSError, "iova failed"): make_iface(fd).map(fd.cpu_addr, 17, 9)
+
+    self.assertEqual(fd.closed_handles, [19])
 
   def test_allocator_rejects_external_pointer(self):
     _, allocator = self.allocator(RecordingMSMFile())
-    with self.assertRaisesRegex(ValueError, "external pointers"):
+    with self.assertRaisesRegex(ValueError, "DMA-BUF fd"):
       allocator.alloc(16, BufferSpec(external_ptr=0x1000))
 
   def test_allocator_lru_bounds_gem_churn(self):
