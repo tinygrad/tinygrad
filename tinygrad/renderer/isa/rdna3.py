@@ -349,18 +349,6 @@ def alu(ctx, x:UOp):
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
-def intcast(y:UOp, x:UOp):
-  # NOTE: use v_bfe instead of hand rolled masking
-  if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
-  if x.dtype.itemsize > y.dtype.itemsize:
-    if y.dtype.itemsize == 1: return y.bitcast(x.dtype)
-    if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
-    return (y & const(y.dtype, 0xFFFFFFFF)).bitcast(x.dtype)
-  if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
-    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
-    return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
-
-# TODO: move this into pattern matcher
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def int_to_int64(y:UOp, tdt:DType):
   do_sext = not dtypes.is_unsigned(y.dtype)
@@ -371,6 +359,18 @@ def int_to_int64(y:UOp, tdt:DType):
     lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(dtypes.uint32, ~((1 << nbits) - 1)))))) # TODO: cleanup manual constr.
   else: lo, hi = vmov(y), vmov(const(dtypes.uint32, 0))
   return multireg(lo, hi, dtype=tdt)
+
+def intcast(y:UOp, x:UOp):
+  # NOTE: use v_bfe instead of hand rolled masking
+  if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
+  if x.dtype.itemsize > y.dtype.itemsize:
+    if x.dtype.itemsize == 8: return int_to_int64(y, x.dtype)
+    if y.dtype.itemsize == 1: return y.bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(dtypes.uint32, 0xFFFF)).bitcast(x.dtype)
+    return (y & const(y.dtype, 0xFFFFFFFF)).bitcast(x.dtype)
+  if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
+    if x.dtype.itemsize == 2: return (y & const(y.dtype, 0xFFFF)).bitcast(x.dtype)
+    return (y & const(y.dtype, 0xFF)).bitcast(x.dtype)
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
 def f64_to_int64(y:UOp, tdt:DType):
@@ -488,67 +488,64 @@ pm_gfx1100_wmma = PatternMatcher([
 ])
 
 extra_matcher = PatternMatcher([
-  # how to handle const invalid?
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(dtypes.uint16, to_storage_scalar(x.arg, dtypes.bfloat16)).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
-  # prevent 64 bit immediate from being realized into 2 regs for shift
-  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + pm_gfx1100_wmma
  
-# TODO: Ops.NEG should be 0 - x, 64 bit consts should also be folded into imm field when possible
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
-# cast i8 -> i16/i32 = bfe
-# NOTE: down casting float to int should round first then reduce precision
-pre_isel_matcher = PatternMatcher([
-  # realize bool const as sgpr mask
-  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const(dtypes.uint16, (1 << 16) - 1)).replace(dtype=dtypes.uint16)),
-  # NOTE: does this not work for int8 alu? Do we need to sign extend or something..
-  (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
-  (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"), lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
-  (UPat(Ops.STACK, name="x"), stack2regs),
-  (UPat(Ops.CDIV, name="x"), idiv),
-  # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
-  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
-  (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
-  (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
-  # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
-  # NOTE: int8s also have to be converted at memory boundary, native alu is in b16
-  (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
-  # TODO: what cases does this fail?
-  (UPat().cast().named("x").bitcast(), lambda x: x),
-  # --- casting rewrites ---
-  # float -> int
+
+pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
   (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32))),
   (UPat.var("y", dtypes.float32).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
-  # int -> float
+  (UPat.var("y", dtypes.double).cast(dtypes.int64s).named("x"), lambda y,x: f64_to_int64(y, x.dtype)),
+])
+
+pm_int_to_float = PatternMatcher([
   (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
   (UPat.var("y", dtypes.int8s).cast(dtypes.half), lambda y: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(dtypes.half)),
   (UPat.var("y", dtypes.int8s+dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
-  # other
-  (UPat.var("y", dtypes.int64s).cast(dtypes.int64s), lambda y: y),
-  (UPat.var("x", dtypes.int64s).cast(dtypes.float64), long2double),
-  (UPat.var("y", dtypes.ints).cast(dtypes.int64s).named("x"), lambda y,x: int_to_int64(y, x.dtype)),
-  (UPat.var("y", dtypes.double).cast(dtypes.int64s).named("x"), lambda y,x: f64_to_int64(y, x.dtype)),
-  (UPat.var("y", dtypes.int16s+dtypes.int32s+dtypes.int8s).cast(dtypes.int16s+dtypes.int32s+dtypes.int8s, name="x"), intcast),
-  # narrowing long goes through b32
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half), name="x"), lambda y,x: long2double(y).cast(dtypes.float).cast(x.dtype)),
+  (UPat.var("x", dtypes.int64s).cast(dtypes.float64), long2double),
+])
+
+pre_isel_matcher = PatternMatcher([
+  # --- bool repr ---
+  # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
+  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
+  (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != const(dtypes.uint32, 0)),
+  (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const(dtypes.uint32, (1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
+  # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
+  (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(x.dtype, 1), const(x.dtype, 0))),
+  # --- int8 alu is int16 ---
+  (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
+  (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"),
+    lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
+  # -- int -> int casts ---
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
-  (UPat(Ops.MUL, dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a.cast(dtypes.int32) * b.cast(dtypes.int32)),
+  (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), intcast),
+  # narrowing long goes through b32
+  (UPat(Ops.MUL, dtypes.int16, name="x"), lambda x: x.replace(dtype=dtypes.int32)),
+  # --- 64 bit semantics ---
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
-  # expand 64 bit where, 2 cndmasks
-  (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))), lambda pred,a,b: 
-    multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
-  # --- perf/folding ---
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("y"),UPat.cvar("x"))), lambda x,y: y if x.arg == 0 else None),
-])
+  (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))),
+    lambda pred,a,b: multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
+  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), # prevent 64 bit immediate from being realized into 2 regs for shift
+    lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
+  # --- other ---
+  (UPat(Ops.STACK, name="x"), stack2regs),
+  (UPat(Ops.CDIV, name="x"), idiv),
+  # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
+  # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const(dtypes.uint8, (1 << 8) - 1)).replace(dtype=dtypes.uint8)),
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const(dtypes.uint16, (1 << 16) - 1)).replace(dtype=dtypes.uint16)),
+]) + pm_float_to_int + pm_int_to_float
 
 # NOTE: cmp shouldn't always be materialized to sgpr, only for where
 isel_matcher = PatternMatcher([
@@ -596,8 +593,7 @@ def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
   def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
-  def _immorreg(x:UOp):
-    return x.arg if x.op is Ops.CONST else _fuse(rdefs(x))
+  def _immorreg(x:UOp): return x.arg if x.op is Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
