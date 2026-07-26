@@ -21,7 +21,7 @@ class CUDAGraph(MultiGraphRunner):
 
         c_deps, new_node = self.new_node([b.base for b in bufs], ast.arg.outs)
         c_args, vargs = encode_args([b._buf for b in bufs], [device_vars.get(x.expr, 0) for x in ast.arg.vars])
-        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(runtime.prg, *global_size, *local_size, 0,
+        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(runtime.prg, *global_size, *local_size, runtime.smem,
                                                       ctypes.cast(0, ctypes.POINTER(ctypes.c_void_p)), vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(c_deps or []), ctypes.byref(kern_params)))
 

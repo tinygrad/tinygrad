@@ -1,6 +1,6 @@
 from typing import Tuple
 import time
-from tinygrad import Tensor, TinyJit, nn
+from tinygrad import Tensor, TinyJit, nn, Context
 import gymnasium as gym
 from tinygrad.helpers import trange
 import numpy as np  # TODO: remove numpy import
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
   @TinyJit
   def train_step(x:Tensor, selected_action:Tensor, reward:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-    with Tensor.train():
+    with Context(TRAINING=1):
       log_dist, value = model(x)
       action_mask = (selected_action.reshape(-1, 1) == Tensor.arange(log_dist.shape[1]).reshape(1, -1).expand(selected_action.shape[0], -1)).float()
 

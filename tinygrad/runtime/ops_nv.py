@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, BufferSpec
+from tinygrad.device import Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, mesa
+from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
@@ -243,15 +243,15 @@ class NVArgsState(CLikeArgsState):
     if isinstance(prg.dev.iface, MOCKIface): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
     super().__init__(buf, prg, bufs, vals=vals, prefix=prg.cbuf_0 or None)
 
-class NVProgram(HCQProgram):
-  def __init__(self, dev:NVDevice, name:str, lib:bytes, **kwargs):
-    self.dev, self.name, self.lib = dev, name, lib
+class NVProgram(HCQProgram['NVDevice']):
+  def __init__(self, dev:NVDevice, obj:TinyELF):
+    self.dev, self.name, self.lib = dev, obj.name, obj.lib
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
 
     if (NAK:=isinstance(dev.renderer, NAKRenderer)):
-      image, self.cbuf_0 = memoryview(bytearray(lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(lib)):])), []
+      image, self.cbuf_0 = memoryview(bytearray(obj.lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(obj.lib)):])), []
       self.regs_usage, self.shmem_usage, self.lcmem_usage = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
-    elif isinstance(dev.iface, MOCKIface): image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
+    elif isinstance(dev.iface, MOCKIface): image, sections, relocs = memoryview(bytearray(obj.lib) + b'\x00' * (4 - len(obj.lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(nolru=True))
@@ -266,7 +266,7 @@ class NVProgram(HCQProgram):
           self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
         elif sh.name.startswith(".nv.info"):
           for typ, param, data in self._parse_elf_info(sh):
-            if sh.name == f".nv.info.{name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
+            if sh.name == f".nv.info.{obj.name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
             elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
             elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
 
@@ -325,7 +325,7 @@ class NVProgram(HCQProgram):
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
                wait=False, timeout:int|None=None):
-    if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > cast(NVDevice, self.dev).slm_per_thread:
+    if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > self.dev.slm_per_thread:
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {self.max_threads=}")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
@@ -342,7 +342,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape:tuple[int,...], frame_pos:int):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout, desc_buf]), "all buffers must be 0x100 aligned"
@@ -389,7 +389,8 @@ class NVKIface:
       NVKIface.root = self.rm_alloc(0, nv_gpu.NV01_ROOT_CLIENT, None, root=0)
 
       drvver = self.rm_control(self.root, nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2, nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS())
-      if int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 580: nv_gpu = nv_580
+      if int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 610: nv_gpu = nv_610
+      elif int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 580: nv_gpu = nv_580
 
       self.uvm(nv_gpu.UVM_INITIALIZE, nv_gpu.UVM_INITIALIZE_PARAMS())
 
@@ -451,7 +452,7 @@ class NVKIface:
     self.uvm(nv_gpu.UVM_REGISTER_GPU_VASPACE, nv_gpu.UVM_REGISTER_GPU_VASPACE_PARAMS(
       gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace))
 
-    for dev in cast(list[NVDevice], [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, NVDevice) and not d.is_nvd()]):
+    for dev in [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, NVDevice) and not d.is_nvd()]:
       try: self.uvm(nv_gpu.UVM_ENABLE_PEER_ACCESS, nv_gpu.UVM_ENABLE_PEER_ACCESS_PARAMS(gpuUuidA=self.gpu_uuid, gpuUuidB=dev.iface.gpu_uuid))
       except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
 
@@ -629,8 +630,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], functools.partial(NVProgram, self), NVSignal,
-                     NVComputeQueue, NVCopyQueue, arch=self.arch)
+    super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], NVProgram, NVSignal, NVComputeQueue,
+                     NVCopyQueue, arch=self.arch)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, math, time
 import numpy as np
-from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
+from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters, Context
 from dataclasses import dataclass
 
 @dataclass
@@ -177,7 +177,7 @@ if __name__ == "__main__":
   if args.gpus > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
 
   @TinyJit
-  @Tensor.train()
+  @Context(TRAINING=1)
   def step(x:Tensor, y:Tensor) -> Tensor:
     _, loss = model(x, y)
     optimizer.zero_grad()
@@ -204,4 +204,3 @@ if __name__ == "__main__":
     top_k = 40
     y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
     print(decode(y[0].tolist()))
-

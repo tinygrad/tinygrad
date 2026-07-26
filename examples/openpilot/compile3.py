@@ -42,7 +42,7 @@ def compile(onnx_file):
   kernel_calls = [u for u in run_onnx_jit.captured.linear.toposort(gate=lambda x: x.op not in kernel_asts)
                   if u.op is Ops.CALL and u.src[0].op in kernel_asts]
   print(f"captured {len(kernel_calls)} kernels")
-  np.testing.assert_equal(test_val, ret, "JIT run failed")
+  if getenv("TEST", 1): np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
   # check gated read_image usage
@@ -50,7 +50,7 @@ def compile(onnx_file):
   read_image_count = 0
   gated_read_image_count = 0
   for call in kernel_calls:
-    _, _, _, source, _ = call.src[0].src
+    _, _, source, _ = call.src[0].src
     src = source.arg
     kernel_count += 1
     read_image_count += src.count("read_image")

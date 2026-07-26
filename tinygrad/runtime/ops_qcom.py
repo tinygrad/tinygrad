@@ -2,15 +2,15 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from typing import Any, cast
-from tinygrad.device import BufferSpec, Device
+from tinygrad.device import BufferSpec, Device, TinyELF
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, is_image_shape
 from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -20,13 +20,12 @@ BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 def dcache_flush():
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen import to_program
-  buf, n = UOp.param(0, dtypes.uint8.ptr()), UOp.param(1, dtypes.uint8.ptr())
-  i = UOp.range(n.cast(dtypes.int), 0, dtype=dtypes.int)
-  flush = UOp(Ops.CUSTOM, dtypes.void, (buf.cast(dtypes.ulong) + i.cast(dtypes.ulong) * UOp.const(dtypes.ulong, 64),),
-              arg='__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");')
-  sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, dtypes.void, (), arg='__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush"))
-  prg = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())))), Device["CPU"].renderer)
-  return Device["CPU"].runtime(prg.arg.function_name, prg.src[4].arg)
+  buf, n = UOp.param(0, dtypes.uint8, shape=(1,)), UOp.param(1, dtypes.int, shape=(1,), name="n", addrspace=None)
+  i = UOp.range(n, 0, dtype=dtypes.int)
+  flush = UOp(Ops.CUSTOM, src=(buf.index(i * 64),), arg='__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");')
+  sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, arg='__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush"))
+  prg = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())))), Device["CPU"].renderer)
+  return Device["CPU"].runtime(prg.to_elf())
 
 #Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
@@ -131,7 +130,8 @@ class QCOMComputeQueue(HWQueue):
     self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, 0x0)
     self.reg(mesa.REG_A6XX_SP_CS_TSIZE, qreg.a6xx_sp_cs_tsize(0x80)) # is this right? mesa uses 1
     self.reg(mesa.REG_A6XX_SP_CS_USIZE, qreg.a6xx_sp_cs_usize(0x40)) # mesa also uses 1
-    self.reg(mesa.REG_A6XX_SP_MODE_CNTL, qreg.a6xx_sp_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
+    self.reg(mesa.REG_A6XX_SP_MODE_CNTL, qreg.a6xx_sp_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL,
+                                                                constant_demotion_enable=prg.NIR))
     self.reg(mesa.REG_A6XX_SP_PERFCTR_SHADER_MASK, qreg.a6xx_sp_perfctr_shader_mask(cs=True))
     self.reg(mesa.REG_A6XX_TPL1_MODE_CNTL, qreg.a6xx_tpl1_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
     self.reg(mesa.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
@@ -200,8 +200,8 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, bufs, vals=vals)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [b for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if not isinstance(dt, ImageDType)]
-    uavs = [(dt,b) for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if isinstance(dt, ImageDType)]
+    ubos = [bufs[slot] for _,slot,_,shape in prg.signature if slot < len(bufs) and not is_image_shape(shape)]
+    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in prg.signature if slot < len(bufs) and is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
@@ -216,24 +216,25 @@ class QCOMArgsState(HCQArgsState):
       for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=prg.buf_offs[i+len(ubos)])
 
     def _tex(b, ibo=False):
-      imgdt, buf = b
+      imgdt, shape, buf = b
+      pitch = shape[1] * 4 * imgdt.itemsize
       fmt = mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
       return [qreg.a6xx_tex_const_0(fmt=fmt) if ibo else qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=fmt),
-              qreg.a6xx_tex_const_1(width=imgdt.shape[1], height=imgdt.shape[0]),
-              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=imgdt.pitch, pitchalign=ctz(imgdt.pitch)-6), 0, *data64_le(buf.va_addr),
+              qreg.a6xx_tex_const_1(width=shape[1], height=shape[0]),
+              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=ctz(pitch)-6), 0, *data64_le(buf.va_addr),
               qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13), 0, 0, 0, 0, 0, 0, 0, 0]
 
     self.bind_sints_to_buf(*flatten(map(_tex, texs)), buf=self.buf, fmt='I', offset=prg.tex_off)
     self.bind_sints_to_buf(*flatten(map(functools.partial(_tex, ibo=True), ibos)), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
-class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[], **kwargs):
+class QCOMProgram(HCQProgram['QCOMDevice']):
+  def __init__(self, dev: QCOMDevice, obj: TinyELF):
     self.dev: QCOMDevice = dev
-    self.buf_dtypes, self.name, self.NIR = buf_dtypes, name, isinstance(dev.renderer, IR3Renderer)
+    self.signature, self.name, self.NIR = obj.signature, obj.name, isinstance(dev.renderer, IR3Renderer)
 
     if self.NIR:
       from tinygrad.runtime.support.compiler_mesa import IR3Compiler
-      v, cs, imm_vals, self.image = IR3Compiler.unpack_lib(lib)
+      v, cs, imm_vals, self.image = IR3Compiler.unpack_lib(obj.lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
       self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
 
@@ -251,7 +252,7 @@ class QCOMProgram(HCQProgram):
 
       self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
-    else: self._parse_lib(lib)
+    else: self._parse_lib(obj.lib)
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
@@ -277,7 +278,7 @@ class QCOMProgram(HCQProgram):
   def _parse_lib(self, lib):
     # Extract image binary
     self.image_size = _read_lib(lib, 0x100)
-    self.image = bytearray(lib[(image_offset:=_read_lib(lib, 0xc0)):image_offset+self.image_size])
+    self.image = lib[(image_offset:=_read_lib(lib, 0xc0)):image_offset+self.image_size]
 
     # Parse image descriptors
     image_desc_off = _read_lib(lib, 0x110)
@@ -331,9 +332,7 @@ class QCOMAllocator(HCQAllocatorBase):
   def _copyin(self, dest:HCQBuffer, src:memoryview): self._do_copy(mv_address(src), dest.cpu_view().addr, src.nbytes, f"TINY -> {self.dev.device}")
   def _copyout(self, dest:memoryview, src:HCQBuffer): self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, f"{self.dev.device} -> TINY")
 
-  def _as_buffer(self, src:HCQBuffer) -> memoryview:
-    self.dev.synchronize()
-    return to_mv(src.cpu_view().addr, src.size)
+  def _as_buffer(self, src:HCQBuffer) -> memoryview: return to_mv(src.cpu_view().addr, src.size)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 
@@ -370,8 +369,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], functools.partial(QCOMProgram, self), QCOMSignal,
-                     functools.partial(QCOMComputeQueue, self), arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
+    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], QCOMProgram, QCOMSignal, functools.partial(QCOMComputeQueue, self),
+                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
@@ -385,7 +384,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_map(self, ptr:int, size:int) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
-    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ctypes.c_uint64(ceildiv(ptr + size - ptr_line_aligned, 64)))
+    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
       return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)

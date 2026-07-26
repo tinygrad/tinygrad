@@ -14,7 +14,7 @@ from test.helpers import not_support_multi_device, needs_second_gpu, slow
 @slow
 class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
-    with Tensor.train(training):
+    with Context(TRAINING=training):
       szs = [4, 8, 16, 32]
       for sz in szs:
         # create in tinygrad

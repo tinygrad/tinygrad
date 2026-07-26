@@ -6,37 +6,24 @@ class MockUSB:
   def __init__(self, mem):
     self.mem = mem
   def read(self, address, size): return bytes(self.mem[address:address+size])
-  def write(self, address, data, ignore_cache=False): self.mem[address:address+len(data)] = data
-  def pcie_mem_req(self, address, value=None, size=1):
-    if value is None: return int.from_bytes(self.mem[address:address+size], "little")
-    else: self.mem[address:address+size] = value.to_bytes(size, "little")
-  def pcie_mem_write(self, address, values, size):
-    for i, value in enumerate(values): self.pcie_mem_req(address + i * size, value, size)
+  def write(self, address, data): self.mem[address:address+len(data)] = data
+  def pcie_mem_read(self, address, nbytes): return bytes(self.mem[address:address+nbytes])
+  def pcie_mem_write(self, address, data): self.mem[address:address+len(data)] = data
 
 # *** ASM24 Controller Mock ***
 
 _mock_usb_state: MockASM24State|None = None
 
 class MockASM24State:
-  """Mock ASM24 controller: XRAM memory map, DMA windows, TLP engine, PCI config space.
+  """Mock custom ASM24 controller: XRAM, DMA windows, PCI config space, and GPU BARs.
 
   Memory map (64KB XRAM):
     0xA000-0xAFFF: DMA window -> sys 0x820000
     0xB000-0xB1FF: DMA window -> sys 0x800000
-    0xB200-0xB7FF: PCI MMIO (TLP engine)
+    0xB200-0xB7FF: controller PCI MMIO
     0xF000-0xFFFF: DMA window -> sys 0x200000 (512KB)
   """
   XRAM_SIZE = 0x10000
-
-  TLP_FMT_TYPE = 0xB210
-  TLP_BYTE_EN = 0xB217
-  TLP_ADDR_LO = 0xB218
-  TLP_ADDR_HI = 0xB21C
-  TLP_DATA = 0xB220
-  TLP_COMPL = 0xB22A
-  TLP_TRIGGER = 0xB254
-  TLP_LINK_STATUS = 0xB284
-  TLP_STATUS = 0xB296
 
   def __init__(self, gpu, driver, vram_size:int, doorbell_size:int, mmio_size:int):
     self.gpu, self.driver = gpu, driver
@@ -93,53 +80,7 @@ class MockASM24State:
       if ctrl_addr <= addr < ctrl_addr + dma_size:
         (ctypes.c_ubyte * 1).from_address(host_addr + (addr - ctrl_addr))[0] = value
         return
-    if addr == self.TLP_STATUS:
-      self._xram[addr] &= ~value & 0xFF
-      return
     self._xram[addr] = value
-    if addr == self.TLP_TRIGGER and value == 0x0F: self._process_tlp()
-
-  # --- TLP engine ---
-
-  def _process_tlp(self):
-    fmt_type, byte_en = self._xram[self.TLP_FMT_TYPE], self._xram[self.TLP_BYTE_EN]
-    addr_lo = int.from_bytes(self._xram[self.TLP_ADDR_LO:self.TLP_ADDR_LO+4], 'big')
-    addr_hi = int.from_bytes(self._xram[self.TLP_ADDR_HI:self.TLP_ADDR_HI+4], 'big')
-    address = addr_lo | (addr_hi << 32)
-
-    size, offset, tmp = 0, 0, byte_en
-    while tmp and not (tmp & 1):
-      offset += 1
-      tmp >>= 1
-    while tmp:
-      size += tmp & 1
-      tmp >>= 1
-
-    is_write, is_cfg = bool(fmt_type & 0x40), (fmt_type & 0xbe) == 0x04
-
-    if is_cfg:
-      bus, dev, fn, byte_addr = (address >> 24) & 0xFF, (address >> 19) & 0x1F, (address >> 16) & 0x7, address & 0xFFC
-      if is_write:
-        data = int.from_bytes(self._xram[self.TLP_DATA:self.TLP_DATA+4], 'big')
-        self._cfg_write(bus, dev, fn, byte_addr + offset, (data >> (8 * offset)) & ((1 << (8 * size)) - 1), size)
-      else:
-        self._xram[self.TLP_DATA:self.TLP_DATA+4] = int.from_bytes(self._get_cfg(bus, dev, fn)[byte_addr:byte_addr+4], 'little').to_bytes(4, 'big')
-      self._xram[self.TLP_COMPL:self.TLP_COMPL+2] = (4).to_bytes(2, 'big')
-      self._xram[self.TLP_LINK_STATUS] = 0x01 if not is_write else 0x00
-      self._xram[self.TLP_STATUS] = 0x02
-      return
-
-    if is_write:
-      data = int.from_bytes(self._xram[self.TLP_DATA:self.TLP_DATA+4], 'big')
-      self._pcie_dispatch(address + offset, (data >> (8 * offset)) & ((1 << (8 * size)) - 1), size)
-    else:
-      result = self._pcie_dispatch(address + offset, None, size)
-      if result is not None:
-        self._xram[self.TLP_DATA:self.TLP_DATA+4] = ((result << (8 * offset)) & 0xFFFFFFFF).to_bytes(4, 'big')
-
-    self._xram[self.TLP_COMPL:self.TLP_COMPL+2] = (size & 0xFFF).to_bytes(2, 'big')
-    self._xram[self.TLP_LINK_STATUS] = 0x01 if not is_write else 0x00
-    self._xram[self.TLP_STATUS] = 0x02
 
   def _cfg_write(self, bus:int, dev:int, fn:int, byte_addr:int, val:int, size:int):
     cfg = self._get_cfg(bus, dev, fn)
@@ -168,49 +109,104 @@ class MockASM24State:
     # Generic config write
     for i in range(size): cfg[byte_addr + i] = (val >> (8 * i)) & 0xFF
 
-  def _pcie_dispatch(self, address:int, value:int|None, size:int) -> int|None:
+  def _find_bar(self, address:int, size:int) -> tuple[int, int]:
     for reg_off, (bar_addr, bar_size) in self._bar_addrs.items():
-      if bar_addr <= address < bar_addr + bar_size:
-        offset = address - bar_addr
-        if reg_off == 0x10:  # BAR0 - VRAM
-          if value is None: return int.from_bytes(bytes(self.gpu.vram[offset:offset+size]), "little")
-          self.gpu.vram[offset:offset+size] = list(value.to_bytes(size, "little"))
-          return None
-        if reg_off == 0x18:  # BAR2 - Doorbell
-          if value is None: return int.from_bytes(bytes(self._doorbell[offset:offset+size]), "little")
-          for i, b in enumerate(value.to_bytes(size, "little")): self._doorbell[offset + i] = b
-          self.driver._emulate_execute()
-          return None
-        if reg_off == 0x24:  # BAR5 - MMIO
-          if value is None: return self.gpu.mmio[offset // 4]
-          self.gpu.mmio[offset // 4] = value
-          return None
-    raise ValueError(f"PCIe address {address:#x} not mapped to any BAR")
+      if bar_addr <= address and address + size <= bar_addr + bar_size: return reg_off, address - bar_addr
+    raise ValueError(f"PCIe range {address:#x}+{size:#x} not mapped to any BAR")
 
-  # --- CDB processing (called by MockUSB3.send_batch) ---
+  def _pcie_read(self, address:int, size:int) -> bytes:
+    reg_off, offset = self._find_bar(address, size)
+    if reg_off == 0x10: return bytes(self.gpu.vram[offset:offset+size])
+    if reg_off == 0x18: return bytes(self._doorbell[offset:offset+size])
+    if reg_off == 0x24: return bytes((self.gpu.mmio[(offset+i)//4] >> (8*((offset+i)&3))) & 0xFF for i in range(size))
+    raise RuntimeError(f"unsupported BAR register {reg_off:#x}")
 
-  def process_cdb(self, cdb:bytes, rlen:int, send_data:bytes|None) -> bytes|None:
-    op = cdb[0]
-    if op == 0xE5:  # write byte
-      self._xram_write_byte(((cdb[2] << 16) | (cdb[3] << 8) | cdb[4]) & 0xFFFF, cdb[1])
-      return None
-    if op == 0xE4:  # read
-      return self._xram_read(((cdb[2] << 16) | (cdb[3] << 8) | cdb[4]) & 0xFFFF, cdb[1])
-    if op == 0x8A and send_data is not None and 0xF000 in self._dma_regions:  # SCSI write
-      host_addr, dma_size = self._dma_regions[0xF000]
-      ctypes.memmove(host_addr, send_data, min(len(send_data), dma_size))
+  def _pcie_write(self, address:int, data:bytes):
+    reg_off, offset = self._find_bar(address, len(data))
+    if reg_off == 0x10: self.gpu.vram[offset:offset+len(data)] = list(data)
+    elif reg_off == 0x18:
+      self._doorbell[offset:offset+len(data)] = list(data)
+      self.driver._emulate_execute()
+    elif reg_off == 0x24:
+      updates: dict[int, int] = {}
+      for i, byte in enumerate(data):
+        idx, shift = (offset+i)//4, 8*((offset+i)&3)
+        updates[idx] = (updates.get(idx, self.gpu.mmio[idx]) & ~(0xFF << shift)) | (byte << shift)
+      for idx, val in updates.items(): self.gpu.mmio[idx] = val
+    else: raise RuntimeError(f"unsupported BAR register {reg_off:#x}")
+
+  def _pcie_dispatch(self, address:int, value:int|None, size:int) -> int|None:
+    if value is None: return int.from_bytes(self._pcie_read(address, size), 'little')
+    self._pcie_write(address, value.to_bytes(size, 'little'))
     return None
 
 class MockUSB3:
   @classmethod
   def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
   def __init__(self, *args, **kwargs):
-    self.product, self.is_custom = "", False
-  def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
+    self.product = "custom mock"
+    self._bulk_read_op: tuple[str, int, int]|None = None
+    self._bulk_write_op: tuple[str, int, int]|None = None
+    self._f0_reply = bytes(8)
+
+  @property
+  def state(self) -> MockASM24State:
     assert _mock_usb_state is not None
-    idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
-    results: list[bytes|None] = []
-    for cdb, rlen, sdata in zip(cdbs, idata, odata):
-      result = _mock_usb_state.process_cdb(cdb, rlen, sdata)
-      results.append(result if rlen > 0 else None)
-    return results
+    return _mock_usb_state
+
+  def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
+    if request == 0xF3:
+      self.state._xram[0xB450] = 0x78 if value else 0
+    elif request == 0xE5:
+      self.state._xram_write_byte(value, index)
+    elif request == 0xF2:
+      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000, (value & 0x7FFF) * 512)
+      if value & 0x8000: self._bulk_read_op = op
+      else: self._bulk_write_op = op
+    elif request == 0xF0:
+      address_lo, address_hi, payload = struct.unpack('<III', data)
+      address, fmt_type, byte_en = address_lo | (address_hi << 32), value & 0xFF, value >> 8
+      if index == 1: self._bulk_write_op = ("pcie_write", address, payload * 4)
+      elif index == 2: self._bulk_read_op = ("pcie_read", address, payload * 4)
+      else:
+        assert index == 0 and byte_en
+        offset = (byte_en & -byte_en).bit_length() - 1
+        size, is_write, is_cfg = byte_en.bit_count(), bool(fmt_type & 0x40), (fmt_type & 0xBE) == 0x04
+        if is_cfg:
+          bus, dev, fn, byte_addr = (address >> 24) & 0xFF, (address >> 19) & 0x1F, (address >> 16) & 0x7, address & 0xFFC
+          if is_write: self.state._cfg_write(bus, dev, fn, byte_addr + offset, (payload >> (8 * offset)) & ((1 << (8 * size))-1), size)
+          else: payload = int.from_bytes(self.state._get_cfg(bus, dev, fn)[byte_addr:byte_addr+4], 'little')
+        elif is_write:
+          self.state._pcie_dispatch(address + offset, (payload >> (8 * offset)) & ((1 << (8 * size))-1), size)
+        else: payload = (self.state._pcie_dispatch(address + offset, None, size) or 0) << (8 * offset)
+        self._f0_reply = struct.pack('<I', payload & 0xFFFFFFFF) + bytes(4)
+    else: raise ValueError(f"unsupported control OUT request 0x{request:02X}")
+
+  def control_read(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> memoryview:
+    if request == 0xE4: data = self.state._xram_read(value, length)
+    elif request == 0xF0: data = self._f0_reply
+    else: raise ValueError(f"unsupported control IN request 0x{request:02X}")
+    return memoryview(data[:length])
+
+  def bulk_write(self, data:bytes, timeout:int=1000):
+    assert self._bulk_write_op is not None
+    op, address, size = self._bulk_write_op
+    assert len(data) == size
+    if op == "sram_write":
+      host_addr, region_size = self.state._dma_regions[address]
+      ctypes.memmove(host_addr, data, min(len(data), region_size))
+    elif op == "pcie_write": self.state._pcie_write(address, data)
+    else: raise RuntimeError(f"cannot bulk write for {op}")
+    self._bulk_write_op = None
+
+  def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
+    assert self._bulk_read_op is not None
+    op, address, size = self._bulk_read_op
+    assert length == size
+    if op == "sram_read":
+      host_addr, region_size = self.state._dma_regions[address]
+      data = bytes((ctypes.c_ubyte * min(length, region_size)).from_address(host_addr))
+    elif op == "pcie_read": data = self.state._pcie_read(address, length)
+    else: raise RuntimeError(f"cannot bulk read for {op}")
+    self._bulk_read_op = None
+    return memoryview(data)

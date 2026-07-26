@@ -5,7 +5,7 @@
 #  - symbolic removal
 
 from examples.beautiful_mnist import Model
-from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable
+from tinygrad import Tensor, nn, getenv, GlobalCounters, Variable, Context
 from tinygrad.nn.datasets import mnist
 from tinygrad.helpers import trange
 
@@ -26,7 +26,7 @@ if __name__ == "__main__":
   X_samp, Y_samp = X_train[samples], Y_train[samples]
   print("*** got samples")
 
-  with Tensor.train():
+  with Context(TRAINING=1):
     """
     i = UOp.range(samples.shape[0])  # TODO: fix range function on UOp
     losses = model(X_samp[i]).sparse_categorical_crossentropy(Y_samp[i]).backward().contract(i)

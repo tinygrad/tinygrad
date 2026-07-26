@@ -255,7 +255,7 @@ def _sign(serial_num, out_dir):
   final = _build_elf(ehdr, allph, segs)
 
   os.makedirs(out_dir, exist_ok=True)
-  out = os.path.join(out_dir, "testsig-0x%08X.so" % serial_num)
+  out = os.path.join(out_dir, "testsig-0x%08x.so" % serial_num)
   with open(out, 'wb') as f:
     f.write(final)
   print("Signing complete! Output saved at %s" % out)

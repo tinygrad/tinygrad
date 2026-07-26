@@ -4,7 +4,7 @@ import torch
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
-from tinygrad.gradient import compute_gradient
+from tinygrad.mixin.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
   def _cmp_nan_okay(self, x, y):

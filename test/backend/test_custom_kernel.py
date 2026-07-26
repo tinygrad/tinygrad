@@ -1,18 +1,18 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
-from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 # **** kernels ****
 
 def custom_arange_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
-  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
+  return C[i].store(i.cast(C.dtype)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
 
 def custom_eye_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
   j = UOp.range(C.shape[1], 1)
-  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
+  return C[i, j].store((i.eq(j)).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
 
 def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -51,13 +51,13 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   i = UOp.range(dest.shape[0], 0)
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
-  store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
+  store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0)
   slice_src = src[G, :]
-  reg = UOp.placeholder((1,), dest.dtype.base, 0, addrspace=AddrSpace.REG)
+  reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
   reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
@@ -73,12 +73,12 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
 
   k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
-  qk_acc = UOp.placeholder((1,), Q.dtype.base, 0, addrspace=AddrSpace.REG)
+  qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
   qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
   qk_score = qk_acc[0] / (d ** 0.5)
 
-  out_acc = UOp.placeholder((1,), Q.dtype.base, 1, addrspace=AddrSpace.REG)
+  out_acc = UOp.placeholder((1,), Q.dtype, 1, addrspace=AddrSpace.REG)
   out_acc = out_acc.after(i, d_out)[0].set(0.0)
   out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
 
@@ -199,8 +199,7 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.empty(N, N)
 
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
@@ -209,8 +208,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.randn(N, N).to(devs)
     c = Tensor(Tensor.empty(N//2, N, device=devs).uop.multi(0), device=devs)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-    err = (tst - (a@b)).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
   # NOTE: grad_fxn doesn't work with pyrender
@@ -233,14 +231,9 @@ class TestCustomKernel(unittest.TestCase):
     real_grad_a, real_grad_b = a.grad, b.grad
     Tensor.realize(ref, real_grad_a, real_grad_b)
 
-    err = (tst - ref).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_a - real_grad_a).square().max()
-    self.assertLess(err.item(), 1e-6)
-
-    err = (grad_b - real_grad_b).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(tst.allclose(ref, atol=1e-3).item())
+    self.assertTrue(grad_a.allclose(real_grad_a, atol=1e-3).item())
+    self.assertTrue(grad_b.allclose(real_grad_b, atol=1e-3).item())
 
   def test_simple_qkv(self):
     N, d = 8, 4
@@ -253,8 +246,38 @@ class TestCustomKernel(unittest.TestCase):
     O_ref = ((Q @ K.T) / (d ** 0.5)) @ V
 
     Tensor.realize(O_custom, O_ref)
-    err = (O_custom - O_ref).square().max()
-    self.assertLess(err.item(), 1e-6)
+    self.assertTrue(O_custom.allclose(O_ref, atol=1e-3).item())
+
+  def test_gemm_qkv(self):
+    B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
+    H, QKV = H_KV * REP, H_KV * (REP + 2) * D
+
+    x = Tensor.empty(B*N, K_DIM)
+    w = Tensor.empty(K_DIM, QKV)
+    qkv = Tensor.empty(B*N, QKV)
+
+    qkv = Tensor.custom_kernel(qkv, x, w, fxn=custom_gemm)[0]
+    qkv = qkv.reshape(B, N, H_KV, REP + 2, D)
+
+    q = qkv[:, :, :, :REP, :].reshape(B, N, H, D).transpose(1, 2)
+    k = qkv[:, :, :, REP, :].transpose(1, 2)
+    v = qkv[:, :, :, REP + 1, :].transpose(1, 2)
+
+    out = q.scaled_dot_product_attention(k, v, enable_gqa=True)
+
+    GlobalCounters.reset()
+    out.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 5)
+
+  def test_simple_reshape(self):
+    a = Tensor.ones(2,3,4).realize()
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_add_one_kernel)[0]
+    b2 = b.reshape(2,12)
+    c = Tensor.custom_kernel(Tensor.empty_like(b2), b2, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    c.realize()
+    assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
+    self.assertEqual(GlobalCounters.kernel_count, 3)
 
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
@@ -296,6 +319,31 @@ class TestCustomKernel(unittest.TestCase):
       prg = call.src[0]
       if prg.op is not Ops.PROGRAM: continue
       self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
+
+  def test_multi_invalids_custom_kernel_no_copy(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(4, 4).shard(devs, axis=0).realize()
+    c = Tensor(Tensor.invalids(2, 4, dtype=dtypes.float, device=devs).uop.multi(0), device=devs)
+    c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    c.realize()
+    self.assertEqual(GlobalCounters.kernel_count, len(devs))
+    self.assertTrue((c == 2).all().item())
+
+  def test_partial_invalid_store_keeps_uncovered_reads(self):
+    x = Tensor([10., 20., 30., 40.])
+    after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float, Invalid, shape=(2,))))
+    self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
+
+  def test_multi_after_invalid_store_dep_removed(self):
+    x = Tensor.empty(4).uop
+    self.assertEqual(Tensor(x.after(x.store(5), x.store(Invalid))).tolist(), [5]*4)
+
+  def test_expand_view_invalid_assign_keeps_uncovered_reads(self):
+    x = Tensor([[10., 11., 12., 13.], [20., 21., 22., 23.], [30., 31., 32., 33.], [40., 41., 42., 43.]]).realize()
+    v = x[:1, :].expand(4, 4)
+    v.assign(Tensor.invalids(4, 4, dtype=dtypes.float))
+    self.assertEqual(v.contiguous().tolist(), [[10., 11., 12., 13.]]*4)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
@@ -374,7 +422,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]

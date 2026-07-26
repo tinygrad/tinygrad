@@ -28,6 +28,21 @@ class TestRingAllReduce(unittest.TestCase):
       self.assertEqual(len(copies), 24)
       self.assertEqual(len(sinks), 26)
 
+  @Context(RING=0, ALL2ALL=0)
+  def test_schedule_naive(self):
+    N = 4
+    ds = tuple(f"NULL:{i}" for i in range(N))
+    t = Tensor.empty(N, 4096).shard(ds, axis=0).realize()
+    linear = t.sum(0).linear_with_vars()[0]
+
+    copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+    sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
+    pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
+
+    self.assertEqual(len(pairs), N*(N-1))
+    self.assertEqual(len(sinks), 2)
+    self.assertTrue(all(dst != src for dst, src in pairs))
+
   def test_correct_ring(self):
     with Context(RING=2):
       N = 4
