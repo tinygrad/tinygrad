@@ -1,7 +1,9 @@
 import ctypes, errno, mmap, unittest
+from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tinygrad.device import BufferSpec
 from tinygrad.helpers import Context, mv_address
 from tinygrad.runtime.autogen import msm_drm
 from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterface
@@ -107,6 +109,16 @@ class TestMSMDRMUAPI(unittest.TestCase):
 
 
 class TestMSMIface(unittest.TestCase):
+  @staticmethod
+  def allocator(fd):
+    from tinygrad.runtime.ops_qcom import QCOMAllocator
+
+    dev = SimpleNamespace(synchronize=lambda: None)
+    iface, allocator = make_iface(fd), object.__new__(QCOMAllocator)
+    dev.iface, dev.allocator, iface.dev = iface, allocator, dev
+    allocator.dev, allocator.cache = dev, defaultdict(list)
+    return dev, allocator
+
   def test_init_requires_explicit_interface(self):
     from tinygrad.runtime.ops_qcom import MSMIface
 
@@ -192,6 +204,38 @@ class TestMSMIface(unittest.TestCase):
 
   def test_external_pointer_is_rejected(self):
     with self.assertRaisesRegex(ValueError, "external pointers"): make_iface(RecordingMSMFile()).map(0x1000, 16)
+
+  def test_allocator_rejects_external_pointer(self):
+    _, allocator = self.allocator(RecordingMSMFile())
+    with self.assertRaisesRegex(ValueError, "external pointers"):
+      allocator.alloc(16, BufferSpec(external_ptr=0x1000))
+
+  def test_allocator_lru_bounds_gem_churn(self):
+    fd = RecordingMSMFile()
+    _, allocator = self.allocator(fd)
+    options = BufferSpec()
+
+    for _ in range(1000):
+      buf = allocator.alloc(17, options)
+      allocator.free(buf, buf.size, options)
+
+    self.assertEqual(fd.requests.count(ioctl_number(msm_drm.DRM_IOCTL_MSM_GEM_NEW)), 1)
+    self.assertEqual(fd.closed_handles, [])
+    allocator.free_cache()
+    self.assertEqual(fd.closed_handles, [17])
+
+  def test_program_buffer_finalizer_synchronizes_before_close(self):
+    from tinygrad.runtime.ops_qcom import QCOMProgram
+
+    fd, synchronized = RecordingMSMFile(), []
+    dev, allocator = self.allocator(fd)
+    dev.synchronize = lambda: synchronized.append(True)
+    buf = allocator.alloc(17, BufferSpec(nolru=True))
+
+    QCOMProgram._fini(dev, buf, BufferSpec(nolru=True))
+
+    self.assertEqual(synchronized, [True])
+    self.assertEqual(fd.closed_handles, [17])
 
   def test_free_unmaps_then_closes_handle(self):
     fd = RecordingMSMFile()
