@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
@@ -492,8 +492,8 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
     ```
     """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
+    self = self.cast(least_upper_float(self.dtype))
+    return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
 
   def exp(self) -> Self:
     """
@@ -505,9 +505,8 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    if self.is_floating_point():
-      return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
-    return self.mul(1/math.log(2)).exp2()
+    self = self.cast(least_upper_float(self.dtype))
+    return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
 
   def log2(self) -> Self:
     """
