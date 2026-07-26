@@ -432,7 +432,7 @@ class MSMIface:
 
   def __init__(self, dev:QCOMDevice, device_id:int):
     if DEV.target("QCOM").interface != "MSM":
-      raise RuntimeError("MSM DRM must be selected explicitly with DEV=MSM+QCOM:IR3")
+      raise RuntimeError("MSM DRM must be selected explicitly with DEV=MSM+QCOM")
     if device_id != 0: raise RuntimeError(f"QCOM:{device_id} does not exist (1 MSM DRM device available)")
     self.dev = dev
 

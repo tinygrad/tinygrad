@@ -123,14 +123,14 @@ class TestMSMIface(unittest.TestCase):
     from tinygrad.runtime.ops_qcom import MSMIface
 
     with Context(DEV="QCOM:IR3"):
-      with self.assertRaisesRegex(RuntimeError, "MSM\\+QCOM:IR3"): MSMIface(SimpleNamespace(), 0)
+      with self.assertRaisesRegex(RuntimeError, "^MSM DRM must be selected explicitly with DEV=MSM\\+QCOM$"): MSMIface(SimpleNamespace(), 0)
 
   def test_init_probes_render_nodes_and_creates_a6xx_queue(self):
     from tinygrad.runtime.ops_qcom import MSMIface
 
     foreign, fd, dev = RecordingMSMFile(), RecordingMSMFile(), SimpleNamespace()
     foreign.is_msm = False
-    with Context(DEV="MSM+QCOM:IR3"), \
+    with Context(DEV="MSM+QCOM"), \
          patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128", "/dev/dri/renderD129"]), \
          patch("tinygrad.runtime.ops_qcom.FileIOInterface", side_effect=[foreign, fd]):
       iface = MSMIface(dev, 0)
@@ -145,7 +145,7 @@ class TestMSMIface(unittest.TestCase):
 
     fd = RecordingMSMFile()
     fd.chip_id = 0x05040000
-    with Context(DEV="MSM+QCOM:IR3"), \
+    with Context(DEV="MSM+QCOM"), \
          patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128"]), \
          patch("tinygrad.runtime.ops_qcom.FileIOInterface", return_value=fd), \
          self.assertRaisesRegex(RuntimeError, "Adreno 630"):
@@ -158,7 +158,7 @@ class TestMSMIface(unittest.TestCase):
 
     fd = RecordingMSMFile()
     fd.chip_id = 0x06050000
-    with Context(DEV="MSM+QCOM:IR3"), \
+    with Context(DEV="MSM+QCOM"), \
          patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128"]), \
          patch("tinygrad.runtime.ops_qcom.FileIOInterface", return_value=fd), \
          self.assertRaisesRegex(RuntimeError, "Adreno 630"):
