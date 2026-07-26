@@ -51,7 +51,7 @@ class ElementwiseMixin(CreationMixin):
     """
     Returns a contiguous tensor.
     """
-    if self.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {self.dtype}")
+    if self.dtype in dtypes.weaks: return self
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
     return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))
@@ -399,7 +399,7 @@ class ElementwiseMixin(CreationMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     a, b = self._broadcasted(other)
-    return a.abs() * ((b < 0) | (b.reciprocal() < 0)).where(-1, 1)
+    return ((b < 0) | (b.reciprocal() < 0)).where(-(mag := a.cast(least_upper_dtype(a.dtype, b.dtype)).abs()), mag)
 
   def logaddexp(self, other: Self | ConstType) -> Self:
     """
