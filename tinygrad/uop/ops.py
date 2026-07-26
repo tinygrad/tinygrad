@@ -157,7 +157,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
       if not dtypes.is_int(src[1].dtype): raise RuntimeError(f"shift distance must be int, got {src[1].dtype}")
-      return src[0].dtype
+      return promo_dtype(src)
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
       return arg.dtype
@@ -173,7 +173,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
       if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is always bool, the promo lattice bottom
       if isinstance(arg, bool): return dtypes.bool
-      if isinstance(arg, int): return None
+      if isinstance(arg, int): return dtypes.weakint
       if isinstance(arg, float): return dtypes.weakfloat
       raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
@@ -188,9 +188,10 @@ class UOpMetaClass(type):
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if op is Ops.CONST and arg is Invalid: dtype = dtypes.bool
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    # CONST derives its dtype by value only when the constructor omits one; an explicit (strong) const dtype is legal until the field is removed
-    if SPEC == 2 and op is not Ops.CONST and not any(s.base.arg is Invalid for s in src) and \
-       (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    # CONST derives its dtype by value only when the constructor omits one
+    # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
+    if SPEC == 2 and op is not Ops.CONST and not (op in (Ops.SHL, Ops.SHR) and src[1].dtype == dtypes.uint and dtype == src[0].dtype) and \
+       not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
