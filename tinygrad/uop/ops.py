@@ -828,6 +828,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x.device is not None: return x.device
     return None
+  @property
+  def is_virtual(self) -> bool:
+    # NOTE: no device means no place to store, weak means no width to store. neither can back a buffer as-is
+    # TODO: unify with has_buffer_identity
+    return self.device is None or self.dtype in dtypes.weaks
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
