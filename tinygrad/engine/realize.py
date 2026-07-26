@@ -4,7 +4,7 @@ import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
@@ -112,9 +112,8 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
-  assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.arg.function_name, ast.src[3].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
+    runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
   return runtime
 
@@ -261,20 +260,16 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
+
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_compile
-    linear = hcq_compile(linear, input_uops, jit=jit)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, jit=jit)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp, jit=False) -> UOp:
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_link
-    linear = hcq_link(linear, jit=jit)
-  return linear
+def link_linear(linear:UOp, jit=False) -> UOp: return hcq_link(linear, jit=jit) if getenv("HCQ2") else linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)

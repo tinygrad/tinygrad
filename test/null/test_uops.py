@@ -7,14 +7,13 @@ from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
-from tinygrad.uop.symbolic import sym
+from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
 
 class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):
     self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.float16, 1.0)), None), dtypes.float32)
     self.assertEqual(dtype_from_uop(Ops.MUL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.int32, 1)), None), dtypes.int32)
-    with self.assertRaises(KeyError): dtype_from_uop(Ops.ADD, (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.int8, 1)), None)
 
   def test_same_dtype_fast_path(self):
     src = (UOp.const(dtypes.weakint, 1), UOp.const(dtypes.weakint, 2))
@@ -44,6 +43,28 @@ class TestDTypeFromUOp(unittest.TestCase):
     for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
       with self.assertRaises(RuntimeError): type_verify(UOp.const(weak, value).sink(), spec_program)
       type_verify(UOp.const(concrete, value).sink(), spec_program)
+
+  def test_invalid_dtype_and_consumers(self):
+    invalid = UOp.invalid()
+    self.assertIs(invalid.dtype, dtypes.bool)
+    self.assertIs(UOp.const(dtypes.float32, Invalid), invalid)
+    self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
+    scratch = Tensor.invalids(4, dtype=dtypes.float32)
+    self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
+      if u.arg is Invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
+    invalid, value = UOp.invalid(), UOp.const(dtypes.float32, 1)
+    for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
+              UOp.const(dtypes.bool, True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
+              UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
+    gate, value = UOp.param(0, dtypes.bool, ()), UOp.param(1, dtypes.float, ())
+    self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(dtypes.float, 0))
+    type_verify(out.sink(), spec_program)
+
+  def test_remove_invalid_stack_lanes(self):
+    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(dtypes.half, 1), UOp.invalid()))
+    out = graph_rewrite(stack, pm_remove_invalid)
+    self.assertEqual(out.src, (UOp.const(dtypes.half, 1), UOp.const(dtypes.half, 0)))
+    type_verify(out.sink(), spec_program)
 
 class TestLowerIndexDtype(unittest.TestCase):
   def test_gated_shrink_lowers_to_selected_width(self):

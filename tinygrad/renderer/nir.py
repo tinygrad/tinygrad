@@ -2,7 +2,7 @@ from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
 from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
@@ -282,9 +282,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   srcs=lambda b,img,idx_y,idx_x:[nsrc(x) for x in [img, tovec(b, idx_y, idx_x), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
       lambda b,img,idx_y,idx_x,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
-class IR3Renderer(NIRRenderer, OpenCLRenderer):
-  has_aux = True
-
+class IR3Renderer(NIRRenderer):
   def nload_img(ctx,img,idx_y,idx_x):
     ctx.texs.add(img)
     return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], img.dtype)

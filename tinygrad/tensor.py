@@ -6,7 +6,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, ConstLike
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -70,16 +70,13 @@ class Tensor(RandMixin):
     self.is_param:bool = True
 
     # create a UOp from the different types of inputs
-    if isinstance(data, UOp):
-      # if data is dtype.weakint that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
-      if data.dtype == dtypes.weakint: data = _index_to_concrete_int(data)
-    elif data is None:
+    if data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
       data = UOp.const(_dtype or dtypes.from_py(data), data)
     elif is_numpy_ndarray(data) and data.shape == ():
       data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
-    else:
+    elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes): data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
       elif isinstance(data, (list, tuple)):
@@ -176,7 +173,9 @@ class Tensor(RandMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    if any(t.dtype in dtypes.weaks for t in (self,)+lst): raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
+    # weakness ends where storage begins
+    if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
+      raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -204,7 +203,7 @@ class Tensor(RandMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
-    if self.dtype in dtypes.weaks: raise RuntimeError("cannot assign into a weak tensor; it has no storage")
+    if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
     is_disk = isinstance(self.device, str) and self.device.startswith(("DISK", "TINYFS"))
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP

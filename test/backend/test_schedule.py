@@ -366,6 +366,7 @@ class TestCopyFolding(unittest.TestCase):
     x = y.one_hot(10)
     check_schedule(x, 3, filter_sink=False)
 
+  @unittest.skip("no longer supported")
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).clone().realize()
     zeros = Tensor.zeros(3, buffer=False).realize()
@@ -406,6 +407,7 @@ class TestCopyFolding(unittest.TestCase):
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
+  @unittest.skip("same-device copies are no-ops")
   def test_self_assign_same_device_copy(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph

@@ -1,8 +1,9 @@
-import tempfile, unittest
+import tempfile, unittest, math
 
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.dtype import least_upper_float
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop
 from tinygrad.uop.spec import spec_shared, type_verify
 
 
@@ -23,7 +24,22 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(t.dtype, weak)
       self.assertEqual(t.data().itemsize, strong.itemsize)
       self.assertEqual(t.numpy().dtype.itemsize, strong.itemsize)
-      with self.assertRaises(RuntimeError): t.clone("CPU")
+      # materializing commits at the kind default; contiguous has no layout to fix so it stays weak
+      self.assertEqual((c := t.clone("CPU")).dtype, strong)
+      self.assertEqual(c.item(), value)
+      self.assertEqual(t.contiguous().dtype, weak)
+
+  def test_assign_into_weak_commits(self):
+    t = Tensor.const(dtypes.weakfloat, 0.5)
+    t.assign(Tensor(1.0, dtype=dtypes.default_float))
+    self.assertEqual((t.dtype, t.item()), (dtypes.default_float, 1.0))
+
+  def test_float_unary_on_weakint_stays_weak(self):
+    self.assertIs(least_upper_float(dtypes.weakint), dtypes.weakfloat)
+
+  def test_copysign_meets_operands(self):
+    r = Tensor([2], dtype=dtypes.uint8, device="CPU").copysign(Tensor([1], dtype=dtypes.uint32, device="CPU"))
+    self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
 
   def test_uop_scalar_const_unchanged(self):
     for dtype, value in ((dtypes.weakint, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
@@ -58,6 +74,8 @@ class TestWeakPromotion(unittest.TestCase):
   def test_weak_int_binop(self):
     v = UOp.variable("i", 0, 10, dtypes.weakint)
     self.assertEqual((v << 1).dtype, dtypes.weakint)
+    self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.uint32, 1)), None), dtypes.int64)
+    self.assertEqual(UOp.const(dtypes.weakint, 1).alu(Ops.SHL, UOp.const(dtypes.uint8, 1)).dtype, dtypes.uint8)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
     with self.assertRaises(RuntimeError): Tensor.const(dtypes.weakfloat, 1.0) << Tensor.const(dtypes.weakfloat, 1.0)
     with self.assertRaises(RuntimeError): UOp.const(dtypes.int32, 1).alu(Ops.SHL, UOp.const(dtypes.float64, 1))
@@ -125,8 +143,9 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(weak_val().numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(weak_val().tolist(), [value])
       self.assertEqual(weak_val().cast(strong).realize().uop.buffer.dtype, strong)
-      for entry in (lambda t: t.contiguous(), lambda t: t.realize(), lambda t: t.clone(),
-                    lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
+      self.assertEqual(weak_val().contiguous().dtype, weak)                 # no layout to fix, stays weak
+      self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the kind default
+      for entry in (lambda t: t.realize(), lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
         with self.assertRaises(RuntimeError): entry(weak_val())
 
   def test_empty_reads_commit(self):
@@ -135,6 +154,20 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(empty.data().format, strong.fmt)
       self.assertEqual(empty.numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(empty.tolist(), [])
+
+
+class TestSignedUint64Weakfloat(unittest.TestCase):
+  # int64 and uint64 have no common integer supertype (JAX JEP), so the join defers to weakfloat instead of wrapping
+  def test_no_wrap(self):
+    r = Tensor([-1], dtype=dtypes.int64, device="CPU") + Tensor([1], dtype=dtypes.uint64, device="CPU")
+    self.assertEqual((r.dtype, r.item()), (dtypes.weakfloat, 0.0))
+
+  def test_weakfloat_lowers(self):
+    i64, u64 = Tensor([-1], dtype=dtypes.int64, device="CPU"), Tensor([3], dtype=dtypes.uint64, device="CPU")
+    r = i64 + u64 + Tensor([2], dtype=dtypes.float16, device="CPU")  # a concrete consumer takes the join
+    self.assertEqual((r.dtype, r.cast(dtypes.float32).item()), (dtypes.half, 4.0))
+    self.assertEqual((i64 < u64).item(), True)  # comparison meets at float
+    self.assertAlmostEqual((i64 + u64).sin().item(), math.sin(2), places=5)  # Unary lowers before transcendental
 
 
 if __name__ == "__main__":

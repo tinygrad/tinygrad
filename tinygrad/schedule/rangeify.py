@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, K
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -149,11 +149,16 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
    lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
-  # copying mselect to same device is just mselect (no NOOP kernel)
-  (UPat(Ops.COPY, src=(UPat(Ops.MSELECT, name="ms"),), name="copy"), lambda ms,copy: ms if ms.device == copy.device else None),
+  # copy to same device is a no-op
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
-  # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+  # copy on reshape is reshape on copy
+  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
+
+  # reshaping on STORE can be a NOOP
+  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
+                        UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
+   lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
 
   # ** store rules **
 
@@ -184,7 +189,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -305,8 +310,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
-  # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("x"),), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST
@@ -514,20 +517,30 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
-  # SINK requires all buffers on the same device, but COPY is cross-device
-  if ret.op is Ops.STORE: stored = ret.src[1]
-  elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
-  else: raise RuntimeError(f"unknown kernel type {ret.op}")
-  if stored.op is Ops.COPY: ret = stored.replace(src=stored.src + ret.ended_ranges)
-  else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
-
-  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
-  if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
-  return kernel
+  # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
+])
+
+def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
+  input_src = copy.src[0]
+  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
+  input_src = input_src.flatten()
+  if existing_buf is not None:
+    # if the existing buffer is not a full buffer, we can't use it
+    if not existing_buf.has_buffer_identity(after_ok=True): return None
+    # if there's already a buffer, we just use it
+    return existing_buf.flatten().store(input_src)
+  # create the output buffer
+  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+  # reshape back to input
+  return buf.after(buf.store(input_src)).reshape(copy.shape)
+
+pm_copy_to_store = PatternMatcher([
+  (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
+  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
 ])
 
 @profile_matches
@@ -535,6 +548,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+
+  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))

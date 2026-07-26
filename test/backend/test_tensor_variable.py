@@ -18,13 +18,16 @@ class TestTensorVariable(unittest.TestCase):
       self.assertListEqual((vv * t).tolist(), [2, 2, 2])
     except RuntimeError: pass
 
+  # TODO: a Variable PARAM lowers to int32, so a bound value that doesn't fit int32 truncates or fails to bind
+  @unittest.expectedFailure
   def test_large_range_variable(self):
-    vv = Variable("b", 0, 2**40).bind(2**35)
-    # TODO: pm_lower_index_dtype lowers ALU PARAM to int32 unconditionally
-    try:
-      self.assertEqual(Tensor(vv).item(), 2**35)
-    except AssertionError:
-      pass
+    self.assertEqual(Tensor(Variable("b", 0, 2**40).bind(2**35)).item(), 2**35)
+
+  def test_variable_defers_like_a_literal(self):
+    vv = Variable("a", 1, 10).bind(2)
+    self.assertEqual(Tensor(vv).dtype, dtypes.weakint)
+    self.assertEqual((Tensor(vv) + Tensor([1], dtype=dtypes.int8)).dtype, dtypes.int8)  # takes the concrete side, no widening
+    self.assertEqual(Tensor(vv).item(), 2)                                              # a read commits at default_int
 
   def test_variable_tensor_dtype_arg(self):
     vv = Variable("a", 1, 10).bind(2)

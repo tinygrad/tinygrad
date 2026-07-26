@@ -142,11 +142,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
-   copy.replace(src=(x,)+copy.src[1:], tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,), tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:]) \
+   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) \
    if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # add CONTIGUOUS to tagged UOps
@@ -179,10 +179,9 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
+  if b.op is Ops.BIND: return b.param_like(len(ctx.replacements)-1)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, name=b.src[0].expr if b.op is Ops.BIND else None,
-                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL,
-                   multiple_of=b.src[0].arg.multiple_of if b.op is Ops.BIND else None)
+                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),

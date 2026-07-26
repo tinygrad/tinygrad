@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -26,7 +26,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
-from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
+from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -88,25 +88,20 @@ expander2 = PatternMatcher([
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
-def broadcast_binary(x:UOp):
+def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
   if any(s is None for s in shapes) or all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
-  return x.replace(src=tuple(src_reshaped))
+  shape = _broadcast_shape(*shapes)
+  return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
   shapes = [u.shape[:-1] for u in b.src]
   if all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp+(u.shape[-1],)).expand(broadcasted+(u.shape[-1],))
-                  for u,shp in zip(b.src, shaped_aligned)]
+  shape = _broadcast_shape(*shapes)
+  src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
+    src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
 pm_wmma_add = PatternMatcher([
@@ -119,19 +114,19 @@ pm_wmma_add = PatternMatcher([
     lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.arg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.arg)),
 ])
 
-unbroadcast = pm_wmma_add+PatternMatcher([
-  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+pm_expand_broadcast = pm_wmma_add+PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked
-  if not all_same([x.shape for x in b.src]): return None
+  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
+  if not all(x.shape == b.shape or x.base.arg is Invalid for x in b.src): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
     idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+    src.append(b.replace(src=tuple(x.base if x.base.arg is Invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -302,7 +297,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
@@ -408,8 +403,7 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
-  new_arg = replace(prg.arg, aux=tuple(ctx.aux(list(lin.src)))) if ctx.has_aux else prg.arg
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
@@ -442,14 +436,14 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prog_info = ProgramInfo.from_sink(full_sink)
+    prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg

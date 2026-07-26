@@ -323,7 +323,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
     a = Tensor.ones(4, 4).shard(devs, axis=0).realize()
-    c = Tensor(UOp.const(dtypes.float, Invalid, shape=(2, 4)).clone(device=devs).multi(0), device=devs)
+    c = Tensor(Tensor.invalids(2, 4, dtype=dtypes.float, device=devs).uop.multi(0), device=devs)
     c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     c.realize()
