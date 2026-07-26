@@ -97,7 +97,9 @@ class CreationMixin(DTypeMixin, MovementMixin):
     if isinstance(self.device, tuple):
       if device is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
       return self._multi_like(lambda shape, dev: type(self).full(shape, fill_value, dtype=dtype or self.dtype, device=dev, buffer=buffer))
-    return type(self).full(self.shape, fill_value, dtype=dtype or self.dtype, device=(self.device if device is None else device) if buffer else device, buffer=buffer)
+    #`buffer=False` produces a device-less broadcast const, so don't inherit `self.device` in that case (None stays None, raising `full` assert)
+    device = (self.device if device is None else device) if buffer else device
+    return type(self).full(self.shape, fill_value, dtype=dtype or self.dtype, device=device, buffer=buffer)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
