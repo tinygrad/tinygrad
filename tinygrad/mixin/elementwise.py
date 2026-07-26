@@ -240,6 +240,7 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
+      if a.dtype not in dtypes.weaks: a = a.cast(dtypes.default_float)
     d = a * b.reciprocal()
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
@@ -390,7 +391,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
-    return t._inverse().maximum(x._inverse())._inverse()
+    return t.cast(dtype := least_upper_dtype(t.dtype, x.dtype))._inverse().maximum(x.cast(dtype)._inverse())._inverse()
 
   def copysign(self, other: Self | ConstType) -> Self:
     """
@@ -549,7 +550,7 @@ class ElementwiseMixin(CreationMixin):
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
-    if not base.is_floating_point() and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
+    if not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
       raise RuntimeError("base needs to be float")
     return base.alu(Ops.POW, exponent)
 
