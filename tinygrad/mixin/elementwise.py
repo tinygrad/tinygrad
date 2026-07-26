@@ -391,7 +391,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
-    return t.cast(dtype := least_upper_dtype(t.dtype, x.dtype))._inverse().maximum(x.cast(dtype)._inverse())._inverse()
+    return t._inverse().maximum(x._inverse())._inverse()
 
   def copysign(self, other: Self | ConstType) -> Self:
     """
@@ -399,7 +399,7 @@ class ElementwiseMixin(CreationMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     a, b = self._broadcasted(other)
-    return ((b < 0) | (b.reciprocal() < 0)).where(-(mag := a.cast(least_upper_dtype(a.dtype, b.dtype)).abs()), mag)
+    return ((b < 0) | (b.reciprocal() < 0)).where(-(mag := a.abs()), mag)
 
   def logaddexp(self, other: Self | ConstType) -> Self:
     """
