@@ -26,7 +26,6 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib, self.arch)
 
-
 class X86Compiler(Compiler):
   def __init__(self): super().__init__(None)
   def compile(self, src:str) -> bytes: return bytes.fromhex(src)

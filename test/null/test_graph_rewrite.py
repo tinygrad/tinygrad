@@ -348,6 +348,19 @@ class TestStopEarly(unittest.TestCase):
     ret = (c+d).substitute({c:cn}, extra_pm=pm_cvisit)
     assert ret == cn+d
 
+class TestFastSubstitute(unittest.TestCase):
+  def test_replacement_tree_is_substituted(self):
+    a, b, c, d = [UOp.variable(x, 0, 10) for x in "abcd"]
+    self.assertIs((a+4).substitute({a:b+c, b:d}), (d+c)+4)
+
+  def test_rebuilt_node_is_substituted(self):
+    a, b, c, d = [UOp.variable(x, 0, 10) for x in "abcd"]
+    self.assertIs(((a+b)*2).substitute({a:c, c+b:d}), d*2)
+
+  def test_mapping_cycle(self):
+    a, b = [UOp.variable(x, 0, 10) for x in "ab"]
+    with self.assertRaises(RuntimeError): (a+1).substitute({a:b, b:a})
+
 class TestWalkRewrite(unittest.TestCase):
   """Tests for graph_rewrite with walk=True (MLIR Walk Pattern Rewrite Driver semantics).
   walk=True gives a single-pass traversal that does NOT revisit or re-traverse into rewritten subtrees.

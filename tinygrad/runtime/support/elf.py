@@ -6,6 +6,22 @@ from tinygrad.runtime.autogen import libc
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
+def elf_symbols(blob:bytes) -> dict[str, int]:
+  ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
+  header = getattr(libc, f"{ecls}_Ehdr").from_buffer_copy(blob)
+  section_headers = (getattr(libc, f"{ecls}_Shdr") * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
+  sym_t = getattr(libc, f"{ecls}_Sym")
+  symbols = {}
+  for sh in section_headers:
+    if sh.sh_type not in (libc.SHT_SYMTAB, libc.SHT_DYNSYM): continue
+    str_sh = section_headers[sh.sh_link]
+    strtab = blob[str_sh.sh_offset:str_sh.sh_offset+str_sh.sh_size]
+    for sym in (sym_t * (sh.sh_size // sh.sh_entsize)).from_buffer_copy(blob[sh.sh_offset:]):
+      symbols[strtab[sym.st_name:strtab.find(b'\0', sym.st_name)].decode()] = sym.st_value
+  return symbols
+
+def elf_symbol_address(blob:bytes, name:str) -> int|None: return elf_symbols(blob).get(name)
+
 def link_sym(sym:str, libs:list[str]) -> int:
   for lib in libs:
     try: return unwrap(ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library(lib)), sym), ctypes.c_void_p).value)

@@ -312,9 +312,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = memory_coalescing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
 
-  # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym, name="extra symbolic")
-
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
@@ -324,7 +321,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
-  # **** decomps ****
+  # optional pre matcher
+  if ren.pre_matcher is not None:
+    sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
@@ -346,10 +345,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+  final_topo = sink.backward_slice_with_self
 
   # put unnumbered variable PARAMs in slots
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
-  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+  param_slots = [u.arg.slot for u in final_topo if u.op is Ops.PARAM]
+  if -1 in param_slots:
+    sink = graph_rewrite(sink, pm_number_params, ctx=[sum(slot != -1 for slot in param_slots)], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
@@ -424,15 +425,9 @@ pm_to_program = PatternMatcher([
 def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   """
   Transform an AST into a compiled PROGRAM. May trigger BEAM search.
-
-  Args:
-    ast: The Ops.SINK/Ops.PROGRAM rooted AST
-    renderer: The renderer used to generate the code
-
-  Returns:
-    The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
-  if ast.op is Ops.PROGRAM: prg = ast
+  if ast.op is Ops.PROGRAM:
+    prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
@@ -449,8 +444,9 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
-def to_program(ast:UOp, renderer:Renderer) -> UOp:
+def to_program(ast:UOp, renderer:Renderer, compile_binary=True) -> UOp:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
-  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  key = (ast.key, type(renderer), renderer.target, compile_binary, *[x.value for x in config])
+  if (prg:=to_program_cache.get(key)) is None:
+    to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg
