@@ -1,13 +1,31 @@
 import unittest, io
 from contextlib import redirect_stdout
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, UOp
 from tinygrad.helpers import Target
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.codegen import to_program
+from tinygrad.runtime.ops_cpu import RING_SLOTS
+from tinygrad.uop.ops import KernelInfo
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
+  def test_32_buffer_kernel(self):
+    def add_inputs(out:UOp, *inputs:UOp) -> UOp:
+      return out[0].store(sum((x[0] for x in inputs), start=UOp.const(out.dtype, 0))).sink(
+        arg=KernelInfo(name="add_31_inputs", opts_to_apply=()))
+    inputs = [Tensor([i], device="CPU").realize() for i in range(31)]
+    out = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), *inputs, fxn=add_inputs)[0]
+    self.assertEqual(out.item(), sum(range(31)))
+
+  def test_command_ring_backpressure(self):
+    dev, count = Device["CPU"], RING_SLOTS + 257
+    signal, queue = dev.new_signal(value=0), dev.hw_compute_queue_t()
+    for value in range(1, count + 1): queue.signal(signal, value)
+    queue.submit(dev)
+    signal.wait(count, timeout=10000)
+    self.assertEqual(signal.value, count)
+
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]
     for ren in Device[Device.DEFAULT].renderers:

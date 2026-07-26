@@ -2,8 +2,8 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
-from tinygrad.helpers import JIT_BATCH_SIZE
 from tinygrad.dtype import AddrSpace
+from tinygrad.llm import cpu as llm_cpu
 from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load, _GGML_QUANT
 from tinygrad.uop.ops import resolve, Ops, KernelInfo, AxisType
 
@@ -319,6 +319,20 @@ class Linear(nn.Linear):
         kernel = _q6_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0] * 4).call(*srcs)
       out = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], self.out_features)
       return out if self.bias is None else out + self.bias
+    if llm_cpu.SUPPORTED and self.ggml_type in (8, 14) and str(self.weight.device).startswith("CPU") and \
+       x.dtype in (dtypes.float16, dtypes.float32):
+      ggml_type = self.ggml_type
+      assert ggml_type is not None
+      tokens, xc = int(x.numel()) // self.in_features, x.reshape(-1, self.in_features).contiguous()
+      out = Tensor.empty(tokens, self.out_features, dtype=x.dtype, device=x.device)
+      out = Tensor.custom_kernel(out, self.weight, xc, fxn=lambda out,raw,x:
+        llm_cpu.ggml_linear_kernel(out, raw, x, ggml_type))[0].reshape(*x.shape[:-1], self.out_features)
+      return out if self.bias is None else out + self.bias
+    if self.ggml_type is not None:
+      weight = ggml_data_to_tensor(self.weight, self.out_features * self.in_features, self.ggml_type,
+                                   contiguous=False).reshape(self.out_features, self.in_features)
+      if getenv("HALF", 1): weight = weight.cast('float16')
+      return x.linear(weight.transpose(), self.bias)
     return super().__call__(x)
 
 def _q8_linear_pair(first:Linear, second:Linear, x:Tensor, prepared:tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
@@ -476,6 +490,15 @@ class ExpertWeights:
         fxn=lambda out,raw,sel,xq,xd,lut:_packed_expert_kernel(out, raw, sel, xq, xd, lut, self.out_features,
                                                               self.in_features, ggml_type, routes_per_input))[0]
       return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
+    if llm_cpu.SUPPORTED and ggml_type in (14, 21, 23) and str(self.weight.device).startswith("CPU") and \
+       x.dtype in (dtypes.float16, dtypes.float32):
+      input_count = int(x.numel()) // self.in_features
+      routes_per_input = int(sel.numel()) // input_count
+      flat_sel, xc = sel.flatten().contiguous(), x.reshape(-1, self.in_features).contiguous()
+      out = Tensor.empty(int(sel.numel()), self.out_features, dtype=x.dtype, device=x.device)
+      out = Tensor.custom_kernel(out, self.weight, flat_sel, xc, fxn=lambda out,raw,sel,x:
+        llm_cpu.ggml_expert_kernel(out, raw, sel, x, ggml_type, routes_per_input))[0]
+      return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
     if self.ggml_type is None: weight = self.weight[sel]
     else:
       packed = self.weight.reshape(self.num_experts, -1)[sel].flatten()
@@ -548,6 +571,8 @@ def _biased_sigmoid_topk_kernel(out:UOp, sel:UOp, x:UOp, bias:UOp, k:int, normal
 def biased_sigmoid_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, Tensor]:
   assert x.shape[-1] == bias.shape[0] == 256
   outer = int(x.numel()) // 256
+  if str(x.device).startswith("CPU") and outer <= 32 and x.dtype in (dtypes.float16, dtypes.float32) and \
+     bias.dtype in (dtypes.float16, dtypes.float32): return llm_cpu.biased_topk(x, bias, k, normalize)
   values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
   indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
   return tuple(Tensor.custom_kernel(values, indices, x.contiguous(), bias.contiguous(),
@@ -570,6 +595,8 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
 
 def topk_softmax(x:Tensor, k:int) -> tuple[Tensor, Tensor]:
   n, outer = x.shape[-1], int(x.numel()) // x.shape[-1]
+  if n == 256 and outer <= 512 and str(x.device).startswith("CPU") and x.dtype in (dtypes.float16, dtypes.float32):
+    return llm_cpu.topk_softmax(x, k)
   if n == 256 and outer <= 256 and str(x.device).startswith("AMD"):
     values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
     indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
@@ -684,9 +711,11 @@ class FFNBlock:
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       prepared = self.ffn_gate_exps.prepare(h) \
         if self.ffn_gate_exps.ggml_type in (14, 21, 23) and str(h.device).startswith("AMD") else None
-      logits = self.ffn_gate_inp(x, prepared)
+      logits = llm_cpu.f16_linear(self.ffn_gate_inp, x) if self.ffn_gate_inp.ggml_type is None and self.ffn_gate_inp.bias is None and \
+        self.ffn_gate_inp.weight.dtype == dtypes.float16 and str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
+        int(x.numel()) % self.ffn_gate_inp.in_features == 0 else self.ffn_gate_inp(x, prepared)
       if hasattr(self, 'exp_probs_b'):
-        if logits.shape[-1] == 256 and str(logits.device).startswith("AMD"):
+        if logits.shape[-1] == 256 and str(logits.device).startswith(("AMD", "CPU")):
           probs, sel = biased_sigmoid_topk(logits, self.exp_probs_b["bias"], self.config.num_experts_per_tok,
                                            self.config.norm_topk_prob)
           probs, sel = probs.reshape(*logits.shape[:-1], -1), sel.reshape(*logits.shape[:-1], -1)
@@ -702,27 +731,48 @@ class FFNBlock:
           _, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
           probs = logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
+      if llm_cpu.SUPPORTED and self.ffn_gate_exps.ggml_type == self.ffn_up_exps.ggml_type == 21 and \
+         self.ffn_down_exps.ggml_type == 23 and str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
+         hasattr(self, "ffn_gate_shexp") and self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == \
+         self.ffn_down_shexp.ggml_type == 8 and hasattr(self, "ffn_gate_inp_shexp") and \
+         int(x.numel()) == self.config.dim:
+        return llm_cpu.moe_ffn(self, x, probs, sel)
       if prepared is not None:
         flat_sel = sel.flatten().clone()
         gate, up = self.ffn_gate_exps(flat_sel, h, prepared), self.ffn_up_exps(flat_sel, h, prepared)
         x_down = self.ffn_down_exps(flat_sel, gate, _q8_silu_mul(gate, up, self.config.hidden_dim))
         x_down = x_down.reshape(*sel.shape, self.config.dim)
-      else: x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      elif llm_cpu.SUPPORTED and str(h.device).startswith("CPU") and \
+           self.ffn_gate_exps.ggml_type == self.ffn_up_exps.ggml_type and self.ffn_gate_exps.ggml_type in (14, 21, 23):
+        expert_input = llm_cpu.expert_silu(self.ffn_gate_exps, self.ffn_up_exps, sel, h) if h.dtype == dtypes.float32 else \
+          llm_cpu.silu_mul(*llm_cpu.expert_pair(self.ffn_gate_exps, self.ffn_up_exps, sel, h))
+        x_down = self.ffn_down_exps(sel, expert_input)
+      else:
+        x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())
+      out = llm_cpu.weighted_sum(x_down, probs) if llm_cpu.SUPPORTED and str(x_down.device).startswith("CPU") and \
+        x_down.dtype == probs.dtype and x_down.dtype in (dtypes.float16, dtypes.float32) else \
+        (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
         if prepared is not None and self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8:
           gate, up = _q8_linear_pair(self.ffn_gate_shexp, self.ffn_up_shexp, x, prepared)
+        elif self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8 and str(x.device).startswith("CPU"):
+          gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(
+            self.ffn_gate_shexp, self.ffn_up_shexp, x)
         else: gate, up = self.ffn_gate_shexp(x, prepared), self.ffn_up_shexp(x, prepared)
         if self.ffn_down_shexp.ggml_type in (8, 14) and str(gate.device).startswith("AMD"):
           shexp = self.ffn_down_shexp(gate, _q8_silu_mul(gate, up, self.config.shared_expert_dim))
+        elif self.ffn_down_shexp.ggml_type in (8, 14) and str(gate.device).startswith("CPU"):
+          shexp = self.ffn_down_shexp(llm_cpu.silu_mul(gate, up))
         else: shexp = self.ffn_down_shexp(gate.silu().contiguous() * up)
-        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * llm_cpu.shared_gate(x, self.ffn_gate_inp_shexp["weight"])
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
     prepared = self.ffn_gate.prepare(x)
     if prepared is not None and self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8:
       gate, up = _q8_linear_pair(self.ffn_gate, self.ffn_up, x, prepared)
+    elif self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8 and str(x.device).startswith("CPU"):
+      gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(self.ffn_gate, self.ffn_up, x)
     else: gate, up = self.ffn_gate(x, prepared), self.ffn_up(x, prepared)
     return self.ffn_down(gate.silu().contiguous() * up)
 
@@ -738,20 +788,22 @@ class FFNBlock:
     self._init_state(x)
     if hasattr(self, 'ssm_a'):
       self.pending_state = None
+      self.pending_recurrent_inplace = False
       @function(precompile=True, allow_implicit=True)
       def _run_stateful(x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None):
-        h = x + self._attention(self.attn_norm(x), start_pos, use_flash, kv_len, valid_len)
-        out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+        h = x + self._attention(llm_cpu.rmsnorm(self.attn_norm, x), start_pos, use_flash, kv_len, valid_len)
+        out = (h + self._feed_forward(llm_cpu.rmsnorm(self.ffn_norm, h))).contiguous()
         assert self.pending_state is not None
         return out, *self.pending_state
       out, conv_state, recurrent_state = _run_stateful(x, start_pos, valid_len)
-      stores = (getattr(self, "conv_state").uop.store(conv_state.uop), getattr(self, "recurrent_state").uop.store(recurrent_state.uop))
+      stores = [getattr(self, "conv_state").uop.store(conv_state.uop)]
+      if not self.pending_recurrent_inplace: stores.append(getattr(self, "recurrent_state").uop.store(recurrent_state.uop))
       state = getattr(self, "recurrent_state").uop.after(*stores)
       return Tensor(out.uop.after(state))
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     def _run(x:Tensor, start_pos:int|UOp):
-      h =     x + self._attention(self.attn_norm(x), start_pos, use_flash, kv_len)
-      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+      h =     x + self._attention(llm_cpu.rmsnorm(self.attn_norm, x), start_pos, use_flash, kv_len)
+      return (h + self._feed_forward(llm_cpu.rmsnorm(self.ffn_norm, h))).contiguous()
     return function(precompile=True, allow_implicit=True)(_run)(x, start_pos)
 
 class TransformerBlock(FFNBlock):
@@ -774,6 +826,8 @@ class TransformerBlock(FFNBlock):
     q = self.attn_q(x, prepared)
     if prepared is not None and self.attn_k.ggml_type == self.attn_v.ggml_type == 8:
       k, v = _q8_linear_pair(self.attn_k, self.attn_v, x, prepared)
+    elif str(x.device).startswith("CPU") and self.attn_k.ggml_type == self.attn_v.ggml_type == 8:
+      k, v = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(self.attn_k, self.attn_v, x)
     else: k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
@@ -808,6 +862,12 @@ class TransformerBlock(FFNBlock):
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
       from extra.gemm.amd_flash_attention import amd_flash_attention_decode
       attn = amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
+    elif llm_cpu.SUPPORTED and self.attn_k.ggml_type == self.attn_v.ggml_type == 8 and resolve(T == 1) and \
+         kv_len is not None and str(x.device).startswith("CPU"):
+      attn = llm_cpu.attention_decode(q.float(), assigned_kv, start_pos)
+    elif llm_cpu.SUPPORTED and self.attn_k.ggml_type == self.attn_v.ggml_type == 8 and resolve(T != 1) and \
+         str(x.device).startswith("CPU"):
+      attn = llm_cpu.attention_prefill(q.float(), assigned_kv, start_pos)
     elif use_flash:
       from extra.gemm.amd_flash_attention import amd_flash_attention_causal_cached
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
@@ -910,21 +970,44 @@ class GatedDeltaNetBlock(FFNBlock):
     if T == 1:
       x = x.half()
       prepared = self.attn_gate.prepare(x)
-      if prepared is not None and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
+      beta_alpha = None
+      if str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8 and \
+         self.ssm_beta_alpha_weight is not None and self.ssm_beta_alpha_weight.dtype == dtypes.float16:
+        out_gate, qkv, beta_alpha = llm_cpu.q8_gdn_projections(self.attn_gate, self.attn_qkv, self.ssm_beta_alpha_weight, x)
+      elif prepared is not None and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
         out_gate, qkv = _q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
+      elif str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
+        out_gate, qkv = llm_cpu.q8_linear_pair(self.attn_gate, self.attn_qkv, x)
       else: out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
-      beta, alpha = (x @ self.ssm_beta_alpha_weight.T).split(self.num_v_heads, dim=-1) if self.ssm_beta_alpha_weight is not None else \
-        (self.ssm_beta(x, prepared), self.ssm_alpha(x, prepared))
+      if beta_alpha is not None: beta, alpha = beta_alpha.split(self.num_v_heads, dim=-1)
+      elif self.ssm_beta_alpha_weight is not None: beta, alpha = (x @ self.ssm_beta_alpha_weight.T).split(self.num_v_heads, dim=-1)
+      elif str(x.device).startswith("CPU") and self.ssm_beta.ggml_type == self.ssm_alpha.ggml_type == 8:
+        beta, alpha = llm_cpu.q8_linear_pair(self.ssm_beta, self.ssm_alpha, x)
+      else: beta, alpha = self.ssm_beta(x, prepared), self.ssm_alpha(x, prepared)
       out_gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim)
       beta, alpha = beta.sigmoid(), ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).exp()
       conv_window = conv_state.cat(qkv, dim=1)
-      conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+      conv_sum = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1)
+      conv_out = llm_cpu.silu(conv_sum) if str(x.device).startswith("CPU") and \
+        self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8 else conv_sum.silu()
       q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
       q = l2norm(q.reshape(B, self.num_k_heads, self.head_k_dim)).repeat(1, self.num_v_heads//self.num_k_heads, 1)
       k = l2norm(k.reshape(B, self.num_k_heads, self.head_k_dim)).repeat(1, self.num_v_heads//self.num_k_heads, 1)
       v = v.reshape(B, self.num_v_heads, self.head_v_dim)
+      q = q.mul(self.head_k_dim**-0.5)
+      if llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
+        core, recurrent_state = llm_cpu.gated_delta(q.float(), k.float(), v.float(), beta.reshape(B, self.num_v_heads).float(),
+                                                  alpha.reshape(B, self.num_v_heads).float(), initial_state, inplace=True,
+                                                  norm_weight=self.ssm_norm.weight, norm_eps=self.ssm_norm.eps)
+        self.pending_recurrent_inplace = True
+        self.pending_state = (conv_window[:, 1:, :].cast(self.conv_state.dtype).contiguous(),
+                              recurrent_state)
+        if self.ssm_out.ggml_type == 8:
+          return llm_cpu.q8_silu_linear(self.ssm_out, out_gate.reshape(B, 1, -1), core.reshape(B, 1, -1))
+        return self.ssm_out(llm_cpu.silu_mul(out_gate, core.reshape(B, 1, self.num_v_heads, self.head_v_dim)).
+                            reshape(B, 1, -1).cast(x.dtype))
       beta, alpha = beta.reshape(B, self.num_v_heads, 1, 1), alpha.reshape(B, self.num_v_heads, 1, 1)
-      q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+      q, k, v = q.unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
       state_dots = initial_state @ k.cat(q, dim=-1)
       state_k, state_q = state_dots[..., :1] * alpha, state_dots[..., 1:] * alpha
       delta = (v - state_k) * beta
@@ -932,7 +1015,7 @@ class GatedDeltaNetBlock(FFNBlock):
       self.pending_state = (conv_window[:, 1:, :].cast(self.conv_state.dtype).contiguous(),
                             recurrent_state.cast(self.recurrent_state.dtype).contiguous())
       core = state_q + delta * (k.transpose(-1, -2) @ q)
-      core_attn_out = self.ssm_norm(core.squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+      core_attn_out = llm_cpu.rmsnorm(self.ssm_norm, core.squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
       return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
     # Batched projections and causal depthwise convolution.
@@ -940,9 +1023,14 @@ class GatedDeltaNetBlock(FFNBlock):
     prepared = self.attn_gate.prepare(x)
     if prepared is not None and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
       out_gate, qkv = _q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
+    elif str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
+      out_gate, qkv = llm_cpu.q8_batched_pair(self.attn_gate, self.attn_qkv, x)
     else: out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
-    beta, alpha = (x @ self.ssm_beta_alpha_weight.T).split(self.num_v_heads, dim=-1) if self.ssm_beta_alpha_weight is not None else \
-      (self.ssm_beta(x, prepared), self.ssm_alpha(x, prepared))
+    if self.ssm_beta_alpha_weight is not None:
+      beta_alpha = llm_cpu.f16_matvec(x, self.ssm_beta_alpha_weight) if llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and \
+        x.dtype == self.ssm_beta_alpha_weight.dtype == dtypes.float16 else x @ self.ssm_beta_alpha_weight.T
+      beta, alpha = beta_alpha.split(self.num_v_heads, dim=-1)
+    else: beta, alpha = self.ssm_beta(x, prepared), self.ssm_alpha(x, prepared)
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
     log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
@@ -950,16 +1038,38 @@ class GatedDeltaNetBlock(FFNBlock):
       active = (Tensor.arange(T).to(x.device) < Tensor(valid_len, device=x.device)).reshape(1, T, 1)
       beta, log_alpha = beta * active, log_alpha * active
     conv_window = conv_state.cat(qkv, dim=1)
-    conv_out = functools.reduce(lambda a,b: a+b,
-      (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
-    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q = l2norm(q.reshape(B, T, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
-    k = l2norm(k.reshape(B, T, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
-    v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
+    conv_out = llm_cpu.causal_conv_silu(conv_window, self.ssm_conv1d["weight"], T) if \
+      llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and isinstance(T, int) and \
+      conv_window.dtype in (dtypes.float16, dtypes.float32) and \
+      self.ssm_conv1d["weight"].dtype in (dtypes.float16, dtypes.float32) and \
+      (conv_window.dtype == dtypes.float32 or self.ssm_conv1d["weight"].dtype == dtypes.float32) else \
+      functools.reduce(lambda a,b: a+b,
+        (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
+    cpu_qkv = llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and conv_out.dtype == dtypes.float32
+    if cpu_qkv:
+      q, k, v = llm_cpu.gdn_qkv(conv_out, self.num_k_heads, self.num_v_heads, self.head_k_dim)
+      beta, log_alpha = beta.transpose(1, 2).float(), log_alpha.transpose(1, 2).float()
+    else:
+      q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+      q = l2norm(q.reshape(B, T, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
+      k = l2norm(k.reshape(B, T, self.num_k_heads, self.head_k_dim)).repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
+      v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
+      q, k, v, beta, log_alpha = [z.transpose(1, 2).float() for z in (q, k, v, beta, log_alpha)]
+      q = q * self.head_k_dim**-0.5
 
     # Chunked gated delta rule. The strictly-lower update is the triangular solve from the reference implementation.
-    q, k, v, beta, log_alpha = [z.transpose(1, 2).float() for z in (q, k, v, beta, log_alpha)]
-    q = q * self.head_k_dim**-0.5
+    if llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and self.ssm_norm.weight is not None and \
+       self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8 and self.ssm_norm.weight.dtype == dtypes.float16:
+      core_attn_out, recurrent_state = llm_cpu.gated_delta_prefill(q, k, v, beta, log_alpha.exp(), initial_state,
+                                                                 self.ssm_norm.weight, self.ssm_norm.eps)
+      core_attn_out = core_attn_out.transpose(1, 2)
+      out = (llm_cpu.q8_silu_linear(self.ssm_out, out_gate.reshape(B, T, -1), core_attn_out.reshape(B, T, -1))
+             if self.ssm_out.ggml_type == 8 else
+             self.ssm_out(llm_cpu.silu_mul(out_gate, core_attn_out).reshape(B, T, -1).cast(x.dtype))).contiguous()
+      state_pos = T if valid_len is None else valid_len
+      self.pending_state = (conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1, :].cast(self.conv_state.dtype).contiguous(),
+                            recurrent_state)
+      return out
     state = initial_state.transpose(-1, -2).float()
     core_chunks = []
     for start in range(0, T, 64):
@@ -977,7 +1087,7 @@ class GatedDeltaNetBlock(FFNBlock):
       state = state * g[..., -1, None, None].exp() + \
               (kc * (g[..., -1, None] - g).exp().unsqueeze(-1)).transpose(-1, -2) @ value
     core_attn_out = functools.reduce(lambda a,b: a.cat(b, dim=2), core_chunks)
-    core_attn_out = self.ssm_norm(core_attn_out.transpose(1, 2))
+    core_attn_out = llm_cpu.rmsnorm(self.ssm_norm, core_attn_out.transpose(1, 2))
     out = self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, T, -1).cast(x.dtype)).contiguous()
 
     state_pos = T if valid_len is None else valid_len
@@ -1028,7 +1138,10 @@ class Transformer:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos, use_flash, kv_len, valid_len)
     last = x[:, tokens.shape[1]-1:tokens.shape[1]] if valid_len is None else x[:, valid_len-1:valid_len]
-    logits = self.output(self.output_norm(last))[:, -1, :]
+    normalized = self.output_norm(last)
+    if not sample and llm_cpu.SUPPORTED and str(normalized.device).startswith("CPU") and self.output.ggml_type == 14 and \
+       int(normalized.numel()) == self.output.in_features: return llm_cpu.q6_argmax(self.output, normalized)
+    logits = self.output(normalized)[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if not sample: return logits.argmax(-1, keepdim=True)
     return (logits / temperature - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
@@ -1043,8 +1156,7 @@ class Transformer:
     if resolve(tokens.shape[1] == 1):
       pos = start_pos.unbind()[1] if isinstance(start_pos, UOp) else start_pos
       if self.has_recurrent_block:
-        short_decode_len = min(8192, self.max_context)
-        key = short_decode_len if pos < short_decode_len else self.max_context
+        key = llm_cpu.recurrent_decode_bucket(pos, self.max_context, str(self.token_embd.weight.device))
       else:
         min_bucket = max(1, getenv("DECODE_BUCKET", 256))
         kv_len = key = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
@@ -1117,6 +1229,9 @@ class Transformer:
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
     load_device = next(iter(state_dict.values())).device
+    if str(load_device).startswith("CPU") and getenv("CPU_GGML_PHYSICAL", 1) and \
+       (use_physical_cores:=getattr(Device[str(load_device)], "use_physical_cores", None)) is not None: use_physical_cores()
+    if llm_cpu.SUPPORTED and str(load_device).startswith("CPU"): llm_cpu.parallel_runtime()
     for param in nn.state.get_parameters(model): param.replace(param.to(load_device))
     model.parameter_count = sum(int(weight.numel()) for weight in state_dict.values())
     packed_weights:set[str] = set()
@@ -1141,13 +1256,17 @@ class Transformer:
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     recurrent_weights = []
     for block in model.blk:
-      if isinstance(block, GatedDeltaNetBlock):
+      if isinstance(block, GatedDeltaNetBlock) and block.ssm_beta.ggml_type is None and block.ssm_alpha.ggml_type is None:
         block.ssm_beta_alpha_weight = block.ssm_beta.weight.cat(block.ssm_alpha.weight).contiguous()
         recurrent_weights.append(block.ssm_beta_alpha_weight)
-    Tensor.realize(*recurrent_weights)
+    # Router weights are cast from GGUF float32 to float16 during loading. If that cast stays lazy, CPU decode captures
+    # and reruns the full 256 x dim conversion once per block and token instead of reading a persistent half matrix.
+    cpu_router_weights = [block.ffn_gate_inp.weight for block in model.blk if str(load_device).startswith("CPU") and
+                          hasattr(block, "ffn_gate_inp") and block.ffn_gate_inp.ggml_type is None]
+    if recurrent_weights or cpu_router_weights: Tensor.realize(*recurrent_weights, *cpu_router_weights)
     # Custom kernels need the shared GGUF buffer and byte offset before function tracing disables device access.
     packed_offsets = [linear._packed_offset() for linear in packed_linears]
-    Tensor.realize(*packed_offsets)
+    if packed_offsets: Tensor.realize(*packed_offsets)
     for linear,offset in zip(packed_linears, packed_offsets): linear._raw_offset_uop = offset.uop
     expert_types = {getattr(block, name).ggml_type for block in model.blk if hasattr(block, "ffn_gate_exps")
                     for name in ("ffn_gate_exps", "ffn_down_exps")}
@@ -1173,7 +1292,9 @@ class Transformer:
 
   def _init_state_checkpoints(self):
     if not self._state_checkpoints:
-      self._state_checkpoints = [Tensor.zeros_like(state).contiguous().realize() for state in self._recurrent_states()]
+      states = self._recurrent_states()
+      if not states: return
+      self._state_checkpoints = [Tensor.zeros_like(state).contiguous().realize() for state in states]
       def copy_jit(pairs:list[tuple[Tensor, Tensor]]) -> TinyJit:
         def copy_states() -> Tensor:
           copies = [dest.assign(src) for dest,src in pairs]
@@ -1183,13 +1304,12 @@ class Transformer:
         jit()
         jit()
         return jit
-      states = self._recurrent_states()
       self._save_state_jit = copy_jit(list(zip(self._state_checkpoints, states)))
       self._restore_state_jit = copy_jit(list(zip(states, self._state_checkpoints)))
 
   def _save_state_checkpoint(self, pos:int):
     self._init_state_checkpoints()
-    assert self._save_state_jit is not None
+    if self._save_state_jit is None: return
     self._save_state_jit()
     self._state_checkpoint_pos = pos
 
@@ -1199,13 +1319,16 @@ class Transformer:
 
   def warmup(self, chunk_size:int=256):
     device = self.token_embd.weight.device
+    # A 256-token packed CPU prefill can exceed the per-command timeout. The batched packed kernels reuse decoded
+    # weights across a smaller chunk while still warming both prefill and decode JITs.
+    if str(device).startswith("CPU"): chunk_size = min(chunk_size, max(1, getenv("CPU_PREFILL_CHUNK", 128)))
     direct_capture = not self.has_recurrent_block and all(isinstance(block, TransformerBlock) for block in self.blk)
     if direct_capture:
       device = str(self.token_embd.weight.device)
       direct_capture = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
 
     # Recurrent prefill has one fixed padded shape with symbolic valid length.
-    recurrent_chunk = min(chunk_size, 256)
+    recurrent_chunk = chunk_size if str(device).startswith("CPU") else min(chunk_size, 256)
     warm_len = min(recurrent_chunk if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
     if warm_len > 0:
       if direct_capture:
@@ -1230,11 +1353,11 @@ class Transformer:
         self.rollout_jits[short_decode_len].cnt = 1
         self._warming_up = True
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
-        prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 128 if str(device).startswith("AMD") else JIT_BATCH_SIZE.value)
+        prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 16 if str(device).startswith("CPU") else 128)
         with Context(JIT_BATCH_SIZE=prefill_batch): next(warm)
         next(warm)
-        # Long-context decode uses a larger attention partition. Capture it before listening so crossing 8K is seamless.
-        if self.max_context > short_decode_len:
+        # AMD flash decode specializes on its attention partition. Fused CPU decode uses one graph for the full cache.
+        if self.max_context > short_decode_len and not str(device).startswith("CPU"):
           self.rollout_jits[self.max_context] = TinyJit(
             functools.partial(self.forward_recurrent_decode, decode_len=self.max_context, sample=False))
           self.rollout_jits[self.max_context].cnt = 1
@@ -1273,7 +1396,12 @@ class Transformer:
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int=256, temperature:float=0.0):
-    if self.has_recurrent_block: chunk_size = min(chunk_size, 256)
+    # Compute reuse before selecting the CPU prefill shape so a one-token extension is not padded to a full chunk.
+    start_pos = self.get_start_pos(tokens)
+    if self.has_recurrent_block:
+      cpu_chunk = min(max(1, len(tokens)-start_pos), max(1, getenv("CPU_PREFILL_CHUNK", 128))) \
+        if str(self.token_embd.weight.device).startswith("CPU") else 256
+      chunk_size = min(chunk_size, cpu_chunk)
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -1283,8 +1411,7 @@ class Transformer:
     # chunk tensors below; allocating its input at max_context makes short requests spend most of their time converting zeros.
     t = None if self.has_recurrent_block else \
       Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32", device=device).reshape(1, self.max_context + chunk_size)
-    # recompute start_pos from what's currently valid in the caches
-    start_pos = self.get_start_pos(tokens)
+    # start_pos describes what's currently valid in the caches
     if start_pos < len(self._cached_tokens):
       if self.has_recurrent_block and self._state_checkpoints and start_pos == self._state_checkpoint_pos:
         self._restore_state_checkpoint()

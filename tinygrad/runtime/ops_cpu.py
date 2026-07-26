@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array
+import platform, sys, os, ctypes, functools, mmap, threading, array, pathlib
 from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -15,7 +15,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sint, KernelInfo
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
+MAX_ARGS, CMD_SIZE, RING_SLOTS = 32, 33, (16 << 10)
 
 def signal_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
@@ -44,6 +44,7 @@ def quit_prog():
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
+  progress = UOp.param(3, dtypes.uint64, (1,), volatile=True)
   cur = UOp.range(2**64-1, 0, dtype=dtypes.uint64)
 
   # spin on windows, sem_wait to sleep on posix
@@ -51,18 +52,19 @@ def worker_prog():
   else: ready = wait.after(cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.void)
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
-  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
+  return progress.after(entry[0].call(*entry[1:], ret_dtype=dtypes.void), cur)[0].store(cur + 1).end(cur)
 
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
     super().__init__()
     self.dev = dev
+    self._encoded:array.array|None = None
   def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=self.dev.prgs[prog], prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
     args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
-    assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
+    assert len(args) <= MAX_ARGS, f"CPU program {prg.name!r} supports at most {MAX_ARGS} arguments, got {len(args)}"
     for tid in range(1 if lvp else (global_size or (1,))[0]):
       if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
@@ -71,12 +73,23 @@ class CPUComputeQueue(HWQueue):
   def timestamp(self, signal): return self._cmd(timestamp_prog, (signal.base_buf.offset(8, 8), self.dev.func_table.offset(0, 8)))
   def signal(self, signal, value:sint=0): return self._cmd(signal_prog, (signal.base_buf,), (value,))
   def _submit(self, dev):
-    for off in range(0, len(self._q), CMD_SIZE):
-      entry = [self._q[off].addr, *self._q[off+1:off+CMD_SIZE]]
-      dev.ring_view[(base:=(dev.ring_pos % RING_SLOTS) * CMD_SIZE):base+CMD_SIZE] = array.array('Q', (int(x) & ((1<<64)-1) for x in entry))
-      dev.ring_pos += 1
+    if self._encoded is None:
+      self._encoded = array.array('Q', ((x.addr if i % CMD_SIZE == 0 else int(x)) & ((1<<64)-1) for i,x in enumerate(self._q)))
+    else:
+      for off, _ in self.q_sints: self._encoded[off] = int(self._q[off]) & ((1<<64)-1)
+    cmds, submitted = len(self._q) // CMD_SIZE, 0
+    while submitted < cmds:
+      consumed = dev.progress_view[0]
+      if (available:=RING_SLOTS - (dev.ring_pos - consumed)) == 0: continue
+      start = dev.ring_pos % RING_SLOTS
+      count = min(cmds - submitted, available, RING_SLOTS - start)
+      src = submitted * CMD_SIZE
+      dev.ring_view[start*CMD_SIZE:(start+count)*CMD_SIZE] = self._encoded[src:(src+count*CMD_SIZE)]
+      dev.ring_pos += count
       if WIN: dev.sys_view[0] = dev.ring_pos
-      else: assert libc.sem_post(dev.sem) == 0
+      else:
+        for _ in range(count): assert libc.sem_post(dev.sem) == 0
+      submitted += count
 
 class LVPArgsState(CLikeArgsState):
   def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
@@ -150,6 +163,8 @@ class CPUDevice(HCQCompiled):
 
     self.ring = self.allocator.alloc(RING_SLOTS * CMD_SIZE * 8, BufferSpec())
     self.ring_view, self.ring_pos = self.ring.cpu_view().view(fmt='Q'), 0
+    self.progress = self.allocator.alloc(8, BufferSpec())
+    self.progress_view = self.progress.cpu_view().view(fmt='Q')
 
     # posix uses sem to put cpus into sleep
     if WIN:
@@ -173,8 +188,23 @@ class CPUDevice(HCQCompiled):
       self.prgs = {f: self.runtime(f.__name__, do_to_program(v, ClangRenderer(self.renderer.target)).src[3].arg, native=True) for f,v in prgs.items()}
 
     self.worker:threading.Thread|None = threading.Thread(target=self.prgs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
-      ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr)), daemon=True)
+      ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr),
+      ctypes.c_uint64(self.progress.va_addr)), daemon=True)
     self.worker.start()
+    self._physical_affinity = False
+
+  def use_physical_cores(self):
+    if self._physical_affinity or not sys.platform.startswith("linux") or self.worker is None or self.worker.native_id is None: return
+    allowed = os.sched_getaffinity(self.worker.native_id)
+    physical:dict[tuple[str, str], int] = {}
+    try:
+      for cpu in sorted(allowed):
+        topology = pathlib.Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        key = ((topology / "physical_package_id").read_text().strip(), (topology / "core_id").read_text().strip())
+        physical.setdefault(key, cpu)
+    except (OSError, ValueError): return
+    if physical: os.sched_setaffinity(self.worker.native_id, set(physical.values()))
+    self._physical_affinity = True
 
   def finalize(self):
     if self.worker is None: return
