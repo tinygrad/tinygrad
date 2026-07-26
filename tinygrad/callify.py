@@ -38,8 +38,8 @@ add_tags = PatternMatcher([
 ])
 
 def replace_contig_with_store_after(u:UOp):
-  # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
-  if u.device is None: return None
+  # can't allocate a buffer for a virtual value
+  if u.is_virtual: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
@@ -203,7 +203,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
   # same predicate as Tensor.realize
-  ctx = AllocCtx(bases={base for x in big_sink.src if (base:=x.base).device is not None and not base.has_buffer_identity()
+  ctx = AllocCtx(bases={base for x in big_sink.src if not (base:=x.base).is_virtual and not base.has_buffer_identity()
                         and base.op is not Ops.AFTER and base.addrspace is not AddrSpace.ALU})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up

@@ -1,10 +1,11 @@
 import tempfile, unittest, math
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
 from tinygrad.uop.ops import UOp, Ops, dtype_from_uop
 from tinygrad.uop.spec import spec_shared, type_verify
+from tinygrad.engine.jit import JitError
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -150,6 +151,18 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the default
       for entry in (lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
         with self.assertRaises(RuntimeError): entry(weak_val())
+
+  def test_weak_is_virtual(self):
+    # NOTE: int64 lub uint64 is weakfloat, so this is device-ful weak from promotion, never from a cast to weak
+    devful = Tensor([1], dtype=dtypes.int64, device="CPU") + Tensor([1], dtype=dtypes.uint64, device="CPU")
+    for t in (Tensor.const(dtypes.weakfloat, 0.5), devful):
+      self.assertTrue(t.uop.is_virtual)
+      # realize is a no-op, so a weak input can never become the real buffer TinyJit needs
+      with self.assertRaises(JitError): TinyJit(lambda x: (x+1).realize())(t)
+    # callify must not silently commit a weak CONTIGUOUS to storage
+    c = devful.alu(Ops.CONTIGUOUS)
+    c.callify()
+    self.assertIs(c.dtype, dtypes.weakfloat)
 
   def test_empty_reads_commit(self):
     for weak, strong in ((dtypes.weakfloat, dtypes.default_float),):
