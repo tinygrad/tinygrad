@@ -130,7 +130,9 @@ def __getattr__(nm):
                                 args=["-I/opt/rocm/include", "-x", "c++"])
     case "amdgpu_drm": return load("amdgpu_drm", [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "msm_drm":
-      return load("msm_drm", ["{}/usr/include/drm/drm.h", "{}/usr/include/drm/msm_drm.h"], args=["-I{}/usr/include/drm"], srcs=linux_headers_deb,
+      return load("msm_drm", ["{}/usr/include/drm/drm.h", "{}/usr/include/drm/msm_drm.h"],
+                  args=["--target=x86_64-linux-gnu", "-nostdinc", "-I{}/usr/include/x86_64-linux-gnu", "-I{}/usr/include", "-I{}/usr/include/drm"],
+                  srcs=linux_headers_deb,
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz",
                                                          cwd=path, shell=True, check=True))
     case "kgsl": return load("kgsl", [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])

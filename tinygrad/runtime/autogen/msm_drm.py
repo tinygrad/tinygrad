@@ -4,16 +4,7 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-__s8: TypeAlias = ctypes.c_int32
-__u8: TypeAlias = ctypes.c_int32
-__s16: TypeAlias = ctypes.c_int32
-__u16: TypeAlias = ctypes.c_int32
-__s32: TypeAlias = ctypes.c_int32
-__u32: TypeAlias = ctypes.c_int32
-__s64: TypeAlias = ctypes.c_int32
-__u64: TypeAlias = ctypes.c_int32
-__kernel_size_t: TypeAlias = ctypes.c_int32
-drm_handle_t: TypeAlias = ctypes.c_uint64
+drm_handle_t: TypeAlias = ctypes.c_uint32
 drm_context_t: TypeAlias = ctypes.c_uint32
 drm_drawable_t: TypeAlias = ctypes.c_uint32
 drm_magic_t: TypeAlias = ctypes.c_uint32
@@ -48,7 +39,7 @@ class struct_drm_hw_lock(c.Struct):
 struct_drm_hw_lock.register_fields([('lock', ctypes.c_uint32, 0), ('padding', c.Array[ctypes.c_char, Literal[60]], 4)])
 @c.record
 class struct_drm_version(c.Struct):
-  SIZE = 56
+  SIZE = 64
   version_major: int
   version_minor: int
   version_patchlevel: int
@@ -58,13 +49,14 @@ class struct_drm_version(c.Struct):
   date: c.POINTER[ctypes.c_char]
   desc_len: int
   desc: c.POINTER[ctypes.c_char]
-struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_int32, 12), ('name', c.POINTER[ctypes.c_char], 16), ('date_len', ctypes.c_int32, 24), ('date', c.POINTER[ctypes.c_char], 32), ('desc_len', ctypes.c_int32, 40), ('desc', c.POINTER[ctypes.c_char], 48)])
+__kernel_size_t: TypeAlias = ctypes.c_uint64
+struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_uint64, 16), ('name', c.POINTER[ctypes.c_char], 24), ('date_len', ctypes.c_uint64, 32), ('date', c.POINTER[ctypes.c_char], 40), ('desc_len', ctypes.c_uint64, 48), ('desc', c.POINTER[ctypes.c_char], 56)])
 @c.record
 class struct_drm_unique(c.Struct):
   SIZE = 16
   unique_len: int
   unique: c.POINTER[ctypes.c_char]
-struct_drm_unique.register_fields([('unique_len', ctypes.c_int32, 0), ('unique', c.POINTER[ctypes.c_char], 8)])
+struct_drm_unique.register_fields([('unique_len', ctypes.c_uint64, 0), ('unique', c.POINTER[ctypes.c_char], 8)])
 @c.record
 class struct_drm_list(c.Struct):
   SIZE = 16
@@ -251,7 +243,8 @@ class struct_drm_modeset_ctl(c.Struct):
   SIZE = 8
   crtc: int
   cmd: int
-struct_drm_modeset_ctl.register_fields([('crtc', ctypes.c_int32, 0), ('cmd', ctypes.c_int32, 4)])
+__u32: TypeAlias = ctypes.c_uint32
+struct_drm_modeset_ctl.register_fields([('crtc', ctypes.c_uint32, 0), ('cmd', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_agp_mode(c.Struct):
   SIZE = 8
@@ -303,79 +296,81 @@ class struct_drm_gem_close(c.Struct):
   SIZE = 8
   handle: int
   pad: int
-struct_drm_gem_close.register_fields([('handle', ctypes.c_int32, 0), ('pad', ctypes.c_int32, 4)])
+struct_drm_gem_close.register_fields([('handle', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_gem_flink(c.Struct):
   SIZE = 8
   handle: int
   name: int
-struct_drm_gem_flink.register_fields([('handle', ctypes.c_int32, 0), ('name', ctypes.c_int32, 4)])
+struct_drm_gem_flink.register_fields([('handle', ctypes.c_uint32, 0), ('name', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_gem_open(c.Struct):
-  SIZE = 12
+  SIZE = 16
   name: int
   handle: int
   size: int
-struct_drm_gem_open.register_fields([('name', ctypes.c_int32, 0), ('handle', ctypes.c_int32, 4), ('size', ctypes.c_int32, 8)])
+__u64: TypeAlias = ctypes.c_uint64
+struct_drm_gem_open.register_fields([('name', ctypes.c_uint32, 0), ('handle', ctypes.c_uint32, 4), ('size', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_gem_change_handle(c.Struct):
   SIZE = 8
   handle: int
   new_handle: int
-struct_drm_gem_change_handle.register_fields([('handle', ctypes.c_int32, 0), ('new_handle', ctypes.c_int32, 4)])
+struct_drm_gem_change_handle.register_fields([('handle', ctypes.c_uint32, 0), ('new_handle', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_get_cap(c.Struct):
-  SIZE = 8
+  SIZE = 16
   capability: int
   value: int
-struct_drm_get_cap.register_fields([('capability', ctypes.c_int32, 0), ('value', ctypes.c_int32, 4)])
+struct_drm_get_cap.register_fields([('capability', ctypes.c_uint64, 0), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_set_client_cap(c.Struct):
-  SIZE = 8
+  SIZE = 16
   capability: int
   value: int
-struct_drm_set_client_cap.register_fields([('capability', ctypes.c_int32, 0), ('value', ctypes.c_int32, 4)])
+struct_drm_set_client_cap.register_fields([('capability', ctypes.c_uint64, 0), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_prime_handle(c.Struct):
   SIZE = 12
   handle: int
   flags: int
   fd: int
-struct_drm_prime_handle.register_fields([('handle', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('fd', ctypes.c_int32, 8)])
+__s32: TypeAlias = ctypes.c_int32
+struct_drm_prime_handle.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('fd', ctypes.c_int32, 8)])
 @c.record
 class struct_drm_syncobj_create(c.Struct):
   SIZE = 8
   handle: int
   flags: int
-struct_drm_syncobj_create.register_fields([('handle', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4)])
+struct_drm_syncobj_create.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_syncobj_destroy(c.Struct):
   SIZE = 8
   handle: int
   pad: int
-struct_drm_syncobj_destroy.register_fields([('handle', ctypes.c_int32, 0), ('pad', ctypes.c_int32, 4)])
+struct_drm_syncobj_destroy.register_fields([('handle', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_syncobj_handle(c.Struct):
-  SIZE = 20
+  SIZE = 24
   handle: int
   flags: int
   fd: int
   pad: int
   point: int
-struct_drm_syncobj_handle.register_fields([('handle', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('fd', ctypes.c_int32, 8), ('pad', ctypes.c_int32, 12), ('point', ctypes.c_int32, 16)])
+struct_drm_syncobj_handle.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('fd', ctypes.c_int32, 8), ('pad', ctypes.c_uint32, 12), ('point', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_syncobj_transfer(c.Struct):
-  SIZE = 24
+  SIZE = 32
   src_handle: int
   dst_handle: int
   src_point: int
   dst_point: int
   flags: int
   pad: int
-struct_drm_syncobj_transfer.register_fields([('src_handle', ctypes.c_int32, 0), ('dst_handle', ctypes.c_int32, 4), ('src_point', ctypes.c_int32, 8), ('dst_point', ctypes.c_int32, 12), ('flags', ctypes.c_int32, 16), ('pad', ctypes.c_int32, 20)])
+struct_drm_syncobj_transfer.register_fields([('src_handle', ctypes.c_uint32, 0), ('dst_handle', ctypes.c_uint32, 4), ('src_point', ctypes.c_uint64, 8), ('dst_point', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('pad', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_syncobj_wait(c.Struct):
-  SIZE = 28
+  SIZE = 40
   handles: int
   timeout_nsec: int
   count_handles: int
@@ -383,10 +378,11 @@ class struct_drm_syncobj_wait(c.Struct):
   first_signaled: int
   pad: int
   deadline_nsec: int
-struct_drm_syncobj_wait.register_fields([('handles', ctypes.c_int32, 0), ('timeout_nsec', ctypes.c_int32, 4), ('count_handles', ctypes.c_int32, 8), ('flags', ctypes.c_int32, 12), ('first_signaled', ctypes.c_int32, 16), ('pad', ctypes.c_int32, 20), ('deadline_nsec', ctypes.c_int32, 24)])
+__s64: TypeAlias = ctypes.c_int64
+struct_drm_syncobj_wait.register_fields([('handles', ctypes.c_uint64, 0), ('timeout_nsec', ctypes.c_int64, 8), ('count_handles', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('first_signaled', ctypes.c_uint32, 24), ('pad', ctypes.c_uint32, 28), ('deadline_nsec', ctypes.c_uint64, 32)])
 @c.record
 class struct_drm_syncobj_timeline_wait(c.Struct):
-  SIZE = 32
+  SIZE = 48
   handles: int
   points: int
   timeout_nsec: int
@@ -395,77 +391,77 @@ class struct_drm_syncobj_timeline_wait(c.Struct):
   first_signaled: int
   pad: int
   deadline_nsec: int
-struct_drm_syncobj_timeline_wait.register_fields([('handles', ctypes.c_int32, 0), ('points', ctypes.c_int32, 4), ('timeout_nsec', ctypes.c_int32, 8), ('count_handles', ctypes.c_int32, 12), ('flags', ctypes.c_int32, 16), ('first_signaled', ctypes.c_int32, 20), ('pad', ctypes.c_int32, 24), ('deadline_nsec', ctypes.c_int32, 28)])
+struct_drm_syncobj_timeline_wait.register_fields([('handles', ctypes.c_uint64, 0), ('points', ctypes.c_uint64, 8), ('timeout_nsec', ctypes.c_int64, 16), ('count_handles', ctypes.c_uint32, 24), ('flags', ctypes.c_uint32, 28), ('first_signaled', ctypes.c_uint32, 32), ('pad', ctypes.c_uint32, 36), ('deadline_nsec', ctypes.c_uint64, 40)])
 @c.record
 class struct_drm_syncobj_eventfd(c.Struct):
-  SIZE = 20
+  SIZE = 24
   handle: int
   flags: int
   point: int
   fd: int
   pad: int
-struct_drm_syncobj_eventfd.register_fields([('handle', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('point', ctypes.c_int32, 8), ('fd', ctypes.c_int32, 12), ('pad', ctypes.c_int32, 16)])
+struct_drm_syncobj_eventfd.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('point', ctypes.c_uint64, 8), ('fd', ctypes.c_int32, 16), ('pad', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_syncobj_array(c.Struct):
-  SIZE = 12
+  SIZE = 16
   handles: int
   count_handles: int
   pad: int
-struct_drm_syncobj_array.register_fields([('handles', ctypes.c_int32, 0), ('count_handles', ctypes.c_int32, 4), ('pad', ctypes.c_int32, 8)])
+struct_drm_syncobj_array.register_fields([('handles', ctypes.c_uint64, 0), ('count_handles', ctypes.c_uint32, 8), ('pad', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_syncobj_timeline_array(c.Struct):
-  SIZE = 16
+  SIZE = 24
   handles: int
   points: int
   count_handles: int
   flags: int
-struct_drm_syncobj_timeline_array.register_fields([('handles', ctypes.c_int32, 0), ('points', ctypes.c_int32, 4), ('count_handles', ctypes.c_int32, 8), ('flags', ctypes.c_int32, 12)])
+struct_drm_syncobj_timeline_array.register_fields([('handles', ctypes.c_uint64, 0), ('points', ctypes.c_uint64, 8), ('count_handles', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_crtc_get_sequence(c.Struct):
-  SIZE = 16
+  SIZE = 24
   crtc_id: int
   active: int
   sequence: int
   sequence_ns: int
-struct_drm_crtc_get_sequence.register_fields([('crtc_id', ctypes.c_int32, 0), ('active', ctypes.c_int32, 4), ('sequence', ctypes.c_int32, 8), ('sequence_ns', ctypes.c_int32, 12)])
+struct_drm_crtc_get_sequence.register_fields([('crtc_id', ctypes.c_uint32, 0), ('active', ctypes.c_uint32, 4), ('sequence', ctypes.c_uint64, 8), ('sequence_ns', ctypes.c_int64, 16)])
 @c.record
 class struct_drm_crtc_queue_sequence(c.Struct):
-  SIZE = 16
+  SIZE = 24
   crtc_id: int
   flags: int
   sequence: int
   user_data: int
-struct_drm_crtc_queue_sequence.register_fields([('crtc_id', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('sequence', ctypes.c_int32, 8), ('user_data', ctypes.c_int32, 12)])
+struct_drm_crtc_queue_sequence.register_fields([('crtc_id', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('sequence', ctypes.c_uint64, 8), ('user_data', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_set_client_name(c.Struct):
-  SIZE = 8
+  SIZE = 16
   name_len: int
   name: int
-struct_drm_set_client_name.register_fields([('name_len', ctypes.c_int32, 0), ('name', ctypes.c_int32, 4)])
+struct_drm_set_client_name.register_fields([('name_len', ctypes.c_uint64, 0), ('name', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_event(c.Struct):
   SIZE = 8
   type: int
   length: int
-struct_drm_event.register_fields([('type', ctypes.c_int32, 0), ('length', ctypes.c_int32, 4)])
+struct_drm_event.register_fields([('type', ctypes.c_uint32, 0), ('length', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_event_vblank(c.Struct):
-  SIZE = 28
+  SIZE = 32
   base: struct_drm_event
   user_data: int
   tv_sec: int
   tv_usec: int
   sequence: int
   crtc_id: int
-struct_drm_event_vblank.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_int32, 8), ('tv_sec', ctypes.c_int32, 12), ('tv_usec', ctypes.c_int32, 16), ('sequence', ctypes.c_int32, 20), ('crtc_id', ctypes.c_int32, 24)])
+struct_drm_event_vblank.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_uint64, 8), ('tv_sec', ctypes.c_uint32, 16), ('tv_usec', ctypes.c_uint32, 20), ('sequence', ctypes.c_uint32, 24), ('crtc_id', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_event_crtc_sequence(c.Struct):
-  SIZE = 20
+  SIZE = 32
   base: struct_drm_event
   user_data: int
   time_ns: int
   sequence: int
-struct_drm_event_crtc_sequence.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_int32, 8), ('time_ns', ctypes.c_int32, 12), ('sequence', ctypes.c_int32, 16)])
+struct_drm_event_crtc_sequence.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_uint64, 8), ('time_ns', ctypes.c_int64, 16), ('sequence', ctypes.c_uint64, 24)])
 drm_clip_rect_t: TypeAlias = struct_drm_clip_rect
 drm_drawable_info_t: TypeAlias = struct_drm_drawable_info
 drm_tex_region_t: TypeAlias = struct_drm_tex_region
@@ -508,66 +504,66 @@ drm_scatter_gather_t: TypeAlias = struct_drm_scatter_gather
 drm_set_version_t: TypeAlias = struct_drm_set_version
 @c.record
 class struct_drm_msm_timespec(c.Struct):
-  SIZE = 8
+  SIZE = 16
   tv_sec: int
   tv_nsec: int
-struct_drm_msm_timespec.register_fields([('tv_sec', ctypes.c_int32, 0), ('tv_nsec', ctypes.c_int32, 4)])
+struct_drm_msm_timespec.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_nsec', ctypes.c_int64, 8)])
 @c.record
 class struct_drm_msm_param(c.Struct):
-  SIZE = 20
+  SIZE = 24
   pipe: int
   param: int
   value: int
   len: int
   pad: int
-struct_drm_msm_param.register_fields([('pipe', ctypes.c_int32, 0), ('param', ctypes.c_int32, 4), ('value', ctypes.c_int32, 8), ('len', ctypes.c_int32, 12), ('pad', ctypes.c_int32, 16)])
+struct_drm_msm_param.register_fields([('pipe', ctypes.c_uint32, 0), ('param', ctypes.c_uint32, 4), ('value', ctypes.c_uint64, 8), ('len', ctypes.c_uint32, 16), ('pad', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_msm_gem_new(c.Struct):
-  SIZE = 12
+  SIZE = 16
   size: int
   flags: int
   handle: int
-struct_drm_msm_gem_new.register_fields([('size', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('handle', ctypes.c_int32, 8)])
+struct_drm_msm_gem_new.register_fields([('size', ctypes.c_uint64, 0), ('flags', ctypes.c_uint32, 8), ('handle', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_msm_gem_info(c.Struct):
-  SIZE = 20
+  SIZE = 24
   handle: int
   info: int
   value: int
   len: int
   pad: int
-struct_drm_msm_gem_info.register_fields([('handle', ctypes.c_int32, 0), ('info', ctypes.c_int32, 4), ('value', ctypes.c_int32, 8), ('len', ctypes.c_int32, 12), ('pad', ctypes.c_int32, 16)])
+struct_drm_msm_gem_info.register_fields([('handle', ctypes.c_uint32, 0), ('info', ctypes.c_uint32, 4), ('value', ctypes.c_uint64, 8), ('len', ctypes.c_uint32, 16), ('pad', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_msm_gem_cpu_prep(c.Struct):
-  SIZE = 16
+  SIZE = 24
   handle: int
   op: int
   timeout: struct_drm_msm_timespec
-struct_drm_msm_gem_cpu_prep.register_fields([('handle', ctypes.c_int32, 0), ('op', ctypes.c_int32, 4), ('timeout', struct_drm_msm_timespec, 8)])
+struct_drm_msm_gem_cpu_prep.register_fields([('handle', ctypes.c_uint32, 0), ('op', ctypes.c_uint32, 4), ('timeout', struct_drm_msm_timespec, 8)])
 @c.record
 class struct_drm_msm_gem_cpu_fini(c.Struct):
   SIZE = 4
   handle: int
-struct_drm_msm_gem_cpu_fini.register_fields([('handle', ctypes.c_int32, 0)])
+struct_drm_msm_gem_cpu_fini.register_fields([('handle', ctypes.c_uint32, 0)])
 @c.record
 class struct_drm_msm_syncobj(c.Struct):
-  SIZE = 12
+  SIZE = 16
   handle: int
   flags: int
   point: int
-struct_drm_msm_syncobj.register_fields([('handle', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('point', ctypes.c_int32, 8)])
+struct_drm_msm_syncobj.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('point', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_msm_gem_submit_reloc(c.Struct):
-  SIZE = 20
+  SIZE = 24
   submit_offset: int
   _or: int
   shift: int
   reloc_idx: int
   reloc_offset: int
-struct_drm_msm_gem_submit_reloc.register_fields([('submit_offset', ctypes.c_int32, 0), ('_or', ctypes.c_int32, 4), ('shift', ctypes.c_int32, 8), ('reloc_idx', ctypes.c_int32, 12), ('reloc_offset', ctypes.c_int32, 16)])
+struct_drm_msm_gem_submit_reloc.register_fields([('submit_offset', ctypes.c_uint32, 0), ('_or', ctypes.c_uint32, 4), ('shift', ctypes.c_int32, 8), ('reloc_idx', ctypes.c_uint32, 12), ('reloc_offset', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_msm_gem_submit_cmd(c.Struct):
-  SIZE = 28
+  SIZE = 32
   type: int
   submit_idx: int
   submit_offset: int
@@ -576,17 +572,17 @@ class struct_drm_msm_gem_submit_cmd(c.Struct):
   nr_relocs: int
   relocs: int
   iova: int
-struct_drm_msm_gem_submit_cmd.register_fields([('type', ctypes.c_int32, 0), ('submit_idx', ctypes.c_int32, 4), ('submit_offset', ctypes.c_int32, 8), ('size', ctypes.c_int32, 12), ('pad', ctypes.c_int32, 16), ('nr_relocs', ctypes.c_int32, 20), ('relocs', ctypes.c_int32, 24), ('iova', ctypes.c_int32, 24)])
+struct_drm_msm_gem_submit_cmd.register_fields([('type', ctypes.c_uint32, 0), ('submit_idx', ctypes.c_uint32, 4), ('submit_offset', ctypes.c_uint32, 8), ('size', ctypes.c_uint32, 12), ('pad', ctypes.c_uint32, 16), ('nr_relocs', ctypes.c_uint32, 20), ('relocs', ctypes.c_uint64, 24), ('iova', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_msm_gem_submit_bo(c.Struct):
-  SIZE = 12
+  SIZE = 16
   flags: int
   handle: int
   presumed: int
-struct_drm_msm_gem_submit_bo.register_fields([('flags', ctypes.c_int32, 0), ('handle', ctypes.c_int32, 4), ('presumed', ctypes.c_int32, 8)])
+struct_drm_msm_gem_submit_bo.register_fields([('flags', ctypes.c_uint32, 0), ('handle', ctypes.c_uint32, 4), ('presumed', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_msm_gem_submit(c.Struct):
-  SIZE = 56
+  SIZE = 72
   flags: int
   fence: int
   nr_bos: int
@@ -601,10 +597,10 @@ class struct_drm_msm_gem_submit(c.Struct):
   nr_out_syncobjs: int
   syncobj_stride: int
   pad: int
-struct_drm_msm_gem_submit.register_fields([('flags', ctypes.c_int32, 0), ('fence', ctypes.c_int32, 4), ('nr_bos', ctypes.c_int32, 8), ('nr_cmds', ctypes.c_int32, 12), ('bos', ctypes.c_int32, 16), ('cmds', ctypes.c_int32, 20), ('fence_fd', ctypes.c_int32, 24), ('queueid', ctypes.c_int32, 28), ('in_syncobjs', ctypes.c_int32, 32), ('out_syncobjs', ctypes.c_int32, 36), ('nr_in_syncobjs', ctypes.c_int32, 40), ('nr_out_syncobjs', ctypes.c_int32, 44), ('syncobj_stride', ctypes.c_int32, 48), ('pad', ctypes.c_int32, 52)])
+struct_drm_msm_gem_submit.register_fields([('flags', ctypes.c_uint32, 0), ('fence', ctypes.c_uint32, 4), ('nr_bos', ctypes.c_uint32, 8), ('nr_cmds', ctypes.c_uint32, 12), ('bos', ctypes.c_uint64, 16), ('cmds', ctypes.c_uint64, 24), ('fence_fd', ctypes.c_int32, 32), ('queueid', ctypes.c_uint32, 36), ('in_syncobjs', ctypes.c_uint64, 40), ('out_syncobjs', ctypes.c_uint64, 48), ('nr_in_syncobjs', ctypes.c_uint32, 56), ('nr_out_syncobjs', ctypes.c_uint32, 60), ('syncobj_stride', ctypes.c_uint32, 64), ('pad', ctypes.c_uint32, 68)])
 @c.record
 class struct_drm_msm_vm_bind_op(c.Struct):
-  SIZE = 28
+  SIZE = 40
   op: int
   handle: int
   obj_offset: int
@@ -612,10 +608,10 @@ class struct_drm_msm_vm_bind_op(c.Struct):
   range: int
   flags: int
   pad: int
-struct_drm_msm_vm_bind_op.register_fields([('op', ctypes.c_int32, 0), ('handle', ctypes.c_int32, 4), ('obj_offset', ctypes.c_int32, 8), ('iova', ctypes.c_int32, 12), ('range', ctypes.c_int32, 16), ('flags', ctypes.c_int32, 20), ('pad', ctypes.c_int32, 24)])
+struct_drm_msm_vm_bind_op.register_fields([('op', ctypes.c_uint32, 0), ('handle', ctypes.c_uint32, 4), ('obj_offset', ctypes.c_uint64, 8), ('iova', ctypes.c_uint64, 16), ('range', ctypes.c_uint64, 24), ('flags', ctypes.c_uint32, 32), ('pad', ctypes.c_uint32, 36)])
 @c.record
 class struct_drm_msm_vm_bind(c.Struct):
-  SIZE = 68
+  SIZE = 88
   flags: int
   nr_ops: int
   fence_fd: int
@@ -628,38 +624,38 @@ class struct_drm_msm_vm_bind(c.Struct):
   op_stride: int
   op: struct_drm_msm_vm_bind_op
   ops: int
-struct_drm_msm_vm_bind.register_fields([('flags', ctypes.c_int32, 0), ('nr_ops', ctypes.c_int32, 4), ('fence_fd', ctypes.c_int32, 8), ('queue_id', ctypes.c_int32, 12), ('in_syncobjs', ctypes.c_int32, 16), ('out_syncobjs', ctypes.c_int32, 20), ('nr_in_syncobjs', ctypes.c_int32, 24), ('nr_out_syncobjs', ctypes.c_int32, 28), ('syncobj_stride', ctypes.c_int32, 32), ('op_stride', ctypes.c_int32, 36), ('op', struct_drm_msm_vm_bind_op, 40), ('ops', ctypes.c_int32, 40)])
+struct_drm_msm_vm_bind.register_fields([('flags', ctypes.c_uint32, 0), ('nr_ops', ctypes.c_uint32, 4), ('fence_fd', ctypes.c_int32, 8), ('queue_id', ctypes.c_uint32, 12), ('in_syncobjs', ctypes.c_uint64, 16), ('out_syncobjs', ctypes.c_uint64, 24), ('nr_in_syncobjs', ctypes.c_uint32, 32), ('nr_out_syncobjs', ctypes.c_uint32, 36), ('syncobj_stride', ctypes.c_uint32, 40), ('op_stride', ctypes.c_uint32, 44), ('op', struct_drm_msm_vm_bind_op, 48), ('ops', ctypes.c_uint64, 48)])
 @c.record
 class struct_drm_msm_wait_fence(c.Struct):
-  SIZE = 20
+  SIZE = 32
   fence: int
   flags: int
   timeout: struct_drm_msm_timespec
   queueid: int
-struct_drm_msm_wait_fence.register_fields([('fence', ctypes.c_int32, 0), ('flags', ctypes.c_int32, 4), ('timeout', struct_drm_msm_timespec, 8), ('queueid', ctypes.c_int32, 16)])
+struct_drm_msm_wait_fence.register_fields([('fence', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('timeout', struct_drm_msm_timespec, 8), ('queueid', ctypes.c_uint32, 24)])
 @c.record
 class struct_drm_msm_gem_madvise(c.Struct):
   SIZE = 12
   handle: int
   madv: int
   retained: int
-struct_drm_msm_gem_madvise.register_fields([('handle', ctypes.c_int32, 0), ('madv', ctypes.c_int32, 4), ('retained', ctypes.c_int32, 8)])
+struct_drm_msm_gem_madvise.register_fields([('handle', ctypes.c_uint32, 0), ('madv', ctypes.c_uint32, 4), ('retained', ctypes.c_uint32, 8)])
 @c.record
 class struct_drm_msm_submitqueue(c.Struct):
   SIZE = 12
   flags: int
   prio: int
   id: int
-struct_drm_msm_submitqueue.register_fields([('flags', ctypes.c_int32, 0), ('prio', ctypes.c_int32, 4), ('id', ctypes.c_int32, 8)])
+struct_drm_msm_submitqueue.register_fields([('flags', ctypes.c_uint32, 0), ('prio', ctypes.c_uint32, 4), ('id', ctypes.c_uint32, 8)])
 @c.record
 class struct_drm_msm_submitqueue_query(c.Struct):
-  SIZE = 20
+  SIZE = 24
   data: int
   id: int
   param: int
   len: int
   pad: int
-struct_drm_msm_submitqueue_query.register_fields([('data', ctypes.c_int32, 0), ('id', ctypes.c_int32, 4), ('param', ctypes.c_int32, 8), ('len', ctypes.c_int32, 12), ('pad', ctypes.c_int32, 16)])
+struct_drm_msm_submitqueue_query.register_fields([('data', ctypes.c_uint64, 0), ('id', ctypes.c_uint32, 8), ('param', ctypes.c_uint32, 12), ('len', ctypes.c_uint32, 16), ('pad', ctypes.c_uint32, 20)])
 DRM_NAME = "drm"
 DRM_MIN_ORDER = 5
 DRM_MAX_ORDER = 22

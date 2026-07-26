@@ -8,7 +8,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, MMIOInterface
 from tinygrad.runtime.support.memory import BumpAllocator
 
-class TestAllocator:
+class FakeAllocator:
   def __init__(self): self.allocations = []
 
   def alloc(self, size, options):
@@ -69,7 +69,7 @@ class TestQCOM(unittest.TestCase):
     struct.pack_into("I", lib, reg_desc_offset + 0x14, 1)
     lib[image_offset:image_offset+len(image)] = image
 
-    allocator = TestAllocator()
+    allocator = FakeAllocator()
     dev = SimpleNamespace(device="QCOM", renderer=object(), allocator=allocator, prof_prg_counter=itertools.count(),
                           _ensure_stack_size=lambda size: None)
     QCOMProgram(dev, TinyELF(bytes(lib), "test", Target("QCOM"), ()))
@@ -100,7 +100,7 @@ class TestQCOM(unittest.TestCase):
   def test_queue_bind_uses_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue
 
-    allocator = TestAllocator()
+    allocator = FakeAllocator()
     queue = QCOMComputeQueue(SimpleNamespace(allocator=allocator, ctx=1))
     queue.q(0x12345678, 0x9abcdef0)
     queue.bind(queue.dev)
@@ -112,7 +112,7 @@ class TestQCOM(unittest.TestCase):
   def test_queue_submits_through_interface(self):
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue
 
-    allocator, iface = TestAllocator(), RecordingIface()
+    allocator, iface = FakeAllocator(), RecordingIface()
     cmd_buf = allocator.alloc(64, None)
     dev = SimpleNamespace(iface=iface, cmd_buf=cmd_buf,
                           cmd_buf_allocator=BumpAllocator(cmd_buf.size, base=int(cmd_buf.va_addr), wrap=True))
@@ -129,7 +129,7 @@ class TestQCOM(unittest.TestCase):
   def test_queue_submits_referenced_buffers(self):
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue
 
-    allocator, iface = TestAllocator(), RecordingIface()
+    allocator, iface = FakeAllocator(), RecordingIface()
     cmd_buf = allocator.alloc(4096, None)
     args = allocator.alloc(32, None)
     data, lib, stack, border, dummy, signal = [HCQBuffer(addr, 4096) for addr in range(0x100000, 0x700000, 0x100000)]
