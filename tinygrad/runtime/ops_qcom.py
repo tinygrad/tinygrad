@@ -100,8 +100,12 @@ class QCOMComputeQueue(HWQueue):
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
     return self
 
-  def _build_gpu_command(self, dev:QCOMDevice, hw_addr=None):
-    to_mv((hw_page_addr:=hw_addr or dev.cmd_buf_allocator.alloc(len(self._q) * 4)), len(self._q) * 4).cast('I')[:] = array.array('I', self._q)
+  def _build_gpu_command(self, dev:QCOMDevice, hw_page:HCQBuffer|None=None):
+    if hw_page is None:
+      hw_page_addr = dev.cmd_buf_allocator.alloc(len(self._q) * 4)
+      hw_view = to_mv(hw_page_addr, len(self._q) * 4).cast('I')
+    else: hw_page_addr, hw_view = hw_page.va_addr, hw_page.cpu_view().view(fmt='I')
+    hw_view[:] = array.array('I', self._q)
     obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(self._q) * 4, flags=kgsl.KGSL_CMDLIST_IB)
     submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=dev.ctx,
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
@@ -110,9 +114,9 @@ class QCOMComputeQueue(HWQueue):
   def bind(self, dev:QCOMDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
-    self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
+    self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page)
     # From now on, the queue is on the device for faster submission.
-    self._q = to_mv(self.obj.gpuaddr, len(self._q) * 4).cast("I")
+    self._q = self.hw_page.cpu_view().view(fmt='I')
 
   def _submit(self, dev:QCOMDevice):
     if self.binded_device == dev: submit_req = self.submit_req

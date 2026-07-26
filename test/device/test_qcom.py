@@ -78,6 +78,18 @@ class TestQCOM(unittest.TestCase):
     self.assertEqual(cpu_memory[4:16], struct.pack("III", 2, 3, 4))
     self.assertEqual(gpu_memory, bytes([0xaa] * len(gpu_memory)))
 
+  def test_queue_bind_uses_cpu_view(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+
+    allocator = TestAllocator()
+    queue = QCOMComputeQueue(SimpleNamespace(allocator=allocator, ctx=1))
+    queue.q(0x12345678, 0x9abcdef0)
+    queue.bind(queue.dev)
+
+    gpu_memory, cpu_memory, _ = allocator.allocations[0]
+    self.assertEqual(cpu_memory, struct.pack("II", 0x12345678, 0x9abcdef0))
+    self.assertEqual(gpu_memory, bytes([0xaa] * len(gpu_memory)))
+
   # although part of the QCOM runtime, this tests flushing the CPU's dcache
   @unittest.skipUnless(isinstance(Device["CPU"].renderer, ClangRenderer) and platform.machine().lower() in {"arm64", "aarch64"},
                        "dcache_flush's inline asm needs ClangRenderer, and runs on arm64")
