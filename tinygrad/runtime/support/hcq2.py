@@ -49,13 +49,14 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
   return buf.index(r).store(data.index(r).load()).end(r)
 
-def make_cmdbuf(lin, devs):
+def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
   blob, patches = b'', []
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
     blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
-  cmdbuf = UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
-  return cmdbuf.after(make_binary_patch(cmdbuf, blob), *[make_patch(cmdbuf, off, s) for off, s in patches])
+  cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
+  writable = cmdbuf.after(dep) if dep is not None else cmdbuf
+  return cmdbuf.after(make_binary_patch(writable, blob), *[make_patch(writable, off, s) for off, s in patches])
 
 def make_signal(devs, queue="COMPUTE:0", sentinel=False):
   return UOp.placeholder((1,), dtypes.uint64, 0, device=devs, volatile=True).rtag("sentinel_signal" if sentinel else f"{queue}_timeline_signal")
@@ -309,6 +310,11 @@ def replace_params(call:UOp) -> UOp|None:
   by_root = {p.src[0]: p for p in patched}
   c_args = [by_root.get(a, a) for a in args]
 
+  # keep buffers whose addresses become link-time constants alive and mapped
+  held = args + [r.without_after for r in refhold]
+  addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
+  refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
+
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
@@ -479,21 +485,21 @@ class HCQ2Compiled(Compiled):
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
-  def timeline_signal(self, queue:str="COMPUTE:0", init_value:int=0) -> Buffer:
+  def timeline_signal(self, queue:str, init_value:int=0) -> Buffer:
     buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   @functools.cache
-  def timeline_value(self, queue:str="COMPUTE:0", init_value:int=1) -> Buffer:
+  def timeline_value(self, queue:str, init_value:int=1) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
-    sig = self.timeline_signal().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
-    tl = self.timeline_value().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    sig = self.timeline_signal("COMPUTE:0").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    tl = self.timeline_value("COMPUTE:0").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()

@@ -17,7 +17,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sint, KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
+MAX_ARGS, CMD_SIZE, RING_SLOTS = 63, 64, (16 << 10)
 
 def signal_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
