@@ -79,11 +79,13 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((v & 3).dtype, dtypes.weakint)
     with self.assertRaises(RuntimeError): Tensor.const(dtypes.weakfloat, 1.0) << Tensor.const(dtypes.weakfloat, 1.0)
     with self.assertRaises(RuntimeError): UOp.const(dtypes.int32, 1).alu(Ops.SHL, UOp.const(dtypes.float64, 1))
-    # float bitwise/shift builds, the spec rejects it
+    for op in (Ops.SHL, Ops.SHR):
+      with self.assertRaises(RuntimeError):
+        UOp.const(dtypes.float32, 1).alu(op, UOp.const(dtypes.int32, 1))
+    # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.weakfloat, 1.0)
-      for bad in (f32.alu(Ops.AND, f32), f32.alu(Ops.SHL, UOp.const(dtypes.int32, 1)),
-                  UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
+      for bad in (f32.alu(Ops.AND, f32), UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
         with self.assertRaises(RuntimeError): type_verify([bad], spec_shared)
 
   def test_integer_values(self):
@@ -144,8 +146,9 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(weak_val().tolist(), [value])
       self.assertEqual(weak_val().cast(strong).realize().uop.buffer.dtype, strong)
       self.assertEqual(weak_val().contiguous().dtype, weak)                 # no layout to fix, stays weak
-      self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the kind default
-      for entry in (lambda t: t.realize(), lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
+      self.assertEqual(weak_val().realize().dtype, weak)                    # no width to store, stays weak
+      self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the default
+      for entry in (lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
         with self.assertRaises(RuntimeError): entry(weak_val())
 
   def test_empty_reads_commit(self):
