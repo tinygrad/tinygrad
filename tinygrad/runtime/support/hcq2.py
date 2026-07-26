@@ -9,7 +9,6 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
 from tinygrad.engine.realize import pm_flatten_linear
@@ -475,8 +474,8 @@ class HCQ2Compiled(Compiled):
 
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b:
-        None if b.tag is None else Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True)))
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else
+        Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True)))
     ])
 
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
