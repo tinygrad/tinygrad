@@ -131,7 +131,8 @@ class PM4Executor(AMDQueue):
     _ = self._next_dword() # ev
 
     ptr = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 8)
-    if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
+    if mem_data_sel == 1: ptr.cast('I')[0] = val & 0xffffffff
+    elif mem_data_sel == 2: ptr.cast('Q')[0] = val
     elif mem_data_sel == 3:
       if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('Q')[0] = int(time.perf_counter() * 1e8)
       else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}")

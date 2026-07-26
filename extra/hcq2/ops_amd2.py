@@ -4,7 +4,7 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_cmdbuf
-from tinygrad.runtime.support.hcq2 import make_binary_patch
+from tinygrad.runtime.support.hcq2 import make_binary_patch, make_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -146,31 +146,37 @@ pm_pm4_opsel = PatternMatcher([
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
 ])
 
-def pm4_submit(cmdbuf, devs):
-  size, zero = UOp.const(dtypes.uint32, cmdbuf.nbytes() // dtypes.uint32.itemsize), UOp.const(dtypes.int, 0)
-
-  # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
-  for d in devs: q = Device[d].compute_queue
+def pm4_submit(ctx, lin):
+  # ensure compute queues are allocated
+  for d in (devs:=ctx.devs): q = Device[d].compute_queue
   ring, wptr, doorbell, put_ptr = (UOp.placeholder((b.size,), b.dtype, 0, device=devs).rtag(f"COMPUTE:0_{name}")
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
-  # place the cmdbuf at the ring's write offset, wrapping the ring
-  put = put_ptr.index(zero)
-  next_put = put + size.cast(put.dtype)
-  i = UOp.range(size, 0, dtype=dtypes.int, src=(cmdbuf,))
-  ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
+  # two tail dwords coordinate safe IB reuse: GPU completions and host submits
+  size_dw = sum(len(ins.src) for ins in lin.src) + len(release_mem(ctx, 0, 0).src)
+  assert size_dw < (1 << 20), f"indirect buffer of {size_dw} dwords doesn't fit one packet"
 
-  # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx).store(cmdbuf.index(i).load()).end(i)
-  bump_put_ptr = put_ptr.index(zero).store(next_put)
-  bump_wptr = wptr.index(zero).store(next_put)
+  ib = UOp.placeholder((size_dw + 2,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
+  done_idx, submit_idx = UOp.const(dtypes.int, size_dw + 0), UOp.const(dtypes.int, size_dw + 1)
+  submitted = (counter:=ib.after(*[make_patch(ib, (size_dw + i) * 4, UOp.const(dtypes.uint32, 0)) for i in range(2)]).index(submit_idx)).load()
+  completed = ib.after(loop:=UOp.loop(0)).index(done_idx).load()
+  ib_free = completed.end(loop, completed != submitted)
 
-  # ring the doorbell once the copy and pointer bumps have landed
-  flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush).index(zero).store(next_put)
+  bump_fence = pm4_store(ctx, UOp(Ops.SLICE, dtypes.uint32, (ib, UOp.const(dtypes.weakint, size_dw)), 2), (submitted + 1).cast(dtypes.uint64))
+  cmdbuf = make_cmdbuf(lin.replace(src=lin.src + (bump_fence,)), devs, buf=ib, dep=ib_free)
 
-pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
+  # the ring itself only carries a packet pointing at the ib, wrapping the ring
+  put = put_ptr.index(zero:=UOp.const(dtypes.int, 0))
+  pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(cmdbuf.getaddr(devs)), size_dw | ctx.pm4.INDIRECT_BUFFER_VALID)
+  write_pkt = UOp.barrier(*[ring.index(((put + off) % q.ring.size).cast(dtypes.int)).store(UOp.const(dtypes.uint32, x)) for off,x in enumerate(pkt)])
+
+  # advance the put/write pointers past the packet
+  bump_put_ptr = put_ptr.index(zero).store(put + len(pkt))
+  bump_wptr = wptr.index(zero).store(put + len(pkt))
+  flush = UOp.barrier(write_pkt, bump_put_ptr, bump_wptr, counter.store(submitted + 1))
+  return doorbell.after(flush).index(zero).store(put + len(pkt))
+
+pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"), pm4_submit)])
 
 # *****************
 # SDMA
@@ -242,7 +248,7 @@ def sdma_submit(cmdbuf, devs):
   return doorbell.after(flush).index(zero).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0])), to_tuple(lin.arg[0])))])
+  lambda ctx, lin: sdma_submit(make_cmdbuf(lin, ctx.devs), ctx.devs))])
 
 @dataclass(frozen=True)
 class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
@@ -253,7 +259,7 @@ def encode_queue(q:UOp) -> UOp|None:
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
   ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
   opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
-  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"))
+  return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"), ctx)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -511,7 +517,8 @@ class PCIIface(PCIIfaceBase):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.timeline_signal()._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.timeline_signal('COMPUTE:0')._buf.cpu_view().mv.cast('Q')[0] = \
+        d.timeline_value('COMPUTE:0').as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
