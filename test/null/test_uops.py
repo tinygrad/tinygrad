@@ -1,5 +1,5 @@
 # uops tests that pass on NULL backend (no copyout needed)
-import unittest
+import math, unittest
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
@@ -114,6 +114,11 @@ class TestSafeCast(unittest.TestCase):
 class TestExecALU(unittest.TestCase):
   def test_sqrt(self):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
+
+  def test_trunc_nonfinite(self):
+    self.assertEqual(exec_alu(Ops.TRUNC, dtypes.float, (math.inf,)), math.inf)
+    self.assertEqual(exec_alu(Ops.TRUNC, dtypes.float, (-math.inf,)), -math.inf)
+    self.assertTrue(math.isnan(exec_alu(Ops.TRUNC, dtypes.float, (math.nan,))))
 
   def test_invalid_poison(self):
     # Invalid poisons any binary op regardless of result dtype: a comparison must not fold to a boolean
