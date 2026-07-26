@@ -164,8 +164,9 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
+    # elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
     if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
+    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255) # how to tell if ConstFloat is fp16? consts are fp32??
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
     elif isinstance(val, int): offset = 255  # literal
@@ -252,7 +253,7 @@ OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 def _needs_literal(val) -> bool:
   """Check if a value needs a literal constant (can't be encoded inline)."""
   if val is None or isinstance(val, Reg): return False
-  if isinstance(val, (float, tinygrad.dtype.ConstFloat)): return float(val) not in SrcField._FLOAT_ENC
+  if isinstance(val, float): return val not in SrcField._FLOAT_ENC
   if isinstance(val, int): return not (0 <= val <= 64 or -16 <= val < 0)
   return False
 
@@ -341,7 +342,7 @@ class Inst:
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):
-        if isinstance(val, float):
+        if isinstance(val, (float, tinygrad.dtype.ConstFloat)):
           # 16-bit operands (e.g. v_mov_b16) need the fp16 bit pattern in the low half of the literal
           literal_val = _f16(val) if op_operands.get(name, (None, 32, None))[1] == 16 else _f32(val)
         else: literal_val = val & 0xFFFFFFFF

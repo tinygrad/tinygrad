@@ -45,7 +45,6 @@ OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 
 # ---- helpers ----
-# NOTE: v_mov_b16 breaks min 1 register per value invariant, but its required for f16
 def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(dt, v) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
@@ -90,7 +89,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
 def _vop3(ctx, x:UOp):
   assert x.op is Ops.INS, f"should only legalize INS ops: {x.op}"
   lits = [s for s in x.src if s.op is Ops.CONST]
-  return x if len(lits) <= 1 else x.replace(src=tuple([vmov(s) if s in lits else s for s in x.src]))
+  return x if len(lits) <= 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
 rev_op_order = { RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
 def _vop2(ctx, x:UOp):
