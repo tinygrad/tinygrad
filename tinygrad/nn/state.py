@@ -300,15 +300,16 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
                "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
                "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor, "_rebuild_tensor_v2": _rebuild_tensor_v2,
                "FloatTensor": None, "Parameter": Parameter}
-  whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
+  allowlist = {("collections", "OrderedDict"), ("_codecs", "encode"), ("numpy", "dtype"), ("numpy", "ndarray"),
+               ("numpy.core.multiarray", "_reconstruct"), ("numpy.core.multiarray", "scalar"),
+               ("numpy._core.multiarray", "_reconstruct"), ("numpy._core.multiarray", "scalar")}
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
-      module_root = module.split(".")[0]
-      if module_root not in whitelist:
-        if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
-        return Dummy
-      return intercept[name] if module_root == "torch" else super().find_class(module, name)
+      if module.split(".")[0] == "torch": return intercept[name]
+      if (module, name) in allowlist: return super().find_class(module, name)
+      if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
+      return Dummy
     def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
   fobj = io.BufferedReader(TensorIO(t))
