@@ -123,11 +123,17 @@ class TestMSMIface(unittest.TestCase):
     allocator.dev, allocator.cache = dev, defaultdict(list)
     return dev, allocator
 
-  def test_init_requires_explicit_interface(self):
+  def test_init_allows_default_interface_selection(self):
     from tinygrad.runtime.ops_qcom import MSMIface
 
-    with Context(DEV="QCOM:IR3"):
-      with self.assertRaisesRegex(RuntimeError, "^MSM DRM must be selected explicitly with DEV=MSM\\+QCOM$"): MSMIface(SimpleNamespace(), 0)
+    fd = RecordingMSMFile()
+    with Context(DEV="QCOM:IR3"), \
+         patch("tinygrad.runtime.ops_qcom.glob.glob", return_value=["/dev/dri/renderD128"]), \
+         patch("tinygrad.runtime.ops_qcom.FileIOInterface", return_value=fd):
+      iface = MSMIface(SimpleNamespace(), 0)
+
+    self.assertIs(iface.fd, fd)
+    self.assertEqual(fd.new_queues, [(0, 0)])
 
   def test_init_probes_render_nodes_and_creates_a6xx_queue(self):
     from tinygrad.runtime.ops_qcom import MSMIface

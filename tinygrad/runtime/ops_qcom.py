@@ -9,11 +9,10 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, msm_drm
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import DEV, getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing
 from tinygrad.helpers import is_image_shape, next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.system import System
-from tinygrad.uop.ops import sym_infer
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -61,18 +60,23 @@ class QCOMSignal(HCQSignal):
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
-    self.dev, self._buffers = dev, set[HCQBuffer]()
+    self.dev = dev
+    self._buffers:dict[HCQBuffer, int|None] = {}
     super().__init__()
 
   @suppress_finalizing
   def __del__(self):
-    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
+    if (dev:=getattr(self, "binded_device", None)) is not None and (hw_page:=getattr(self, "hw_page", None)) is not None:
+      dev.allocator.free(hw_page, hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
   def cmd(self, opcode: int, *vals: int): self.q(pkt7_hdr(opcode, len(vals)), *vals)
 
   def reg(self, reg: int, *vals: int): self.q(pkt4_hdr(reg, len(vals)), *vals)
 
-  def _add_buffers(self, *bufs:HCQBuffer): self._buffers.update(buf.base for buf in bufs)
+  def _add_buffers(self, *bufs:HCQBuffer):
+    for buf in bufs:
+      base = buf.base
+      if base not in self._buffers: self._buffers[base] = None if isinstance(base.va_addr, int) else self._new_sym(base.va_addr)
 
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
@@ -123,14 +127,14 @@ class QCOMComputeQueue(HWQueue):
     # From now on, the queue is on the device for faster submission.
     self._q = self.hw_page.cpu_view().view(fmt='I')
 
-  def submit(self, dev:QCOMDevice, var_vals:dict[str, int]|None=None):
-    if var_vals is not None: self._apply_var_vals(var_vals)
-    self._submit(dev, var_vals or {})
-    return self
-
-  def _submit(self, dev:QCOMDevice, var_vals:dict[str, int]|None=None):
+  def _submit(self, dev:QCOMDevice):
     command = self.hw_page if self.binded_device == dev else self._build_gpu_command(dev)
-    dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, self._buffers, var_vals)
+    buffers:set[HCQBuffer] = set()
+    for buf, sym_idx in self._buffers.items():
+      if sym_idx is None: buffers.add(buf)
+      elif (address:=self._prev_resolved_syms[sym_idx]) is None: raise RuntimeError("QCOM queue has an unresolved symbolic buffer address")
+      else: buffers.add(HCQBuffer(address, buf.size))
+    dev.last_cmd = dev.iface.submit(command, len(self._q) * 4, buffers)
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     self.bind_args_state(args_state)
@@ -409,7 +413,7 @@ class KGSLIface:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
       FileIOInterface.munmap(mem.cpu_view().addr, mem.meta[0].mmapsize)
 
-  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer], _var_vals:dict[str, int]|None=None) -> int:
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
     obj = kgsl.struct_kgsl_command_object(gpuaddr=command.va_addr, size=size, flags=kgsl.KGSL_CMDLIST_IB)
     req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=self.ctx,
                                        cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
@@ -441,8 +445,6 @@ class MSMIface:
   renderers = [IR3Renderer]
 
   def __init__(self, dev:QCOMDevice, device_id:int):
-    if DEV.target("QCOM").interface != "MSM":
-      raise RuntimeError("MSM DRM must be selected explicitly with DEV=MSM+QCOM")
     if device_id != 0: raise RuntimeError(f"QCOM:{device_id} does not exist (1 MSM DRM device available)")
     self.dev = dev
 
@@ -501,9 +503,10 @@ class MSMIface:
     if not isinstance(allocation:=mem.base.meta, MSMAllocation): raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
     return allocation
 
-  def _resolve_allocation(self, mem:HCQBuffer, var_vals:dict[str, int]) -> MSMAllocation:
+  def _resolve_allocation(self, mem:HCQBuffer) -> MSMAllocation:
     if isinstance(mem.base.meta, MSMAllocation): return mem.base.meta
-    address = sym_infer(mem.va_addr, var_vals)
+    if not isinstance(mem.va_addr, int): raise RuntimeError("MSM buffer address must be resolved before submission")
+    address = mem.va_addr
     matches = [allocation for allocation in self.allocations.values()
                if allocation.iova <= address and address + mem.size <= allocation.iova + allocation.size]
     if len(matches) != 1: raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
@@ -524,7 +527,7 @@ class MSMIface:
     except OSError as e: raise RuntimeError(f"Failed to close MSM GEM handle {allocation.handle}") from e
     self.allocations.pop(allocation.handle, None)
 
-  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer], var_vals:dict[str, int]|None=None) -> int:
+  def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer]) -> int:
     if size <= 0: raise ValueError(f"MSM command size must be positive, got {size}")
     if size % 4: raise ValueError(f"MSM command size must be a multiple of 4, got {size}")
     command_base, command_allocation = command.base, self._allocation(command)
@@ -533,7 +536,7 @@ class MSMIface:
       raise ValueError("MSM command range is outside its buffer")
 
     submit_allocations = {allocation.handle:allocation for allocation in
-                          [command_allocation, *(self._resolve_allocation(b, var_vals or {}) for b in buffers)]}
+                          [command_allocation, *(self._resolve_allocation(b) for b in buffers)]}
     allocations = sorted(submit_allocations.values(), key=lambda allocation: allocation.handle)
     bos = (msm_drm.struct_drm_msm_gem_submit_bo * len(allocations))(*[
       msm_drm.struct_drm_msm_gem_submit_bo(flags=msm_drm.MSM_SUBMIT_BO_READ | msm_drm.MSM_SUBMIT_BO_WRITE,

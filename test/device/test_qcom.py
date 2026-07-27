@@ -23,7 +23,7 @@ class FakeAllocator:
 class RecordingIface:
   def __init__(self): self.submissions, self.sleeps = [], []
 
-  def submit(self, command, size, buffers, _var_vals=None):
+  def submit(self, command, size, buffers):
     self.submissions.append((command, size, buffers))
     return 42
 
@@ -40,6 +40,18 @@ class RecordingMemoryIface:
   def free(self, buf): self.freed.append(buf)
 
 class TestQCOM(unittest.TestCase):
+  def test_partially_initialized_queue_can_be_destroyed(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+
+    object.__new__(QCOMComputeQueue).__del__()
+
+  def test_partially_bound_queue_can_be_destroyed(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+
+    queue = object.__new__(QCOMComputeQueue)
+    queue.binded_device = SimpleNamespace(allocator=FakeAllocator())
+    queue.__del__()
+
   def test_args_use_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMArgsState
 
@@ -166,6 +178,24 @@ class TestQCOM(unittest.TestCase):
     queue.signal(SimpleNamespace(value_addr=signal.va_addr, base_buf=signal), 1).submit(dev)
 
     self.assertEqual(iface.submissions[0][2], {args, data, lib, stack, dummy, signal})
+
+  def test_queue_resolves_symbolic_buffers_before_interface_submit(self):
+    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
+    from tinygrad.uop.ops import UOp
+
+    allocator, iface = FakeAllocator(), RecordingIface()
+    cmd_buf = allocator.alloc(64, None)
+    dev = SimpleNamespace(iface=iface, cmd_buf=cmd_buf,
+                          cmd_buf_allocator=BumpAllocator(cmd_buf.size, base=int(cmd_buf.va_addr), wrap=True))
+    data_addr = UOp.variable("data_addr", 0, 0xffffffffffffffff, dtype=dtypes.uint64)
+    queue = QCOMComputeQueue(dev)
+    queue._add_buffers(HCQBuffer(data_addr, 16))
+    queue.q(0x12345678)
+
+    queue.submit(dev, {data_addr.expr: 0x1234_0000})
+
+    submitted = iface.submissions[0][2]
+    self.assertEqual({buf.va_addr for buf in submitted}, {0x1234_0000})
 
   def test_allocator_uses_interface(self):
     from tinygrad.runtime.ops_qcom import QCOMAllocator
