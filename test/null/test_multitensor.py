@@ -219,7 +219,7 @@ class TestMultiAxis(unittest.TestCase):
     self.assertTrue(e.uop.has_buffer_identity())
 
   def test_symbolic_reshape_shard_axis(self):
-    rows = UOp.variable("rows", 1, 4)
+    rows = UOp.variable("rows", 1, 4).bind(3)
     x = Tensor.empty(4, 2).shard(("NULL:1", "NULL:2"), axis=1)[:rows]
     self.assertEqual(x.reshape(rows, 1, 2).uop.axis, 2)
 
