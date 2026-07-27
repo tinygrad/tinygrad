@@ -363,7 +363,7 @@ class TestCopyFolding(unittest.TestCase):
 
   def test_one_hot_with_copy(self):
     y = Tensor([1, 2, 3]).to("CPU")
-    x = y.one_hot(10)
+    x = y.one_hot(10).int()
     check_schedule(x, 3, filter_sink=False)
 
   @unittest.skip("no longer supported")
