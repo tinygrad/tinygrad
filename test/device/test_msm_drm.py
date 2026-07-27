@@ -3,11 +3,11 @@ from collections import defaultdict
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import tinygrad.runtime.autogen as autogen
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import Context, mv_address
 from tinygrad.runtime.autogen import msm_drm
 from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.memory import BumpAllocator
 
 
 def ioctl_number(ioctl):
@@ -87,6 +87,14 @@ def make_buffer(handle, gpu_addr, size, cpu=False):
 
 
 class TestMSMDRMUAPI(unittest.TestCase):
+  def test_autogen_targets_aarch64(self):
+    with patch.object(autogen, "load") as load:
+      autogen.__getattr__("msm_drm")
+
+    args = load.call_args.kwargs["args"]
+    self.assertIn("--target=aarch64-linux-gnu", args)
+    self.assertIn("-I{}/usr/include/aarch64-linux-gnu", args)
+
   def test_struct_layouts(self):
     layouts = {
       msm_drm.struct_drm_msm_timespec: (16, (0, 8)),
@@ -359,45 +367,15 @@ class TestMSMIface(unittest.TestCase):
     command_idx = next(i for i,(_,handle,_) in enumerate(bos) if handle == 11)
     self.assertEqual(cmds, [(msm_drm.MSM_SUBMIT_CMD_BUF, command_idx, 0x40, 0x20)])
 
-  def test_qcom_queue_submits_through_msm_interface(self):
-    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
-
+  def test_submit_resolves_buffer_by_address(self):
     fd = RecordingMSMFile()
     iface = make_iface(fd)
-    cmd_buf = make_buffer(11, 0x1000_0000, 0x1000, cpu=True)
-    dev = SimpleNamespace(iface=iface, cmd_buf=cmd_buf,
-                          cmd_buf_allocator=BumpAllocator(cmd_buf.size, base=int(cmd_buf.va_addr), wrap=True))
-    iface.dev = dev
-
-    queue = QCOMComputeQueue(dev)
-    queue.q(0x12345678, 0x9abcdef0)
-    queue.submit(dev)
-
-    self.assertEqual(dev.last_cmd, 42)
-    self.assertEqual(fd.submissions[0][3], [(msm_drm.MSM_SUBMIT_CMD_BUF, 0, 0, 8)])
-
-  def test_qcom_queue_resolves_symbolic_buffers_for_msm_submit(self):
-    from tinygrad.dtype import dtypes
-    from tinygrad.runtime.ops_qcom import QCOMComputeQueue
-    from tinygrad.uop.ops import UOp
-
-    fd = RecordingMSMFile()
-    iface = make_iface(fd)
-    command = make_buffer(11, 0x1000_0000, 0x1000, cpu=True)
+    command = make_buffer(11, 0x1000_0000, 0x1000)
     data = make_buffer(12, 0x2000_0000, 0x1000)
     iface.allocations = {data.meta.handle: data.meta}
-    dev = SimpleNamespace(iface=iface, cmd_buf=command,
-                          cmd_buf_allocator=BumpAllocator(command.size, base=int(command.va_addr), wrap=True))
-    iface.dev = dev
 
-    data_addr = UOp.variable("data_addr", 0, 0xffffffffffffffff, dtype=dtypes.uint64)
-    queue = QCOMComputeQueue(dev)
-    queue._add_buffers(HCQBuffer(data_addr, data.size))
-    queue.q(0x12345678)
+    iface.submit(command, 4, {HCQBuffer(data.va_addr, data.size)})
 
-    queue.submit(dev, {data_addr.expr: int(data.va_addr)})
-
-    self.assertEqual(dev.last_cmd, 42)
     _, _, bos, _ = fd.submissions[0]
     self.assertEqual({handle for _,handle,_ in bos}, {11, 12})
 

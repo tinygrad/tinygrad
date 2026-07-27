@@ -35,8 +35,8 @@ struct_drm_tex_region.register_fields([('next', ctypes.c_ubyte, 0), ('prev', cty
 class struct_drm_hw_lock(c.Struct):
   SIZE = 64
   lock: int
-  padding: c.Array[ctypes.c_char, Literal[60]]
-struct_drm_hw_lock.register_fields([('lock', ctypes.c_uint32, 0), ('padding', c.Array[ctypes.c_char, Literal[60]], 4)])
+  padding: c.Array[ctypes.c_ubyte, Literal[60]]
+struct_drm_hw_lock.register_fields([('lock', ctypes.c_uint32, 0), ('padding', c.Array[ctypes.c_ubyte, Literal[60]], 4)])
 @c.record
 class struct_drm_version(c.Struct):
   SIZE = 64
@@ -44,19 +44,19 @@ class struct_drm_version(c.Struct):
   version_minor: int
   version_patchlevel: int
   name_len: int
-  name: c.POINTER[ctypes.c_char]
+  name: c.POINTER[ctypes.c_ubyte]
   date_len: int
-  date: c.POINTER[ctypes.c_char]
+  date: c.POINTER[ctypes.c_ubyte]
   desc_len: int
-  desc: c.POINTER[ctypes.c_char]
+  desc: c.POINTER[ctypes.c_ubyte]
 __kernel_size_t: TypeAlias = ctypes.c_uint64
-struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_uint64, 16), ('name', c.POINTER[ctypes.c_char], 24), ('date_len', ctypes.c_uint64, 32), ('date', c.POINTER[ctypes.c_char], 40), ('desc_len', ctypes.c_uint64, 48), ('desc', c.POINTER[ctypes.c_char], 56)])
+struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_uint64, 16), ('name', c.POINTER[ctypes.c_ubyte], 24), ('date_len', ctypes.c_uint64, 32), ('date', c.POINTER[ctypes.c_ubyte], 40), ('desc_len', ctypes.c_uint64, 48), ('desc', c.POINTER[ctypes.c_ubyte], 56)])
 @c.record
 class struct_drm_unique(c.Struct):
   SIZE = 16
   unique_len: int
-  unique: c.POINTER[ctypes.c_char]
-struct_drm_unique.register_fields([('unique_len', ctypes.c_uint64, 0), ('unique', c.POINTER[ctypes.c_char], 8)])
+  unique: c.POINTER[ctypes.c_ubyte]
+struct_drm_unique.register_fields([('unique_len', ctypes.c_uint64, 0), ('unique', c.POINTER[ctypes.c_ubyte], 8)])
 @c.record
 class struct_drm_list(c.Struct):
   SIZE = 16
