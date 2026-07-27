@@ -1,9 +1,11 @@
 import tempfile, unittest, math
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.dtype import least_upper_float
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop
 from tinygrad.uop.spec import spec_shared, type_verify
+from tinygrad.engine.jit import JitError
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -23,7 +25,22 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(t.dtype, weak)
       self.assertEqual(t.data().itemsize, strong.itemsize)
       self.assertEqual(t.numpy().dtype.itemsize, strong.itemsize)
-      with self.assertRaises(RuntimeError): t.clone("CPU")
+      # materializing commits at the kind default; contiguous has no layout to fix so it stays weak
+      self.assertEqual((c := t.clone("CPU")).dtype, strong)
+      self.assertEqual(c.item(), value)
+      self.assertEqual(t.contiguous().dtype, weak)
+
+  def test_assign_into_weak_commits(self):
+    t = Tensor.const(dtypes.weakfloat, 0.5)
+    t.assign(Tensor(1.0, dtype=dtypes.default_float))
+    self.assertEqual((t.dtype, t.item()), (dtypes.default_float, 1.0))
+
+  def test_float_unary_on_weakint_stays_weak(self):
+    self.assertIs(least_upper_float(dtypes.weakint), dtypes.weakfloat)
+
+  def test_copysign_meets_operands(self):
+    r = Tensor([2], dtype=dtypes.uint8, device="CPU").copysign(Tensor([1], dtype=dtypes.uint32, device="CPU"))
+    self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
 
   def test_uop_scalar_const_unchanged(self):
     for dtype, value in ((dtypes.weakint, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
@@ -58,14 +75,18 @@ class TestWeakPromotion(unittest.TestCase):
   def test_weak_int_binop(self):
     v = UOp.variable("i", 0, 10, dtypes.weakint)
     self.assertEqual((v << 1).dtype, dtypes.weakint)
+    self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.uint32, 1)), None), dtypes.int64)
+    self.assertEqual(UOp.const(dtypes.weakint, 1).alu(Ops.SHL, UOp.const(dtypes.uint8, 1)).dtype, dtypes.uint8)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
     with self.assertRaises(RuntimeError): Tensor.const(dtypes.weakfloat, 1.0) << Tensor.const(dtypes.weakfloat, 1.0)
     with self.assertRaises(RuntimeError): UOp.const(dtypes.int32, 1).alu(Ops.SHL, UOp.const(dtypes.float64, 1))
-    # float bitwise/shift builds, the spec rejects it
+    for op in (Ops.SHL, Ops.SHR):
+      with self.assertRaises(RuntimeError):
+        UOp.const(dtypes.float32, 1).alu(op, UOp.const(dtypes.int32, 1))
+    # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(dtypes.float32, 1.0), UOp.const(dtypes.weakfloat, 1.0)
-      for bad in (f32.alu(Ops.AND, f32), f32.alu(Ops.SHL, UOp.const(dtypes.int32, 1)),
-                  UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
+      for bad in (f32.alu(Ops.AND, f32), UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
         with self.assertRaises(RuntimeError): type_verify([bad], spec_shared)
 
   def test_integer_values(self):
@@ -125,9 +146,23 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertEqual(weak_val().numpy().dtype.itemsize, strong.itemsize)
       self.assertEqual(weak_val().tolist(), [value])
       self.assertEqual(weak_val().cast(strong).realize().uop.buffer.dtype, strong)
-      for entry in (lambda t: t.contiguous(), lambda t: t.realize(), lambda t: t.clone(),
-                    lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
+      self.assertEqual(weak_val().contiguous().dtype, weak)                 # no layout to fix, stays weak
+      self.assertEqual(weak_val().realize().dtype, weak)                    # no width to store, stays weak
+      self.assertEqual(weak_val().clone().dtype, strong)                    # storage commits at the default
+      for entry in (lambda t: t.to("CPU:1").realize(), lambda t: t.as_param(0)):
         with self.assertRaises(RuntimeError): entry(weak_val())
+
+  def test_weak_is_virtual(self):
+    # NOTE: int64 lub uint64 is weakfloat, so this is device-ful weak from promotion, never from a cast to weak
+    devful = Tensor([1], dtype=dtypes.int64, device="CPU") + Tensor([1], dtype=dtypes.uint64, device="CPU")
+    for t in (Tensor.const(dtypes.weakfloat, 0.5), devful):
+      self.assertTrue(t.uop.is_virtual)
+      # realize is a no-op, so a weak input can never become the real buffer TinyJit needs
+      with self.assertRaises(JitError): TinyJit(lambda x: (x+1).realize())(t)
+    # callify must not silently commit a weak CONTIGUOUS to storage
+    c = devful.alu(Ops.CONTIGUOUS)
+    c.callify()
+    self.assertIs(c.dtype, dtypes.weakfloat)
 
   def test_empty_reads_commit(self):
     for weak, strong in ((dtypes.weakfloat, dtypes.default_float),):

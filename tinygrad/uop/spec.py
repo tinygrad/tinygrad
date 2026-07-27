@@ -59,10 +59,10 @@ spec_shared = PatternMatcher([
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
   (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
-   lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) for x in s.src)),
+   lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype in dtypes.weaks for x in s.src)),
 
   # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
-  # a weak dtype matches any dtype (TODO: make python scalars weak consts)
+  # a weak dtype matches any dtype until lowering commits its operand
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(), UPat())),
    lambda w: all(matches_dtype(s, w.dtype) or s.dtype in dtypes.weaks for s in w.src[1:])),
   (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),

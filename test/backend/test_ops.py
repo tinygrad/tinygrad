@@ -340,11 +340,11 @@ class TestOps(unittest.TestCase):
 
   def test_where(self):
     helper_test_op([], lambda: torch.where(torch.tensor([True, False]), 1, 3).type(torch.int32),
-                   lambda: Tensor([True, False]).where(1, 3), forward_only=True)
+                   lambda: Tensor([True, False]).where(1, 3).clone(), forward_only=True)
     helper_test_op(
       [(100,)],
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32),
-      lambda x: (x > 0.5).where(4, 2), forward_only=True)
+      lambda x: (x > 0.5).where(4, 2).clone(), forward_only=True)
 
     for shps in [[(8,),(1,),(1,)], [(10,10),(10,),(10,)], [(100,)]*3, [(10,10)]*3]:
       helper_test_op(
@@ -356,7 +356,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(
       [(5, 5)],
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32).permute((1, 0)),
-      lambda x: (x > 0.5).where(4, 2).permute((1, 0)), forward_only=True)
+      lambda x: (x > 0.5).where(4, 2).clone().permute((1, 0)), forward_only=True)
 
   def _test_cmp(self, fxn, reverse=True):
     # test different dtypes
@@ -636,9 +636,9 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x,y: x%y, forward_only=True, vals=[va, vb])
         helper_test_op(None, lambda x: x%2, forward_only=True, vals=[va])
         helper_test_op(None, lambda x: x%3, forward_only=True, vals=[va])
-        helper_test_op(None, lambda x: x%3.5, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x%3.5, lambda x: (x%3.5).clone(), forward_only=True, vals=[va])
         helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[va])
-        helper_test_op(None, lambda x: 100.5%x, forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: 100.5%x, lambda x: (100.5%x).clone(), forward_only=True, vals=[va])
 
   def test_fmod(self):
     a = [-4, 7, 5, 4, -7, 8, -9]
@@ -649,7 +649,7 @@ class TestOps(unittest.TestCase):
         vb = [float(bi) for bi in b] if float_b else b
         helper_test_op(None, lambda x,y: x.fmod(y), forward_only=True, vals=[va, vb])
         helper_test_op(None, lambda x: x.fmod(2), forward_only=True, vals=[va])
-        helper_test_op(None, lambda x: x.fmod(3.5), forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x.fmod(3.5), lambda x: x.fmod(3.5).clone(), forward_only=True, vals=[va])
 
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
@@ -706,7 +706,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
     # float to power of int
-    helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
+    helper_test_op(None, lambda x: 0.7**x, lambda x: (0.7**x).clone(), vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "TODO: broken in LVP")
@@ -775,7 +775,7 @@ class TestOps(unittest.TestCase):
   def test_pow_int_base_float_exponent(self):
     for exponent in (0.5, 1.5, 2.0, -1.0, 0.0):
       helper_test_op([], lambda: torch.tensor([1, 2, 3, 4], dtype=torch.int) ** exponent,
-                         lambda: Tensor([1, 2, 3, 4], dtype=dtypes.int32) ** exponent, forward_only=True)
+                         lambda: (Tensor([1, 2, 3, 4], dtype=dtypes.int32) ** exponent).clone(), forward_only=True)
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())

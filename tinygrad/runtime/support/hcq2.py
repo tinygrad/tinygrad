@@ -9,7 +9,6 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
 from tinygrad.engine.realize import pm_flatten_linear
@@ -49,13 +48,14 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
   return buf.index(r).store(data.index(r).load()).end(r)
 
-def make_cmdbuf(lin, devs):
+def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
   blob, patches = b'', []
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
     blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
-  cmdbuf = UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
-  return cmdbuf.after(make_binary_patch(cmdbuf, blob), *[make_patch(cmdbuf, off, s) for off, s in patches])
+  cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
+  writable = cmdbuf.after(dep) if dep is not None else cmdbuf
+  return cmdbuf.after(make_binary_patch(writable, blob), *[make_patch(writable, off, s) for off, s in patches])
 
 def make_signal(devs, queue="COMPUTE:0", sentinel=False):
   return UOp.placeholder((1,), dtypes.uint64, 0, device=devs, volatile=True).rtag("sentinel_signal" if sentinel else f"{queue}_timeline_signal")
@@ -309,6 +309,11 @@ def replace_params(call:UOp) -> UOp|None:
   by_root = {p.src[0]: p for p in patched}
   c_args = [by_root.get(a, a) for a in args]
 
+  # keep buffers whose addresses become link-time constants alive and mapped
+  held = args + [r.without_after for r in refhold]
+  addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
+  refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
+
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
@@ -437,21 +442,25 @@ pm_resolve_patches = PatternMatcher([
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
 
-hcq_link_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+linked_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+linked_linear_cache:dict[tuple[bytes, bool], UOp] = {}
 
-def link_cache_key(a:UOp): return a.key, to_tuple(a.device)
-pm_link_cache = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: hcq_link_cache.get(link_cache_key(a)))])
+def linked_buf_key(a:UOp): return a.key, to_tuple(a.device)
+pm_linked_bufs = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: linked_buf_cache.get(linked_buf_key(a)))])
 
 @track_rewrites(lambda _,jit,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, jit=False) -> UOp:
+  if (linked:=linked_linear_cache.get(linear_key:=(linear.key, jit))) is not None: return linked
+
   cacheable = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
                if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
-  hits = {a.src[0]:hcq_link_cache[key] for a in cacheable.values() if (key:=link_cache_key(a)) in hcq_link_cache}
-  linear = graph_rewrite(linear, pm_link_cache, name="apply link cache").substitute(hits, walk=True)
+  hits = {a.src[0]:linked_buf_cache[key] for a in cacheable.values() if (key:=linked_buf_key(a)) in linked_buf_cache}
+  linear = graph_rewrite(linear, pm_linked_bufs, name="reuse linked bufs").substitute(hits, walk=True)
   linear = graph_rewrite(linear, pm_bufferize, ctx=jit, bottom_up=True, walk=True, name="bufferize placeholders")
   linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
-  for (j,i),a in cacheable.items(): hcq_link_cache.setdefault(link_cache_key(a), linear.src[j].src[i])
+  for (j,i),a in cacheable.items(): linked_buf_cache.setdefault(linked_buf_key(a), linear.src[j].src[i])
+  linked_linear_cache[linear_key] = linear
   return linear
 
 # *****************
@@ -465,35 +474,28 @@ class HCQ2Compiled(Compiled):
 
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline_signal("sentinel", (1 << 64) - 1)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, jit=ctx[1]))
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else
+        Buffer(ctx[0].device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True)))
     ])
 
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
-    self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
-    self.rt_allocator = BumpAllocator(64 << 20, wrap=False)
-
-  def new_buffer(self, b:UOp, jit:bool) -> Buffer:
-    if jit or b.tag in HCQ_CACHE_TAGS:
-      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True))
-    return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
-
   @functools.cache
-  def timeline_signal(self, queue:str="COMPUTE:0", init_value:int=0) -> Buffer:
+  def timeline_signal(self, queue:str, init_value:int=0) -> Buffer:
     buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   @functools.cache
-  def timeline_value(self, queue:str="COMPUTE:0", init_value:int=1) -> Buffer:
+  def timeline_value(self, queue:str, init_value:int=1) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
-    sig = self.timeline_signal().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
-    tl = self.timeline_value().as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    sig = self.timeline_signal("COMPUTE:0").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    tl = self.timeline_value("COMPUTE:0").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()

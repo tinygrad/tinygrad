@@ -102,7 +102,7 @@ class dtypes:
     if isinstance(x, float): return dtypes.default_float
     if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
-    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)): return strong_dtype(max(dtypes.from_py(xi) for xi in x)) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -181,7 +181,8 @@ def _get_recursive_parents(dtype:DType) -> set[DType]:
 @functools.cache
 def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
-def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
+def least_upper_float(dt:DType) -> DType:
+  return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
