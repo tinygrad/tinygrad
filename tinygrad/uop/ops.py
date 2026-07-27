@@ -1360,7 +1360,7 @@ class UPat(OpMixin):
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, UPat) else x
+  def ufix(self, x): return UPat.cvar(arg=x) if not isinstance(x, UPat) else x
   def __floordiv__(self, x): return self._binop(Ops.FLOORDIV, x, False)
   def __rfloordiv__(self, x): return self._binop(Ops.FLOORDIV, x, True)
   def mod(self, x, reverse=False): return self._binop(Ops.FLOORMOD, x, reverse)
