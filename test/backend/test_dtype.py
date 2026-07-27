@@ -229,10 +229,10 @@ class TestFloatDType(TestDType):
     _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
              [0, 0, 1])
 
-  @unittest.skipUnless(dtypes.half in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "CL" and getenv("RUSTICL_ENABLE", "") == "llvmpipe",
+  @unittest.skipIf(dtypes.half in supported_dtypes and Device.DEFAULT == "CL" and getenv("RUSTICL_ENABLE", "") == "llvmpipe",
                    "rusticl/llvmpipe does not round standalone float16 casts")
-  @unittest.skipIf(sys.platform == "linux" and Device.DEFAULT == "WEBGPU", "Linux WebGPU does not round standalone float16 casts")
+  @unittest.skipIf(dtypes.half in supported_dtypes and sys.platform == "linux" and Device.DEFAULT == "WEBGPU",
+                   "Linux WebGPU does not round standalone float16 casts")
   def test_float_half_float_preserves_rounding(self):
     values = np.array([1.0003, -2.0007, 123.456], dtype=np.float32)
     got = Tensor(values).cast(dtypes.float16).cast(dtypes.float32).numpy()
