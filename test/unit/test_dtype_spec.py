@@ -83,7 +83,7 @@ class TestTypeSpec(unittest.TestCase):
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     _assert_eq(Tensor(True), dtypes.bool, True)
-    _assert_eq(Tensor(None), dtypes.default_float, [])
+    _assert_eq(Tensor(None), dtypes.weakfloat, [])
     _assert_eq(Tensor(2), dtypes.weakint, 2)
     _assert_eq(Tensor(2.34), dtypes.weakfloat, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])

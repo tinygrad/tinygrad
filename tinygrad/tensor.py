@@ -71,14 +71,15 @@ class Tensor(RandMixin):
 
     # create a UOp from the different types of inputs
     if data is None:
-      data = UOp.const(_dtype or dtypes.default_float, 0)
+      data = UOp.const(_dtype or dtypes.weakfloat, 0.0)
     elif isinstance(data, get_args(ConstType)):
       data = UOp.const(_dtype or dtypes.from_py(data), data)
     elif is_numpy_ndarray(data) and data.shape == ():
       data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
-      if isinstance(data, bytes): data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
+      if isinstance(data, bytes):
+        data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
       elif isinstance(data, (list, tuple)):
         data = UOp._frompy(data, _dtype or dtypes.from_py(data), _device)
       elif is_numpy_ndarray(data):
@@ -93,7 +94,7 @@ class Tensor(RandMixin):
     # data might be on a different device
     self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
-    if _dtype is not None and self.uop.dtype != _dtype: self.uop = self.uop.cast(_dtype)
+    if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
