@@ -1,6 +1,6 @@
 import unittest, math, subprocess
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, DTYPES_DICT
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
 from test.helpers import slow
@@ -25,6 +25,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
+    # weak values read back at their default.
+    target_dtype = strong_dtype(target_dtype)
     # denormals are zero
     if target_dtype in dtypes.floats and (target_dtype not in supported_dtypes or target_dtype in EMULATED_DTYPES.tolist(dtypes)):
       fe, fm = dtypes.finfo(target_dtype)
@@ -82,8 +84,8 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     _assert_eq(Tensor(True), dtypes.bool, True)
     _assert_eq(Tensor(None), dtypes.default_float, [])
-    _assert_eq(Tensor(2), dtypes.default_int, 2)
-    _assert_eq(Tensor(2.34), dtypes.default_float, 2.34)
+    _assert_eq(Tensor(2), dtypes.weakint, 2)
+    _assert_eq(Tensor(2.34), dtypes.weakfloat, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])
     _assert_eq(Tensor([1]), dtypes.default_int, [1])
     # list elements are python scalars; a numpy scalar in a list has no inferred dtype (use np.array or state a dtype)

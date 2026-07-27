@@ -24,7 +24,10 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong) and uops[0].dtype not in dtypes.floats:
-      return uops[0].cast(l2i_dt[dt]), (uops[0] < 0).where(UOp.const(l2i_dt[dt], -1), UOp.const(l2i_dt[dt], 0))
+      # the high word is the sign extension; bool has no sign, test the already-cast low word instead (bool < 0 would promote to weakint)
+      x, lo = uops[0], uops[0].cast(l2i_dt[dt])
+      sign = lo if x.dtype is dtypes.bool else x
+      return lo, (sign < sign.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
       return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0)).cast(l2i_dt[dt])
     case Ops.CAST if dt in dtypes.floats:
