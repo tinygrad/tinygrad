@@ -643,10 +643,14 @@ def ctp(x:UOp) -> CntType|None:
 # TODO: buffered flush
 def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
   nuops = []
+  deps: set[Register] = set()
   for u in uops:
-    nuops.append(u)
-    if (tp := ctp(u)) is not None:
+    if any(r in deps for s in u.src for r in rdefs(s)):
       nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(dtypes.int16, 0),)))
+      deps.clear()
+    if (tp := ctp(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
+      deps.update(rdefs(u))
+    nuops.append(u)
   return nuops
 
 @dataclass
