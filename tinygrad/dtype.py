@@ -99,8 +99,8 @@ class dtypes:
   def from_py(x) -> DType:
     # NOTE: isinstance(True, int) is True, so bool must be checked before int
     if isinstance(x, (bool, InvalidType)): return dtypes.bool
-    if isinstance(x, float): return dtypes.default_float
-    if isinstance(x, int): return dtypes.default_int
+    if isinstance(x, float): return dtypes.weakfloat
+    if isinstance(x, int): return dtypes.weakint
     # put this in the last is faster because there are more items than lists/tuples to check
     if isinstance(x, (list, tuple)): return strong_dtype(max(dtypes.from_py(xi) for xi in x)) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
@@ -208,7 +208,6 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
-  if dt in dtypes.weaks: return dt
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
@@ -303,6 +302,7 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 @functools.cache
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
+  dtype = strong_dtype(dtype)
   if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8

@@ -58,8 +58,8 @@ class TestHelpers(unittest.TestCase):
   def test_from_py(self):
     assert dtypes.from_py(True) == dtypes.bool
     assert dtypes.from_py(Invalid) == dtypes.bool
-    assert dtypes.from_py(2) == dtypes.default_int
-    assert dtypes.from_py(3.0) == dtypes.default_float
+    assert dtypes.from_py(2) == dtypes.weakint
+    assert dtypes.from_py(3.0) == dtypes.weakfloat
     assert dtypes.from_py([]) == dtypes.default_float
     assert dtypes.from_py(()) == dtypes.default_float
     assert dtypes.from_py([True]) == dtypes.bool
@@ -313,15 +313,15 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes))
   def test_broadcast_scalar(self, dt):
-    assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
-    assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.weakfloat)
+    assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.weakint)
     assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
 
   @given(strat.sampled_from(core_dtypes))
   def test_pad_scalar(self, dt):
     t = Tensor.ones(4, dtype=dt)
-    assert t.pad(((1, 1),), value=2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
-    assert t.pad(((1, 1),), value=2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert t.pad(((1, 1),), value=2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.weakfloat)
+    assert t.pad(((1, 1),), value=2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.weakint)
     assert t.pad(((1, 1),), value=True).dtype == dt
 
   @given(strat.sampled_from(core_dtypes))
@@ -420,16 +420,16 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_where_one_scalar(self, dt):
     t = Tensor(2, dtype=dt)
-    self.check_where_alternate_input_other(t, 3.2, (dt if dtypes.is_float(dt) else dtypes.default_float))
-    self.check_where_alternate_input_other(t, 3, (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int))
+    self.check_where_alternate_input_other(t, 3.2, (dt if dtypes.is_float(dt) else dtypes.weakfloat))
+    self.check_where_alternate_input_other(t, 3, (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.weakint))
     self.check_where_alternate_input_other(t, True, dt)
 
   def test_where_two_scalars(self):
-    self.check_where_alternate_input_other(3.1, 3.2, dtypes.default_float)
-    self.check_where_alternate_input_other(3.1, 3, dtypes.default_float)
-    self.check_where_alternate_input_other(3.1, True, dtypes.default_float)
-    self.check_where_alternate_input_other(3, 2, dtypes.default_int)
-    self.check_where_alternate_input_other(3, True, dtypes.default_int)
+    self.check_where_alternate_input_other(3.1, 3.2, dtypes.weakfloat)
+    self.check_where_alternate_input_other(3.1, 3, dtypes.weakfloat)
+    self.check_where_alternate_input_other(3.1, True, dtypes.weakfloat)
+    self.check_where_alternate_input_other(3, 2, dtypes.weakint)
+    self.check_where_alternate_input_other(3, True, dtypes.weakint)
 
   def test_where_non_bool_cond_raises(self):
     with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0)
@@ -441,8 +441,8 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes))
   def test_maximum_const(self, dt):
-    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
-    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dtypes.is_float(dt) else dtypes.weakfloat)
+    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.weakint)
     assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
   def test_div(self):
@@ -453,7 +453,7 @@ class TestAutoCastType(unittest.TestCase):
 
   def test_div_const(self):
     assert (Tensor([1, 2], dtype=dtypes.int32) / 2).dtype == dtypes.default_float
-    assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.weakfloat
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
 
