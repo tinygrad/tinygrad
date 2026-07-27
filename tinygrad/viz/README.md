@@ -1,7 +1,7 @@
 VIZ is a tool for inspecting tinygrad's rewrites and runtime profiling.
 
 to use:
-1. Run tinygrad with VIZ=1 (this saves the pkls and launches the server in interactive shells)
+1. Run tinygrad with `VIZ=1` (this saves the pkls and launches the server in interactive shells)
 2. That's it!
 
 # VIZ in the command line
@@ -10,7 +10,7 @@ Use `python -m tinygrad.viz.cli` (add --json for scripting) to view the full tim
 
 ### Environment variables
 
-Setting DEBUG includes the following data in the output stream. These show up as raw `{"value": "..."}` lines when using `--json`.
+Setting `DEBUG` includes the following data in the output stream. These show up as raw `{"value": "..."}` lines when using `--json`.
 
 | DEBUG | Includes |
 |------:|----------|
@@ -23,7 +23,7 @@ Setting DEBUG includes the following data in the output stream. These show up as
 
 VIZ defaults to colored output. Set `NO_COLOR=1` to disable colors.
 
-### Profiling Examples
+### Profiling examples
 
 Get kernel times and ASTs
 
@@ -31,9 +31,9 @@ Get kernel times and ASTs
 DEBUG=3 python -m tinygrad.viz.cli --json > /tmp/events.jsonl
 ```
 
-Select kernel times after a marker
+Select events between two markers
 
-Note: markers are set by the `profile_marker` helper in the user code, to find them:
+Markers are set using the `profile_marker` helper in user code. To list them:
 ```
 python -m tinygrad.viz.cli | rg MARKER
 ```
@@ -44,7 +44,7 @@ python -m tinygrad.viz.cli --interval "train @ 2" "train @ 3"
 
 Set `-t` to aggregate events.
 
-### Rewrites debugging example
+### Rewrites Debugging example
 
 First, find the rewrite you are looking for. This can be a schedule or kernel:
 
@@ -55,18 +55,18 @@ python -m tinygrad.viz.cli -s TINY | rg E_3
 
 List all rewrite passes:
 
-Note: the names come from `graph_rewrite(..., name="...")` in user code.
+Rewrite pass names come from `graph_rewrite(..., name="...")` in user code.
 ```bash
 python -m tinygrad.viz.cli -s TINY "Schedule 6 Kernels n1" --ls
 ```
 
-Get input graph to all passes
+Show the input graph for each pass
 
 ```bash
 DEBUG=6 python -m tinygrad.viz.cli -s TINY "Schedule 6 Kernels n1"
 ```
 
-Get all rewrites
+Show all rewrites
 
 ```bash
 # for the entire scheduler
