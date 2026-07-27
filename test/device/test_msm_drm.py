@@ -23,7 +23,7 @@ class RecordingMSMFile(FileIOInterface):
     self.submissions, self.waits, self.closed_queues, self.imports = [], [], [], []
     self.new_queues = []
     self.fail_mmap, self.wait_errno, self.close_errno, self.iova_errno = False, None, None, None
-    self.is_msm, self.chip_id, self.munmap_result = True, 0x06030000, 0
+    self.is_msm, self.chip_id, self.import_handle, self.munmap_result = True, 0x06030000, 19, 0
 
   def __del__(self): pass
 
@@ -32,7 +32,7 @@ class RecordingMSMFile(FileIOInterface):
     if request == ioctl_number(msm_drm.DRM_IOCTL_MSM_GEM_NEW): arg.handle = 17
     elif request == ioctl_number(msm_drm.DRM_IOCTL_PRIME_FD_TO_HANDLE):
       self.imports.append((arg.fd, arg.flags))
-      arg.handle = 19
+      arg.handle = self.import_handle
     elif request == ioctl_number(msm_drm.DRM_IOCTL_MSM_GET_PARAM):
       if not self.is_msm: raise OSError(errno.ENOTTY, "not msm")
       arg.value = 630 if arg.param == msm_drm.MSM_PARAM_GPU_ID else self.chip_id
@@ -81,7 +81,7 @@ def make_buffer(handle, gpu_addr, size, cpu=False):
 
   memory = bytearray(size) if cpu else None
   view = MMIOInterface(mv_address(memoryview(memory)), size) if memory is not None else None
-  buf = HCQBuffer(gpu_addr, size, meta=MSMAllocation(handle, gpu_addr, size, size if cpu else None), view=view)
+  buf = HCQBuffer(gpu_addr, size, meta=MSMAllocation(handle, gpu_addr, size, (view.addr, size) if view is not None else None), view=view)
   buf.test_memory = memory
   return buf
 
@@ -201,7 +201,7 @@ class TestMSMIface(unittest.TestCase):
     self.assertEqual(buf.size, 17)
     self.assertEqual(buf.cpu_view().addr, fd.cpu_addr)
     self.assertNotEqual(buf.va_addr, buf.cpu_view().addr)
-    self.assertEqual((buf.meta.handle, buf.meta.mapped_size), (17, mmap.PAGESIZE))
+    self.assertEqual((buf.meta.handle, buf.meta.cpu_mapping), (17, (fd.cpu_addr, mmap.PAGESIZE)))
     self.assertEqual(fd.mmaps, [(0, mmap.PAGESIZE, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0x8000)])
     self.assertEqual(fd.memory[:17], bytes(17))
 
@@ -284,6 +284,21 @@ class TestMSMIface(unittest.TestCase):
     self.assertIn(19, [handle for _,handle,_ in fd.submissions[0][2]])
     iface.free(second)
     self.assertEqual(fd.closed_handles, [19])
+
+  def test_reimported_allocation_unmaps_owned_mapping_after_original_free(self):
+    fd = RecordingMSMFile()
+    fd.import_handle = 17
+    iface = make_iface(fd)
+    original = iface.alloc(17)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)):
+      imported = iface.map(fd.cpu_addr + 0x40, 17, 9, 0x40)
+
+    iface.free(original)
+    self.assertEqual(fd.unmaps, [])
+    iface.free(imported)
+
+    self.assertEqual(fd.unmaps, [(fd.cpu_addr, mmap.PAGESIZE)])
+    self.assertEqual(fd.closed_handles, [17])
 
   def test_submit_deduplicates_repeated_dma_buf_imports(self):
     fd = RecordingMSMFile()

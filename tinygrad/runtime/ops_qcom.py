@@ -430,7 +430,7 @@ class MSMAllocation:
   handle: int
   iova: int
   size: int
-  mapped_size: int|None
+  cpu_mapping: tuple[int, int]|None
   references: int = 1
 
 def _open_msm_render_node(path:str) -> FileIOInterface|None:
@@ -475,7 +475,7 @@ class MSMIface:
       raise
 
     if fill_zeroes: ctypes.memset(cpu_addr, 0, size)
-    allocation = MSMAllocation(gem.handle, iova, mapped_size, mapped_size)
+    allocation = MSMAllocation(gem.handle, iova, mapped_size, (cpu_addr, mapped_size))
     buf = HCQBuffer(iova, size, meta=allocation, view=MMIOInterface(cpu_addr, size), owner=self.dev)
     self.allocations[gem.handle] = allocation
     return buf
@@ -513,12 +513,11 @@ class MSMIface:
     return matches[0]
 
   def free(self, mem:HCQBuffer):
-    base = mem.base
     allocation = self._allocation(mem)
     if allocation.references <= 0: raise RuntimeError(f"MSM GEM handle {allocation.handle} is already freed")
     allocation.references -= 1
     if allocation.references: return
-    if allocation.mapped_size is not None and self.fd.munmap(base.cpu_view().addr, allocation.mapped_size) != 0:
+    if allocation.cpu_mapping is not None and self.fd.munmap(*allocation.cpu_mapping) != 0:
       try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
       except OSError as e: raise RuntimeError(f"Failed to unmap and close MSM GEM handle {allocation.handle}") from e
       self.allocations.pop(allocation.handle, None)
