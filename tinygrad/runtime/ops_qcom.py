@@ -340,7 +340,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
-    if opts.external_ptr is not None: return self.dev.iface.map(opts.external_ptr, size, opts.external_fd)
+    if opts.external_ptr is not None: return self.dev.iface.map(opts.external_ptr, size, opts.external_fd, opts.external_offset)
     return self.dev.iface.alloc(size, uncached=opts.uncached)
 
   def _do_copy(self, src_addr, dest_addr, size, prof_text):
@@ -392,7 +392,7 @@ class KGSLIface:
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
     return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self.dev)
 
-  def map(self, ptr:int, size:int, _fd:int|None=None) -> HCQBuffer:
+  def map(self, ptr:int, size:int, _fd:int|None=None, _offset:int=0) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
     dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
@@ -421,10 +421,13 @@ class KGSLIface:
   def profile_finalize(self):
     with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")
 
-@dataclass(frozen=True)
+@dataclass
 class MSMAllocation:
   handle: int
+  iova: int
+  size: int
   mapped_size: int|None
+  references: int = 1
 
 def _open_msm_render_node(path:str) -> FileIOInterface|None:
   try: fd = FileIOInterface(path, os.O_RDWR)
@@ -453,7 +456,7 @@ class MSMIface:
     self.gpu_id = (self.chip_id >> 24, (self.chip_id >> 16) & 0xff, (self.chip_id >> 8) & 0xff)
     if self.gpu_id != (6, 3, 0): raise RuntimeError(f"MSM DRM requires Adreno 630, got chip_id={self.chip_id:#x}")
     self.queue_id = msm_drm.DRM_IOCTL_MSM_SUBMITQUEUE_NEW(self.fd, flags=0, prio=0).id
-    self.allocations: dict[int, HCQBuffer] = {}
+    self.allocations: dict[int, MSMAllocation] = {}
 
   def alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     if size <= 0: raise ValueError(f"MSM allocation size must be positive, got {size}")
@@ -470,66 +473,73 @@ class MSMIface:
       raise
 
     if fill_zeroes: ctypes.memset(cpu_addr, 0, size)
-    buf = HCQBuffer(iova, size, meta=MSMAllocation(gem.handle, mapped_size), view=MMIOInterface(cpu_addr, size), owner=self.dev)
-    self.allocations[iova] = buf
+    allocation = MSMAllocation(gem.handle, iova, mapped_size, mapped_size)
+    buf = HCQBuffer(iova, size, meta=allocation, view=MMIOInterface(cpu_addr, size), owner=self.dev)
+    self.allocations[gem.handle] = allocation
     return buf
 
-  def map(self, ptr:int, size:int, fd:int|None=None) -> HCQBuffer:
+  def map(self, ptr:int, size:int, fd:int|None=None, offset:int=0) -> HCQBuffer:
     if fd is None: raise ValueError("MSM DRM external pointers require a DMA-BUF fd")
     if size <= 0: raise ValueError(f"MSM mapping size must be positive, got {size}")
+    if offset < 0: raise ValueError(f"DMA-BUF offset must be non-negative, got {offset}")
+    if offset + size > (dma_buf_size:=os.fstat(fd).st_size):
+      raise ValueError(f"DMA-BUF range [{offset}, {offset + size}) exceeds DMA-BUF size {dma_buf_size}")
     imported = msm_drm.DRM_IOCTL_PRIME_FD_TO_HANDLE(self.fd, fd=fd)
-    try:
-      iova = msm_drm.DRM_IOCTL_MSM_GEM_INFO(self.fd, handle=imported.handle, info=msm_drm.MSM_INFO_GET_IOVA).value
-    except Exception:
-      try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=imported.handle)
-      except OSError as e: raise RuntimeError(f"MSM DMA-BUF import cleanup failed for GEM handle {imported.handle}") from e
-      raise
-
-    buf = HCQBuffer(iova, size, meta=MSMAllocation(imported.handle, None), view=MMIOInterface(ptr, size), owner=self.dev)
-    self.allocations[iova] = buf
-    return buf
+    if (allocation:=self.allocations.get(imported.handle)) is None:
+      try:
+        iova = msm_drm.DRM_IOCTL_MSM_GEM_INFO(self.fd, handle=imported.handle, info=msm_drm.MSM_INFO_GET_IOVA).value
+      except Exception:
+        try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=imported.handle)
+        except OSError as e: raise RuntimeError(f"MSM DMA-BUF import cleanup failed for GEM handle {imported.handle}") from e
+        raise
+      self.allocations[imported.handle] = allocation = MSMAllocation(imported.handle, iova, dma_buf_size, None)
+    else: allocation.references += 1
+    return HCQBuffer(allocation.iova + offset, size, meta=allocation, view=MMIOInterface(ptr, size), owner=self.dev)
 
   @staticmethod
   def _allocation(mem:HCQBuffer) -> MSMAllocation:
     if not isinstance(allocation:=mem.base.meta, MSMAllocation): raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
     return allocation
 
-  def _resolve_buffer(self, mem:HCQBuffer, var_vals:dict[str, int]) -> HCQBuffer:
-    if isinstance(mem.base.meta, MSMAllocation): return mem.base
+  def _resolve_allocation(self, mem:HCQBuffer, var_vals:dict[str, int]) -> MSMAllocation:
+    if isinstance(mem.base.meta, MSMAllocation): return mem.base.meta
     address = sym_infer(mem.va_addr, var_vals)
-    matches = [buf for buf in self.allocations.values()
-               if int(buf.va_addr) <= address and address + mem.size <= int(buf.va_addr) + buf.size]
+    matches = [allocation for allocation in self.allocations.values()
+               if allocation.iova <= address and address + mem.size <= allocation.iova + allocation.size]
     if len(matches) != 1: raise RuntimeError("MSM buffer was not allocated by the MSM DRM interface")
     return matches[0]
 
   def free(self, mem:HCQBuffer):
     base = mem.base
     allocation = self._allocation(mem)
+    if allocation.references <= 0: raise RuntimeError(f"MSM GEM handle {allocation.handle} is already freed")
+    allocation.references -= 1
+    if allocation.references: return
     if allocation.mapped_size is not None and self.fd.munmap(base.cpu_view().addr, allocation.mapped_size) != 0:
       try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
       except OSError as e: raise RuntimeError(f"Failed to unmap and close MSM GEM handle {allocation.handle}") from e
-      self.allocations.pop(int(base.va_addr), None)
+      self.allocations.pop(allocation.handle, None)
       raise RuntimeError(f"Failed to unmap MSM GEM handle {allocation.handle}")
     try: msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=allocation.handle)
     except OSError as e: raise RuntimeError(f"Failed to close MSM GEM handle {allocation.handle}") from e
-    self.allocations.pop(int(base.va_addr), None)
+    self.allocations.pop(allocation.handle, None)
 
   def submit(self, command:HCQBuffer, size:int, buffers:set[HCQBuffer], var_vals:dict[str, int]|None=None) -> int:
     if size <= 0: raise ValueError(f"MSM command size must be positive, got {size}")
     if size % 4: raise ValueError(f"MSM command size must be a multiple of 4, got {size}")
-    command_base = command.base
-    command_offset = int(command.va_addr) - int(command_base.va_addr)
+    command_base, command_allocation = command.base, self._allocation(command)
+    command_offset = int(command.va_addr) - command_allocation.iova
     if command_offset < 0 or size > command.size or command_offset + size > command_base.size:
       raise ValueError("MSM command range is outside its buffer")
 
-    submit_buffers = [(buf, self._allocation(buf)) for buf in
-                      {command_base, *(self._resolve_buffer(b, var_vals or {}) for b in buffers)}]
-    submit_buffers.sort(key=lambda item: item[1].handle)
-    bos = (msm_drm.struct_drm_msm_gem_submit_bo * len(submit_buffers))(*[
+    submit_allocations = {allocation.handle:allocation for allocation in
+                          [command_allocation, *(self._resolve_allocation(b, var_vals or {}) for b in buffers)]}
+    allocations = sorted(submit_allocations.values(), key=lambda allocation: allocation.handle)
+    bos = (msm_drm.struct_drm_msm_gem_submit_bo * len(allocations))(*[
       msm_drm.struct_drm_msm_gem_submit_bo(flags=msm_drm.MSM_SUBMIT_BO_READ | msm_drm.MSM_SUBMIT_BO_WRITE,
-                                            handle=allocation.handle, presumed=int(buf.va_addr))
-      for buf,allocation in submit_buffers])
-    command_idx = next(i for i,(buf,_) in enumerate(submit_buffers) if buf is command_base)
+                                            handle=allocation.handle, presumed=allocation.iova)
+      for allocation in allocations])
+    command_idx = allocations.index(command_allocation)
     cmds = (msm_drm.struct_drm_msm_gem_submit_cmd * 1)(
       msm_drm.struct_drm_msm_gem_submit_cmd(type=msm_drm.MSM_SUBMIT_CMD_BUF, submit_idx=command_idx,
                                             submit_offset=command_offset, size=size))

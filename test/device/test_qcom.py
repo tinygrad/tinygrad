@@ -34,8 +34,8 @@ class RecordingMemoryIface:
     self.allocated, self.mapped, self.freed, self.maps = HCQBuffer(0x1000, 16), HCQBuffer(0x2000, 16), [], []
 
   def alloc(self, size, uncached=False): return self.allocated
-  def map(self, ptr, size, fd=None):
-    self.maps.append((ptr, size, fd))
+  def map(self, ptr, size, fd=None, offset=0):
+    self.maps.append((ptr, size, fd, offset))
     return self.mapped
   def free(self, buf): self.freed.append(buf)
 
@@ -176,17 +176,17 @@ class TestQCOM(unittest.TestCase):
 
     self.assertIs(allocator._alloc(16, BufferSpec()), iface.allocated)
     self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x1234)), iface.mapped)
-    self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x5678, external_fd=7)), iface.mapped)
-    self.assertEqual(iface.maps, [(0x1234, 16, None), (0x5678, 16, 7)])
+    self.assertIs(allocator._alloc(16, BufferSpec(external_ptr=0x5678, external_fd=7, external_offset=0x100)), iface.mapped)
+    self.assertEqual(iface.maps, [(0x1234, 16, None, 0), (0x5678, 16, 7, 0x100)])
 
     allocator._do_free(iface.allocated, BufferSpec())
     self.assertEqual(iface.freed, [iface.allocated])
 
-  def test_tensor_from_blob_passes_external_fd(self):
+  def test_tensor_from_blob_passes_external_fd_and_offset(self):
     with patch.object(Buffer, "allocate", autospec=True) as allocate:
-      Tensor.from_blob(0x1234, (4,), dtype=dtypes.int, device="CPU", fd=7)
+      Tensor.from_blob(0x1234, (4,), dtype=dtypes.int, device="CPU", fd=7, offset=0x234)
 
-    self.assertEqual(allocate.call_args.kwargs, {"external_ptr": 0x1234, "external_fd": 7})
+    self.assertEqual(allocate.call_args.kwargs, {"external_ptr": 0x1234, "external_fd": 7, "external_offset": 0x234})
 
   def test_signal_sleep_uses_interface(self):
     from tinygrad.runtime.ops_qcom import QCOMSignal

@@ -85,6 +85,7 @@ class BufferSpec:
   nolru: bool = False
   external_ptr: int|None = None
   external_fd: int|None = None
+  external_offset: int = 0
 
 class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
@@ -141,15 +142,15 @@ class Buffer:
       else: self._bufs[device] = allocator.map(self.ensure_allocated())
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
-  def allocate(self, opaque=None, external_ptr=None, external_fd=None) -> Buffer:
+  def allocate(self, opaque=None, external_ptr=None, external_fd=None, external_offset=0) -> Buffer:
     assert not self.is_initialized(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
     if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and (self.options is None or self.options.external_ptr is None):
       raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
     self.allocator:Allocator = Device[self.device].allocator
     if external_ptr is not None:
-      self.options = replace(self.options, external_ptr=external_ptr, external_fd=external_fd) if self.options else \
-                     BufferSpec(external_ptr=external_ptr, external_fd=external_fd)
+      self.options = replace(self.options, external_ptr=external_ptr, external_fd=external_fd, external_offset=external_offset) if self.options else \
+                     BufferSpec(external_ptr=external_ptr, external_fd=external_fd, external_offset=external_offset)
     if self._base is not None:
       self._base.ensure_allocated()
       self._base.allocated_views += 1

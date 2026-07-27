@@ -81,7 +81,7 @@ def make_buffer(handle, gpu_addr, size, cpu=False):
 
   memory = bytearray(size) if cpu else None
   view = MMIOInterface(mv_address(memoryview(memory)), size) if memory is not None else None
-  buf = HCQBuffer(gpu_addr, size, meta=MSMAllocation(handle, size), view=view)
+  buf = HCQBuffer(gpu_addr, size, meta=MSMAllocation(handle, gpu_addr, size, size if cpu else None), view=view)
   buf.test_memory = memory
   return buf
 
@@ -209,16 +209,27 @@ class TestMSMIface(unittest.TestCase):
   def test_external_pointer_is_rejected(self):
     with self.assertRaisesRegex(ValueError, "DMA-BUF fd"): make_iface(RecordingMSMFile()).map(0x1000, 16)
 
+  def test_import_dma_buf_rejects_negative_offset(self):
+    with self.assertRaisesRegex(ValueError, "non-negative"):
+      make_iface(RecordingMSMFile()).map(0x1000, 16, 9, -1)
+
+  def test_import_dma_buf_rejects_range_past_end(self):
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=0x100)):
+      with self.assertRaisesRegex(ValueError, "exceeds DMA-BUF size"):
+        make_iface(RecordingMSMFile()).map(0x1000, 0x20, 9, 0xf0)
+
   def test_import_dma_buf_maps_gpu_and_keeps_cpu_pointer(self):
     fd = RecordingMSMFile()
     iface = make_iface(fd)
 
-    buf = iface.map(fd.cpu_addr, 17, 9)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)) as fstat:
+      buf = iface.map(fd.cpu_addr + 0x40, 17, 9, 0x40)
 
-    self.assertEqual((buf.va_addr, buf.size, buf.cpu_view().addr), (0x1234_0000, 17, fd.cpu_addr))
+    self.assertEqual((buf.va_addr, buf.size, buf.cpu_view().addr), (0x1234_0040, 17, fd.cpu_addr + 0x40))
+    fstat.assert_called_once_with(9)
     self.assertEqual(buf.meta.handle, 19)
     self.assertEqual(fd.imports, [(9, 0)])
-    self.assertIs(iface.allocations[0x1234_0000], buf)
+    self.assertIs(iface.allocations[19], buf.meta)
 
     iface.free(buf)
     self.assertEqual(fd.unmaps, [])
@@ -228,9 +239,50 @@ class TestMSMIface(unittest.TestCase):
     fd = RecordingMSMFile()
     fd.iova_errno = errno.EIO
 
-    with self.assertRaisesRegex(OSError, "iova failed"): make_iface(fd).map(fd.cpu_addr, 17, 9)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)):
+      with self.assertRaisesRegex(OSError, "iova failed"): make_iface(fd).map(fd.cpu_addr, 17, 9)
 
     self.assertEqual(fd.closed_handles, [19])
+
+  def test_submit_uses_dma_buf_base_iova_for_offset_import(self):
+    fd = RecordingMSMFile()
+    iface = make_iface(fd)
+    command = make_buffer(11, 0x1000_0000, 0x1000)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)):
+      data = iface.map(fd.cpu_addr + 0x40, 17, 9, 0x40)
+
+    iface.submit(command, 4, {data})
+
+    _, _, bos, _ = fd.submissions[0]
+    self.assertIn((msm_drm.MSM_SUBMIT_BO_READ | msm_drm.MSM_SUBMIT_BO_WRITE, 19, 0x1234_0000), bos)
+
+  def test_repeated_dma_buf_import_closes_handle_after_last_free(self):
+    fd = RecordingMSMFile()
+    iface = make_iface(fd)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)):
+      first = iface.map(fd.cpu_addr, 17, 9)
+      second = iface.map(fd.cpu_addr + 0x40, 17, 9, 0x40)
+
+    iface.free(first)
+    self.assertEqual(fd.closed_handles, [])
+    self.assertIs(iface.allocations[19], second.meta)
+    iface.submit(make_buffer(11, 0x1000_0000, 0x1000), 4, {second})
+    self.assertIn(19, [handle for _,handle,_ in fd.submissions[0][2]])
+    iface.free(second)
+    self.assertEqual(fd.closed_handles, [19])
+
+  def test_submit_deduplicates_repeated_dma_buf_imports(self):
+    fd = RecordingMSMFile()
+    iface = make_iface(fd)
+    command = make_buffer(11, 0x1000_0000, 0x1000)
+    with patch("tinygrad.runtime.ops_qcom.os.fstat", return_value=SimpleNamespace(st_size=mmap.PAGESIZE)):
+      first = iface.map(fd.cpu_addr, 17, 9)
+      second = iface.map(fd.cpu_addr + 0x40, 17, 9, 0x40)
+
+    iface.submit(command, 4, {first, second})
+
+    _, _, bos, _ = fd.submissions[0]
+    self.assertEqual([handle for _,handle,_ in bos].count(19), 1)
 
   def test_allocator_rejects_external_pointer(self):
     _, allocator = self.allocator(RecordingMSMFile())
@@ -327,7 +379,7 @@ class TestMSMIface(unittest.TestCase):
     iface = make_iface(fd)
     command = make_buffer(11, 0x1000_0000, 0x1000, cpu=True)
     data = make_buffer(12, 0x2000_0000, 0x1000)
-    iface.allocations = {int(data.va_addr): data}
+    iface.allocations = {data.meta.handle: data.meta}
     dev = SimpleNamespace(iface=iface, cmd_buf=command,
                           cmd_buf_allocator=BumpAllocator(command.size, base=int(command.va_addr), wrap=True))
     iface.dev = dev
