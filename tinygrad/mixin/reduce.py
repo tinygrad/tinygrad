@@ -11,7 +11,7 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     raise NotImplementedError
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
-    if self.dtype in dtypes.weaks: self = self.cast(strong_dtype(self.dtype))
+    self = self.cast(strong_dtype(self.dtype))
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
     ret = self._rop(op, axis)
