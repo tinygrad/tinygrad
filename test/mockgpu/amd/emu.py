@@ -1582,7 +1582,8 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   vdst_reg = ctx.inst_field(type(inst).vdst)
   src0_r = ctx.inst_field(type(inst).src0) - _c(256)
   src1_r = ctx.inst_field(type(inst).src1) - _c(256)
-  src2_r = ctx.inst_field(type(inst).src2) - _c(256)
+  src2_r = ctx.inst_field(type(inst).src2)
+  src2_r = (src2_r >= 256).where(src2_r - _c(256), src2_r)
   output_type = op_name.split("WMMA_", 1)[1].split("_", 1)[0]
   is_bf16 = 'BF16' in op_name
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
