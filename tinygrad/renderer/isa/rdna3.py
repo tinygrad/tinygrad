@@ -640,33 +640,13 @@ def ctp(x:UOp) -> CntType|None:
   if x.arg.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
   return None
 
+# TODO: buffered flush
 def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
   nuops = []
   for u in uops:
     nuops.append(u)
     if (tp := ctp(u)) is not None:
       nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(dtypes.int16, 0),)))
-  return nuops
-
-# basic ones to start
-def _dual_ops():
-  dual_op_srcs = { "mov_b32", "mul_f32", "add_f32", "fmac_f32" }
-  return { getattr(RDNA3Ops, f"v_{opc}_e32") : getattr(RDNA3Ops, f"v_dual_{opc}") for opc in dual_op_srcs }
-dual_ops = _dual_ops()
-
-def dual_alu(uops:list[UOp]):
-  nuops = []
-  for x,y in zip(uops[::2], uops[1::2]):
-    indp = all(r not in rdefs(x) for s in y.src for r in rdefs(s))
-    # ensure they dont have different literals
-    _consts = {0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0}
-    _consts.update(range(64))
-    lits = set([u.arg for u in x.src+y.src if u.op is Ops.CONST and u.arg not in _consts])
-    if x.arg in dual_ops and y.arg in dual_ops and indp and (rdef(x).index + rdef(y).index) % 2 != 0 and len(lits) <= 1:
-      dx, dy = x.replace(arg=dual_ops[x.arg]), y.replace(arg=dual_ops[y.arg])
-      nuops.append(dx.replace(src=(dy,) + dx.src))
-    else: nuops.extend([x,y])
-  if len(uops) % 2 != 0: nuops.append(uops[-1])
   return nuops
 
 @dataclass
