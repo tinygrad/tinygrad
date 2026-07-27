@@ -582,9 +582,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp.const(dtype or self.dtype, b).broadcast(self.max_numel())
   def ufix(self, x):
     if isinstance(x, UOp): return x
-    # float self keeps its dtype for any scalar, int self only for int/Invalid scalars
-    dtype = self.dtype if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))) else dtypes.from_py(x)
-    return UOp.const(dtype, x)
+    return UOp.const(least_upper_dtype(self.dtype, dtypes.from_py(x)), x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -1740,8 +1738,6 @@ pm_lower_weak = PatternMatcher([
     lambda u,var: u.replace(dtype=dtypes.int, src=(var,)).cast(dtypes.weakint)),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=dtypes.int)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
-  (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
-    lambda var,val: var.bind(val).cast(dtypes.weakint)),
 ])
 def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   if ctx is None: ctx = {}
