@@ -76,7 +76,7 @@ class TestQCOM(unittest.TestCase):
   def test_program_upload_uses_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMProgram
 
-    lib, image, image_offset, image_desc_offset, reg_desc_offset = bytearray(0x500), b"\x12\x34\x56\x78", 0x400, 0x180, 0x300
+    lib, image, image_offset, image_desc_offset, reg_desc_offset = bytearray(0x500), bytes(range(128)), 0x400, 0x180, 0x300
     struct.pack_into("I", lib, 0x100, len(image))
     struct.pack_into("I", lib, 0xc0, image_offset)
     struct.pack_into("I", lib, 0x110, image_desc_offset)
@@ -87,11 +87,28 @@ class TestQCOM(unittest.TestCase):
     allocator = FakeAllocator()
     dev = SimpleNamespace(device="QCOM", renderer=object(), allocator=allocator, prof_prg_counter=itertools.count(),
                           _ensure_stack_size=lambda size: None)
-    QCOMProgram(dev, TinyELF(bytes(lib), "test", Target("QCOM"), ()))
+    prg = QCOMProgram(dev, TinyELF(bytes(lib), "test", Target("QCOM"), ()))
 
     gpu_memory, cpu_memory, _ = allocator.allocations[0]
     self.assertEqual(cpu_memory, image)
     self.assertEqual(gpu_memory, bytes([0xaa] * len(image)))
+    self.assertEqual(prg.instrlen, len(image) // 128)
+
+  def test_ir3_program_uses_compiler_instruction_length(self):
+    from tinygrad.renderer.nir import IR3Renderer
+    from tinygrad.runtime.autogen import mesa
+    from tinygrad.runtime.ops_qcom import QCOMProgram
+
+    image = bytes(256)
+    v, cs = mesa.struct_ir3_shader_variant(), mesa.struct_ir3_const_state()
+    v.info.size, v.instrlen = len(image), 1
+    v.cs.work_group_id = v.cs.local_invocation_id = 0xfc
+    dev = SimpleNamespace(device="QCOM", renderer=object.__new__(IR3Renderer), allocator=FakeAllocator(),
+                          prof_prg_counter=itertools.count(), _ensure_stack_size=lambda size: None)
+
+    prg = QCOMProgram(dev, TinyELF(bytes(v) + bytes(cs) + image, "test", Target("QCOM"), ()))
+
+    self.assertEqual(prg.instrlen, v.instrlen)
 
   def test_workgroup_size_uses_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue
@@ -101,7 +118,7 @@ class TestQCOM(unittest.TestCase):
                      view=MMIOInterface(mv_address(memoryview(cpu_memory)), len(cpu_memory)))
     prg = SimpleNamespace(NIR=True, wgsz=1, hregs=0, fregs=0, brnchstck=0, shared_size=1, prg_offset=0,
                           lib_gpu=HCQBuffer(0x200000, 128), pvtmem_size_per_item=0, pvtmem_size_total=0, hw_stack_offset=0,
-                          image_size=128, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
+                          image_size=128, instrlen=1, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
     dummy = HCQBuffer(0x300000, 4096)
     dev = SimpleNamespace(gpu_id=(6, 0, 0), dummy_buf=dummy, dummy_addr=dummy.va_addr, _stack=HCQBuffer(0x400000, 4096),
                           border_color_buf=HCQBuffer(0x500000, 4096))
@@ -112,15 +129,16 @@ class TestQCOM(unittest.TestCase):
     self.assertEqual(cpu_memory[4:16], struct.pack("III", 2, 3, 4))
     self.assertEqual(gpu_memory, bytes([0xaa] * len(gpu_memory)))
 
-  def test_shader_instruction_size_uses_128_byte_units(self):
+  def test_shader_instruction_size_uses_program_metadata(self):
     from tinygrad.runtime.autogen import mesa
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue, pkt4_hdr
 
     image_size = 0x3280
+    instrlen = image_size // 128 - 1
     args = HCQBuffer(0x100000, 4096)
     prg = SimpleNamespace(NIR=True, wgsz=0xfc, hregs=0, fregs=0, brnchstck=0, shared_size=1, prg_offset=0,
                           lib_gpu=HCQBuffer(0x200000, image_size), pvtmem_size_per_item=0, pvtmem_size_total=0,
-                          hw_stack_offset=0, image_size=image_size, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
+                          hw_stack_offset=0, image_size=image_size, instrlen=instrlen, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
     dummy = HCQBuffer(0x300000, 4096)
     dev = SimpleNamespace(gpu_id=(6, 0, 0), dummy_buf=dummy, dummy_addr=dummy.va_addr, _stack=HCQBuffer(0x400000, 4096),
                           border_color_buf=HCQBuffer(0x500000, 4096))
@@ -129,7 +147,7 @@ class TestQCOM(unittest.TestCase):
     queue = QCOMComputeQueue(dev).exec(prg, SimpleNamespace(bind_data=[], buf=args, prg=prg, bufs=()), (1, 1, 1), (1, 1, 1))
     register_packet = pkt4_hdr(mesa.REG_A6XX_SP_CS_INSTR_SIZE, 1)
 
-    self.assertEqual(queue._q[queue._q.index(register_packet) + 1], image_size // 128)
+    self.assertEqual(queue._q[queue._q.index(register_packet) + 1], instrlen)
 
   def test_queue_bind_uses_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMComputeQueue
@@ -172,7 +190,7 @@ class TestQCOM(unittest.TestCase):
                           gpu_id=(6, 0, 0), _stack=stack, border_color_buf=border, dummy_buf=dummy, dummy_addr=dummy.va_addr)
     prg = SimpleNamespace(dev=dev, NIR=True, wgsz=0xfc, hregs=0, fregs=0, brnchstck=0, shared_size=1, prg_offset=0,
                           lib_gpu=lib, pvtmem_size_per_item=0, pvtmem_size_total=0, hw_stack_offset=0, image_size=128,
-                          samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
+                          instrlen=1, samp_cnt=0, tex_cnt=0, ibo_cnt=0, wgid=0xfc, lid=0xfc)
     state = SimpleNamespace(bind_data=[], buf=args, prg=prg, bufs=(data,))
     queue = QCOMComputeQueue(dev).exec(prg, state, (1, 1, 1), (1, 1, 1))
     queue.signal(SimpleNamespace(value_addr=signal.va_addr, base_buf=signal), 1).submit(dev)
