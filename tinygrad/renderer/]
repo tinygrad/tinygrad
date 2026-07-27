@@ -58,10 +58,12 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
   if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
   if wmma.dtype != dtypes.float: args.append("i1 false") # opsel
-  def _bf16(dt:DType): return dtypes.ushort if dt is dtypes.bfloat16 else dt
-  if rdna4: suffix = f".v{wmma.max_numel()}{_bf16(dt_map[wmma.dtype])}.v{wmma.src[0].max_numel()}{_bf16(dt_map[wmma.arg[1]])}" if rdna4 else ""
-  # bfloat treated as i16 in LLVM call
-  return f"  {ctx[wmma]} = call {ldt(_bf16(wmma.dtype), wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
+  # if wmma.dtype != dtypes.float and not rdna4: args.append("i1 false") # opsel
+  suffix = ""
+  if rdna4:
+    def smap(dt): return "i16" if dt is dtypes.bfloat16 else dt_map[dt]
+    suffix = f".v{wmma.max_numel()}{smap(wmma.dtype)}.v{wmma.src[0].max_numel()}{smap(wmma.arg[1])}"
+  return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
     f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
@@ -307,7 +309,6 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     if target.arch in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: x.replace(
-          dtype=dtypes.uint16,
           src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)))
             .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
