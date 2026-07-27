@@ -218,8 +218,7 @@ def main(args) -> None:
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli", epilog="DEBUG modes (cumulative): 3=base AST, 4=generated source, "
-                                   "5=rewrite steps and kernel graph, 6=all UOp graphs, 7=all rewrites")
+  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
