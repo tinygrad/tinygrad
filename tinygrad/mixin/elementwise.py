@@ -21,7 +21,6 @@ class ElementwiseMixin(CreationMixin):
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    if x.dtype == y.dtype: return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
@@ -240,7 +239,7 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
-      if a.dtype not in dtypes.weaks: a = a.cast(dtypes.default_float)
+      a = a.cast(dtypes.default_float)
     d = a * b.reciprocal()
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
