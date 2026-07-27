@@ -4,7 +4,7 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor
 from tinygrad.device import Buffer, BufferSpec, TinyELF
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import mv_address, Target
+from tinygrad.helpers import mv_address, round_up, Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, MMIOInterface
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -76,7 +76,7 @@ class TestQCOM(unittest.TestCase):
   def test_program_upload_uses_cpu_view(self):
     from tinygrad.runtime.ops_qcom import QCOMProgram
 
-    lib, image, image_offset, image_desc_offset, reg_desc_offset = bytearray(0x500), bytes(range(128)), 0x400, 0x180, 0x300
+    lib, image, image_offset, image_desc_offset, reg_desc_offset = bytearray(0x500), bytes(range(129)), 0x400, 0x180, 0x300
     struct.pack_into("I", lib, 0x100, len(image))
     struct.pack_into("I", lib, 0xc0, image_offset)
     struct.pack_into("I", lib, 0x110, image_desc_offset)
@@ -92,7 +92,7 @@ class TestQCOM(unittest.TestCase):
     gpu_memory, cpu_memory, _ = allocator.allocations[0]
     self.assertEqual(cpu_memory, image)
     self.assertEqual(gpu_memory, bytes([0xaa] * len(image)))
-    self.assertEqual(prg.instrlen, len(image) // 128)
+    self.assertEqual(prg.instrlen, round_up(len(image), 128) // 128)
 
   def test_ir3_program_uses_compiler_instruction_length(self):
     from tinygrad.renderer.nir import IR3Renderer

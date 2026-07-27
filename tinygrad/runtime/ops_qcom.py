@@ -276,7 +276,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
     else:
       self._parse_lib(obj.lib)
-      self.instrlen = self.image_size // 128
+      self.instrlen = round_up(self.image_size, 128) // 128
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     self.lib_gpu.cpu_view().view(size=self.image_size, fmt='B')[:] = self.image
