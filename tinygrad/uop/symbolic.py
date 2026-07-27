@@ -69,10 +69,11 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 pm_data_invalid = PatternMatcher([
+  (invalid_pat.broadcast(), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,), name="op"), lambda i,op: i.cast(op.dtype)),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
    lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i.cast(op.dtype))),
-  # binary ops move inside the gate, with Invalid cast to the result dtype (bool for comparisons)
+  # binary ops move inside the gate, with Invalid in the false branch
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i.cast(alu.dtype))),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
@@ -92,7 +93,9 @@ pm_data_invalid = PatternMatcher([
 ])
 
 pm_remove_invalid = PatternMatcher([
-  (invalid_pat, lambda i: i.const_like(0)),
+  (invalid_gate.named("w"), lambda cond,x,i,w: w.replace(src=(cond,x,w.const_like(0)))),
+  (UPat(Ops.STACK, name="s"), lambda s: s.replace(src=tuple(UOp.const(s.dtype, 0) if x.arg is Invalid else x for x in s.src))
+   if any(x.arg is Invalid for x in s.src) else None),
 ])
 
 symbolic_simple = pm_data_invalid + PatternMatcher([

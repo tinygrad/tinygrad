@@ -1,7 +1,9 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array
-from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import Buffer, BufferSpec
+import platform, sys, os, ctypes, functools, mmap, threading, array, itertools
+from dataclasses import replace
+from typing import cast
+from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, partition
+from tinygrad.device import Buffer, BufferSpec, TinyELF
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -13,9 +15,9 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, KernelInfo
+from tinygrad.uop.ops import sint, KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 31, 32, (16 << 10)
+MAX_ARGS, CMD_SIZE, RING_SLOTS = 63, 64, (16 << 10)
 
 def signal_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
@@ -53,6 +55,17 @@ def worker_prog():
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
 
+def host_wait(ctx, dst:UOp, val:UOp) -> UOp:
+  return (cur:=dst.after(loop:=UOp.loop(next(ctx))).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
+
+pm_host_opsel = PatternMatcher([(UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait)])
+
+def encode_host_queue(q:UOp) -> UOp:
+  # TODO: subset of hcq2 for now
+  spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, ctx=itertools.count(), walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
+  assert store.op is Ops.INS and store.arg == "store", f"host queue cannot encode {store.op} {store.arg}"
+  return store.src[0].after(*spins).index(UOp.const(dtypes.int, 0)).store(store.src[1])
+
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
     super().__init__()
@@ -64,7 +77,7 @@ class CPUComputeQueue(HWQueue):
     args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
     assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
     for tid in range(1 if lvp else (global_size or (1,))[0]):
-      if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
+      if not lvp and 'core_id' in prg.runtimevars: args[prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
     return self
   def wait(self, signal, value=0): return self._cmd(wait_prog, (signal.base_buf,), (value,))
@@ -86,32 +99,33 @@ class LVPArgsState(CLikeArgsState):
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
 
-class CPUProgram(HCQProgram):
+class CPUProgram(HCQProgram['CPUDevice']):
   rt_lib = None
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, native=False, **kwargs):
-    self.runtimevars = runtimevars or {}
+  def __init__(self, dev:CPUDevice, obj:TinyELF):
+    self.runtimevars = {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
 
-    LVP = isinstance(dev.renderer, LVPRenderer) and not native
+    LVP = obj.target.renderer == "LVP"
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
-      self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(self.addr, lib, len(lib))
+      self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(obj.lib)), MEM_COMMIT | MEM_RESERVE,
+                                                      PAGE_EXECUTE_READWRITE)
+      ctypes.memmove(self.addr, obj.lib, len(obj.lib))
       ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
       proc = ctypes.windll.kernel32.GetCurrentProcess()
-      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(lib)))
+      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(obj.lib)))
       self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
     else:
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
-      self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
+      self.mem = mmap.mmap(-1, len(obj.lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
       self.addr = mv_address(self.mem)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if LVP: lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
+      lib = jit_loader(obj.lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m']) if LVP else obj.lib
       self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
@@ -126,7 +140,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
 
-    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, obj.name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
@@ -146,9 +160,23 @@ class CPUAllocator(HCQAllocator):
   def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQCompiled):
+  pm_lower = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_host_queue)])
+
+  pm_bufferize = PatternMatcher([
+    (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline("sentinel", (1 << 64) - 1)),
+    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_signal"), lambda ctx: ctx[0].timeline("signal", 0)),
+    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_value"), lambda ctx: ctx[0].timeline("value", 1)),
+  ])
+
+  @functools.cache
+  def timeline(self, tag:str, init_value:int) -> Buffer:
+    (buf:=Buffer(self.device, 1, dtypes.uint64, preallocate=True)).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
+    return buf
+
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], functools.partial(CPUProgram, self),
-      HCQSignal, functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
+    super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram, HCQSignal,
+      functools.partial(CPUComputeQueue, self), arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.ring_pos = 0
 
@@ -162,7 +190,7 @@ class CPUDevice(HCQCompiled):
     # TODO: move to hcq2
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
-      self.prgs = {f: self.runtime(f.__name__, do_to_program(v, ClangRenderer(self.renderer.target)).src[3].arg, native=True) for f,v in prgs.items()}
+      self.prgs = {f: self.runtime(do_to_program(v, ClangRenderer(replace(self.renderer.target, renderer="CLANG"))).to_elf()) for f,v in prgs.items()}
 
   @functools.cached_property
   def ring(self) -> Buffer: return Buffer(self.device, RING_SLOTS * CMD_SIZE, dtypes.uint64, preallocate=True)
@@ -182,7 +210,7 @@ class CPUDevice(HCQCompiled):
 
   @functools.cache
   def ensure_worker(self):
-    threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
+    threading.Thread(target=cast(CPUProgram, self.prgs[worker_prog]).fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
       [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else self.func_table._buf.va_addr+16, self.sem_addr]]).start()
 
   def finalize(self):
