@@ -5,7 +5,7 @@ from dataclasses import replace
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, select_by_name, unwrap
-from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey, round_up
+from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -326,12 +326,9 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
     self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
-    val_offset = len(bufs) * 8
-    for v,(_,_,dt,_) in zip(vals, prg.signature[len(bufs):]):
+    for v,(val_offset,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(bufs) * 8)):
       assert v is not None
-      val_offset = round_up(val_offset, dt.itemsize)
       self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=len(prefix or []) * 4 + val_offset)
-      val_offset += dt.itemsize
 
 class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, obj:TinyELF, kernargs_alloc_size:int, base:int|None=None):
