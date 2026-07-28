@@ -186,6 +186,12 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    if op is Ops.MULTI and len(src):
+      # a MULTI always carries the DEVICE range it ends as src[1:]: if no DEVICE range is attached,
+      # attach the open ones from src[0], or a fresh one if src[0] has none (e.g. per-shard PARAMs)
+      if not any(r.op is Ops.RANGE and r.arg[-1] is AxisType.DEVICE for r in src[1:]):
+        drngs = tuple(r for r in src[0].ranges if r.arg[-1] is AxisType.DEVICE) or (UOp.range(len(src[0].device), -1, AxisType.DEVICE),)
+        src = src + drngs
     if op is Ops.CONST and arg is Invalid: dtype = dtypes.bool
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     # CONST derives its dtype by value only when the constructor omits one
@@ -438,7 +444,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
+        case Ops.MULTI:
+          dcount = int(dr.vmax)+1 if (dr:=self.device_range) is not None else len(self.device)
+          return tuple(s*dcount if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -473,7 +481,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+    dcount = int(dr.vmax)+1 if self.op is Ops.MULTI and (dr:=self.device_range) is not None else len(self.device)
+    return tuple(x//dcount if i == self.axis else x for i,x in enumerate(self.shape))
+
+  @functools.cached_property
+  def device_range(self) -> UOp|None:
+    # the device axis of a MULTI is the DEVICE range it ends (src[1:]), its size (vmax+1) is the number of shards
+    return next((r for r in self.src[1:] if r.arg[-1] is AxisType.DEVICE), None) if self.op is Ops.MULTI else None
 
   @property
   def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
@@ -483,7 +497,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # MULTI ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
-    if self.op is Ops.MULTI: return tuple(r for r in self.src[0].ranges if r.arg[-1] is AxisType.DEVICE)
+    if self.op is Ops.MULTI: return self.src[1:]
     return ()
 
   # determine what ranges this is in
@@ -666,6 +680,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def multi(self, axis:int|None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
     assert axis is not None, "multi None is no longer supported"
+    # the constructor adds the DEVICE ranges this MULTI ends (src[0]'s open DEVICE ranges) as src[1:]
     return UOp(Ops.MULTI, src=(self,), arg=axis)
 
   @property

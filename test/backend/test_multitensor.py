@@ -1,6 +1,6 @@
 import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, compile_linear
@@ -52,8 +52,10 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
-    for lb in X.uop.src:
-      assert lb.shape == (128,)
+    assert X.uop.src[0].shape == (128,)
+    # the MULTI carries and ends the DEVICE range as its second src
+    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
+    assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
   @unittest.expectedFailure # TODO: fix
