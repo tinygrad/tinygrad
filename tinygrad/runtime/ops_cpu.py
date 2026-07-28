@@ -140,7 +140,7 @@ class CPUProgram(HCQProgram['CPUDevice']):
 
       self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
 
-    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, obj.name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, obj, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
