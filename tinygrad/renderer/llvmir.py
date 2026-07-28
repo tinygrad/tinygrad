@@ -5,7 +5,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
+from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -189,7 +189,7 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = (NUM_CPU_THREADS.value, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
