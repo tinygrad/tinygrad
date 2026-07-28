@@ -232,17 +232,14 @@ class TestRandomness(unittest.TestCase):
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   def test_randn_finite(self, default_float):
     if default_float not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
-    self.enterContext(Context(CAPTURE_PROCESS_REPLAY=0))  # TODO: make default dtype ContextVar
-    old_default_float = dtypes.default_float
     # low precision can result in inf from randn
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     t = Tensor.randn(64, 64)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     print(f"testing with {default_float=}")
     assert math.isfinite(mx), mx
     assert math.isfinite(mn), mn
-    dtypes.default_float = old_default_float
 
   def test_random_counter_overflow(self):
     device = Device.DEFAULT

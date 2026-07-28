@@ -1,8 +1,9 @@
 from tinygrad import Tensor, dtypes, GlobalCounters
-dtypes.default_float = dtypes.float16
 from tinygrad.dtype import to_dtype
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from test.backend.test_softmax_fusion import single_kernel_softmax
+
+Context(DEFAULT_FLOAT=dtypes.float16).__enter__()
 
 if __name__ == "__main__":
   # softmax in bert layers
