@@ -1,12 +1,14 @@
 import functools, sys, unittest
 import numpy as np
 
-from tinygrad import Device, Tensor, UOp, dtypes, nn
+from tinygrad import Device, Tensor, TinyJit, UOp, dtypes, nn
 from tinygrad.llm.gguf import _GGML_QUANT, ggml_data_to_tensor
-from tinygrad.llm.cpu import (attention_decode, attention_prefill, causal_conv_silu, expert_pair, expert_silu, f16_linear, f16_matvec,
-                              gated_delta, gated_delta_prefill, gdn_qkv, moe_ffn, q6_argmax, q8_batched_pair, q8_gdn_projections,
-                              q8_linear_pair, q8_silu_linear, recurrent_decode_bucket, rmsnorm, shared_gate, silu, silu_mul, weighted_sum)
-from tinygrad.llm.model import biased_sigmoid_topk, pairwise_topk, ExpertWeights, FFNBlock, Linear, TransformerConfig
+from tinygrad.llm.cpu import (attention_decode, attention_prefill, causal_conv_silu, expert_pair, expert_silu, expert_weighted_sum, f16_linear,
+                              f16_matvec, gated_delta, gated_delta_prefill, gdn_qkv, iq3_repack, moe_ffn, q6_argmax, q8_batched_pair,
+                              q8_gdn_norm_projections, q8_gdn_projections, q8_linear_pair, q8_repack, q8_silu_linear,
+                              recurrent_decode_bucket, rmsnorm, rmsnorm_f16_linear, shared_gate,
+                              silu, silu_mul, weighted_sum)
+from tinygrad.llm.model import biased_sigmoid_topk, pairwise_topk, ExpertWeights, FFNBlock, Linear, Transformer, TransformerConfig
 
 
 def q8_activation(x:np.ndarray) -> np.ndarray:
@@ -34,6 +36,29 @@ def random_packed(rng:np.random.Generator, ggml_type:int, elements:int) -> np.nd
 
 @unittest.skipUnless(sys.platform.startswith("linux") and Device.DEFAULT == "CPU", "requires DEV=CPU on Linux")
 class TestLLMQuantCPU(unittest.TestCase):
+  def test_generate_accepts_different_recurrent_prefill_shapes(self):
+    class TinyRecurrentTransformer(Transformer):
+      def __init__(self):
+        self.max_context, self.has_recurrent_block = 32, True
+        self.token_embd = nn.Embedding(4, 1)
+        self.blk, self._cached_tokens = [], []
+        self._state_checkpoints, self._state_checkpoint_pos = [], 0
+        self._save_state_jit = self._restore_state_jit = None
+        self._warming_up = False
+        self.prefill_jit = TinyJit(self.forward)
+        self.flash_prefill_jit = TinyJit(functools.partial(self.forward, use_flash=True))
+        self.sample_prefill_jit = TinyJit(functools.partial(self.forward, sample=True))
+        self.recurrent_prefill_jits = {}
+        self.rollout_jits, self.sample_rollout_jits = {}, {}
+
+      def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, use_flash:bool=False,
+                  kv_len:int|UOp|None=None, valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
+        return tokens[:, -1:] + 1
+
+    model = TinyRecurrentTransformer()
+    for _ in range(3): self.assertEqual(next(model.generate([1] * 8, chunk_size=8)), 2)
+    self.assertEqual(next(model.generate([1] * 3, chunk_size=8)), 2)
+
   def test_attention_decode_matches_causal_gqa_reference(self):
     rng = np.random.default_rng(0)
     batch, heads, kv_heads, cache_len, head_dim = 1, 16, 2, 4113, 32
@@ -164,12 +189,21 @@ class TestLLMQuantCPU(unittest.TestCase):
       for weight_dtype in (dtypes.float16, dtypes.float32):
         if dtype == weight_dtype == dtypes.float16: continue
         with self.subTest(dtype=dtype, weight_dtype=weight_dtype):
-          window = Tensor(rng.standard_normal((batch, tokens + kernel - 1, channels), dtype=np.float32),
-                          device="CPU").cast(dtype).realize()
+          state = Tensor(rng.standard_normal((batch, kernel - 1, channels), dtype=np.float32), device="CPU").realize()
+          x = Tensor(rng.standard_normal((batch, tokens, channels), dtype=np.float32), device="CPU").cast(dtype).realize()
           weight = Tensor(rng.standard_normal((channels, kernel), dtype=np.float32),
                           device="CPU").cast(weight_dtype).realize()
+          window = state.cat(x, dim=1)
           expected = functools.reduce(lambda a,b: a+b, (window[:, i:i+tokens] * weight[:, i] for i in range(kernel))).silu()
-          np.testing.assert_allclose(causal_conv_silu(window, weight, tokens).numpy(), expected.numpy(), rtol=2e-6, atol=2e-6)
+          np.testing.assert_allclose(causal_conv_silu(state, x, weight).numpy(), expected.numpy(), rtol=2e-6, atol=2e-6)
+          np.testing.assert_allclose(causal_conv_silu(state, x, weight.T.contiguous()).numpy(), expected.numpy(), rtol=2e-6, atol=2e-6)
+
+    # This is the vectorized path used by Qwen's prefill.
+    state = Tensor(rng.standard_normal((1, kernel - 1, channels), dtype=np.float32), device="CPU").realize()
+    x = Tensor(rng.standard_normal((1, tokens, channels), dtype=np.float32), device="CPU").half().realize()
+    weight = Tensor(rng.standard_normal((channels, kernel), dtype=np.float32), device="CPU").half().realize()
+    expected = causal_conv_silu(state, x, weight).numpy()
+    np.testing.assert_allclose(causal_conv_silu(state, x, weight.T.contiguous()).numpy(), expected, rtol=2e-6, atol=2e-6)
 
   def test_shared_gate_matches_reference(self):
     rng = np.random.default_rng(6)
@@ -235,6 +269,9 @@ class TestLLMQuantCPU(unittest.TestCase):
         x = Tensor(rng.standard_normal((1, in_features), dtype=np.float32), device="CPU").cast(dtype).realize()
         got = q8_linear_pair(*layers, x)
         for paired,layer in zip(got, layers): np.testing.assert_allclose(paired.numpy(), layer(x).numpy(), rtol=2e-5, atol=2e-5)
+        for layer in layers: layer.cpu_repacked = q8_repack(layer.weight, layer.out_features, layer.in_features).realize()
+        for repacked,original in zip(q8_linear_pair(*layers, x), got): np.testing.assert_equal(repacked.numpy(), original.numpy())
+        for layer in layers: layer.cpu_repacked = None
 
   def test_q8_batched_pair_matches_separate(self):
     rng = np.random.default_rng(15)
@@ -250,6 +287,9 @@ class TestLLMQuantCPU(unittest.TestCase):
         x = Tensor(rng.standard_normal((2, 3, in_features), dtype=np.float32), device="CPU").cast(dtype).realize()
         got = q8_batched_pair(*layers, x)
         for paired,layer in zip(got, layers): np.testing.assert_allclose(paired.numpy(), layer(x).numpy(), rtol=2e-5, atol=2e-5)
+        for layer in layers: layer.cpu_repacked = q8_repack(layer.weight, layer.out_features, layer.in_features).realize()
+        for repacked,original in zip(q8_batched_pair(*layers, x), got): np.testing.assert_equal(repacked.numpy(), original.numpy())
+        for layer in layers: layer.cpu_repacked = None
 
   def test_q8_silu_linear_matches_separate(self):
     rng = np.random.default_rng(16)
@@ -260,22 +300,37 @@ class TestLLMQuantCPU(unittest.TestCase):
     up = Tensor(rng.standard_normal(gate.shape, dtype=np.float32), device="CPU").realize()
     fused = q8_silu_linear(layer, gate, up)
     separate = layer(silu_mul(gate, up).half())
+    linear = layer(gate[:, 0])
+    single = q8_silu_linear(layer, gate[:1, :1], up[:1, :1])
     np.testing.assert_equal(fused.numpy(), separate.numpy())
+    layer.cpu_repacked = q8_repack(layer.weight, layer.out_features, layer.in_features).realize()
+    np.testing.assert_equal(q8_silu_linear(layer, gate, up).numpy(), fused.numpy())
+    np.testing.assert_equal(q8_silu_linear(layer, gate[:1, :1], up[:1, :1]).numpy(), single.numpy())
+    np.testing.assert_equal(layer(gate[:, 0]).numpy(), linear.numpy())
 
   def test_q8_gdn_projections_match_separate(self):
-    rng = np.random.default_rng(14)
-    in_features = 64
+    rng = np.random.default_rng(10)
+    in_features = 256
     layers = []
-    for out_features in (17, 29):
+    for out_features in (1, 1):
       raw = random_packed(rng, 8, out_features * in_features)
       layer = Linear(in_features, out_features, bias=False)
       layer.set_quantized(Tensor(raw, dtype=dtypes.uint8, device="CPU").realize(), 8)
       layers.append(layer)
     x = Tensor(rng.standard_normal((1, in_features), dtype=np.float32), device="CPU").half().realize()
-    weight = Tensor(rng.standard_normal((13, in_features), dtype=np.float32), device="CPU").half().realize()
+    weight = Tensor(rng.standard_normal((16, in_features), dtype=np.float32), device="CPU").half().realize()
     got = q8_gdn_projections(*layers, weight, x)
     expected = (*q8_linear_pair(*layers, x), x @ weight.T)
     for fused,separate in zip(got, expected): np.testing.assert_equal(fused.numpy(), separate.numpy())
+    for layer in layers: layer.cpu_repacked = q8_repack(layer.weight, layer.out_features, layer.in_features).realize()
+    for repacked,original in zip(q8_gdn_projections(*layers, weight, x), got):
+      np.testing.assert_equal(repacked.numpy(), original.numpy())
+    norm = nn.RMSNorm(in_features, eps=1e-6)
+    norm.weight = Tensor(rng.standard_normal(in_features, dtype=np.float32), device="CPU").half().realize()
+    raw_x = Tensor(rng.standard_normal((1, in_features), dtype=np.float32), device="CPU").realize()
+    expected = q8_gdn_projections(*layers, weight, rmsnorm(norm, raw_x).half())
+    for fused,separate in zip(q8_gdn_norm_projections(*layers, weight, raw_x, norm), expected):
+      np.testing.assert_equal(fused.numpy(), separate.numpy())
 
   def test_f16_linear_matches_standard(self):
     rng = np.random.default_rng(13)
@@ -287,6 +342,13 @@ class TestLLMQuantCPU(unittest.TestCase):
           x = Tensor(rng.standard_normal((tokens, 256), dtype=np.float32), device="CPU").cast(dtype).realize()
           np.testing.assert_allclose(f16_linear(layer, x).numpy(), layer(x).numpy(), rtol=1e-5, atol=2e-5)
           np.testing.assert_allclose(f16_matvec(x, layer.weight).numpy(), layer(x).numpy(), rtol=1e-5, atol=2e-5)
+    norm = nn.RMSNorm(256, eps=1e-6)
+    norm.weight = Tensor(rng.standard_normal(256, dtype=np.float32), device="CPU").half().realize()
+    x = Tensor(rng.standard_normal((1, 256), dtype=np.float32), device="CPU").realize()
+    normalized, out = rmsnorm_f16_linear(norm, layer, x)
+    expected = rmsnorm(norm, x)
+    np.testing.assert_equal(normalized.numpy(), expected.numpy())
+    np.testing.assert_equal(out.numpy(), f16_linear(layer, expected).numpy())
 
   def test_q6_argmax_matches_materialized_logits(self):
     rng = np.random.default_rng(8)
@@ -297,7 +359,8 @@ class TestLLMQuantCPU(unittest.TestCase):
     layer.set_quantized(Tensor(raw, dtype=dtypes.uint8, device="CPU").realize(), 14)
     for _ in range(3):
       x = Tensor(rng.standard_normal((1, in_features), dtype=np.float32), device="CPU").realize()
-      self.assertEqual(q6_argmax(layer, x).item(), int(np.argmax(weight @ q8k_activation(x.numpy()).reshape(-1))))
+      expected = int(np.argmax(weight @ q8k_activation(x.numpy()).reshape(-1)))
+      self.assertEqual(q6_argmax(layer, x).item(), expected)
 
   def test_packed_experts_match_reference(self):
     rng = np.random.default_rng(2)
@@ -319,13 +382,26 @@ class TestLLMQuantCPU(unittest.TestCase):
         direct_activation = q8k_activation(x[:1]) if ggml_type in (21, 23) else q8_activation(x[:1])
         direct_expected = np.stack([direct_activation[0] @ weight[expert].T for expert in direct_sel])
         np.testing.assert_allclose(direct, direct_expected, rtol=1e-5, atol=5e-4)
-
   def test_weighted_expert_sum_matches_reference(self):
     rng = np.random.default_rng(16)
     x = rng.standard_normal((2, 4, 257), dtype=np.float32)
     probs = rng.random((2, 4), dtype=np.float32)
     got = weighted_sum(Tensor(x, device="CPU"), Tensor(probs, device="CPU")).numpy()
     np.testing.assert_allclose(got, (x * probs[..., None]).sum(axis=1), rtol=1e-6, atol=1e-6)
+
+  def test_quantized_expert_weighted_sum_matches_separate(self):
+    rng = np.random.default_rng(29)
+    num_experts, inputs, routes_per_input, in_features, out_features = 16, 4, 8, 256, 64
+    sel = Tensor(rng.integers(0, num_experts, (1, inputs, routes_per_input), dtype=np.int32), device="CPU").realize()
+    x = Tensor(rng.standard_normal((*sel.shape, in_features), dtype=np.float32), device="CPU").realize()
+    probs = Tensor(rng.random(sel.shape, dtype=np.float32), device="CPU").realize()
+    for ggml_type in (14, 23):
+      with self.subTest(ggml_type=ggml_type):
+        layer = ExpertWeights(num_experts, in_features, out_features)
+        layer.set_quantized(Tensor.empty(num_experts, out_features, in_features),
+                            Tensor(random_packed(rng, ggml_type, num_experts * in_features * out_features),
+                                   dtype=dtypes.uint8, device="CPU").realize(), ggml_type)
+        np.testing.assert_equal(expert_weighted_sum(layer, sel, x, probs).numpy(), weighted_sum(layer(sel, x), probs).numpy())
 
   def test_fused_expert_silu_matches_separate(self):
     rng = np.random.default_rng(12)
@@ -344,6 +420,15 @@ class TestLLMQuantCPU(unittest.TestCase):
           experts.append(expert)
         gate, up = expert_pair(*experts, sel, x)
         np.testing.assert_equal(expert_silu(*experts, sel, x).numpy(), silu_mul(gate, up).numpy())
+        if ggml_type == 21:
+          direct_expected = expert_silu(*experts, sel, x).numpy()
+          batch_sel = Tensor(np.array([[2, 0], [1, 2]], dtype=np.int32), device="CPU")
+          batch_x = Tensor(rng.standard_normal((2, in_features), dtype=np.float32), device="CPU").realize()
+          expected = expert_silu(*experts, batch_sel, batch_x).numpy()
+          for expert in experts:
+            expert.cpu_repacked = iq3_repack(expert.weight, expert.num_experts * expert.out_features, expert.in_features).realize()
+          np.testing.assert_equal(expert_silu(*experts, sel, x).numpy(), direct_expected)
+          np.testing.assert_equal(expert_silu(*experts, batch_sel, batch_x).numpy(), expected)
 
   def test_fused_moe_matches_separate_quantized_layers(self):
     rng = np.random.default_rng(15)
@@ -380,7 +465,40 @@ class TestLLMQuantCPU(unittest.TestCase):
     shared_gate_out, shared_up = block.ffn_gate_shexp(x), block.ffn_up_shexp(x)
     shared = block.ffn_down_shexp(silu_mul(shared_gate_out, shared_up))
     expected = routed + shared * shared_gate(x, block.ffn_gate_inp_shexp["weight"])
-    np.testing.assert_allclose(moe_ffn(block, x, probs, sel).numpy(), expected.numpy(), rtol=1e-4, atol=2e-2)
+    original = moe_ffn(block, x, probs, sel).numpy()
+    np.testing.assert_allclose(original, expected.numpy(), rtol=1e-4, atol=2e-2)
+    for expert in (block.ffn_gate_exps, block.ffn_up_exps):
+      expert.cpu_repacked = iq3_repack(expert.weight, expert.num_experts * expert.out_features, expert.in_features).realize()
+    np.testing.assert_equal(moe_ffn(block, x, probs, sel).numpy(), original)
+
+  def test_fused_moe_q6_down_matches_separate(self):
+    rng = np.random.default_rng(16)
+    dim = hidden = 256
+    config = TransformerConfig(1, dim, hidden, 1, 1, 1e-6, 32, dim, 1e6, dim, dim,
+                               num_experts=3, num_experts_per_tok=2, shared_expert_dim=hidden)
+    block = FFNBlock(config)
+    for expert,ggml_type in ((block.ffn_gate_exps, 21), (block.ffn_up_exps, 21), (block.ffn_down_exps, 14)):
+      elements = expert.num_experts * expert.in_features * expert.out_features
+      raw = random_packed(rng, ggml_type, elements)
+      weight = ggml_data_to_tensor(Tensor(raw), elements, ggml_type).reshape(
+        expert.num_experts, expert.out_features, expert.in_features)
+      expert.set_quantized(weight, Tensor(raw, dtype=dtypes.uint8, device="CPU").realize(), ggml_type)
+    for expert in (block.ffn_gate_exps, block.ffn_up_exps):
+      expert.cpu_repacked = iq3_repack(expert.weight, expert.num_experts * expert.out_features, expert.in_features).realize()
+    for layer in (block.ffn_gate_shexp, block.ffn_up_shexp, block.ffn_down_shexp):
+      elements = layer.in_features * layer.out_features
+      raw = random_packed(rng, 8, elements)
+      layer.set_quantized(Tensor(raw, dtype=dtypes.uint8, device="CPU").realize(), 8)
+    block.ffn_gate_inp_shexp["weight"] = Tensor(rng.standard_normal(dim, dtype=np.float32), device="CPU").half().realize()
+
+    x = Tensor(rng.standard_normal((1, 1, dim), dtype=np.float32), device="CPU").realize()
+    probs = Tensor(np.array([[[0.7, 0.3]]], dtype=np.float32), device="CPU").realize()
+    sel = Tensor(np.array([[[2, 0]]], dtype=np.int32), device="CPU").realize()
+    hidden = expert_silu(block.ffn_gate_exps, block.ffn_up_exps, sel, x.unsqueeze(2))
+    routed = weighted_sum(block.ffn_down_exps(sel, hidden), probs)
+    gate, up = block.ffn_gate_shexp(x), block.ffn_up_shexp(x)
+    shared = block.ffn_down_shexp(silu_mul(gate, up)) * shared_gate(x, block.ffn_gate_inp_shexp["weight"])
+    np.testing.assert_equal(moe_ffn(block, x, probs, sel).numpy(), (routed + shared).numpy())
 
 if __name__ == "__main__":
   unittest.main()

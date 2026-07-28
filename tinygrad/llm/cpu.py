@@ -118,12 +118,13 @@ def dot_source() -> str:
 #include <immintrin.h>
 static inline int hsum8(__m256i x) {{
   __m128i sum = _mm_add_epi32(_mm256_castsi256_si128(x), _mm256_extracti128_si256(x, 1));
-  sum = _mm_hadd_epi32(sum, sum);
-  return _mm_cvtsi128_si32(_mm_hadd_epi32(sum, sum));
+  const __m128i hi64 = _mm_unpackhi_epi64(sum, sum);
+  sum = _mm_add_epi32(sum, hi64);
+  return _mm_cvtsi128_si32(_mm_add_epi32(sum, _mm_shuffle_epi32(sum, _MM_SHUFFLE(2, 3, 0, 1))));
 }}
 static inline int hsum4(__m128i x) {{
-  x = _mm_hadd_epi32(x, x);
-  return _mm_cvtsi128_si32(_mm_hadd_epi32(x, x));
+  x = _mm_add_epi32(x, _mm_unpackhi_epi64(x, x));
+  return _mm_cvtsi128_si32(_mm_add_epi32(x, _mm_shuffle_epi32(x, _MM_SHUFFLE(2, 3, 0, 1))));
 }}
 static inline float hsum8f(__m256 x) {{
   __m128 sum = _mm_add_ps(_mm256_castps256_ps128(x), _mm256_extractf128_ps(x, 1));
@@ -156,44 +157,104 @@ static inline __m256i unpack_q6(const unsigned char *w, int subgroup) {{
   high = _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, lane * 2), _mm256_set1_epi8(3)), 4);
   return _mm256_sub_epi8(_mm256_or_si256(low, high), _mm256_set1_epi8(32));
 }}
+static inline void unpack_q6_half(const unsigned char *w, int half, __m256i *q) {{
+  const __m256i m15 = _mm256_set1_epi8(15), m3 = _mm256_set1_epi8(3), bias = _mm256_set1_epi8(32);
+  const __m256i low0 = _mm256_loadu_si256((const __m256i *)(w + half * 64));
+  const __m256i low1 = _mm256_loadu_si256((const __m256i *)(w + half * 64 + 32));
+  const __m256i high = _mm256_loadu_si256((const __m256i *)(w + 128 + half * 32));
+  q[0] = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(low0, m15),
+    _mm256_slli_epi16(_mm256_and_si256(high, m3), 4)), bias);
+  q[1] = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(low1, m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 2), m3), 4)), bias);
+  q[2] = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low0, 4), m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 4), m3), 4)), bias);
+  q[3] = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low1, 4), m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 6), m3), 4)), bias);
+}}
+static inline void unpack_q6_half_unsigned(const unsigned char *w, int half, __m256i *q) {{
+  const __m256i m15 = _mm256_set1_epi8(15), m3 = _mm256_set1_epi8(3);
+  const __m256i low0 = _mm256_loadu_si256((const __m256i *)(w + half * 64));
+  const __m256i low1 = _mm256_loadu_si256((const __m256i *)(w + half * 64 + 32));
+  const __m256i high = _mm256_loadu_si256((const __m256i *)(w + 128 + half * 32));
+  q[0] = _mm256_or_si256(_mm256_and_si256(low0, m15),
+    _mm256_slli_epi16(_mm256_and_si256(high, m3), 4));
+  q[1] = _mm256_or_si256(_mm256_and_si256(low1, m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 2), m3), 4));
+  q[2] = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low0, 4), m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 4), m3), 4));
+  q[3] = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low1, 4), m15),
+    _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 6), m3), 4));
+}}
 static inline void dot_q6(const unsigned char *w, int subgroup, const signed char *xq, int *lo, int *hi) {{
   const __m256i qvals = unpack_q6(w, subgroup);
   const __m128i qlo = _mm256_castsi256_si128(qvals), qhi = _mm256_extracti128_si256(qvals, 1);
   *lo = dot16((const signed char *)&qlo, xq); *hi = dot16((const signed char *)&qhi, xq + 16);
 }}
 static inline void dot_q6_vec(__m256i qvals, const signed char *xq, int *lo, int *hi) {{
-  const __m256i xv = _mm256_loadu_si256((const __m256i *)xq);
-  const __m256i pairs = _mm256_maddubs_epi16(_mm256_abs_epi8(qvals), _mm256_sign_epi8(xv, qvals));
-  __m256i sums = _mm256_madd_epi16(pairs, _mm256_set1_epi16(1));
-  sums = _mm256_hadd_epi32(sums, sums);
-  sums = _mm256_hadd_epi32(sums, sums);
-  *lo = _mm_cvtsi128_si32(_mm256_castsi256_si128(sums));
-  *hi = _mm_cvtsi128_si32(_mm256_extracti128_si256(sums, 1));
+  const __m256i sums = dot32_parts(qvals, xq);
+  *lo = hsum4(_mm256_castsi256_si128(sums));
+  *hi = hsum4(_mm256_extracti128_si256(sums, 1));
 }}
-static inline void dot_q6_8(const unsigned char *w, const signed char *xq, int *lo, int *hi) {{
-  const __m256i m15 = _mm256_set1_epi8(15), m3 = _mm256_set1_epi8(3), bias = _mm256_set1_epi8(32);
+static inline __m256i q6_scale_pair(__m128i scales, int subgroup) {{
+  static const unsigned char shuffle[128] = {{
+     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+     2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+     4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5,
+     6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7,
+     8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9,
+    10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,
+    12,12,12,12,12,12,12,12,13,13,13,13,13,13,13,13,
+    14,14,14,14,14,14,14,14,15,15,15,15,15,15,15,15}};
+  return _mm256_cvtepi8_epi16(_mm_shuffle_epi8(scales,
+    _mm_loadu_si128((const __m128i *)(shuffle + subgroup * 16))));
+}}
+static inline int dot_q6_8_scaled(const unsigned char *w, const signed char *xq, const signed char *scales) {{
+  __m256i sum = _mm256_setzero_si256();
+  const __m128i scale_bytes = _mm_loadu_si128((const __m128i *)scales);
   for (int half = 0; half < 2; half++) {{
-    const __m256i low0 = _mm256_loadu_si256((const __m256i *)(w + half * 64));
-    const __m256i low1 = _mm256_loadu_si256((const __m256i *)(w + half * 64 + 32));
-    const __m256i high = _mm256_loadu_si256((const __m256i *)(w + 128 + half * 32));
-    const __m256i q0 = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(low0, m15),
-      _mm256_slli_epi16(_mm256_and_si256(high, m3), 4)), bias);
-    const __m256i q1 = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(low1, m15),
-      _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 2), m3), 4)), bias);
-    const __m256i q2 = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low0, 4), m15),
-      _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 4), m3), 4)), bias);
-    const __m256i q3 = _mm256_sub_epi8(_mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(low1, 4), m15),
-      _mm256_slli_epi16(_mm256_and_si256(_mm256_srli_epi16(high, 6), m3), 4)), bias);
-    dot_q6_vec(q0, xq + (half * 4 + 0) * 32, &lo[half * 4 + 0], &hi[half * 4 + 0]);
-    dot_q6_vec(q1, xq + (half * 4 + 1) * 32, &lo[half * 4 + 1], &hi[half * 4 + 1]);
-    dot_q6_vec(q2, xq + (half * 4 + 2) * 32, &lo[half * 4 + 2], &hi[half * 4 + 2]);
-    dot_q6_vec(q3, xq + (half * 4 + 3) * 32, &lo[half * 4 + 3], &hi[half * 4 + 3]);
+    __m256i q[4];
+    unpack_q6_half(w, half, q);
+    for (int lane = 0; lane < 4; lane++) {{
+      const int subgroup = half * 4 + lane;
+      sum = _mm256_add_epi32(sum, _mm256_madd_epi16(
+        dot32_pairs(q[lane], xq + subgroup * 32), q6_scale_pair(scale_bytes, subgroup)));
+    }}
   }}
+  return hsum8(sum);
+}}
+static inline int dot_q6_8_scaled_unsigned(const unsigned char *w, const signed char *xq, const signed char *scales,
+                                           const short *bsums) {{
+  const __m128i scale_bytes = _mm_loadu_si128((const __m128i *)scales);
+  const __m256i scale16 = _mm256_cvtepi8_epi16(scale_bytes);
+  __m256i sum = _mm256_sub_epi32(_mm256_setzero_si256(),
+    _mm256_slli_epi32(_mm256_madd_epi16(_mm256_loadu_si256((const __m256i *)bsums), scale16), 5));
+  for (int half = 0; half < 2; half++) {{
+    __m256i q[4];
+    unpack_q6_half_unsigned(w, half, q);
+    for (int lane = 0; lane < 4; lane++) {{
+      const int subgroup = half * 4 + lane;
+      sum = _mm256_add_epi32(sum, _mm256_madd_epi16(
+        _mm256_maddubs_epi16(q[lane], _mm256_loadu_si256((const __m256i *)(xq + subgroup * 32))),
+        q6_scale_pair(scale_bytes, subgroup)));
+    }}
+  }}
+  return hsum8(sum);
 }}
 #else
 {_SCALAR_DOT}
-static inline void dot_q6_8(const unsigned char *w, const signed char *xq, int *lo, int *hi) {{
-  for (int subgroup = 0; subgroup < 8; subgroup++) dot_q6(w, subgroup, xq + subgroup * 32, &lo[subgroup], &hi[subgroup]);
+static inline int dot_q6_8_scaled(const unsigned char *w, const signed char *xq, const signed char *scales) {{
+  int sum = 0;
+  for (int subgroup = 0; subgroup < 8; subgroup++) {{
+    int lo, hi;
+    dot_q6(w, subgroup, xq + subgroup * 32, &lo, &hi);
+    sum += scales[subgroup * 2] * lo + scales[subgroup * 2 + 1] * hi;
+  }}
+  return sum;
+}}
+static inline int dot_q6_8_scaled_unsigned(const unsigned char *w, const signed char *xq, const signed char *scales,
+                                           const short *bsums) {{
+  (void)bsums;
+  return dot_q6_8_scaled(w, xq, scales);
 }}
 #endif
 """
@@ -257,6 +318,261 @@ def _compile_cpu_ggml(src:str) -> bytes:
   if "tiny_cpu_parallel" not in src: return jit_loader(obj, link_libs=link_libs)
   _, parallel = parallel_runtime()
   return jit_loader(obj, link_libs=link_libs, link_syms={"tiny_cpu_parallel": parallel})
+
+def _cpu_program(bufs:tuple[UOp, ...], src:str, binary:bytes, name:str, outs:tuple[int, ...]=(0,)) -> UOp:
+  sink = UOp.sink(*(x.base for x in bufs), arg=KernelInfo(name=name))
+  global_idxs = tuple(range(len(bufs)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
+             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=global_idxs, outs=outs,
+                             ins=tuple(i for i in global_idxs if i not in outs)))
+
+@functools.cache
+def iq3_repack_program(rows:int, blocks_per_row:int) -> tuple[str, bytes, str]:
+  from tinygrad.runtime.autogen import ggml_common
+  name = f"cpu_iq3_repack_{rows}_{blocks_per_row}"
+  threads = min(rows, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
+  meta_size = (blocks_per_row * 6 + 63) // 64 * 64
+  row_size = meta_size + blocks_per_row * 128
+  grid = ",".join(hex(x) for x in ggml_common.iq3s_grid)
+  src = f"""
+static const unsigned int grid[512] = {{{grid}}};
+#define ROWS {rows}
+#define BLOCKS_PER_ROW {blocks_per_row}
+#define META_SIZE {meta_size}
+#define ROW_SIZE {row_size}
+#define THREADS {threads}
+typedef struct {{ unsigned char *out; const unsigned char *raw; int begin, end; }} task_t;
+static unsigned int load_u32(const unsigned char *p) {{
+  return (unsigned int)p[0] | ((unsigned int)p[1] << 8) | ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24);
+}}
+static void *worker(void *opaque) {{
+  task_t *task = (task_t *)opaque;
+  for (int row = task->begin; row < task->end; row++) {{
+    const unsigned char *raw_row = task->raw + row * BLOCKS_PER_ROW * 110;
+    unsigned char *out_row = task->out + row * ROW_SIZE;
+    for (int block = 0; block < BLOCKS_PER_ROW; block++) {{
+      const unsigned char *w = raw_row + block * 110;
+      unsigned char *meta = out_row + block * 6;
+      unsigned char *data = out_row + META_SIZE + block * 128;
+      meta[0] = w[0]; meta[1] = w[1];
+      for (int i = 0; i < 4; i++) meta[2+i] = w[106+i];
+      for (int i = 0; i < 128; i++) data[i] = 0;
+      for (int subgroup = 0; subgroup < 8; subgroup++) {{
+        const unsigned int signs = load_u32(w + 74 + subgroup * 4);
+        for (int word = 0; word < 8; word++) {{
+          const unsigned int values = grid[w[2 + subgroup * 8 + word] | (((w[66 + subgroup] >> word) & 1) << 8)];
+          for (int byte = 0; byte < 4; byte++) {{
+            const int pos = word * 4 + byte;
+            const unsigned int magnitude = (values >> (8 * byte)) & 255;
+            const unsigned char code = (unsigned char)(((magnitude - 1) >> 1) | (((signs >> pos) & 1) << 3));
+            unsigned char *packed = data + subgroup * 16 + (pos & 15);
+            if (pos < 16) *packed = code; else *packed |= (unsigned char)(code << 4);
+          }}
+        }}
+      }}
+    }}
+  }}
+  return (void *)0;
+}}
+{_SEM_POOL}
+void {name}(unsigned char *out, const unsigned char *raw) {{
+  dispatch((task_t){{out, raw, 0, ROWS}}, ROWS, THREADS);
+}}
+"""
+  return src, _compile_cpu_ggml(src), name
+
+def iq3_repack(raw:Tensor, rows:int, in_features:int) -> Tensor:
+  assert raw.dtype == dtypes.uint8 and in_features % 256 == 0
+  blocks_per_row = in_features // 256
+  assert int(raw.numel()) == rows * blocks_per_row * 110
+  meta_size = (blocks_per_row * 6 + 63) // 64 * 64
+  row_size = meta_size + blocks_per_row * 128
+  out = Tensor.empty(rows * row_size, dtype=dtypes.uint8, device=raw.device)
+  src, binary, name = iq3_repack_program(rows, blocks_per_row)
+  return Tensor.custom_kernel(out, raw.flatten(), fxn=lambda out,raw:repack_kernel(out, raw, src, binary, name))[0]
+
+def repack_kernel(out:UOp, raw:UOp, src:str, binary:bytes, name:str) -> UOp:
+  return _cpu_program((out, raw), src, binary, name)
+
+@functools.cache
+def q8_repack_program(rows:int, groups:int) -> tuple[str, bytes, str]:
+  name = f"cpu_q8_repack_{rows}_{groups}"
+  threads = min(rows, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
+  src = f"""
+#define ROWS {rows}
+#define GROUPS {groups}
+#define THREADS {threads}
+typedef struct {{ unsigned char *out; const unsigned char *raw; int begin, end; }} task_t;
+static void *worker(void *opaque) {{
+  task_t *task = (task_t *)opaque;
+  for (int row = task->begin; row < task->end; row++) {{
+    const unsigned char *raw = task->raw + row * GROUPS * 34;
+    unsigned char *scales = task->out + row * GROUPS * 34;
+    signed char *weights = (signed char *)(scales + GROUPS * 2);
+    for (int group = 0; group < GROUPS; group++) {{
+      scales[group * 2] = raw[group * 34];
+      scales[group * 2 + 1] = raw[group * 34 + 1];
+      for (int i = 0; i < 32; i++) weights[group * 32 + i] = (signed char)raw[group * 34 + 2 + i];
+    }}
+  }}
+  return (void *)0;
+}}
+{_SEM_POOL}
+void {name}(unsigned char *out, const unsigned char *raw) {{
+  dispatch((task_t){{out, raw, 0, ROWS}}, ROWS, THREADS);
+}}
+"""
+  return src, _compile_cpu_ggml(src), name
+
+def q8_repack(raw:Tensor, rows:int, in_features:int) -> Tensor:
+  assert raw.dtype == dtypes.uint8 and in_features % 32 == 0 and int(raw.numel()) == rows * (in_features // 32) * 34
+  groups = in_features // 32
+  out = Tensor.empty(rows * groups * 34, dtype=dtypes.uint8, device=raw.device)
+  src, binary, name = q8_repack_program(rows, groups)
+  return Tensor.custom_kernel(out, raw.flatten(), fxn=lambda out,raw:repack_kernel(out, raw, src, binary, name))[0]
+
+@functools.cache
+def q8_repacked_pair_program(out0:int, out1:int, in_features:int, dtype:DType, f16_features:int=0,
+                             norm_eps:float|None=None) -> tuple[str, bytes, str]:
+  assert dtype in (dtypes.float16, dtypes.float32)
+  assert not f16_features or dtype == dtypes.float16
+  assert norm_eps is None or dtype == dtypes.float16
+  ctype = "_Float16" if dtype == dtypes.float16 else "float"
+  norm_tag = "" if norm_eps is None else "_norm_" + str(norm_eps).replace(".", "_").replace("-", "m")
+  name = f"cpu_q8_repacked_pair{'_f16' if f16_features else ''}{norm_tag}_" + \
+         f"{out0}_{out1}_{f16_features}_{in_features}_{dtype.name}"
+  threads = min(out0 + out1 + f16_features, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
+  extra_arg = ", _Float16 *out2, const _Float16 *raw2" if f16_features else ""
+  x_arg = "const float *input" if norm_eps is not None else f"const {ctype} *x"
+  norm_arg = ", const _Float16 *norm_weight" if norm_eps is not None else ""
+  normalize = f"""
+  float norm_sum = 0.0f;
+  for (int i = 0; i < IN_FEATURES; i++) norm_sum += input[i] * input[i];
+  const float norm_scale = 1.0f / __builtin_sqrtf(norm_sum / (float)IN_FEATURES + {norm_eps!r}f);
+  _Float16 normalized_x[IN_FEATURES];
+  for (int i = 0; i < IN_FEATURES; i++) {{
+    const float normalized = input[i] * norm_scale;
+    normalized_x[i] = (_Float16)(normalized * (float)norm_weight[i]);
+  }}
+  const _Float16 *x = normalized_x;""" if norm_eps is not None else ""
+  task_init = "out0, out1, out2, raw0, raw1, raw2, x" if f16_features else \
+              "out0, out1, (_Float16 *)out0, raw0, raw1, (const _Float16 *)x, x"
+  src = f"""
+typedef union {{ unsigned short u; _Float16 h; }} half_bits;
+static inline float half_to_float(const unsigned char *p) {{
+  half_bits v; v.u = (unsigned short)p[0] | ((unsigned short)p[1] << 8); return (float)v.h;
+}}
+{dot_source()}
+#define OUT0 {out0}
+#define OUT1 {out1}
+#define OUT2 {f16_features}
+#define IN_FEATURES {in_features}
+#define GROUPS (IN_FEATURES / 32)
+#define THREADS {threads}
+typedef struct {{
+  {ctype} *out0, *out1; _Float16 *out2; const unsigned char *raw0, *raw1; const _Float16 *raw2;
+  const {ctype} *x; signed char *xq; float *xd; unsigned *quant_ready; int id, active, begin, end;
+}} task_t;
+static void *worker(void *opaque) {{
+  task_t *task = (task_t *)opaque;
+  for (int group = GROUPS * task->id / task->active; group < GROUPS * (task->id + 1) / task->active; group++) {{
+    float amax = 0.0f;
+    for (int i = 0; i < 32; i++) {{
+      float value = (float)task->x[group * 32 + i]; if (value < 0.0f) value = -value; if (value > amax) amax = value;
+    }}
+    const float d = amax > 0.00000001f ? amax / 127.0f : 0.00000001f;
+    task->xd[group] = d;
+    for (int i = 0; i < 32; i++) {{
+      int value = (int)__builtin_roundf((float)task->x[group * 32 + i] / d);
+      if (value < -127) value = -127; if (value > 127) value = 127;
+      task->xq[group * 32 + i] = (signed char)value;
+    }}
+  }}
+  if (OUT2) {{
+    const int total = OUT0 + OUT1;
+    const int row_begin = task->begin * OUT2 / total, row_end = task->end * OUT2 / total;
+    for (int row = row_begin; row < row_end; row++) {{
+      const _Float16 *weight = task->raw2 + row * IN_FEATURES;
+      float acc = 0.0f;
+      for (int i = 0; i < IN_FEATURES; i += 4)
+        acc = acc + (float)task->x[i] * (float)weight[i] + (float)task->x[i+1] * (float)weight[i+1] +
+              (float)task->x[i+2] * (float)weight[i+2] + (float)task->x[i+3] * (float)weight[i+3];
+      task->out2[row] = (_Float16)acc;
+    }}
+  }}
+  __atomic_add_fetch(task->quant_ready, 1, __ATOMIC_RELEASE);
+  while (__atomic_load_n(task->quant_ready, __ATOMIC_ACQUIRE) != (unsigned)task->active) {{}}
+  for (int local_idx = task->begin; local_idx < task->end; local_idx++) {{
+    const int idx = local_idx;
+    const int projection = idx >= OUT0, row = projection ? idx - OUT0 : idx;
+    const unsigned char *raw = projection ? task->raw1 : task->raw0;
+    const unsigned char *scales = raw + row * GROUPS * 34;
+    const signed char *weights = (const signed char *)(scales + GROUPS * 2);
+#if defined(__AVX2__)
+    __m256 accv = _mm256_setzero_ps();
+    int group = 0;
+    for (; group + 7 < GROUPS; group += 8) {{
+      float factors[8];
+      _mm256_storeu_ps(factors, _mm256_mul_ps(
+        _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(scales + group * 2))), _mm256_loadu_ps(task->xd + group)));
+      for (int lane = 0; lane < 8; lane++) {{
+        const int g = group + lane;
+        accv = _mm256_fmadd_ps(_mm256_set1_ps(factors[lane]),
+          _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256((const __m256i *)(weights + g * 32)),
+                                         task->xq + g * 32)), accv);
+      }}
+    }}
+    for (; group < GROUPS; group++)
+      accv = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(scales + group * 2) * task->xd[group]),
+        _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256((const __m256i *)(weights + group * 32)),
+                                       task->xq + group * 32)), accv);
+    const float acc = hsum8f(accv);
+#else
+    float acc = 0.0f;
+    for (int group = 0; group < GROUPS; group++)
+      acc += half_to_float(scales + group * 2) * task->xd[group] *
+        (float)dot32(weights + group * 32, task->xq + group * 32);
+#endif
+    (projection ? task->out1 : task->out0)[row] = ({ctype})acc;
+  }}
+  return (void *)0;
+}}
+extern void tiny_cpu_parallel(void (*)(void *, int, int, int, int), void *, int, int);
+static void pool_worker(void *opaque, int id, int active, int begin, int end) {{
+  task_t task = *(task_t *)opaque;
+  task.id = id; task.active = active; task.begin = begin; task.end = end;
+  worker(&task);
+}}
+static void dispatch(task_t task, int total, int requested) {{
+  tiny_cpu_parallel(pool_worker, &task, total, requested);
+}}
+void {name}({ctype} *out0, {ctype} *out1, const unsigned char *raw0, const unsigned char *raw1, {x_arg}{extra_arg}{norm_arg}) {{
+{normalize}
+  signed char xq[IN_FEATURES];
+  float xd[GROUPS];
+  unsigned quant_ready = 0;
+  dispatch((task_t){{{task_init}, xq, xd, &quant_ready, 0, 0, 0, OUT0 + OUT1}}, OUT0 + OUT1, THREADS);
+}}
+"""
+  return src, _compile_cpu_ggml(src), name
+
+def q8_repacked_pair(first:Linear, second:Linear, raw0:Tensor, raw1:Tensor, x:Tensor) -> tuple[Tensor, Tensor]:
+  assert first.in_features == second.in_features == x.shape[-1] and int(x.numel()) == x.shape[-1]
+  out0, out1 = (Tensor.empty(1, layer.out_features, dtype=x.dtype, device=x.device) for layer in (first, second))
+  src, binary, name = q8_repacked_pair_program(first.out_features, second.out_features, x.shape[-1], x.dtype)
+  outputs = Tensor.custom_kernel(out0, out1, raw0, raw1, x.flatten().contiguous(),
+    fxn=lambda out0,out1,raw0,raw1,x:q8_batched_pair_kernel(out0, out1, raw0, raw1, x, src, binary, name))
+  shape = x.shape[:-1]
+  return outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features)
+
+def q8_repacked_linear(layer:Linear, x:Tensor) -> Tensor:
+  assert layer.cpu_repacked is not None and int(x.numel()) == layer.in_features
+  out = Tensor.empty(1, layer.out_features, dtype=x.dtype, device=x.device)
+  unused = Tensor.empty(1, dtype=x.dtype, device=x.device)
+  src, binary, name = q8_repacked_pair_program(layer.out_features, 0, layer.in_features, x.dtype)
+  outputs = Tensor.custom_kernel(out, unused, layer.cpu_repacked, layer.cpu_repacked, x.flatten().contiguous(),
+    fxn=lambda out0,out1,raw0,raw1,x:q8_batched_pair_kernel(out0, out1, raw0, raw1, x, src, binary, name))
+  return outputs[0].reshape(*x.shape[:-1], layer.out_features)
 
 @functools.cache
 def attention_decode_program(batch:int, heads:int, kv_heads:int, head_dim:int, cache_len:int) -> tuple[str, bytes, str]:
@@ -745,10 +1061,7 @@ def gated_delta(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:T
 
 def gated_delta_kernel(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, norm_weight:UOp,
                             src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(core.base, next_state.base, q.base, k.base, v.base, beta.base, alpha.base, state.base, norm_weight.base,
-                  arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(9)), outs=(0, 1), ins=tuple(range(2, 9))))
+  return _cpu_program((core, next_state, q, k, v, beta, alpha, state, norm_weight), src, binary, name, (0, 1))
 
 @functools.cache
 def gated_delta_prefill_program(batch:int, heads:int, tokens:int, dim:int, state_dtype:DType,
@@ -887,9 +1200,7 @@ def rmsnorm(norm:nn.RMSNorm, x:Tensor) -> Tensor:
     rmsnorm_kernel(out, x, weight, src, binary, name))[0]
 
 def rmsnorm_kernel(out:UOp, x:UOp, weight:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, x.base, weight.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  return _cpu_program((out, x, weight), src, binary, name)
 
 @functools.cache
 def shared_gate_program(rows:int, dim:int, x_dtype:DType, weight_dtype:DType) -> tuple[str, bytes, str]:
@@ -925,9 +1236,7 @@ def shared_gate(x:Tensor, weight:Tensor) -> Tensor:
     shared_gate_kernel(out, x, weight, src, binary, name))[0]
 
 def shared_gate_kernel(out:UOp, x:UOp, weight:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, x.base, weight.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  return _cpu_program((out, x, weight), src, binary, name)
 
 def silu_mul(gate:Tensor, up:Tensor) -> Tensor:
   assert gate.shape == up.shape
@@ -939,56 +1248,110 @@ def silu(x:Tensor) -> Tensor:
   return Tensor.custom_kernel(out, x.flatten().contiguous(), fxn=silu_kernel)[0].reshape(*x.shape)
 
 @functools.cache
-def causal_conv_silu_program(batch:int, tokens:int, channels:int, kernel_size:int, x_dtype:DType,
-                                  weight_dtype:DType) -> tuple[str, bytes, str]:
-  assert x_dtype in (dtypes.float16, dtypes.float32) and weight_dtype in (dtypes.float16, dtypes.float32)
+def causal_conv_silu_program(batch:int, tokens:int, channels:int, kernel_size:int, state_dtype:DType, x_dtype:DType,
+                             weight_dtype:DType, weight_transposed:bool=False) -> tuple[str, bytes, str]:
+  assert state_dtype in (dtypes.float16, dtypes.float32) and x_dtype in (dtypes.float16, dtypes.float32)
+  assert weight_dtype in (dtypes.float16, dtypes.float32)
+  state_ctype = "_Float16" if state_dtype == dtypes.float16 else "float"
   x_ctype = "_Float16" if x_dtype == dtypes.float16 else "float"
   weight_ctype = "_Float16" if weight_dtype == dtypes.float16 else "float"
-  name = f"cpu_causal_conv_silu_{batch}_{tokens}_{channels}_{kernel_size}_{x_dtype.name}_{weight_dtype.name}"
+  name = f"cpu_causal_conv_silu{'t' if weight_transposed else ''}_" + \
+         f"{batch}_{tokens}_{channels}_{kernel_size}_{state_dtype.name}_{x_dtype.name}_{weight_dtype.name}"
   threads = min(batch * tokens * channels, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
+  vector_exp = platform.system() == "Linux" and platform.machine().lower() in ("x86_64", "amd64") and \
+    ctypes.util.find_library("mvec") is not None
+  exp8_src = """
+typedef float v8sf __attribute__((vector_size(32)));
+extern v8sf _ZGVdN8v_expf(v8sf);
+static inline __m256 exp8(__m256 x) { return (__m256)_ZGVdN8v_expf((v8sf)x); }
+""" if vector_exp else ""
+  weight_index = "tap * CHANNELS + channel" if weight_transposed else "channel * KERNEL_SIZE + tap"
+  vector_conv = vector_exp and weight_transposed and state_dtype == dtypes.float32 and x_dtype == weight_dtype == dtypes.float16
+  vector_loop = """
+  for (; idx + 8 <= task->end && idx % CHANNELS + 8 <= CHANNELS; idx += 8) {
+    const int channel = idx % CHANNELS;
+    const int token_batch = idx / CHANNELS, batch = token_batch / TOKENS, token = token_batch - batch * TOKENS;
+    __m256 sum = _mm256_setzero_ps();
+    for (int tap = 0; tap < KERNEL_SIZE; tap++) {
+      const int position = token + tap;
+      const __m256 value = position < KERNEL_SIZE - 1 ?
+        _mm256_loadu_ps(task->state + (batch * (KERNEL_SIZE - 1) + position) * CHANNELS + channel) :
+        _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(task->x +
+          (batch * TOKENS + position - (KERNEL_SIZE - 1)) * CHANNELS + channel)));
+      const __m256 weight = _mm256_cvtph_ps(_mm_loadu_si128(
+        (const __m128i *)(task->weight + tap * CHANNELS + channel)));
+      sum = _mm256_fmadd_ps(value, weight, sum);
+    }
+    _mm256_storeu_ps(task->out + idx, _mm256_div_ps(sum, _mm256_add_ps(_mm256_set1_ps(1.0f), exp8(_mm256_sub_ps(
+      _mm256_setzero_ps(), sum)))));
+  }""" if vector_conv else """
+#if VECTOR_EXP && defined(__AVX2__)
+  for (; idx + 8 <= task->end; idx += 8) {
+    float sums[8];
+    for (int lane = 0; lane < 8; lane++) sums[lane] = conv_sum(task, idx + lane);
+    const __m256 sum = _mm256_loadu_ps(sums);
+    _mm256_storeu_ps(task->out + idx, _mm256_div_ps(sum, _mm256_add_ps(_mm256_set1_ps(1.0f), exp8(_mm256_sub_ps(
+      _mm256_setzero_ps(), sum)))));
+  }
+#endif"""
   src = f"""
 extern float expf(float);
+{dot_source()}
+{exp8_src}
 #define TOKENS {tokens}
 #define CHANNELS {channels}
 #define KERNEL_SIZE {kernel_size}
 #define THREADS {threads}
-typedef struct {{ float *out; const {x_ctype} *window; const {weight_ctype} *weight; int begin, end; }} task_t;
+#define VECTOR_EXP {int(vector_exp)}
+typedef struct {{
+  float *out; const {state_ctype} *state; const {x_ctype} *x; const {weight_ctype} *weight; int begin, end;
+}} task_t;
+static inline float conv_sum(const task_t *task, int idx) {{
+  const int channel = idx % CHANNELS;
+  const int token_batch = idx / CHANNELS, batch = token_batch / TOKENS, token = token_batch - batch * TOKENS;
+  float sum = 0.0f;
+  for (int tap = 0; tap < KERNEL_SIZE; tap++) {{
+    const int position = token + tap;
+    const float value = position < KERNEL_SIZE - 1 ?
+      (float)task->state[(batch * (KERNEL_SIZE - 1) + position) * CHANNELS + channel] :
+      (float)task->x[(batch * TOKENS + position - (KERNEL_SIZE - 1)) * CHANNELS + channel];
+    sum += value * (float)task->weight[{weight_index}];
+  }}
+  return sum;
+}}
 static void *worker(void *opaque) {{
   task_t *task = (task_t *)opaque;
-  for (int idx = task->begin; idx < task->end; idx++) {{
-    const int channel = idx % CHANNELS;
-    const int token_batch = idx / CHANNELS, batch = token_batch / TOKENS, token = token_batch - batch * TOKENS;
-    float sum = task->window[(batch * (TOKENS + KERNEL_SIZE - 1) + token) * CHANNELS + channel] *
-                task->weight[channel * KERNEL_SIZE];
-    for (int tap = 1; tap < KERNEL_SIZE; tap++)
-      sum += task->window[(batch * (TOKENS + KERNEL_SIZE - 1) + token + tap) * CHANNELS + channel] *
-             task->weight[channel * KERNEL_SIZE + tap];
+  int idx = task->begin;
+{vector_loop}
+  for (; idx < task->end; idx++) {{
+    const float sum = conv_sum(task, idx);
     task->out[idx] = sum / (1.0f + expf(-sum));
-  }}
+    }}
   return (void *)0;
 }}
 {_SEM_POOL}
-void {name}(float *out, const {x_ctype} *window, const {weight_ctype} *weight) {{
+void {name}(float *out, const {state_ctype} *state, const {x_ctype} *x, const {weight_ctype} *weight) {{
   const int total = {batch} * TOKENS * CHANNELS;
-  dispatch((task_t){{out, window, weight, 0, total}}, total, THREADS);
+  dispatch((task_t){{out, state, x, weight, 0, total}}, total, THREADS);
 }}
 """
   return src, _compile_cpu_ggml(src), name
 
-def causal_conv_silu(window:Tensor, weight:Tensor, tokens:int) -> Tensor:
-  assert len(window.shape) == 3 and weight.shape == (window.shape[2], window.shape[1] - tokens + 1)
-  assert window.dtype in (dtypes.float16, dtypes.float32) and weight.dtype in (dtypes.float16, dtypes.float32)
-  assert window.dtype == dtypes.float32 or weight.dtype == dtypes.float32
-  batch, _, channels = window.shape
-  out = Tensor.empty(batch, tokens, channels, dtype=dtypes.float32, device=window.device)
-  src, binary, name = causal_conv_silu_program(batch, tokens, channels, weight.shape[1], window.dtype, weight.dtype)
-  return Tensor.custom_kernel(out, window.contiguous(), weight.contiguous(), fxn=lambda out,window,weight:
-    causal_conv_silu_kernel(out, window, weight, src, binary, name))[0]
+def causal_conv_silu(state:Tensor, x:Tensor, weight:Tensor) -> Tensor:
+  assert len(state.shape) == len(x.shape) == 3 and state.shape[0] == x.shape[0] and state.shape[2] == x.shape[2]
+  weight_transposed = weight.shape == (state.shape[1] + 1, x.shape[2])
+  assert weight_transposed or weight.shape == (x.shape[2], state.shape[1] + 1)
+  assert state.dtype in (dtypes.float16, dtypes.float32) and x.dtype in (dtypes.float16, dtypes.float32)
+  assert weight.dtype in (dtypes.float16, dtypes.float32)
+  batch, tokens, channels = x.shape
+  out = Tensor.empty(batch, tokens, channels, dtype=dtypes.float32, device=x.device)
+  kernel_size = weight.shape[0] if weight_transposed else weight.shape[1]
+  src, binary, name = causal_conv_silu_program(batch, tokens, channels, kernel_size, state.dtype, x.dtype, weight.dtype, weight_transposed)
+  return Tensor.custom_kernel(out, state.contiguous(), x.contiguous(), weight.contiguous(), fxn=lambda out,state,x,weight:
+    causal_conv_silu_kernel(out, state, x, weight, src, binary, name))[0]
 
-def causal_conv_silu_kernel(out:UOp, window:UOp, weight:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, window.base, weight.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+def causal_conv_silu_kernel(out:UOp, state:UOp, x:UOp, weight:UOp, src:str, binary:bytes, name:str) -> UOp:
+  return _cpu_program((out, state, x, weight), src, binary, name)
 
 @functools.cache
 def gdn_qkv_program(batch:int, tokens:int, k_heads:int, v_heads:int, dim:int) -> tuple[str, bytes, str]:
@@ -1044,9 +1407,7 @@ def gdn_qkv(conv:Tensor, k_heads:int, v_heads:int, dim:int) -> tuple[Tensor, Ten
   return ret[0], ret[1], ret[2]
 
 def gdn_qkv_kernel(q:UOp, k:UOp, v:UOp, conv:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(q.base, k.base, v.base, conv.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2, 3), outs=(0, 1, 2), ins=(3,)))
+  return _cpu_program((q, k, v, conv), src, binary, name, (0, 1, 2))
 
 def silu_mul_kernel(out:UOp, gate:UOp, up:UOp) -> UOp:
   elements = out.shape[0]
@@ -1113,9 +1474,7 @@ def biased_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, T
   return outputs[0], outputs[1]
 
 def biased_topk_kernel(out:UOp, sel:UOp, x:UOp, bias:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, sel.base, x.base, bias.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2, 3), outs=(0, 1), ins=(2, 3)))
+  return _cpu_program((out, sel, x, bias), src, binary, name, (0, 1))
 
 @functools.cache
 def topk_softmax_program(outer:int, k:int, dtype:DType) -> tuple[str, bytes, str]:
@@ -1162,16 +1521,16 @@ def topk_softmax(x:Tensor, k:int) -> tuple[Tensor, Tensor]:
   return outputs[0].reshape(*shape), outputs[1].reshape(*shape)
 
 def topk_softmax_kernel(out:UOp, sel:UOp, x:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, sel.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0, 1), ins=(2,)))
+  return _cpu_program((out, sel, x), src, binary, name, (0, 1))
 
 @functools.cache
-def ggml_linear_program(ggml_type:int, tokens:int, out_features:int, in_features:int, dtype:DType) -> tuple[str, bytes, str]:
+def ggml_linear_program(ggml_type:int, tokens:int, out_features:int, in_features:int, dtype:DType,
+                        repacked:bool=False) -> tuple[str, bytes, str]:
   assert ggml_type in (8, 14) and dtype in (dtypes.float16, dtypes.float32)
+  assert not repacked or ggml_type == 8
   token_tile = min(tokens, max(1, getenv("CPU_Q8_TOKEN_TILE", 8))) if ggml_type == 8 and tokens > 1 else tokens
   if tokens % token_tile: token_tile = 1
-  name = f"cpu_ggml_linear_{ggml_type}_{tokens}_{out_features}_{in_features}_{dtype.name}" + \
+  name = f"cpu_ggml_linear{'r' if repacked else ''}_{ggml_type}_{tokens}_{out_features}_{in_features}_{dtype.name}" + \
          (f"_tt{token_tile}" if ggml_type == 8 and tokens > 1 else "")
   ctype = "_Float16" if dtype == dtypes.float16 else "float"
   weight_bytes = out_features * in_features * (34 / 32 if ggml_type == 8 else 210 / 256)
@@ -1180,28 +1539,35 @@ def ggml_linear_program(ggml_type:int, tokens:int, out_features:int, in_features
   if ggml_type == 8:
     dot = """
     const unsigned char *w = raw + row * (IN_FEATURES / 32) * 34;
+    const unsigned char *scales = w;
+    const signed char *weights = (const signed char *)(scales + IN_FEATURES / 16);
 #if defined(__AVX2__)
     __m256 accv = _mm256_setzero_ps();
     for (int block = 0; block < IN_FEATURES / 32; block++, w += 34)
-      accv = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(w) * xd[block]),
-                            _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256((const __m256i *)(w + 2)),
+      accv = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(REPACKED ? scales + block * 2 : w) * xd[block]),
+                            _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256(
+                                                          (const __m256i *)(REPACKED ? weights + block * 32 : (const signed char *)(w + 2))),
                                                           xq + block * 32)), accv);
     acc = hsum8f(accv);
 #else
     for (int block = 0; block < IN_FEATURES / 32; block++, w += 34) {
-      acc += half_to_float(w) * xd[block] * (float)dot32((const signed char *)(w + 2), xq + block * 32);
+      acc += half_to_float(REPACKED ? scales + block * 2 : w) * xd[block] *
+             (float)dot32(REPACKED ? weights + block * 32 : (const signed char *)(w + 2), xq + block * 32);
     }
 #endif"""
     batch_dot = f"""
     const unsigned char *w = task->raw + row * (IN_FEATURES / 32) * 34;
+    const unsigned char *scales = w;
+    const signed char *weights = (const signed char *)(scales + IN_FEATURES / 16);
     for (int token_base = 0; token_base < TOKENS; token_base += {token_tile}) {{
 #if defined(__AVX2__)
     __m256 accv[{token_tile}];
     for (int token = 0; token < {token_tile}; token++) accv[token] = _mm256_setzero_ps();
     const unsigned char *wb = w;
     for (int block = 0; block < IN_FEATURES / 32; block++, wb += 34) {{
-      const __m256i wv = _mm256_loadu_si256((const __m256i *)(wb + 2));
-      const float wd = half_to_float(wb);
+      const __m256i wv = _mm256_loadu_si256(
+        (const __m256i *)(REPACKED ? weights + block * 32 : (const signed char *)(wb + 2)));
+      const float wd = half_to_float(REPACKED ? scales + block * 2 : wb);
       for (int token = 0; token < {token_tile}; token++) {{
         const int ti = token_base + token;
         accv[token] = _mm256_fmadd_ps(
@@ -1213,11 +1579,12 @@ def ggml_linear_program(ggml_type:int, tokens:int, out_features:int, in_features
 #else
     const unsigned char *wb = w;
     for (int block = 0; block < IN_FEATURES / 32; block++, wb += 34) {{
-      const float wd = half_to_float(wb);
+      const float wd = half_to_float(REPACKED ? scales + block * 2 : wb);
+      const signed char *weight = REPACKED ? weights + block * 32 : (const signed char *)(wb + 2);
       for (int token = 0; token < {token_tile}; token++) {{
         const int ti = token_base + token;
         acc[ti] += wd * task->xd[block * TOKENS + ti] *
-          (float)dot32((const signed char *)(wb + 2), task->xq + (block * TOKENS + ti) * 32);
+          (float)dot32(weight, task->xq + (block * TOKENS + ti) * 32);
       }}
     }}
 #endif
@@ -1280,6 +1647,7 @@ static inline float half_to_float(const unsigned char *p) {{
 #define OUT_FEATURES {out_features}
 #define IN_FEATURES {in_features}
 #define THREADS {threads}
+#define REPACKED {int(repacked)}
 typedef struct {{ {ctype} *out; const unsigned char *raw; const signed char *xq; const float *xd; int begin, end; }} task_t;
 static void *worker(void *opaque) {{
   task_t *task = (task_t *)opaque;
@@ -1312,17 +1680,16 @@ void {name}({ctype} *out, const unsigned char *raw, const {ctype} *x) {{
 """
   return src, _compile_cpu_ggml(src), name
 
-def ggml_linear_kernel(out:UOp, raw:UOp, x:UOp, ggml_type:int) -> UOp:
+def ggml_linear_kernel(out:UOp, raw:UOp, x:UOp, ggml_type:int, repacked:bool=False) -> UOp:
   tokens, out_features, in_features = out.shape[0], out.shape[1], x.shape[1]
-  src, binary, name = ggml_linear_program(ggml_type, tokens, out_features, in_features, x.dtype)
-  sink = UOp.sink(out.base, raw.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  src, binary, name = ggml_linear_program(ggml_type, tokens, out_features, in_features, x.dtype, repacked)
+  return _cpu_program((out, raw, x), src, binary, name)
 
 @functools.cache
-def q8_silu_linear_program(tokens:int, out_features:int, in_features:int) -> tuple[str, bytes, str]:
-  token_tile = 8 if tokens % 8 == 0 else 1
-  name = f"cpu_q8_silu_linear_{tokens}_{out_features}_{in_features}_tt{token_tile}"
+def q8_silu_linear_program(tokens:int, out_features:int, in_features:int, repacked:bool=False) -> tuple[str, bytes, str]:
+  token_tile = min(tokens, max(1, getenv("CPU_Q8_TOKEN_TILE", 8)))
+  if tokens % token_tile: token_tile = 1
+  name = f"cpu_q8_silu_linear{'r' if repacked else ''}_{tokens}_{out_features}_{in_features}_tt{token_tile}"
   threads = min(out_features, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
   src = f"""
 typedef union {{ unsigned short u; _Float16 h; }} half_bits;
@@ -1354,6 +1721,7 @@ static inline float tiny_silu_mul(_Float16 gate, float up) {{
 #define IN_FEATURES {in_features}
 #define GROUPS (IN_FEATURES / 32)
 #define THREADS {threads}
+#define REPACKED {int(repacked)}
 typedef struct {{
   _Float16 *out; const unsigned char *raw; const _Float16 *gate; const float *up;
   signed char *xq; float *xd; int stage, begin, end;
@@ -1381,20 +1749,42 @@ static void *worker(void *opaque) {{
   }}
   if (task->stage == 1) for (int row = task->begin; row < task->end; row++) {{
     const unsigned char *w = task->raw + row * GROUPS * 34;
+    const unsigned char *scales = w;
+    const signed char *weights = (const signed char *)(scales + GROUPS * 2);
     for (int token_base = 0; token_base < TOKENS; token_base += TOKEN_TILE) {{
 #if defined(__AVX2__)
       __m256 accv[TOKEN_TILE];
       for (int token = 0; token < TOKEN_TILE; token++) accv[token] = _mm256_setzero_ps();
       const unsigned char *wb = w;
+#if REPACKED
+      int block = 0;
+      for (; block + 7 < GROUPS; block += 8) {{
+        const __m256 factors = _mm256_mul_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(scales + block * 2))),
+                                             _mm256_loadu_ps(task->xd + block));
+        for (int lane = 0; lane < 8; lane++) {{
+          const int group = block + lane;
+          const __m256i wv = _mm256_loadu_si256((const __m256i *)(weights + group * 32));
+          accv[0] = _mm256_fmadd_ps(_mm256_permutevar8x32_ps(factors, _mm256_set1_epi32(lane)),
+            _mm256_cvtepi32_ps(dot32_parts(wv, task->xq + group * 32)), accv[0]);
+        }}
+      }}
+      for (; block < GROUPS; block++) {{
+        const __m256i wv = _mm256_loadu_si256((const __m256i *)(weights + block * 32));
+        accv[0] = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(scales + block * 2) * task->xd[block]),
+          _mm256_cvtepi32_ps(dot32_parts(wv, task->xq + block * 32)), accv[0]);
+      }}
+#else
       for (int block = 0; block < GROUPS; block++, wb += 34) {{
-        const __m256i wv = _mm256_loadu_si256((const __m256i *)(wb + 2));
-        const float wd = half_to_float(wb);
+        const __m256i wv = _mm256_loadu_si256(
+          (const __m256i *)(REPACKED ? weights + block * 32 : (const signed char *)(wb + 2)));
+        const float wd = REPACKED ? half_to_float(scales + block * 2) : half_to_float(wb);
         for (int token = 0; token < TOKEN_TILE; token++) {{
           const int ti = token_base + token;
           accv[token] = _mm256_fmadd_ps(_mm256_set1_ps(wd * task->xd[block * TOKENS + ti]),
             _mm256_cvtepi32_ps(dot32_parts(wv, task->xq + (block * TOKENS + ti) * 32)), accv[token]);
         }}
       }}
+#endif
       for (int token = 0; token < TOKEN_TILE; token++)
         task->out[(token_base + token) * OUT_FEATURES + row] = (_Float16)hsum8f(accv[token]);
 #else
@@ -1402,9 +1792,11 @@ static void *worker(void *opaque) {{
         const int ti = token_base + token;
         float acc = 0.0f;
         const unsigned char *wb = w;
-        for (int block = 0; block < GROUPS; block++, wb += 34)
-          acc += half_to_float(wb) * task->xd[block * TOKENS + ti] *
-            (float)dot32((const signed char *)(wb + 2), task->xq + (block * TOKENS + ti) * 32);
+        for (int block = 0; block < GROUPS; block++, wb += 34) {{
+          const float wd = REPACKED ? half_to_float(scales + block * 2) : half_to_float(wb);
+          const signed char *weight = REPACKED ? weights + block * 32 : (const signed char *)(wb + 2);
+          acc += wd * task->xd[block * TOKENS + ti] * (float)dot32(weight, task->xq + (block * TOKENS + ti) * 32);
+        }}
         task->out[ti * OUT_FEATURES + row] = (_Float16)acc;
       }}
 #endif
@@ -1426,17 +1818,17 @@ def q8_silu_linear(layer:Linear, gate:Tensor, up:Tensor) -> Tensor:
   assert layer.ggml_type == 8 and layer.bias is None and gate.shape == up.shape and gate.shape[-1] == layer.in_features
   assert gate.dtype == dtypes.float16 and up.dtype == dtypes.float32
   tokens = int(gate.numel()) // layer.in_features
+  raw, repacked = layer.cpu_repacked, tokens == 1 and layer.cpu_repacked is not None
+  if raw is None or not repacked: raw = layer.weight
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float16, device=gate.device)
-  src, binary, name = q8_silu_linear_program(tokens, layer.out_features, layer.in_features)
-  out = Tensor.custom_kernel(out, layer.weight, gate.reshape(tokens, layer.in_features).contiguous(),
+  src, binary, name = q8_silu_linear_program(tokens, layer.out_features, layer.in_features, repacked)
+  out = Tensor.custom_kernel(out, raw, gate.reshape(tokens, layer.in_features).contiguous(),
     up.reshape(tokens, layer.in_features).contiguous(), fxn=lambda out,raw,gate,up:
       q8_silu_linear_kernel(out, raw, gate, up, src, binary, name))[0]
   return out.reshape(*gate.shape[:-1], layer.out_features)
 
 def q8_silu_linear_kernel(out:UOp, raw:UOp, gate:UOp, up:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, raw.base, gate.base, up.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2, 3), outs=(0,), ins=(1, 2, 3)))
+  return _cpu_program((out, raw, gate, up), src, binary, name)
 
 @functools.cache
 def f16_linear_program(tokens:int, out_features:int, in_features:int, x_dtype:DType) -> tuple[str, bytes, str]:
@@ -1504,15 +1896,73 @@ def f16_linear(layer:Linear, x:Tensor) -> Tensor:
   return f16_matvec(x, layer.weight)
 
 def f16_linear_kernel(out:UOp, x:UOp, weight:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, x.base, weight.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  return _cpu_program((out, x, weight), src, binary, name)
 
 @functools.cache
-def q8_batched_pair_program(tokens:int, out0:int, out1:int, in_features:int, dtype:DType) -> tuple[str, bytes, str]:
+def rmsnorm_f16_linear_program(out_features:int, in_features:int, eps:float) -> tuple[str, bytes, str]:
+  name = f"cpu_rmsnorm_f16_linear_{out_features}_{in_features}_{str(eps).replace('.', '_').replace('-', 'm')}"
+  threads = min(out_features, 16, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
+  src = f"""
+{dot_source()}
+#define OUT_FEATURES {out_features}
+#define IN_FEATURES {in_features}
+#define THREADS {threads}
+typedef struct {{ float *out; const float *x; const _Float16 *weight; int begin, end; }} task_t;
+static void *worker(void *opaque) {{
+  task_t *task = (task_t *)opaque;
+  for (int row = task->begin; row < task->end; row++) {{
+    const _Float16 *weight = task->weight + row * IN_FEATURES;
+#if defined(__AVX2__)
+    __m256 accv = _mm256_setzero_ps();
+    for (int i = 0; i < IN_FEATURES; i += 8)
+      accv = _mm256_fmadd_ps(_mm256_loadu_ps(task->x + i),
+        _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(weight + i))), accv);
+    task->out[row] = hsum8f(accv);
+#else
+    float acc = 0.0f;
+    for (int i = 0; i < IN_FEATURES; i++) acc += task->x[i] * (float)weight[i];
+    task->out[row] = acc;
+#endif
+  }}
+  return (void *)0;
+}}
+{_SEM_POOL}
+void {name}(float *normalized, float *out, const float *input, const _Float16 *norm_weight, const _Float16 *weight) {{
+  float sum = 0.0f;
+  for (int i = 0; i < IN_FEATURES; i++) sum += input[i] * input[i];
+  const float scale = 1.0f / __builtin_sqrtf(sum / (float)IN_FEATURES + {eps!r}f);
+  for (int i = 0; i < IN_FEATURES; i++) {{
+    const float value = input[i] * scale;
+    normalized[i] = value * (float)norm_weight[i];
+  }}
+  dispatch((task_t){{out, normalized, weight, 0, OUT_FEATURES}}, OUT_FEATURES, THREADS);
+}}
+"""
+  return src, _compile_cpu_ggml(src), name
+
+def rmsnorm_f16_linear(norm:nn.RMSNorm, layer:Linear, x:Tensor) -> tuple[Tensor, Tensor]:
+  assert x.dtype == dtypes.float32 and int(x.numel()) == x.shape[-1] == layer.in_features
+  assert norm.weight is not None and norm.weight.dtype == layer.weight.dtype == dtypes.float16
+  assert layer.ggml_type is None and layer.bias is None
+  normalized = Tensor.empty(x.shape, dtype=dtypes.float32, device=x.device)
+  out = Tensor.empty(*x.shape[:-1], layer.out_features, dtype=dtypes.float32, device=x.device)
+  src, binary, name = rmsnorm_f16_linear_program(layer.out_features, layer.in_features, norm.eps)
+  outputs = Tensor.custom_kernel(normalized, out, x.flatten().contiguous(), norm.weight, layer.weight,
+    fxn=lambda normalized,out,x,norm_weight,weight:
+      rmsnorm_f16_linear_kernel(normalized, out, x, norm_weight, weight, src, binary, name))
+  return outputs[0], outputs[1]
+
+def rmsnorm_f16_linear_kernel(normalized:UOp, out:UOp, x:UOp, norm_weight:UOp, weight:UOp,
+                              src:str, binary:bytes, name:str) -> UOp:
+  return _cpu_program((normalized, out, x, norm_weight, weight), src, binary, name, (0, 1))
+
+@functools.cache
+def q8_batched_pair_program(tokens:int, out0:int, out1:int, in_features:int, dtype:DType, repacked:bool=False) -> tuple[str, bytes, str]:
   assert dtype in (dtypes.float16, dtypes.float32)
   ctype = "_Float16" if dtype == dtypes.float16 else "float"
-  name = f"cpu_q8_batched_pair_{tokens}_{out0}_{out1}_{in_features}_{dtype.name}"
+  token_tile = min(tokens, max(1, getenv("CPU_Q8_TOKEN_TILE", 8)))
+  if tokens % token_tile: token_tile = 1
+  name = f"cpu_q8_batched_pair{'r' if repacked else ''}_{tokens}_{out0}_{out1}_{in_features}_{dtype.name}_tt{token_tile}"
   threads = min(out0 + out1, 32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
   src = f"""
 typedef union {{ unsigned short u; _Float16 h; }} half_bits;
@@ -1525,38 +1975,71 @@ static inline float half_to_float(const unsigned char *p) {{
 #define OUT1 {out1}
 #define IN_FEATURES {in_features}
 #define GROUPS (IN_FEATURES / 32)
+#define TOKEN_TILE {token_tile}
 #define THREADS {threads}
+#define REPACKED {int(repacked)}
 typedef struct {{
-  {ctype} *out0, *out1; const unsigned char *raw0, *raw1; const signed char *xq; const float *xd; int begin, end;
+  {ctype} *out0, *out1; const unsigned char *raw0, *raw1; const {ctype} *x;
+  signed char *xq; float *xd; int stage, begin, end;
 }} task_t;
 static void *worker(void *opaque) {{
   task_t *task = (task_t *)opaque;
-  for (int idx = task->begin; idx < task->end; idx++) {{
+  if (task->stage == 0) for (int idx = task->begin; idx < task->end; idx++) {{
+    const int token = idx / GROUPS, group = idx - token * GROUPS;
+    float amax = 0.0f;
+    for (int i = 0; i < 32; i++) {{
+      float value = (float)task->x[token * IN_FEATURES + group * 32 + i];
+      if (value < 0.0f) value = -value;
+      if (value > amax) amax = value;
+    }}
+    const float d = amax > 0.00000001f ? amax / 127.0f : 0.00000001f;
+    task->xd[group * TOKENS + token] = d;
+    for (int i = 0; i < 32; i++) {{
+      int value = (int)__builtin_roundf((float)task->x[token * IN_FEATURES + group * 32 + i] / d);
+      if (value < -127) value = -127;
+      if (value > 127) value = 127;
+      task->xq[(group * TOKENS + token) * 32 + i] = (signed char)value;
+    }}
+  }}
+  if (task->stage == 1) for (int idx = task->begin; idx < task->end; idx++) {{
     const int projection = idx >= OUT0, row = projection ? idx - OUT0 : idx;
     const unsigned char *w = (projection ? task->raw1 : task->raw0) + row * GROUPS * 34;
-    float acc[TOKENS] = {{0}};
-#if defined(__AVX2__)
-    __m256 accv[TOKENS];
-    for (int token = 0; token < TOKENS; token++) accv[token] = _mm256_setzero_ps();
-    for (int block = 0; block < GROUPS; block++, w += 34) {{
-      const __m256i wv = _mm256_loadu_si256((const __m256i *)(w + 2));
-      const float wd = half_to_float(w);
-      for (int token = 0; token < TOKENS; token++)
-        accv[token] = _mm256_fmadd_ps(_mm256_set1_ps(wd * task->xd[block * TOKENS + token]),
-          _mm256_cvtepi32_ps(dot32_parts(wv, task->xq + (block * TOKENS + token) * 32)), accv[token]);
-    }}
-    for (int token = 0; token < TOKENS; token++) acc[token] = hsum8f(accv[token]);
-#else
-    for (int block = 0; block < GROUPS; block++, w += 34) {{
-      const float wd = half_to_float(w);
-      for (int token = 0; token < TOKENS; token++)
-        acc[token] += wd * task->xd[block * TOKENS + token] *
-          (float)dot32((const signed char *)(w + 2), task->xq + (block * TOKENS + token) * 32);
-    }}
-#endif
+    const unsigned char *scales = w;
+    const signed char *weights = (const signed char *)(scales + GROUPS * 2);
     {ctype} *out = projection ? task->out1 : task->out0;
     const int out_features = projection ? OUT1 : OUT0;
-    for (int token = 0; token < TOKENS; token++) out[token * out_features + row] = ({ctype})acc[token];
+    for (int token_base = 0; token_base < TOKENS; token_base += TOKEN_TILE) {{
+#if defined(__AVX2__)
+      __m256 accv[TOKEN_TILE];
+      for (int token = 0; token < TOKEN_TILE; token++) accv[token] = _mm256_setzero_ps();
+      const unsigned char *wb = w;
+      for (int block = 0; block < GROUPS; block++, wb += 34) {{
+        const __m256i wv = _mm256_loadu_si256((const __m256i *)(REPACKED ? weights + block * 32 : (const signed char *)(wb + 2)));
+        const float wd = half_to_float(REPACKED ? scales + block * 2 : wb);
+        for (int token = 0; token < TOKEN_TILE; token++) {{
+          const int ti = token_base + token;
+          accv[token] = _mm256_fmadd_ps(_mm256_set1_ps(wd * task->xd[block * TOKENS + ti]),
+            _mm256_cvtepi32_ps(dot32_parts(wv, task->xq + (block * TOKENS + ti) * 32)), accv[token]);
+        }}
+      }}
+      for (int token = 0; token < TOKEN_TILE; token++)
+        out[(token_base + token) * out_features + row] = ({ctype})hsum8f(accv[token]);
+#else
+      float acc[TOKEN_TILE] = {{0}};
+      const unsigned char *wb = w;
+      for (int block = 0; block < GROUPS; block++, wb += 34) {{
+        const float wd = half_to_float(REPACKED ? scales + block * 2 : wb);
+        const signed char *weight = REPACKED ? weights + block * 32 : (const signed char *)(wb + 2);
+        for (int token = 0; token < TOKEN_TILE; token++) {{
+          const int ti = token_base + token;
+          acc[token] += wd * task->xd[block * TOKENS + ti] *
+            (float)dot32(weight, task->xq + (block * TOKENS + ti) * 32);
+        }}
+      }}
+      for (int token = 0; token < TOKEN_TILE; token++)
+        out[(token_base + token) * out_features + row] = ({ctype})acc[token];
+#endif
+    }}
   }}
   return (void *)0;
 }}
@@ -1564,24 +2047,9 @@ static void *worker(void *opaque) {{
 void {name}({ctype} *out0, {ctype} *out1, const unsigned char *raw0, const unsigned char *raw1, const {ctype} *x) {{
   signed char xq[TOKENS * IN_FEATURES];
   float xd[TOKENS * GROUPS];
-  for (int token = 0; token < TOKENS; token++) for (int group = 0; group < GROUPS; group++) {{
-    float amax = 0.0f;
-    for (int i = 0; i < 32; i++) {{
-      float value = (float)x[token * IN_FEATURES + group * 32 + i];
-      if (value < 0.0f) value = -value;
-      if (value > amax) amax = value;
-    }}
-    const float d = amax > 0.00000001f ? amax / 127.0f : 0.00000001f;
-    xd[group * TOKENS + token] = d;
-    for (int i = 0; i < 32; i++) {{
-      int value = (int)__builtin_roundf((float)x[token * IN_FEATURES + group * 32 + i] / d);
-      if (value < -127) value = -127;
-      if (value > 127) value = 127;
-      xq[(group * TOKENS + token) * 32 + i] = (signed char)value;
-    }}
-  }}
   const int total = OUT0 + OUT1;
-  dispatch((task_t){{out0, out1, raw0, raw1, xq, xd, 0, total}}, total, THREADS);
+  dispatch((task_t){{out0, out1, raw0, raw1, x, xq, xd, 0, 0, TOKENS * GROUPS}}, TOKENS * GROUPS, THREADS);
+  dispatch((task_t){{out0, out1, raw0, raw1, x, xq, xd, 1, 0, total}}, total, THREADS);
 }}
 """
   return src, _compile_cpu_ggml(src), name
@@ -1591,16 +2059,17 @@ def q8_batched_pair(first:Linear, second:Linear, x:Tensor) -> tuple[Tensor, Tens
   tokens = int(x.numel()) // x.shape[-1]
   assert tokens > 1 and x.dtype in (dtypes.float16, dtypes.float32)
   out0, out1 = (Tensor.empty(tokens, layer.out_features, dtype=x.dtype, device=x.device) for layer in (first, second))
-  src, binary, name = q8_batched_pair_program(tokens, first.out_features, second.out_features, x.shape[-1], x.dtype)
-  outputs = Tensor.custom_kernel(out0, out1, first.weight, second.weight, x.reshape(tokens, x.shape[-1]).contiguous(),
+  repacked = first.cpu_repacked is not None and second.cpu_repacked is not None
+  raw0, raw1 = (first.cpu_repacked, second.cpu_repacked) if repacked else (first.weight, second.weight)
+  assert raw0 is not None and raw1 is not None
+  src, binary, name = q8_batched_pair_program(tokens, first.out_features, second.out_features, x.shape[-1], x.dtype, repacked)
+  outputs = Tensor.custom_kernel(out0, out1, raw0, raw1, x.reshape(tokens, x.shape[-1]).contiguous(),
     fxn=lambda out0,out1,raw0,raw1,x:q8_batched_pair_kernel(out0, out1, raw0, raw1, x, src, binary, name))
   shape = x.shape[:-1]
   return outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features)
 
 def q8_batched_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, x:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out0.base, out1.base, raw0.base, raw1.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(5)), outs=(0, 1), ins=(2, 3, 4)))
+  return _cpu_program((out0, out1, raw0, raw1, x), src, binary, name, (0, 1))
 
 @functools.cache
 def q8_linear_pair_program(out_features0:int, out_features1:int, in_features:int, dtype:DType,
@@ -1683,6 +2152,8 @@ void {name}({ctype} *out0, {ctype} *out1, const unsigned char *raw0, const unsig
 
 def q8_linear_pair(first:Linear, second:Linear, x:Tensor) -> tuple[Tensor, Tensor]:
   assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features and int(x.numel()) == first.in_features
+  if first.cpu_repacked is not None and second.cpu_repacked is not None:
+    return q8_repacked_pair(first, second, first.cpu_repacked, second.cpu_repacked, x)
   out0, out1 = (Tensor.empty(layer.out_features, dtype=x.dtype, device=x.device) for layer in (first, second))
   src, binary, name = q8_linear_pair_program(first.out_features, second.out_features, first.in_features, x.dtype)
   outputs = Tensor.custom_kernel(out0, out1, first.weight, second.weight, x.flatten().contiguous(),
@@ -1691,13 +2162,21 @@ def q8_linear_pair(first:Linear, second:Linear, x:Tensor) -> tuple[Tensor, Tenso
   return outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features)
 
 def q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, x:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out0.base, out1.base, raw0.base, raw1.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(5)), outs=(0, 1), ins=(2, 3, 4)))
+  return _cpu_program((out0, out1, raw0, raw1, x), src, binary, name, (0, 1))
 
 def q8_gdn_projections(first:Linear, second:Linear, f16_weight:Tensor, x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features == x.shape[-1]
   assert x.dtype == f16_weight.dtype == dtypes.float16 and f16_weight.shape[1] == x.shape[-1] and int(x.numel()) == x.shape[-1]
+  if first.cpu_repacked is not None and second.cpu_repacked is not None:
+    out0, out1 = (Tensor.empty(layer.out_features, dtype=x.dtype, device=x.device) for layer in (first, second))
+    out2 = Tensor.empty(f16_weight.shape[0], dtype=dtypes.float16, device=x.device)
+    src, binary, name = q8_repacked_pair_program(first.out_features, second.out_features, first.in_features, x.dtype, f16_weight.shape[0])
+    outputs = Tensor.custom_kernel(out0, out1, first.cpu_repacked, second.cpu_repacked, x.flatten().contiguous(), out2, f16_weight,
+      fxn=lambda out0,out1,raw0,raw1,x,out2,raw2:q8_gdn_projections_kernel(out0, out1, raw0, raw1, x, out2, raw2,
+                                                                          src, binary, name))
+    shape = x.shape[:-1]
+    return (outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features),
+            outputs[5].reshape(*shape, f16_weight.shape[0]))
   out0, out1 = (Tensor.empty(layer.out_features, dtype=x.dtype, device=x.device) for layer in (first, second))
   out2 = Tensor.empty(f16_weight.shape[0], dtype=dtypes.float16, device=x.device)
   src, binary, name = q8_linear_pair_program(first.out_features, second.out_features, first.in_features, x.dtype, f16_weight.shape[0])
@@ -1708,11 +2187,29 @@ def q8_gdn_projections(first:Linear, second:Linear, f16_weight:Tensor, x:Tensor)
   return (outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features),
           outputs[5].reshape(*shape, f16_weight.shape[0]))
 
+def q8_gdn_norm_projections(first:Linear, second:Linear, f16_weight:Tensor, x:Tensor, norm:nn.RMSNorm) -> tuple[Tensor, Tensor, Tensor]:
+  assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features == x.shape[-1]
+  assert x.dtype == dtypes.float32 and f16_weight.dtype == dtypes.float16 and f16_weight.shape[1] == x.shape[-1]
+  assert norm.weight is not None and norm.weight.dtype == dtypes.float16 and int(x.numel()) == x.shape[-1]
+  assert first.cpu_repacked is not None and second.cpu_repacked is not None
+  out0, out1 = (Tensor.empty(layer.out_features, dtype=dtypes.float16, device=x.device) for layer in (first, second))
+  out2 = Tensor.empty(f16_weight.shape[0], dtype=dtypes.float16, device=x.device)
+  src, binary, name = q8_repacked_pair_program(first.out_features, second.out_features, first.in_features, dtypes.float16,
+                                                f16_weight.shape[0], norm.eps)
+  outputs = Tensor.custom_kernel(out0, out1, first.cpu_repacked, second.cpu_repacked, x.flatten().contiguous(), out2, f16_weight,
+    norm.weight, fxn=lambda out0,out1,raw0,raw1,x,out2,raw2,norm_weight:
+      q8_gdn_norm_projections_kernel(out0, out1, raw0, raw1, x, out2, raw2, norm_weight, src, binary, name))
+  shape = x.shape[:-1]
+  return (outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features),
+          outputs[5].reshape(*shape, f16_weight.shape[0]))
+
 def q8_gdn_projections_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, x:UOp, out2:UOp, raw2:UOp,
                                    src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out0.base, out1.base, raw0.base, raw1.base, x.base, out2.base, raw2.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(7)), outs=(0, 1, 5), ins=(2, 3, 4, 6)))
+  return _cpu_program((out0, out1, raw0, raw1, x, out2, raw2), src, binary, name, (0, 1, 5))
+
+def q8_gdn_norm_projections_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, x:UOp, out2:UOp, raw2:UOp, norm_weight:UOp,
+                                   src:str, binary:bytes, name:str) -> UOp:
+  return _cpu_program((out0, out1, raw0, raw1, x, out2, raw2, norm_weight), src, binary, name, (0, 1, 5))
 
 @functools.cache
 def q6_argmax_program(out_features:int, in_features:int, dtype:DType) -> tuple[str, bytes, str]:
@@ -1730,7 +2227,7 @@ static inline float half_to_float(const unsigned char *p) {{
 #define OUT_FEATURES {out_features}
 #define IN_FEATURES {in_features}
 #define THREADS {threads}
-typedef struct {{ const unsigned char *raw; const signed char *xq; const float *xd; }} task_t;
+typedef struct {{ const unsigned char *raw; const signed char *xq; const float *xd; const short *bsums; }} task_t;
 static float best_values[THREADS];
 static int best_indices[THREADS], active_workers;
 static void run_part(const task_t *task, int id, int workers) {{
@@ -1741,16 +2238,9 @@ static void run_part(const task_t *task, int id, int workers) {{
     const unsigned char *w = task->raw + row * (IN_FEATURES / 256) * 210;
     float acc = 0.0f;
     for (int block = 0; block < IN_FEATURES / 256; block++, w += 210) {{
-      const float d = half_to_float(w + 208);
-      int dots_lo[8], dots_hi[8];
-      dot_q6_8(w, task->xq + block * 256, dots_lo, dots_hi);
-      int block_sum = 0;
-      for (int subgroup = 0; subgroup < 8; subgroup++) {{
-        const int scale0 = ((const signed char *)(w + 192))[subgroup * 2];
-        const int scale1 = ((const signed char *)(w + 192))[subgroup * 2 + 1];
-        block_sum += scale0 * dots_lo[subgroup] + scale1 * dots_hi[subgroup];
-      }}
-      acc += d * task->xd[block] * (float)block_sum;
+      const int block_sum = dot_q6_8_scaled_unsigned(w, task->xq + block * 256, (const signed char *)(w + 192),
+                                                     task->bsums + block * 16);
+      acc += half_to_float(w + 208) * task->xd[block] * (float)block_sum;
     }}
     if (acc > best) {{ best = acc; best_index = row; }}
   }}
@@ -1766,6 +2256,7 @@ static void pool_worker(void *opaque, int id, int active, int begin, int end) {{
 void {name}(int *out, const unsigned char *raw, const {ctype} *x) {{
   signed char xq[IN_FEATURES];
   float xd[IN_FEATURES / 256];
+  short bsums[IN_FEATURES / 16];
   for (int block = 0; block < IN_FEATURES / 256; block++) {{
     float max = 0.0f, amax = 0.0f;
     for (int i = 0; i < 256; i++) {{
@@ -1778,8 +2269,13 @@ void {name}(int *out, const unsigned char *raw, const {ctype} *x) {{
     const float inverse = scale != 0.0f ? 1.0f / scale : 0.0f;
     for (int i = 0; i < 256; i++)
       xq[block * 256 + i] = (signed char)__builtin_roundf((float)x[block * 256 + i] * inverse);
+    for (int subgroup = 0; subgroup < 16; subgroup++) {{
+      int sum = 0;
+      for (int i = 0; i < 16; i++) sum += xq[block * 256 + subgroup * 16 + i];
+      bsums[block * 16 + subgroup] = (short)sum;
+    }}
   }}
-  task_t task = (task_t){{raw, xq, xd}};
+  task_t task = (task_t){{raw, xq, xd, bsums}};
   tiny_cpu_parallel(pool_worker, &task, OUT_FEATURES, THREADS);
   float best = best_values[0];
   int best_index = best_indices[0];
@@ -1801,20 +2297,21 @@ def q6_argmax(layer:Linear, x:Tensor) -> Tensor:
     q6_argmax_kernel(out, raw, x, src, binary, name))[0]
 
 def q6_argmax_kernel(out:UOp, raw:UOp, x:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, raw.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  return _cpu_program((out, raw, x), src, binary, name)
 
 @functools.cache
 def ggml_expert_program(ggml_type:int, routes:int, routes_per_input:int, out_features:int,
-                             in_features:int, dtype:DType, projections:int=1, fuse_silu:bool=False) -> tuple[str, bytes, str]:
-  assert ggml_type in (14, 21, 23) and dtype in (dtypes.float16, dtypes.float32)
+                             in_features:int, dtype:DType, projections:int=1, fuse_silu:bool=False,
+                             weighted:bool=False) -> tuple[str, bytes, str]:
+  assert ggml_type in (14, 21, 23, 121) and dtype in (dtypes.float16, dtypes.float32)
   assert projections in (1, 2)
   assert not fuse_silu or projections == 2 and dtype == dtypes.float32
+  assert not weighted or ggml_type in (14, 23) and projections == 1 and not fuse_silu and dtype == dtypes.float32
   from tinygrad.runtime.autogen import ggml_common
-  use_q8k = ggml_type in (21, 23) and bool(getenv("CPU_EXPERT_Q8K", 1))
+  use_q8k = ggml_type in (21, 23, 121) and bool(getenv("CPU_EXPERT_Q8K", 1))
   expert_tile = max(1, getenv("CPU_EXPERT_TILE", 16))
-  name = f"cpu_ggml_expert{'_silu' if fuse_silu else '_pair' if projections == 2 else ''}_{ggml_type}_{routes}_{routes_per_input}_" + \
+  name = f"cpu_ggml_expert{'_weighted' if weighted else '_silu' if fuse_silu else '_pair' if projections == 2 else ''}_" + \
+         f"{ggml_type}_{routes}_{routes_per_input}_" + \
          f"{out_features}_{in_features}_{dtype.name}{'_q8k' if use_q8k else ''}_t{expert_tile}"
   ctype = "_Float16" if dtype == dtypes.float16 else "float"
   threads = min(projections * routes * out_features, 32 if routes != routes_per_input or projections == 1 else 16,
@@ -1936,20 +2433,115 @@ static inline __m256i iq3_apply_signs(__m256i x, unsigned int signs) {
         }
       }
     }"""
+  elif ggml_type == 121:
+    tables = r"""static const signed char iq3_values[16] = {1,3,5,7,9,11,13,15,-1,-3,-5,-7,-9,-11,-13,-15};
+#if defined(__AVX2__)
+static inline __m256i unpack_iq3_repacked(const unsigned char *qs) {
+  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
+  const __m128i lut = _mm_loadu_si128((const __m128i *)iq3_values), mask = _mm_set1_epi8(15);
+  const __m128i lo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
+  const __m128i hi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
+  return _mm256_set_m128i(hi, lo);
+}
+static inline void unpack_iq3_repacked_pair(const unsigned char *qs, __m256i *q0, __m256i *q1) {
+  const __m256i packed = _mm256_loadu_si256((const __m256i *)qs);
+  const __m256i lut = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)iq3_values));
+  const __m256i mask = _mm256_set1_epi8(15);
+  const __m256i lo = _mm256_shuffle_epi8(lut, _mm256_and_si256(packed, mask));
+  const __m256i hi = _mm256_shuffle_epi8(lut, _mm256_and_si256(_mm256_srli_epi16(packed, 4), mask));
+  *q0 = _mm256_permute2x128_si256(lo, hi, 0x20);
+  *q1 = _mm256_permute2x128_si256(lo, hi, 0x31);
+}
+#endif"""
+    batch_dot = """
+    const unsigned char *meta = row_raw, *data = row_raw + IQ3_META_SIZE;
+    for (int block = 0; block < IN_FEATURES / 256; block++) {
+      const unsigned char *w = meta + block * 6;
+      const unsigned char *qdata = data + block * 128;
+      const float d = half_to_float(w);
+#if defined(__AVX2__)
+      __m256i qvals[8], abs_qvals[8];
+      for (int subgroup = 0; subgroup < 8; subgroup += 2) {
+        unpack_iq3_repacked_pair(qdata + subgroup * 16, &qvals[subgroup], &qvals[subgroup + 1]);
+        abs_qvals[subgroup] = _mm256_abs_epi8(qvals[subgroup]);
+        abs_qvals[subgroup + 1] = _mm256_abs_epi8(qvals[subgroup + 1]);
+      }
+#endif
+      for (int m = 0; m < matched_count; m++) {
+        const int input = matched[m] / ROUTES_PER_INPUT;
+#if defined(__AVX2__)
+        __m256i block_acc = _mm256_setzero_si256();
+        for (int subgroup = 0; subgroup < 8; subgroup++) {
+          const int scale = 1 + 2 * ((w[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+          block_acc = _mm256_add_epi32(block_acc, _mm256_madd_epi16(
+            _mm256_maddubs_epi16(abs_qvals[subgroup], _mm256_sign_epi8(
+              _mm256_loadu_si256((const __m256i *)(task->xq + input * IN_FEATURES + block * 256 + subgroup * 32)),
+              qvals[subgroup])),
+            _mm256_set1_epi16((short)scale)));
+        }
+        acc[m] += d * task->xd[input * (IN_FEATURES / 256) + block] * (float)hsum8(block_acc);
+#else
+        int block_acc = 0;
+        for (int subgroup = 0; subgroup < 8; subgroup++) {
+          signed char qvals[32];
+          for (int pos = 0; pos < 32; pos++)
+            qvals[pos] = iq3_values[(qdata[subgroup * 16 + (pos & 15)] >> (pos < 16 ? 0 : 4)) & 15];
+          const int scale = 1 + 2 * ((w[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+          block_acc += scale * dot32(qvals, task->xq + input * IN_FEATURES + block * 256 + subgroup * 32);
+        }
+        acc[m] += d * task->xd[input * (IN_FEATURES / 256) + block] * (float)block_acc;
+#endif
+      }
+    }""" if use_q8k else """
+    const unsigned char *meta = row_raw, *data = row_raw + IQ3_META_SIZE;
+    for (int block = 0; block < IN_FEATURES / 256; block++) {
+      const unsigned char *w = meta + block * 6;
+      const unsigned char *qdata = data + block * 128;
+      const float d = half_to_float(w);
+      for (int subgroup = 0; subgroup < 8; subgroup++) {
+        const int group = block * 8 + subgroup;
+        const int scale = 1 + 2 * ((w[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+#if defined(__AVX2__)
+        const __m256i qvals = unpack_iq3_repacked(qdata + subgroup * 16);
+#else
+        signed char qvals[32];
+        for (int pos = 0; pos < 32; pos++)
+          qvals[pos] = iq3_values[(qdata[subgroup * 16 + (pos & 15)] >> (pos < 16 ? 0 : 4)) & 15];
+#endif
+        for (int m = 0; m < matched_count; m++) {
+          const int input = matched[m] / ROUTES_PER_INPUT;
+          acc[m] += d * (float)scale * task->xd[input * (IN_FEATURES / 32) + group] *
+#if defined(__AVX2__)
+            (float)dot32v(qvals, task->xq + input * IN_FEATURES + group * 32);
+#else
+            (float)dot32(qvals, task->xq + input * IN_FEATURES + group * 32);
+#endif
+        }
+      }
+    }"""
   elif ggml_type == 23:
     tables = "static const signed char kvalues[16] = {" + ",".join(str(x) for x in ggml_common.kvalues_iq4nl) + r"""};
 static inline void unpack_iq4(const unsigned char *qs, signed char *qvals) {
 #if defined(__AVX2__)
   const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
-  const __m128i mask = _mm_set1_epi8(15), lut = _mm_loadu_si128((const __m128i *)kvalues);
-  const __m128i qlo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
-  const __m128i qhi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
-  _mm_storeu_si128((__m128i *)qvals, qlo);
-  _mm_storeu_si128((__m128i *)(qvals + 16), qhi);
+  const __m256i nibbles = _mm256_and_si256(_mm256_set_m128i(_mm_srli_epi16(packed, 4), packed), _mm256_set1_epi8(15));
+  _mm256_storeu_si256((__m256i *)qvals,
+    _mm256_shuffle_epi8(_mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)kvalues)), nibbles));
 #else
   for (int pos = 0; pos < 32; pos++) qvals[pos] = kvalues[(qs[pos & 15] >> (pos < 16 ? 0 : 4)) & 15];
 #endif
 }
+#if defined(__AVX2__)
+static inline void unpack_iq4_pair(const unsigned char *qs, __m256i *q0, __m256i *q1) {
+  const __m256i packed = _mm256_loadu_si256((const __m256i *)qs);
+  const __m256i lut = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)kvalues));
+  const __m256i mask = _mm256_set1_epi8(15);
+  const __m256i lo = _mm256_shuffle_epi8(lut, _mm256_and_si256(packed, mask));
+  const __m256i hi = _mm256_shuffle_epi8(lut, _mm256_and_si256(_mm256_srli_epi16(packed, 4), mask));
+  *q0 = _mm256_permute2x128_si256(lo, hi, 0x20);
+  *q1 = _mm256_permute2x128_si256(lo, hi, 0x31);
+}
+#endif
 static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
   signed char qvals[32];
   unpack_iq4(qs, qvals);
@@ -1961,12 +2553,33 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
       const float d = half_to_float(w);
       const unsigned int high = (unsigned int)w[2] | ((unsigned int)w[3] << 8);
 #if defined(__AVX2__)
-      __m256i block_accv[ROUTES];
-      for (int m = 0; m < matched_count; m++) block_accv[m] = _mm256_setzero_si256();
+      for (int match_base = 0; match_base < matched_count; match_base += 8) {
+        const int match_end = match_base + 8 < matched_count ? match_base + 8 : matched_count;
+        __m256i block_accv[8];
+        for (int m = match_base; m < match_end; m++) block_accv[m - match_base] = _mm256_setzero_si256();
+        for (int subgroup = 0; subgroup < 8; subgroup += 2) {
+          __m256i q0, q1;
+          unpack_iq4_pair(w + 8 + subgroup * 16, &q0, &q1);
+          const int low0 = w[4 + subgroup / 2] & 15, low1 = w[4 + subgroup / 2] >> 4;
+          const int scale0 = (low0 | (((high >> (2 * subgroup)) & 3) << 4)) - 32;
+          const int scale1 = (low1 | (((high >> (2 * (subgroup + 1))) & 3) << 4)) - 32;
+          for (int m = match_base; m < match_end; m++) {
+            const int input = matched[m] / ROUTES_PER_INPUT;
+            const signed char *xq = task->xq + input * IN_FEATURES + block * 256 + subgroup * 32;
+            block_accv[m - match_base] = _mm256_add_epi32(block_accv[m - match_base],
+              _mm256_madd_epi16(dot32_pairs(q0, xq), _mm256_set1_epi16((short)scale0)));
+            block_accv[m - match_base] = _mm256_add_epi32(block_accv[m - match_base],
+              _mm256_madd_epi16(dot32_pairs(q1, xq + 32), _mm256_set1_epi16((short)scale1)));
+          }
+        }
+        for (int m = match_base; m < match_end; m++) {
+          const int input = matched[m] / ROUTES_PER_INPUT;
+          acc[m] += d * task->xd[input * (IN_FEATURES / 256) + block] * (float)hsum8(block_accv[m - match_base]);
+        }
+      }
 #else
       int block_acc[ROUTES];
       for (int m = 0; m < matched_count; m++) block_acc[m] = 0;
-#endif
       for (int subgroup = 0; subgroup < 8; subgroup++) {
         const int low = (w[4 + (subgroup >> 1)] >> (4 * (subgroup & 1))) & 15;
         const int scale_bits = low | (((high >> (2 * subgroup)) & 3) << 4);
@@ -1975,26 +2588,15 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
         unpack_iq4(qs, qvals);
         for (int m = 0; m < matched_count; m++) {
           const int input = matched[m] / ROUTES_PER_INPUT;
-#if defined(__AVX2__)
-          const __m256i pairs = dot32_pairs(_mm256_loadu_si256((const __m256i *)qvals),
-            task->xq + input * IN_FEATURES + block * 256 + subgroup * 32);
-          block_accv[m] = _mm256_add_epi32(block_accv[m],
-            _mm256_madd_epi16(pairs, _mm256_set1_epi16((short)(scale_bits - 32))));
-#else
           block_acc[m] += (scale_bits - 32) * dot32(qvals,
             task->xq + input * IN_FEATURES + block * 256 + subgroup * 32);
-#endif
         }
       }
       for (int m = 0; m < matched_count; m++) {
         const int input = matched[m] / ROUTES_PER_INPUT;
-        acc[m] += d * task->xd[input * (IN_FEATURES / 256) + block] *
-#if defined(__AVX2__)
-          (float)hsum8(block_accv[m]);
-#else
-          (float)block_acc[m];
-#endif
+        acc[m] += d * task->xd[input * (IN_FEATURES / 256) + block] * (float)block_acc[m];
       }
+#endif
     }""" if use_q8k else """
     const unsigned char *w = row_raw;
     for (int block = 0; block < IN_FEATURES / 256; block++, w += 136) {
@@ -2020,29 +2622,45 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
     const unsigned char *w = row_raw;
     for (int block = 0; block < IN_FEATURES / 256; block++, w += 210) {
       const float d = half_to_float(w + 208);
+#if defined(__AVX2__)
+      for (int half = 0; half < 2; half++) {
+        __m256i qvals[4];
+        unpack_q6_half(w, half, qvals);
+        for (int lane = 0; lane < 4; lane++) {
+          const int subgroup = half * 4 + lane, group = block * 8 + subgroup;
+          const int scale0 = ((const signed char *)(w + 192))[subgroup * 2];
+          const int scale1 = ((const signed char *)(w + 192))[subgroup * 2 + 1];
+          for (int m = 0; m < matched_count; m++) {
+            const int input = matched[m] / ROUTES_PER_INPUT;
+            const signed char *xq = task->xq + input * IN_FEATURES + group * 32;
+            const float xd = task->xd[input * (IN_FEATURES / 32) + group];
+            int dot_lo, dot_hi;
+            dot_q6_vec(qvals[lane], xq, &dot_lo, &dot_hi);
+            acc[m] += d * (float)scale0 * xd * (float)(dot_lo + dot_hi);
+            acc[m] += d * (float)(scale1 - scale0) * xd * (float)dot_hi;
+          }
+        }
+      }
+#else
       for (int subgroup = 0; subgroup < 8; subgroup++) {
         const int group = block * 8 + subgroup;
         const int scale0 = ((const signed char *)(w + 192))[subgroup * 2];
         const int scale1 = ((const signed char *)(w + 192))[subgroup * 2 + 1];
-#if defined(__AVX2__)
-        const __m256i qvals = unpack_q6(w, subgroup);
-#endif
         for (int m = 0; m < matched_count; m++) {
           const int input = matched[m] / ROUTES_PER_INPUT;
           const signed char *xq = task->xq + input * IN_FEATURES + group * 32;
           const float xd = task->xd[input * (IN_FEATURES / 32) + group];
           int dot_lo, dot_hi;
-#if defined(__AVX2__)
-          dot_q6_vec(qvals, xq, &dot_lo, &dot_hi);
-#else
           dot_q6(w, subgroup, xq, &dot_lo, &dot_hi);
-#endif
           acc[m] += d * (float)scale0 * xd * (float)(dot_lo + dot_hi);
           acc[m] += d * (float)(scale1 - scale0) * xd * (float)dot_hi;
         }
       }
+#endif
     }"""
-  type_size = _GGML_QUANT[ggml_type][1]
+  type_size = _GGML_QUANT[21 if ggml_type == 121 else ggml_type][1]
+  iq3_meta_size = (in_features // 256 * 6 + 63) // 64 * 64 if ggml_type == 121 else 0
+  row_size = iq3_meta_size + in_features // 2 if ggml_type == 121 else in_features // 256 * type_size
   worker = f"""
   for (int idx = task->begin; idx < task->end; idx++) {{
     const int projection = idx / task->projection_size, local_idx = idx - projection * task->projection_size;
@@ -2051,7 +2669,7 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
     const unsigned char *raw = projection ? task->raw1 : task->raw0;
     const int matched[1] = {{route}}, matched_count = 1;
     float acc[1] = {{0.0f}};
-    const unsigned char *row_raw = raw + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
+    const unsigned char *row_raw = raw + (expert * OUT_FEATURES + row) * ROW_SIZE;
 {batch_dot}
     out[local_idx] = ({ctype})acc[0];
   }}""" if routes == routes_per_input else f"""
@@ -2066,9 +2684,57 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
       matched[matched_count] = route;
       acc[matched_count++] = 0.0f;
     }}
-    const unsigned char *row_raw = raw + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
+    const unsigned char *row_raw = raw + (expert * OUT_FEATURES + row) * ROW_SIZE;
 {batch_dot}
     for (int m = 0; m < matched_count; m++) out[matched[m] * OUT_FEATURES + row] = ({ctype})acc[m];
+  }}"""
+  if weighted:
+    weighted_dot = batch_dot.replace("matched[m] / ROUTES_PER_INPUT", "matched[m]")
+    worker = f"""
+  for (int idx = task->begin; idx < task->end; idx++) {{
+    const int input = idx / OUT_FEATURES, row = idx - input * OUT_FEATURES;
+    float total = 0.0f;
+    for (int local_route = 0; local_route < ROUTES_PER_INPUT; local_route++) {{
+      const int route = input * ROUTES_PER_INPUT + local_route, expert = task->sel[route];
+      const int matched[1] = {{route}}, matched_count = 1;
+      float acc[1] = {{0.0f}};
+      const unsigned char *row_raw = task->raw0 + (expert * OUT_FEATURES + row) * ROW_SIZE;
+{weighted_dot}
+      total += acc[0] * task->probs[route];
+    }}
+    task->out0[idx] = total;
+  }}""" if routes == routes_per_input else f"""
+  for (;;) {{
+    const int tile_begin = __atomic_fetch_add(task->next_work, {expert_tile}, __ATOMIC_RELAXED);
+    if (tile_begin >= task->total_work) break;
+    const int tile_end = tile_begin + {expert_tile} < task->total_work ? tile_begin + {expert_tile} : task->total_work;
+    float route_acc[{expert_tile}][ROUTES];
+    for (int unique_idx = 0; unique_idx < task->unique_count; unique_idx++) {{
+      const int expert = task->unique[unique_idx];
+      int matched[ROUTES], matched_count = 0;
+      for (int route = task->head[unique_idx]; route >= 0; route = task->next[route]) {{
+        matched[matched_count] = route;
+        matched_count++;
+      }}
+      for (int row = tile_begin; row < tile_end; row++) {{
+        float acc[ROUTES];
+        for (int m = 0; m < matched_count; m++) acc[m] = 0.0f;
+        const unsigned char *row_raw =
+          task->raw0 + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
+{weighted_dot}
+        for (int m = 0; m < matched_count; m++) route_acc[row - tile_begin][matched[m]] = acc[m];
+      }}
+    }}
+    for (int row = tile_begin; row < tile_end; row++) {{
+      for (int input = 0; input < OUTPUT_INPUTS; input++) {{
+        float total = 0.0f;
+        for (int local_route = 0; local_route < ROUTES_PER_INPUT; local_route++) {{
+          const int route = input * ROUTES_PER_INPUT + local_route;
+          total += route_acc[row - tile_begin][route] * task->probs[route];
+        }}
+        task->out0[input * OUT_FEATURES + row] = total;
+      }}
+    }}
   }}"""
   if fuse_silu:
     batch_dot0 = "{\n" + batch_dot.replace("row_raw", "row_raw0").replace("acc[", "acc0[") + "\n}"
@@ -2078,8 +2744,8 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
     const int route = local_idx / OUT_FEATURES, row = local_idx - route * OUT_FEATURES, expert = task->sel[route];
     const int matched[1] = {{route}}, matched_count = 1;
     float acc0[1] = {{0.0f}}, acc1[1] = {{0.0f}};
-    const unsigned char *row_raw0 = task->raw0 + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
-    const unsigned char *row_raw1 = task->raw1 + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
+    const unsigned char *row_raw0 = task->raw0 + (expert * OUT_FEATURES + row) * ROW_SIZE;
+    const unsigned char *row_raw1 = task->raw1 + (expert * OUT_FEATURES + row) * ROW_SIZE;
 {batch_dot0}
 {batch_dot1}
     task->out0[local_idx] = tiny_silu_mul(acc0[0], acc1[0]);
@@ -2093,28 +2759,31 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {
       acc0[matched_count] = acc1[matched_count] = 0.0f;
       matched_count++;
     }}
-    const unsigned char *row_raw0 = task->raw0 + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
-    const unsigned char *row_raw1 = task->raw1 + ((expert * OUT_FEATURES + row) * (IN_FEATURES / 256)) * TYPE_SIZE;
+    const unsigned char *row_raw0 = task->raw0 + (expert * OUT_FEATURES + row) * ROW_SIZE;
+    const unsigned char *row_raw1 = task->raw1 + (expert * OUT_FEATURES + row) * ROW_SIZE;
 {batch_dot0}
 {batch_dot1}
     for (int m = 0; m < matched_count; m++)
       task->out0[matched[m] * OUT_FEATURES + row] = tiny_silu_mul(acc0[m], acc1[m]);
   }}"""
-  if routes != routes_per_input:
+  if routes != routes_per_input and not weighted:
     loop_start = "  for (int local_idx = task->begin; local_idx < task->end; local_idx++) {" if fuse_silu else \
+                 "  for (int row = task->begin; row < task->end; row++) {" if weighted else \
                  "  for (int idx = task->begin; idx < task->end; idx++) {"
-    loop_var = "local_idx" if fuse_silu else "idx"
+    loop_var = "local_idx" if fuse_silu else "row" if weighted else "idx"
     worker = worker.replace(loop_start, f"""  for (;;) {{
     const int tile_begin = __atomic_fetch_add(task->next_work, {expert_tile}, __ATOMIC_RELAXED);
     if (tile_begin >= task->total_work) break;
     const int tile_end = tile_begin + {expert_tile} < task->total_work ? tile_begin + {expert_tile} : task->total_work;
     for (int {loop_var} = tile_begin; {loop_var} < tile_end; {loop_var}++) {{""", 1) + "\n  }"
   dot_helpers = dot_source()
-  entry_args = f"{ctype} *out0, const unsigned char *raw0, const unsigned char *raw1" if fuse_silu else \
+  entry_args = f"{ctype} *out0, const unsigned char *raw0, const float *probs" if weighted else \
+               f"{ctype} *out0, const unsigned char *raw0, const unsigned char *raw1" if fuse_silu else \
                f"{ctype} *out0, {ctype} *out1, const unsigned char *raw0, const unsigned char *raw1" if projections == 2 else \
                f"{ctype} *out0, const unsigned char *raw0"
   task_pointers = "out0, out0, raw0, raw1" if fuse_silu else \
                   "out0, out1, raw0, raw1" if projections == 2 else "out0, out0, raw0, raw0"
+  prob_pointer = "probs" if weighted else "(const float *)0"
   init_tables = "  init_signed_grid();\n" if ggml_type == 21 else ""
   silu_helper = r"""
 static inline float tiny_silu_mul(float gate, float up) {
@@ -2183,15 +2852,19 @@ static inline unsigned int load_u32(const unsigned char *p) {{
 {silu_helper}
 #define ROUTES {routes}
 #define ROUTES_PER_INPUT {routes_per_input}
-#define INPUT_COUNT (ROUTES / ROUTES_PER_INPUT)
+#define INPUT_COUNT {routes if weighted else routes // routes_per_input}
+#define OUTPUT_INPUTS (ROUTES / ROUTES_PER_INPUT)
 #define OUT_FEATURES {out_features}
 #define IN_FEATURES {in_features}
 #define TYPE_SIZE {type_size}
+#define ROW_SIZE {row_size}
+#define IQ3_META_SIZE {iq3_meta_size}
 #define THREADS {threads}
 #define PROJECTIONS {projections}
 typedef struct {{
   {ctype} *out0, *out1; const unsigned char *raw0, *raw1; const int *sel, *unique, *head, *next; const {ctype} *x;
-  const signed char *xq; const float *xd; unsigned *next_work; int total_work, projection_size, begin, end;
+  const float *probs; const signed char *xq; const float *xd; unsigned *next_work;
+  int total_work, projection_size, unique_count, begin, end;
 }} task_t;
 static void *worker(void *opaque) {{
   task_t *task = (task_t *)opaque;
@@ -2212,11 +2885,13 @@ void {name}({entry_args}, const int *sel, const {ctype} *x) {{
     next[route] = head[unique_idx];
     head[unique_idx] = route;
   }}
-  const int projection_size = INPUT_COUNT == 1 ? ROUTES * OUT_FEATURES : unique_count * OUT_FEATURES;
+  const int projection_size = {"(INPUT_COUNT == 1 ? OUTPUT_INPUTS : 1) * OUT_FEATURES" if weighted else
+                               "INPUT_COUNT == 1 ? ROUTES * OUT_FEATURES : unique_count * OUT_FEATURES"};
   const int total = projection_size * {1 if fuse_silu else projections};
 {quantize_src}
   unsigned next_work = 0;
-  dispatch((task_t){{{task_pointers}, sel, unique, head, next, x, xq, xd, &next_work, total, projection_size, 0, total}}, total, THREADS);
+  dispatch((task_t){{{task_pointers}, sel, unique, head, next, x, {prob_pointer}, xq, xd,
+                     &next_work, total, projection_size, unique_count, 0, total}}, total, THREADS);
 }}
 """
   return src, _compile_cpu_ggml(src), name
@@ -2224,34 +2899,46 @@ void {name}({entry_args}, const int *sel, const {ctype} *x) {{
 def ggml_expert_kernel(out:UOp, raw:UOp, sel:UOp, x:UOp, ggml_type:int, routes_per_input:int) -> UOp:
   routes, out_features, in_features = out.shape[0], out.shape[1], x.shape[1]
   src, binary, name = ggml_expert_program(ggml_type, routes, routes_per_input, out_features, in_features, x.dtype)
-  sink = UOp.sink(out.base, raw.base, sel.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2, 3), outs=(0,), ins=(1, 2, 3)))
+  return _cpu_program((out, raw, sel, x), src, binary, name)
 
 def ggml_expert_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, sel:UOp, x:UOp,
                                  ggml_type:int, routes_per_input:int) -> UOp:
   routes, out_features, in_features = out0.shape[0], out0.shape[1], x.shape[1]
   assert out1.shape == out0.shape
   src, binary, name = ggml_expert_program(ggml_type, routes, routes_per_input, out_features, in_features, x.dtype, projections=2)
-  sink = UOp.sink(out0.base, out1.base, raw0.base, raw1.base, sel.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(6)), outs=(0, 1), ins=(2, 3, 4, 5)))
+  return _cpu_program((out0, out1, raw0, raw1, sel, x), src, binary, name, (0, 1))
 
 def ggml_expert_silu_kernel(out:UOp, raw0:UOp, raw1:UOp, sel:UOp, x:UOp, ggml_type:int, routes_per_input:int) -> UOp:
   routes, out_features, in_features = out.shape[0], out.shape[1], x.shape[1]
   src, binary, name = ggml_expert_program(ggml_type, routes, routes_per_input, out_features, in_features,
                                                 x.dtype, projections=2, fuse_silu=True)
-  sink = UOp.sink(out.base, raw0.base, raw1.base, sel.base, x.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(5)), outs=(0,), ins=(1, 2, 3, 4)))
+  return _cpu_program((out, raw0, raw1, sel, x), src, binary, name)
+
+def expert_weighted_sum(layer:ExpertWeights, sel:Tensor, x:Tensor, probs:Tensor) -> Tensor:
+  routes, routes_per_input = int(sel.numel()), probs.shape[-1]
+  inputs = routes // routes_per_input
+  assert layer.ggml_type in (14, 23) and x.dtype == probs.dtype == dtypes.float32 and int(x.numel()) == routes * layer.in_features
+  out = Tensor.empty(inputs, layer.out_features, dtype=dtypes.float32, device=x.device)
+  src, binary, name = ggml_expert_program(layer.ggml_type, routes, routes_per_input, layer.out_features, layer.in_features,
+                                          dtypes.float32, weighted=True)
+  out = Tensor.custom_kernel(out, layer.weight, probs.flatten().contiguous(), sel.flatten().contiguous(),
+    x.reshape(routes, layer.in_features).contiguous(), fxn=lambda out,raw,probs,sel,x:
+      ggml_expert_weighted_kernel(out, raw, probs, sel, x, src, binary, name))[0]
+  return out.reshape(*probs.shape[:-1], layer.out_features)
+
+def ggml_expert_weighted_kernel(out:UOp, raw:UOp, probs:UOp, sel:UOp, x:UOp, src:str, binary:bytes, name:str) -> UOp:
+  return _cpu_program((out, raw, probs, sel, x), src, binary, name)
 
 @functools.cache
-def moe_program(routes:int, dim:int, hidden:int, inputs:int=1) -> tuple[str, bytes, str]:
+def moe_program(routes:int, dim:int, hidden:int, inputs:int=1, iq3_type:int=21, down_type:int=23) -> tuple[str, bytes, str]:
   from tinygrad.runtime.autogen import ggml_common
-  assert dim % 256 == hidden % 256 == 0 and routes % inputs == 0
+  assert dim % 256 == hidden % 256 == 0 and routes % inputs == 0 and iq3_type in (21, 121) and down_type in (14, 23)
   threads = min(32, max(1, getenv("CPU_GGML_THREADS", CPU_COUNT.value)))
   use_q8k = getenv("CPU_MOE_Q8K", 1)
-  name = f"cpu_moe_iq3_iq4_q8{'_q8k' if use_q8k else ''}_{routes}_{inputs}_{dim}_{hidden}"
+  repacked = iq3_type == 121
+  iq3_meta_size = (dim // 256 * 6 + 63) // 64 * 64 if repacked else 0
+  name = f"cpu_moe_iq3{'r' if repacked else ''}_{'q6' if down_type == 14 else 'iq4'}_q8" + \
+         f"{'_q8k' if use_q8k else ''}_{routes}_{inputs}_{dim}_{hidden}"
   grid = ",".join(hex(x) for x in ggml_common.iq3s_grid)
   kvalues = ",".join(str(x) for x in ggml_common.kvalues_iq4nl)
   sign_masks = ",".join(hex(sum((0xff << (8*i)) for i in range(4) if signs & (1 << i))) for signs in range(16))
@@ -2268,7 +2955,39 @@ static inline unsigned int load_u32(const unsigned char *p) {{
 static const unsigned int grid[512] = {{{grid}}};
 static const unsigned int sign_masks[16] = {{{sign_masks}}};
 static const signed char kvalues[16] = {{{kvalues}}};
+static const signed char iq3_values[16] = {{1,3,5,7,9,11,13,15,-1,-3,-5,-7,-9,-11,-13,-15}};
+static const unsigned char iq3_values_unsigned[16] = {{17,19,21,23,25,27,29,31,15,13,11,9,7,5,3,1}};
 #if defined(__AVX2__)
+static inline __m256i unpack_iq3_repacked(const unsigned char *qs) {{
+  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
+  const __m128i lut = _mm_loadu_si128((const __m128i *)iq3_values), mask = _mm_set1_epi8(15);
+  const __m128i lo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
+  const __m128i hi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
+  return _mm256_set_m128i(hi, lo);
+}}
+static inline __m256i unpack_iq3_repacked_unsigned(const unsigned char *qs) {{
+  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
+  const __m128i lut = _mm_loadu_si128((const __m128i *)iq3_values_unsigned), mask = _mm_set1_epi8(15);
+  const __m128i lo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
+  const __m128i hi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
+  return _mm256_set_m128i(hi, lo);
+}}
+static inline int dot_iq3_repacked_q8k(const unsigned char *meta, const unsigned char *data, const signed char *xq,
+                                      const short *bsums) {{
+  __m256i sum = _mm256_setzero_si256();
+  const __m128i scales = _mm_setr_epi16(
+    1 + 2 * (meta[2] & 15), 1 + 2 * (meta[2] >> 4), 1 + 2 * (meta[3] & 15), 1 + 2 * (meta[3] >> 4),
+    1 + 2 * (meta[4] & 15), 1 + 2 * (meta[4] >> 4), 1 + 2 * (meta[5] & 15), 1 + 2 * (meta[5] >> 4));
+  for (int subgroup = 0; subgroup < 8; subgroup++) {{
+    const int scale = 1 + 2 * ((meta[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+    sum = _mm256_add_epi32(sum, _mm256_madd_epi16(
+      _mm256_maddubs_epi16(unpack_iq3_repacked_unsigned(data + subgroup * 16),
+                           _mm256_loadu_si256((const __m256i *)(xq + subgroup * 32))),
+      _mm256_set1_epi16((short)scale)));
+  }}
+  const int correction = hsum4(_mm_madd_epi16(_mm_loadu_si128((const __m128i *)bsums), scales));
+  return hsum8(sum) - 16 * correction;
+}}
 static inline __m256i dot_iq3_parts(const unsigned char *qs, unsigned int qh, unsigned int signs, const signed char *xq) {{
   const __m256i qbytes = _mm256_cvtepu8_epi32(_mm_loadl_epi64((const __m128i *)qs));
   const __m256i qh_mask = _mm256_setr_epi32(1, 2, 4, 8, 16, 32, 64, 128);
@@ -2352,14 +3071,29 @@ static inline int dot_iq3_q8k(const unsigned char *w, const signed char *xq) {{
       dot_iq3(w + 2 + subgroup * 8, w[66 + subgroup], load_u32(w + 74 + subgroup * 4), xq + subgroup * 32);
   return ret;
 }}
+static inline int dot_iq3_repacked_q8k(const unsigned char *meta, const unsigned char *data, const signed char *xq,
+                                      const short *bsums) {{
+  (void)bsums;
+  int ret = 0;
+  for (int subgroup = 0; subgroup < 8; subgroup++) {{
+    signed char qvals[32];
+    for (int pos = 0; pos < 32; pos++)
+      qvals[pos] = iq3_values[(data[subgroup * 16 + (pos & 15)] >> (pos < 16 ? 0 : 4)) & 15];
+    ret += (1 + 2 * ((meta[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15)) * dot32(qvals, xq + subgroup * 32);
+  }}
+  return ret;
+}}
+#endif
+#if defined(__AVX2__)
+static inline __m256i unpack_iq4(const unsigned char *qs) {{
+  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
+  const __m256i nibbles = _mm256_and_si256(_mm256_set_m128i(_mm_srli_epi16(packed, 4), packed), _mm256_set1_epi8(15));
+  return _mm256_shuffle_epi8(_mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)kvalues)), nibbles);
+}}
 #endif
 static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {{
 #if defined(__AVX2__)
-  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
-  const __m128i mask = _mm_set1_epi8(15), lut = _mm_loadu_si128((const __m128i *)kvalues);
-  const __m128i qlo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
-  const __m128i qhi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
-  return dot32v(_mm256_set_m128i(qhi, qlo), xq);
+  return dot32v(unpack_iq4(qs), xq);
 #else
   signed char qvals[32];
   for (int pos = 0; pos < 32; pos++) qvals[pos] = kvalues[(qs[pos & 15] >> (pos < 16 ? 0 : 4)) & 15];
@@ -2367,12 +3101,11 @@ static inline int dot_iq4(const unsigned char *qs, const signed char *xq) {{
 #endif
 }}
 #if defined(__AVX2__)
+static inline __m256i dot_iq4_pairs(const unsigned char *qs, const signed char *xq) {{
+  return dot32_pairs(unpack_iq4(qs), xq);
+}}
 static inline __m256i dot_iq4_parts(const unsigned char *qs, const signed char *xq) {{
-  const __m128i packed = _mm_loadu_si128((const __m128i *)qs);
-  const __m128i mask = _mm_set1_epi8(15), lut = _mm_loadu_si128((const __m128i *)kvalues);
-  const __m128i qlo = _mm_shuffle_epi8(lut, _mm_and_si128(packed, mask));
-  const __m128i qhi = _mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
-  return dot32_parts(_mm256_set_m128i(qhi, qlo), xq);
+  return _mm256_madd_epi16(dot_iq4_pairs(qs, xq), _mm256_set1_epi16(1));
 }}
 #endif
 static inline float tiny_silu_mul(float gate, float up) {{
@@ -2406,7 +3139,7 @@ static void quantize(const float *x, int count, signed char *xq, float *xd) {{
     }}
   }}
 }}
-static void quantize_q8k(const float *x, int count, signed char *xq, float *xd) {{
+static void quantize_q8k(const float *x, int count, signed char *xq, float *xd, short *bsums) {{
   for (int block = 0; block < count / 256; block++) {{
     float max = 0.0f, amax = 0.0f;
     for (int i = 0; i < 256; i++) {{
@@ -2417,6 +3150,11 @@ static void quantize_q8k(const float *x, int count, signed char *xq, float *xd) 
     xd[block] = scale;
     const float inv = scale != 0.0f ? 1.0f / scale : 0.0f;
     for (int i = 0; i < 256; i++) xq[block * 256 + i] = (signed char)__builtin_roundf(x[block * 256 + i] * inv);
+    if (bsums) for (int subgroup = 0; subgroup < 8; subgroup++) {{
+      int sum = 0;
+      for (int i = 0; i < 32; i++) sum += xq[block * 256 + subgroup * 32 + i];
+      bsums[block * 8 + subgroup] = (short)sum;
+    }}
   }}
 }}
 #define ROUTES {routes}
@@ -2426,39 +3164,78 @@ static void quantize_q8k(const float *x, int count, signed char *xq, float *xd) 
 #define HIDDEN {hidden}
 #define THREADS {threads}
 #define USE_Q8K {int(use_q8k)}
+#define REPACKED {int(repacked)}
+#define ROUTED_DOWN_TYPE {down_type}
+#define IQ3_META_SIZE {iq3_meta_size}
+#define IQ3_ROW_SIZE {iq3_meta_size + dim // 2 if repacked else dim // 256 * 110}
 typedef struct {{
   float *out, *rhidden, *shidden; const unsigned char *rgate, *rup, *rdown, *sgate, *sup, *sdown;
   const float *x, *probs; const int *sel, *unique, *head, *next; const signed char *xq, *rhq, *shq, *xkq, *rhkq;
   const float *xd, *rhd, *shd, *xkd, *rhkd;
-  const float *shared_scale; int routed_work, stage, begin, end;
+  const short *xks;
+  const float *shared_scale; int routed_work, stage, work_offset, begin, end;
 }} task_t;
 static void *worker(void *opaque) {{
   task_t *task = (task_t *)opaque;
-  if (task->stage == 0) for (int idx = task->begin; idx < task->end; idx++) {{
+  if (task->stage == 0) for (int local_idx = task->begin; local_idx < task->end; local_idx++) {{
+    const int idx = task->work_offset + local_idx;
     if (idx < task->routed_work) {{
       const int unique_idx = idx / HIDDEN, row = idx - unique_idx * HIDDEN, expert = task->unique[unique_idx];
       for (int route = task->head[unique_idx]; route >= 0; route = task->next[route]) {{
       const int input = route / ROUTES_PER_INPUT;
-      const unsigned char *wg = task->rgate + ((expert * HIDDEN + row) * (DIM / 256)) * 110;
-      const unsigned char *wu = task->rup + ((expert * HIDDEN + row) * (DIM / 256)) * 110;
+      const unsigned char *wg = task->rgate + (expert * HIDDEN + row) * IQ3_ROW_SIZE;
+      const unsigned char *wu = task->rup + (expert * HIDDEN + row) * IQ3_ROW_SIZE;
 #if defined(__AVX2__)
       __m256 gate_vec = _mm256_setzero_ps(), up_vec = _mm256_setzero_ps();
       float gate_k = 0.0f, up_k = 0.0f;
 #else
       float gate = 0.0f, up = 0.0f, gate_k = 0.0f, up_k = 0.0f;
 #endif
-      for (int block = 0; block < DIM / 256; block++, wg += 110, wu += 110) {{
-        const float dg = half_to_float(wg), du = half_to_float(wu);
+      for (int block = 0; block < DIM / 256; block++) {{
+        const unsigned char *wgm = wg + block * (REPACKED ? 6 : 110);
+        const unsigned char *wum = wu + block * (REPACKED ? 6 : 110);
+        const unsigned char *wgd = REPACKED ? wg + IQ3_META_SIZE + block * 128 : wgm;
+        const unsigned char *wud = REPACKED ? wu + IQ3_META_SIZE + block * 128 : wum;
+        const float dg = half_to_float(wgm), du = half_to_float(wum);
         if (USE_Q8K) {{
           gate_k += dg * task->xkd[input * (DIM / 256) + block] *
-            (float)dot_iq3_q8k(wg, task->xkq + input * DIM + block * 256);
+            (float)(REPACKED ? dot_iq3_repacked_q8k(wgm, wgd, task->xkq + input * DIM + block * 256,
+                                                   task->xks + input * (DIM / 32) + block * 8) :
+                              dot_iq3_q8k(wgm, task->xkq + input * DIM + block * 256));
           up_k += du * task->xkd[input * (DIM / 256) + block] *
-            (float)dot_iq3_q8k(wu, task->xkq + input * DIM + block * 256);
+            (float)(REPACKED ? dot_iq3_repacked_q8k(wum, wud, task->xkq + input * DIM + block * 256,
+                                                   task->xks + input * (DIM / 32) + block * 8) :
+                              dot_iq3_q8k(wum, task->xkq + input * DIM + block * 256));
           continue;
         }}
-        const unsigned int sg = load_u32(wg + 106), su = load_u32(wu + 106);
-        const unsigned long qhgs = (unsigned long)load_u32(wg + 66) | ((unsigned long)load_u32(wg + 70) << 32);
-        const unsigned long qhus = (unsigned long)load_u32(wu + 66) | ((unsigned long)load_u32(wu + 70) << 32);
+        if (REPACKED) {{
+          for (int subgroup = 0; subgroup < 8; subgroup++) {{
+            const int group = block * 8 + subgroup;
+            const float scale = task->xd[input * (DIM / 32) + group];
+            const int sg = 1 + 2 * ((wgm[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+            const int su = 1 + 2 * ((wum[2 + subgroup / 2] >> (4 * (subgroup & 1))) & 15);
+#if defined(__AVX2__)
+            gate_vec = _mm256_fmadd_ps(_mm256_set1_ps(dg * (float)sg * scale),
+              _mm256_cvtepi32_ps(dot32_parts(unpack_iq3_repacked(wgd + subgroup * 16),
+                task->xq + input * DIM + group * 32)), gate_vec);
+            up_vec = _mm256_fmadd_ps(_mm256_set1_ps(du * (float)su * scale),
+              _mm256_cvtepi32_ps(dot32_parts(unpack_iq3_repacked(wud + subgroup * 16),
+                task->xq + input * DIM + group * 32)), up_vec);
+#else
+            signed char qg[32], qu[32];
+            for (int pos = 0; pos < 32; pos++) {{
+              qg[pos] = iq3_values[(wgd[subgroup * 16 + (pos & 15)] >> (pos < 16 ? 0 : 4)) & 15];
+              qu[pos] = iq3_values[(wud[subgroup * 16 + (pos & 15)] >> (pos < 16 ? 0 : 4)) & 15];
+            }}
+            gate += dg * (float)sg * scale * (float)dot32(qg, task->xq + input * DIM + group * 32);
+            up += du * (float)su * scale * (float)dot32(qu, task->xq + input * DIM + group * 32);
+#endif
+          }}
+          continue;
+        }}
+        const unsigned int sg = load_u32(wgm + 106), su = load_u32(wum + 106);
+        const unsigned long qhgs = (unsigned long)load_u32(wgm + 66) | ((unsigned long)load_u32(wgm + 70) << 32);
+        const unsigned long qhus = (unsigned long)load_u32(wum + 66) | ((unsigned long)load_u32(wum + 70) << 32);
         for (int subgroup = 0; subgroup < 8; subgroup++) {{
           const int group = block * 8 + subgroup;
           const unsigned int qhg = (unsigned int)(qhgs >> (8 * subgroup)) & 255;
@@ -2466,17 +3243,17 @@ static void *worker(void *opaque) {{
 #if defined(__AVX2__)
           const float scale = task->xd[input * (DIM / 32) + group];
           gate_vec = _mm256_fmadd_ps(_mm256_set1_ps(dg * (float)(1 + 2 * ((sg >> (4 * subgroup)) & 15)) * scale),
-            _mm256_cvtepi32_ps(dot_iq3_parts(wg + 2 + subgroup * 8, qhg, load_u32(wg + 74 + subgroup * 4),
+            _mm256_cvtepi32_ps(dot_iq3_parts(wgm + 2 + subgroup * 8, qhg, load_u32(wgm + 74 + subgroup * 4),
                                              task->xq + input * DIM + group * 32)), gate_vec);
           up_vec = _mm256_fmadd_ps(_mm256_set1_ps(du * (float)(1 + 2 * ((su >> (4 * subgroup)) & 15)) * scale),
-            _mm256_cvtepi32_ps(dot_iq3_parts(wu + 2 + subgroup * 8, qhu, load_u32(wu + 74 + subgroup * 4),
+            _mm256_cvtepi32_ps(dot_iq3_parts(wum + 2 + subgroup * 8, qhu, load_u32(wum + 74 + subgroup * 4),
                                              task->xq + input * DIM + group * 32)), up_vec);
 #else
           gate += dg * (float)(1 + 2 * ((sg >> (4 * subgroup)) & 15)) * task->xd[input * (DIM / 32) + group] *
-                  (float)dot_iq3(wg + 2 + subgroup * 8, qhg, load_u32(wg + 74 + subgroup * 4),
+                  (float)dot_iq3(wgm + 2 + subgroup * 8, qhg, load_u32(wgm + 74 + subgroup * 4),
                                  task->xq + input * DIM + group * 32);
           up += du * (float)(1 + 2 * ((su >> (4 * subgroup)) & 15)) * task->xd[input * (DIM / 32) + group] *
-                (float)dot_iq3(wu + 2 + subgroup * 8, qhu, load_u32(wu + 74 + subgroup * 4),
+                (float)dot_iq3(wum + 2 + subgroup * 8, qhu, load_u32(wum + 74 + subgroup * 4),
                                task->xq + input * DIM + group * 32);
 #endif
         }}
@@ -2518,15 +3295,37 @@ static void *worker(void *opaque) {{
       task->shidden[shared_idx] = tiny_silu_mul(gate, up);
     }}
   }}
-  if (task->stage == 1) for (int idx = task->begin; idx < task->end; idx++) {{
-    const int row = idx / INPUTS, input = idx - row * INPUTS;
-    float routed[ROUTES_PER_INPUT];
+  if (task->stage == 1) {{
+    float routed_sum[INPUTS * DIM];
+    for (int idx = task->begin; idx < task->end; idx++) routed_sum[idx] = 0.0f;
     for (int local_route = 0; local_route < ROUTES_PER_INPUT; local_route++) {{
-      const int route = input * ROUTES_PER_INPUT + local_route;
-      const int expert = task->sel[route];
-      const unsigned char *w = task->rdown + ((expert * DIM + row) * (HIDDEN / 256)) * 136;
-      float acc = 0.0f;
-      for (int block = 0; block < HIDDEN / 256; block++, w += 136) {{
+      for (int idx = task->begin; idx < task->end; idx++) {{
+        const int row = idx / INPUTS, input = idx - row * INPUTS;
+        const int route = input * ROUTES_PER_INPUT + local_route;
+        const int expert = task->sel[route];
+        const unsigned char *w = task->rdown + ((expert * DIM + row) * (HIDDEN / 256)) *
+                                 (ROUTED_DOWN_TYPE == 14 ? 210 : 136);
+        float acc = 0.0f;
+#if ROUTED_DOWN_TYPE == 14
+        for (int block = 0; block < HIDDEN / 256; block++, w += 210) {{
+          const float d = half_to_float(w + 208);
+          for (int subgroup = 0; subgroup < 8; subgroup++) {{
+            const int group = block * 8 + subgroup;
+            const int scale0 = ((const signed char *)(w + 192))[subgroup * 2];
+            const int scale1 = ((const signed char *)(w + 192))[subgroup * 2 + 1];
+            int dot_lo, dot_hi;
+#if defined(__AVX2__)
+            dot_q6_vec(unpack_q6(w, subgroup), task->rhq + route * HIDDEN + group * 32, &dot_lo, &dot_hi);
+#else
+            dot_q6(w, subgroup, task->rhq + route * HIDDEN + group * 32, &dot_lo, &dot_hi);
+#endif
+            const float xd = task->rhd[route * (HIDDEN / 32) + group];
+            acc += d * (float)scale0 * xd * (float)(dot_lo + dot_hi);
+            acc += d * (float)(scale1 - scale0) * xd * (float)dot_hi;
+          }}
+        }}
+#else
+        for (int block = 0; block < HIDDEN / 256; block++, w += 136) {{
         const float d = half_to_float(w);
         const unsigned int high = (unsigned int)w[2] | ((unsigned int)w[3] << 8);
 #if defined(__AVX2__)
@@ -2540,9 +3339,9 @@ static void *worker(void *opaque) {{
           const int scale_bits = low | (((high >> (2 * subgroup)) & 3) << 4);
           if (USE_Q8K) {{
 #if defined(__AVX2__)
-            block_sum = _mm256_add_epi32(block_sum, _mm256_mullo_epi32(
-            dot_iq4_parts(w + 8 + subgroup * 16, task->rhkq + route * HIDDEN + group * 32),
-            _mm256_set1_epi32(scale_bits - 32)));
+            block_sum = _mm256_add_epi32(block_sum, _mm256_madd_epi16(
+              dot_iq4_pairs(w + 8 + subgroup * 16, task->rhkq + route * HIDDEN + group * 32),
+              _mm256_set1_epi16((short)(scale_bits - 32))));
 #else
             block_sum += (scale_bits - 32) *
               dot_iq4(w + 8 + subgroup * 16, task->rhkq + route * HIDDEN + group * 32);
@@ -2555,27 +3354,29 @@ static void *worker(void *opaque) {{
 #else
         if (USE_Q8K) acc += d * task->rhkd[route * (HIDDEN / 256) + block] * (float)block_sum;
 #endif
-      }}
-      routed[local_route] = acc;
-    }}
-    float routed_sum = routed[0] * task->probs[input * ROUTES_PER_INPUT];
-    for (int route = 1; route < ROUTES_PER_INPUT; route++)
-      routed_sum += routed[route] * task->probs[input * ROUTES_PER_INPUT + route];
-    const unsigned char *w = task->sdown + row * (HIDDEN / 32) * 34;
-#if defined(__AVX2__)
-    __m256 shared_vec = _mm256_setzero_ps();
-    for (int group = 0; group < HIDDEN / 32; group++, w += 34)
-      shared_vec = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(w) * task->shd[input * (HIDDEN / 32) + group]),
-        _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256((const __m256i *)(w + 2)),
-                                       task->shq + input * HIDDEN + group * 32)), shared_vec);
-    const float shared = hsum8f(shared_vec);
-#else
-    float shared = 0.0f;
-    for (int group = 0; group < HIDDEN / 32; group++, w += 34)
-      shared += half_to_float(w) * task->shd[input * (HIDDEN / 32) + group] *
-                (float)dot32((const signed char *)(w + 2), task->shq + input * HIDDEN + group * 32);
+        }}
 #endif
-    task->out[input * DIM + row] = routed_sum + shared * task->shared_scale[input];
+        routed_sum[idx] += acc * task->probs[route];
+      }}
+    }}
+    for (int idx = task->begin; idx < task->end; idx++) {{
+      const int row = idx / INPUTS, input = idx - row * INPUTS;
+      const unsigned char *w = task->sdown + row * (HIDDEN / 32) * 34;
+#if defined(__AVX2__)
+      __m256 shared_vec = _mm256_setzero_ps();
+      for (int group = 0; group < HIDDEN / 32; group++, w += 34)
+        shared_vec = _mm256_fmadd_ps(_mm256_set1_ps(half_to_float(w) * task->shd[input * (HIDDEN / 32) + group]),
+          _mm256_cvtepi32_ps(dot32_parts(_mm256_loadu_si256((const __m256i *)(w + 2)),
+                                         task->shq + input * HIDDEN + group * 32)), shared_vec);
+      const float shared = hsum8f(shared_vec);
+#else
+      float shared = 0.0f;
+      for (int group = 0; group < HIDDEN / 32; group++, w += 34)
+        shared += half_to_float(w) * task->shd[input * (HIDDEN / 32) + group] *
+                  (float)dot32((const signed char *)(w + 2), task->shq + input * HIDDEN + group * 32);
+#endif
+      task->out[input * DIM + row] = routed_sum[idx] + shared * task->shared_scale[input];
+    }}
   }}
   return (void *)0;
 }}
@@ -2587,6 +3388,7 @@ void {name}(float *out, const unsigned char *rgate, const unsigned char *rup, co
   float xd[INPUTS * (DIM / 32)], rhd[ROUTES * (HIDDEN / 32)], shd[INPUTS * (HIDDEN / 32)];
   signed char xkq[INPUTS * DIM], rhkq[ROUTES * HIDDEN];
   float xkd[INPUTS * (DIM / 256)], rhkd[ROUTES * (HIDDEN / 256)];
+  short xks[INPUTS * (DIM / 32)];
   float rhidden[ROUTES * HIDDEN], shidden[INPUTS * HIDDEN], shared_scale[INPUTS];
   int unique[ROUTES], head[ROUTES], next[ROUTES], unique_count = 0;
   for (int route = 0; route < ROUTES; route++) {{
@@ -2601,32 +3403,32 @@ void {name}(float *out, const unsigned char *rgate, const unsigned char *rup, co
   }}
   for (int input = 0; input < INPUTS; input++) {{
     quantize(x + input * DIM, DIM, xq + input * DIM, xd + input * (DIM / 32));
-    if (USE_Q8K) quantize_q8k(x + input * DIM, DIM, xkq + input * DIM, xkd + input * (DIM / 256));
+    if (USE_Q8K) quantize_q8k(x + input * DIM, DIM, xkq + input * DIM, xkd + input * (DIM / 256),
+                              xks + input * (DIM / 32));
     float gate_sum = 0.0f;
     for (int i = 0; i < DIM; i++) gate_sum += x[input * DIM + i] * (float)shared_gate[i];
     shared_scale[input] = 1.0f / (1.0f + expf(-gate_sum));
   }}
   task_t task = (task_t){{out, rhidden, shidden, rgate, rup, rdown, sgate, sup, sdown, x, probs, sel,
                            unique, head, next, xq, rhq, shq, xkq, rhkq, xd, rhd, shd, xkd, rhkd,
-                           shared_scale, unique_count * HIDDEN, 0, 0, 0}};
-  dispatch(task, task.routed_work + INPUTS * HIDDEN, THREADS);
+                           xks, shared_scale, unique_count * HIDDEN, 0, 0, 0, 0}};
+  dispatch(task, task.routed_work, THREADS);
+  task.work_offset = task.routed_work; dispatch(task, INPUTS * HIDDEN, THREADS);
   for (int route = 0; route < ROUTES; route++)
     quantize(rhidden + route * HIDDEN, HIDDEN, rhq + route * HIDDEN, rhd + route * (HIDDEN / 32));
   if (USE_Q8K) for (int route = 0; route < ROUTES; route++)
-    quantize_q8k(rhidden + route * HIDDEN, HIDDEN, rhkq + route * HIDDEN, rhkd + route * (HIDDEN / 256));
+    quantize_q8k(rhidden + route * HIDDEN, HIDDEN, rhkq + route * HIDDEN, rhkd + route * (HIDDEN / 256),
+                 (short *)0);
   for (int input = 0; input < INPUTS; input++)
     quantize(shidden + input * HIDDEN, HIDDEN, shq + input * HIDDEN, shd + input * (HIDDEN / 32));
-  task.stage = 1; dispatch(task, INPUTS * DIM, THREADS);
+  task.stage = 1; task.work_offset = 0; dispatch(task, INPUTS * DIM, THREADS);
 }}
 """
   return src, _compile_cpu_ggml(src), name
 
 def moe_kernel(out:UOp, rgate:UOp, rup:UOp, rdown:UOp, sgate:UOp, sup:UOp, sdown:UOp, x:UOp, probs:UOp,
                     sel:UOp, shared_gate:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, rgate.base, rup.base, rdown.base, sgate.base, sup.base, sdown.base, x.base, probs.base, sel.base,
-                  shared_gate.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=tuple(range(11)), outs=(0,), ins=tuple(range(1, 11))))
+  return _cpu_program((out, rgate, rup, rdown, sgate, sup, sdown, x, probs, sel, shared_gate), src, binary, name)
 
 def expert_pair(first:ExpertWeights, second:ExpertWeights, sel:Tensor, x:Tensor) -> tuple[Tensor, Tensor]:
   assert first.ggml_type == second.ggml_type and first.ggml_type in (14, 21, 23)
@@ -2651,8 +3453,11 @@ def expert_silu(first:ExpertWeights, second:ExpertWeights, sel:Tensor, x:Tensor)
   routes_per_input = routes // input_count
   flat_sel, xc = sel.flatten().contiguous(), x.reshape(-1, first.in_features).contiguous()
   out = Tensor.empty(routes, first.out_features, dtype=x.dtype, device=x.device)
-  ggml_type = first.ggml_type
-  out = Tensor.custom_kernel(out, first.weight, second.weight, flat_sel, xc,
+  repacked = first.cpu_repacked is not None and second.cpu_repacked is not None
+  raw0, raw1 = (first.cpu_repacked, second.cpu_repacked) if repacked else (first.weight, second.weight)
+  assert raw0 is not None and raw1 is not None
+  ggml_type = 121 if repacked else first.ggml_type
+  out = Tensor.custom_kernel(out, raw0, raw1, flat_sel, xc,
     fxn=lambda out,raw0,raw1,sel,x:ggml_expert_silu_kernel(out, raw0, raw1, sel, x, ggml_type, routes_per_input))[0]
   return out if len(sel.shape) == 1 else out.reshape(*sel.shape, first.out_features)
 
@@ -2696,16 +3501,20 @@ def weighted_sum(x:Tensor, probs:Tensor) -> Tensor:
   return out.reshape(*probs.shape[:-1], dim)
 
 def weighted_sum_kernel(out:UOp, x:UOp, probs:UOp, src:str, binary:bytes, name:str) -> UOp:
-  sink = UOp.sink(out.base, x.base, probs.base, arg=KernelInfo(name=name))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-             arg=ProgramInfo(name=name, local_size=(1, 1, 1), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
+  return _cpu_program((out, x, probs), src, binary, name)
 
 def moe_ffn(block:FFNBlock, x:Tensor, probs:Tensor, sel:Tensor) -> Tensor:
   routes, dim, hidden = int(sel.numel()), block.config.dim, block.config.hidden_dim
   inputs = int(x.numel()) // dim
   out = Tensor.empty(inputs, dim, dtype=dtypes.float32, device=x.device)
-  src, binary, name = moe_program(routes, dim, hidden, inputs)
-  tensors = (out, block.ffn_gate_exps.weight, block.ffn_up_exps.weight, block.ffn_down_exps.weight,
+  assert block.ffn_gate_exps.ggml_type == block.ffn_up_exps.ggml_type == 21
+  repacked = block.ffn_gate_exps.cpu_repacked is not None and block.ffn_up_exps.cpu_repacked is not None
+  gate_weight = block.ffn_gate_exps.cpu_repacked if repacked else block.ffn_gate_exps.weight
+  up_weight = block.ffn_up_exps.cpu_repacked if repacked else block.ffn_up_exps.weight
+  assert gate_weight is not None and up_weight is not None
+  assert block.ffn_down_exps.ggml_type in (14, 23)
+  src, binary, name = moe_program(routes, dim, hidden, inputs, 121 if repacked else 21, block.ffn_down_exps.ggml_type)
+  tensors = (out, gate_weight, up_weight, block.ffn_down_exps.weight,
              block.ffn_gate_shexp.weight, block.ffn_up_shexp.weight, block.ffn_down_shexp.weight,
              x.flatten().contiguous(), probs.flatten().contiguous(), sel.flatten().contiguous(),
              block.ffn_gate_inp_shexp["weight"])
