@@ -438,7 +438,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
+        case Ops.MULTI: return tuple(s*(int(self.src[1].vmax)+1) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -473,7 +473,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+    dcount = int(self.src[1].vmax)+1 if self.op is Ops.MULTI else len(self.device)
+    return tuple(x//dcount if i == self.axis else x for i,x in enumerate(self.shape))
 
   @property
   def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
@@ -483,7 +484,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # MULTI ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
-    if self.op is Ops.MULTI: return tuple(r for r in self.src[0].ranges if r.arg[-1] is AxisType.DEVICE)
+    if self.op is Ops.MULTI: return self.src[1:]
     return ()
 
   # determine what ranges this is in
@@ -663,10 +664,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** multi-device helpers ***
 
-  def multi(self, axis:int|None):
+  def multi(self, axis:int|None, device_range:UOp|None=None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
     assert axis is not None, "multi None is no longer supported"
-    return UOp(Ops.MULTI, src=(self,), arg=axis)
+    # a MULTI always has two srcs: the value and the DEVICE range it ends (defaults to a DEVICE range over the devices)
+    if device_range is None: device_range = UOp.range(len(self.device), -1, AxisType.DEVICE)
+    assert device_range.op is Ops.RANGE and device_range.arg[-1] is AxisType.DEVICE
+    return UOp(Ops.MULTI, src=(self, device_range), arg=axis)
 
   @property
   def bounds(self):
