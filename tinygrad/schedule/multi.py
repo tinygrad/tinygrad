@@ -9,8 +9,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   def apply_shrink(s:UOp, i:int) -> UOp:
     new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
-                      (drng:=[r for r in x.toposort() if r.op is Ops.RANGE and r.arg[-1] is AxisType.DEVICE]) else x for x in ss])
-               for ss in shrink.marg]
+                      (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in shrink.marg]
     return s._mop(Ops.SHRINK, tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
