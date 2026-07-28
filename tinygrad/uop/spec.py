@@ -175,9 +175,9 @@ spec_tensor = PatternMatcher([
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
   # MULTI/MSELECT/MSTACK
-  # a MULTI always carries the DEVICE range it ends as src[1:]
-  (UPat(Ops.MULTI, name="multi"), lambda multi: matches_dtype(multi.src[0], multi.dtype) and isinstance(multi.arg, int)
-    and all(x.op is Ops.RANGE for x in multi.src[1:]) and any(r.arg[-1] is AxisType.DEVICE for r in multi.src[1:])),
+  # a MULTI always has two srcs: the value and the DEVICE range it ends
+  (UPat(Ops.MULTI, name="multi"), lambda multi: len(multi.src) == 2 and matches_dtype(multi.src[0], multi.dtype)
+    and isinstance(multi.arg, int) and multi.src[1].op is Ops.RANGE and multi.src[1].arg[-1] is AxisType.DEVICE),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 

@@ -68,7 +68,7 @@ def alu_multi(root:UOp):
   axis = root.axis
   assert axis is not None
   srcs = shard_srcs(root.src, axis)
-  return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
+  return srcs[0].alu(root.op, *srcs[1:]).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.MULTI))
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
@@ -81,25 +81,25 @@ def reduce_multi(root:UOp, multi:UOp):
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   new_axis = multi.axis - num_axes if multi.axis is not None else None
-  return multi.src[0]._rop(op, tuple(range(num_axes))).multi(axis=new_axis)
+  return multi.src[0]._rop(op, tuple(range(num_axes))).multi(axis=new_axis, device_range=multi.src[1])
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
   if (new_axis:=root.axis) is not None: new_shape = tuple(s//len(multi.device) if a==new_axis else s for a,s in enumerate(new_shape))
-  return multi.src[0].reshape(new_shape).multi(new_axis)
+  return multi.src[0].reshape(new_shape).multi(new_axis, multi.src[1])
 
 def expand_multi(root:UOp, multi:UOp):
   new_axis = None if multi.axis is None else multi.axis + len(root.marg)
-  return multi.src[0]._mop(Ops.EXPAND, arg=root.marg).multi(new_axis)
+  return multi.src[0]._mop(Ops.EXPAND, arg=root.marg).multi(new_axis, multi.src[1])
 
 def pad_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]), f"padding not supported for {root.marg=}"
   local_pad = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
-  return multi.src[0]._mop(Ops.PAD, local_pad).multi(multi.axis)
+  return multi.src[0]._mop(Ops.PAD, local_pad).multi(multi.axis, multi.src[1])
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return multi.src[0].permute(root.marg).multi(root.axis)
+  return multi.src[0].permute(root.marg).multi(root.axis, multi.src[1])
 
 def shrink_multi(root:UOp, multi:UOp):
   shard_bounds = tuple((s,e-s) for s,e in multi.bounds) if multi.axis is not None else ()
@@ -111,17 +111,17 @@ def shrink_multi(root:UOp, multi:UOp):
     non_shard_shrink = tuple((0, multi.src[0].shape[i]) if i == multi.axis else s for i, s in enumerate(root.marg))
     return multi.src[0].copy_to_device(multi.device, arg=shard_bounds.index(root.marg[multi.axis]))._mop(Ops.SHRINK, non_shard_shrink)
   local_shrink = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
-  return multi.src[0]._mop(Ops.SHRINK, local_shrink).multi(multi.axis)
+  return multi.src[0]._mop(Ops.SHRINK, local_shrink).multi(multi.axis, multi.src[1])
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
-  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
+  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis, multi.src[1])
 
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
   axis = root.axis
   assert axis is not None
-  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).multi(axis)
+  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.MULTI))
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   assert multi.axis is not None, "all multi ops have axis"
@@ -130,11 +130,11 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
     return pieces[0].cat(*pieces[1:], dim=multi.axis)
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
-def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
+def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis, src.src[1])
 
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:])
-  return UOp(root.op, root.dtype, src=new_src, arg=root.arg).multi(multi.axis)
+  return UOp(root.op, root.dtype, src=new_src, arg=root.arg).multi(multi.axis, multi.src[1])
 
 def rewrite_into_function(call:UOp):
   if call.arg.precompile: return None
@@ -144,7 +144,8 @@ def rewrite_into_function(call:UOp):
   assert new_body.op is Ops.TUPLE
   if any(s.op is Ops.MULTI for s in new_body.src):
     shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.MULTI else s for s in new_body.src]),)+new_args)
-    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis) if s.op is Ops.MULTI else shard_call.gettuple(i) for i, s in enumerate(new_body.src)])
+    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis, s.src[1]) if s.op is Ops.MULTI else shard_call.gettuple(i)
+                           for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
 def param_to_multi(p:UOp):
@@ -166,13 +167,13 @@ multi_pm = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.MULTI), UPat(Ops.STORE, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))))), store_after_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"),), name="red"),
-    lambda multi,red: multi.src[0].allreduce(*red.arg).multi(axis=multi.axis)),
+    lambda multi,red: multi.src[0].allreduce(*red.arg).multi(axis=multi.axis, device_range=multi.src[1])),
 
   # resolve TUPLE+GETTUPLE (needed in multi)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # GETTUPLE on MULTI: passthrough MULTI (e.g. when FUNCTION was replaced by MULTI(GETTUPLE(...)))
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.MULTI, name="multi"),), name="g"),
-    lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis) if multi.src[0].op in {Ops.FUNCTION, Ops.TUPLE}
+    lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis, multi.src[1]) if multi.src[0].op in {Ops.FUNCTION, Ops.TUPLE}
     else multi),
   # rewrite into FUNCTION calls explicitly for MULTI (value-producing)
   (UPat(Ops.FUNCTION, name="call"), rewrite_into_function),

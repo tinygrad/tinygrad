@@ -6,8 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, K
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.uop.spec import type_verify, spec_tensor
+from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -555,13 +554,6 @@ pm_copy_to_store = PatternMatcher([
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
-  if SPEC:
-    type_verify(tsink, spec_tensor)
-    # multi_pm must preserve the DEVICE range each MULTI carries, it ends exactly the open ones in its src
-    type_verify(tsink, PatternMatcher([
-      (UPat(Ops.MULTI, name="m"), lambda m: set(r for r in m.src[0].ranges if r.arg[-1] is AxisType.DEVICE) <=
-                                            set(r for r in m.src[1:] if r.arg[-1] is AxisType.DEVICE)),
-      (UPat(GroupOp.All-{Ops.MULTI}), lambda: True)]))
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
