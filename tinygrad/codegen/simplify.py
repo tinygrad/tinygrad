@@ -96,8 +96,7 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"),
-   lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else ((y < (c-x)) if no_range(x) and no_range(c) else None)),
+  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and dtypes.is_int(y.dtype) and y.vmin > 0 else None),
