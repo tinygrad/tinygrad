@@ -346,7 +346,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.variable("_device_num", 0, ndev-1)
+      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
