@@ -479,7 +479,7 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install llvm-21 llvm-21-tools cloc
+          sudo apt-get install -y llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
@@ -629,7 +629,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
-    runs-on: &macos macos-26
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -678,7 +678,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: MacOS (DEV=METAL) (${{ matrix.group }})
-    runs-on: *macos
+    runs-on: macos-26
     timeout-minutes: 20
     env:
       DEV: METAL
@@ -710,7 +710,7 @@ jobs:
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
-    runs-on: *macos
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
