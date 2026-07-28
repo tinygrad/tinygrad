@@ -95,7 +95,7 @@ spec_shared = PatternMatcher([
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 
   # CUSTOM (inline and non inline)
@@ -174,9 +174,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: matches_dtype(x, red.dtype) and isinstance(red.arg, tuple) and
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
-  # MULTI/MSELECT/MSTACK
-  # a MULTI always has two srcs: the value and the DEVICE range it ends
-  (UPat(Ops.MULTI, name="multi"), lambda multi: len(multi.src) == 2 and matches_dtype(multi.src[0], multi.dtype)
+  # UNSHARD/MSELECT/MSTACK
+  # an UNSHARD always has two srcs: the value and the DEVICE range it ends
+  (UPat(Ops.UNSHARD, name="multi"), lambda multi: len(multi.src) == 2 and matches_dtype(multi.src[0], multi.dtype)
     and isinstance(multi.arg, int) and multi.src[1].op is Ops.RANGE and multi.src[1].arg[-1] is AxisType.DEVICE),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),

@@ -31,12 +31,12 @@ def dname_of(device) -> str:
 
 def alloc_like(shape, dtype, device, axis=None) -> Tensor:
   if isinstance(device, tuple) and axis is not None:
-    return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.multi(axis), device=device)
+    return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.unshard(axis), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def alloc_local(shape, dtype, device, axis=None) -> Tensor:
   if isinstance(device, tuple) and axis is not None:
-    return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
+    return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.unshard(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def compile_hip(src:str, defines:list[str]):
