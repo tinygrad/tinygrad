@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
-  GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
-  THREAD = auto(); PLACEHOLDER = auto() # noqa: E702
+  DEVICE = auto(); GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto() # noqa: E702
+  UNROLL = auto(); THREAD = auto(); PLACEHOLDER = auto() # noqa: E702
 
 @dataclass(frozen=True, order=True)
 class ParamArg:
@@ -35,14 +35,14 @@ class ParamArg:
               ("volatile", False))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
-axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
-                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
-               AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
+axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L",
+                AxisType.UPCAST: "u", AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
+               AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
-               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
+axis_to_pos = {AxisType.DEVICE: -2, AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2,
+               AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
                Ops.SLICE: 2, Ops.LINEAR: 0}
@@ -482,6 +482,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
+    # MULTI ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
+    if self.op is Ops.MULTI: return tuple(r for r in self.src[0].ranges if r.arg[-1] is AxisType.DEVICE)
     return ()
 
   # determine what ranges this is in
@@ -707,12 +709,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def _unshard(self, axis:int) -> UOp:
     bsz, dcount = self.shape[axis], len(self.device)
-    dnum = UOp.variable("_device_num", 0, dcount-1)
+    dnum = UOp.range(dcount, -1, AxisType.DEVICE)
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
   def _shard(self, axis:int, dcount:int) -> UOp:
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
-    dnum = UOp.variable("_device_num", 0, dcount-1)
+    dnum = UOp.range(dcount, -1, AxisType.DEVICE)
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
@@ -1139,7 +1141,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     if ret_dtype is not None: return UOp(Ops.CALL, ret_dtype, src=(self,)+srcs)
-    assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+    # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
+    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
+      f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     if self.op in UOp._OPAQUE_CALL_BODIES:
       return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
     # value-producing bodies are always wrapped in TUPLE so FUNCTION dtype is always void

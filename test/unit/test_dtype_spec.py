@@ -2,7 +2,7 @@ import unittest, math, subprocess
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
-from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
+from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, Context
 from test.helpers import slow
 from hypothesis import given, settings, strategies as strat
 import numpy as np
@@ -41,6 +41,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
+    self.enterContext(Context(CAPTURE_PROCESS_REPLAY=0))  # TODO: make default dtype ContextVar
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
@@ -150,6 +151,7 @@ class TestTypeSpec(unittest.TestCase):
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
+    self.enterContext(Context(CAPTURE_PROCESS_REPLAY=0))  # TODO: make default dtype ContextVar
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 

@@ -55,7 +55,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
-  G = UOp.range(src.shape[0], 0)
+  G = UOp.range(src.shape[0], 0, dtype=dtypes.int)
   slice_src = src[G, :]
   reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
