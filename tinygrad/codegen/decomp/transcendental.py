@@ -200,7 +200,7 @@ def xexp2(d:UOp) -> UOp:
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   q = rintk(x)
   # s = d - round(d)
-  s = x - q.cast(x.dtype)
+  s = x - q
   # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
   if d.dtype == dtypes.float64:
     u = polyN(s, [0.4434359082926529454e-9, 0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5, 0.1525273353517584730e-4,
