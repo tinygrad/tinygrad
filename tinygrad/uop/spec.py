@@ -142,8 +142,7 @@ spec_tensor = PatternMatcher([
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int, dtypes.long, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.long,dtypes.weakint,))), arg=None),
-   lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),

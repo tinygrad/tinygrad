@@ -123,8 +123,7 @@ class CStyleLanguage(Renderer):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
-  var_prefix: str = "const "
-  var_suffix: str = ""
+  arg_int_prefix: str = "const int"
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
@@ -150,9 +149,9 @@ class CStyleLanguage(Renderer):
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
-                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
+    buftypes = [(name, ("volatile " if u.arg.volatile else "")+
+                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+self.buffer_suffix \
+                 if u.addrspace == AddrSpace.GLOBAL else self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -350,8 +349,7 @@ class MetalRenderer(CStyleLanguage):
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
-  var_prefix = "constant "
-  var_suffix = "&"
+  arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
