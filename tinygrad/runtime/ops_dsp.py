@@ -17,12 +17,9 @@ dsp_string = PatternMatcher([
 ])
 
 class DSPRenderer(ClangRenderer):
-  supports_float4 = True
   has_threads = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
-  extra_args = []
-  extra_matcher = ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}

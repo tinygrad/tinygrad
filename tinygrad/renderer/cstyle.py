@@ -339,7 +339,6 @@ class OpenCLRenderer(CStyleLanguage):
                                       (d != dtypes.double or "cl_khr_fp64" in self.target.arch) and d not in dtypes.fp8s}
 
 class MetalRenderer(CStyleLanguage):
-  shared_max = 32768
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
