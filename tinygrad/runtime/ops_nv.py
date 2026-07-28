@@ -240,8 +240,10 @@ class NVVideoQueue(NVCommandQueue):
 
 class NVArgsState(CLikeArgsState):
   def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    if isinstance(prg.dev.iface, MOCKIface): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.cbuf_0 or None)
+    if (is_mock:=isinstance(prg.dev.iface, MOCKIface)): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
+    super().__init__(buf, prg, bufs, vals=() if is_mock else vals, prefix=prg.cbuf_0 or None)
+    # mock expects all vars to be 64 bit
+    if is_mock and vals: self.bind_sints_to_buf(*vals, buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4 + len(bufs)*8)
 
 class NVProgram(HCQProgram['NVDevice']):
   def __init__(self, dev:NVDevice, obj:TinyELF):

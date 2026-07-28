@@ -91,7 +91,7 @@ class GPFIFO:
     args_cnt, vals_cnt = const0[80], const0[81]
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
     args = to_mv(args_addr, args_cnt*8).cast('Q')
-    vals = to_mv(args_addr + args_cnt*8, vals_cnt*4).cast('I')
+    vals = to_mv(args_addr + args_cnt*8, vals_cnt*8).cast('Q')
     cargs = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
