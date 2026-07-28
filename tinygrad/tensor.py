@@ -71,9 +71,9 @@ class Tensor(RandMixin):
 
     # create a UOp from the different types of inputs
     if data is None:
-      data = UOp.const(_dtype or dtypes.weakfloat, 0.0)
+      data = UOp.const(_dtype, 0.0)
     elif isinstance(data, get_args(ConstType)):
-      data = UOp.const(_dtype or dtypes.from_py(data), data)
+      data = UOp.const(_dtype, data)
     elif is_numpy_ndarray(data) and data.shape == ():
       data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
     elif not isinstance(data, UOp):

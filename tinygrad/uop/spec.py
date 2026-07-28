@@ -11,7 +11,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
-  if gate is None: gate = UOp.const(dtypes.bool, True)
+  if gate is None: gate = UOp.const(None, True)
   # TODO: check for overflow
   if not CHECK_OOB or is_image_shape(buf._shape): return True
 

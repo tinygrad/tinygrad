@@ -602,7 +602,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
-  def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
+  def const(dtype:DType|None, b:ConstLike, shape:tuple[sint, ...]|None=None):
+    if dtype is None: dtype = dtypes.from_py(b)
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple):
@@ -633,7 +634,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE, src=(self.permute(perm),), arg=(op, len(reduce_axis)))
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
-  def invalid(): return UOp.const(dtypes.bool, Invalid)
+  def invalid(): return UOp.const(None, Invalid)
   def valid(self, cond):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
@@ -641,7 +642,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
-    return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
+    return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(None, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
     if isinstance(arg, Ops): arg = (arg, 0)
@@ -1774,8 +1775,8 @@ pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
 
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(),)), lambda: UOp.const(dtypes.weakint, 0)),
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE))), lambda: UOp.const(dtypes.weakint, 0)),
+  (UPat(Ops.INDEX, src=(UPat(),)), lambda: UOp.const(None, 0)),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE))), lambda: UOp.const(None, 0)),
   (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda c: c),
   (UPat(Ops.INDEX, src=(UPat(), UPat.cvar('c'))), lambda ctx, c: c if resolve(ctx.numel() == 1, False) else None),
 ])
