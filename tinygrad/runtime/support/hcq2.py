@@ -326,7 +326,7 @@ pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTIO
 def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   base = bv.src[0].after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ())
   itemsize = bv.src[0].dtype.itemsize if bv.src[0].without_after.op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
-  return UOp(Ops.GETADDR, dtypes.uint64, src=(base,), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
+  return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(dtypes.uint64, bv.src[1].arg * itemsize)
 
 pm_early_simplify = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat.any(sl:=UPat(Ops.SLICE, name="bv"), sl.after(allow_any_len=True)),), name="g"), resolve_getaddr_slice),
@@ -402,8 +402,8 @@ pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 # *****************
 # 7. resolve patches
 
-def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar(),
-  tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
+def push_stack(op, s): return UOp(Ops.STACK,
+  src=tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)):
@@ -423,7 +423,7 @@ def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
   addrs = tuple(UOp.const(dtypes.uint64, x.get_buf(d).va_addr) for x, d in zip(bufs, devs))
-  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64, addrs)
+  return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)
 
 pm_resolve_patches = PatternMatcher([
   # multi

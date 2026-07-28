@@ -73,7 +73,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
     case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
     case Ops.CMPNE: return a0.ne(b0) | a1.ne(b1)
-    case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, dt, src=(a0, b0)), UOp(op, dt, src=(a1, b1))
+    case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, src=(a0, b0)), UOp(op, src=(a1, b1))
     case Ops.WHERE: return uops[0].where(uops[1], uops[3]), uops[0].where(uops[2], uops[4])
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")

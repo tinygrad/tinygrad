@@ -616,7 +616,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
-  def loop(axis_id:int, *arg): return UOp(Ops.RANGE, dtypes.void, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.LOOP)+arg)
+  def loop(axis_id:int, *arg): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.LOOP)+arg)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
   @staticmethod
@@ -778,7 +778,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in {Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(self,), arg=device or to_tuple(self.device)[0])
+    return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
