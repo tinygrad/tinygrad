@@ -253,7 +253,7 @@ class NAKRenderer(NIRRenderer):
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if (d != dtypes.half or int(self.target.arch[3:]) >= 53)}
 
-def padded_param_idx(param_idx:int, size:int): return round_up(param_idx, size) + size
+def padded_idx(param_idx:int, size:int): return round_up(param_idx, size) + size
 
 class LVPRenderer(NIRRenderer):
   has_local = False
@@ -266,12 +266,12 @@ class LVPRenderer(NIRRenderer):
 
   param = nir_instr(nc=1, bs=lambda sz: sz * 8, num_components=1, intrins={"ALIGN_MUL":lambda sz: sz, "RANGE":lambda self: self.param_sz},
     srcs=lambda b,self,sz: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, round_up(self.param_idx, sz), dtypes.int))], also=lambda self, sz:
-    setattr(self, "param_idx", padded_param_idx(self.param_idx, sz)))(lambda self,b,x,sz:
+    setattr(self, "param_idx", padded_idx(self.param_idx, sz)))(lambda self,b,x,sz:
                                                                       mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_ubo))
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
-    self.param_sz = functools.reduce(padded_param_idx, (u.element_size() if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM))
+    self.param_sz = functools.reduce(padded_idx, (u.element_size() if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM), 0)
 
 def tovec(b, idx_y, idx_x): return nalu(b, "vec4", idx_x, idx_y, nundef(b, dtypes.int), nundef(b, dtypes.int))
 def nfloat(dtype): return mesa.nir_type_float16 if dtype == dtypes.half else mesa.nir_type_float32
