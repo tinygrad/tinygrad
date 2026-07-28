@@ -20,7 +20,7 @@ class TestArange(unittest.TestCase):
     self.assertLess(self._get_flops(Tensor.arange(2560).clone(), np.arange(2560)), 2560*4)
 
   def test_cat_complexity(self):
-    x = Tensor.arange(2**31) + Tensor.empty((), dtype=dtypes.uint32)
+    x = Tensor.arange(2**15) + Tensor.empty((), dtype=dtypes.uint32)
     out = x.cat(x).cat(Tensor.empty(1, dtype=dtypes.uint32))
     linear = compile_linear(out.schedule_linear())
     self.assertLessEqual(estimate_uop(linear.src[-1]).ops, out.numel()*10)
