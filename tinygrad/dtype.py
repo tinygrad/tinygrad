@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEFAULT_FLOAT, DEFAULT_INT
 from enum import IntEnum, auto
 
 class ConstFloat(float):
@@ -83,7 +83,7 @@ class DType(metaclass=DTypeMetaClass):
     return ConstFloat(float(val)) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
 
 
-class dtypes:
+class DTypes:
   @staticmethod
   @functools.cache
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
@@ -138,8 +138,10 @@ class dtypes:
   uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
   char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
-  default_float: ClassVar[DType] = float32
-  default_int: ClassVar[DType] = int32
+  @property
+  def default_float(self) -> DType: return to_dtype(DEFAULT_FLOAT.value)
+  @property
+  def default_int(self) -> DType: return to_dtype(DEFAULT_INT.value)
 
   fp8_ocp = (fp8e4m3, fp8e5m2)
   fp8_fnuz = (fp8e4m3fnuz, fp8e5m2fnuz)
@@ -155,12 +157,12 @@ class dtypes:
   weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
-if (env_default_float := getenv("DEFAULT_FLOAT", "")):
-  dtypes.default_float = getattr(dtypes, env_default_float.lower())
-  assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
+dtypes = DTypes()
 
 DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
+assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a float dtype"
+assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
   return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
 
@@ -184,7 +186,7 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType:
   return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
 
 @functools.cache
