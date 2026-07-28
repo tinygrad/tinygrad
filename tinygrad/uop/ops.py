@@ -664,7 +664,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** multi-device helpers ***
 
-  def multi(self, axis:int|None, device_range:UOp|None=None):
+  def unshard(self, axis:int|None, device_range:UOp|None=None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
     assert axis is not None, "multi None is no longer supported"
     # an UNSHARD always has two srcs: the value and the DEVICE range it ends (defaults to a DEVICE range over the devices)
@@ -724,7 +724,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
   def shard(self, devices:tuple[str, ...], axis:int|None=None) -> UOp:
     copied = self.copy_to_device(devices)
-    return copied if axis is None else copied._shard(axis, len(devices)).multi(axis)
+    return copied if axis is None else copied._shard(axis, len(devices)).unshard(axis)
 
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     assert arg is None or isinstance(self.device, tuple)
@@ -799,7 +799,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
     ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=strong_dtype(self.dtype) if dtype is None else dtype, device=device)
-    return ret.multi(axis) if axis is not None else ret
+    return ret.unshard(axis) if axis is not None else ret
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(device)

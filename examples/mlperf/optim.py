@@ -43,7 +43,7 @@ class GradAccClipAdamW(Optimizer):
 
   def _zero_shard(self, t:Tensor) -> Tensor:
     if not self.zero or (t.shape[0] % len(self.device)) != 0: return t
-    return Tensor(t.uop._shard(0, len(self.device)).multi(0)).clone()
+    return Tensor(t.uop._shard(0, len(self.device)).unshard(0)).clone()
 
   def _zero_gather(self, t:Tensor) -> Tensor:
     if not isinstance(t.device, tuple) or t.uop.axis != 0: return t

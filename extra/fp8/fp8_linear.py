@@ -53,7 +53,7 @@ class FP8Linear:
     x_fp8, x_scale = quantize_to_fp8(x)
     GPUS = self.weight.device
     if isinstance(GPUS, tuple) and len(GPUS) > 1:
-      y = Tensor(Tensor.empty((batch//len(GPUS), seq, self.weight.shape[0]), dtype=dtypes.float, device=GPUS).uop.multi(0), device=GPUS)
+      y = Tensor(Tensor.empty((batch//len(GPUS), seq, self.weight.shape[0]), dtype=dtypes.float, device=GPUS).uop.unshard(0), device=GPUS)
     else:
       y = Tensor.empty((batch, seq, self.weight.shape[0]), dtype=dtypes.float)
     y = Tensor.custom_kernel(y, x_fp8, w_fp8, fxn=custom_matmul, grad_fxn=custom_matmul_backward)[0]
