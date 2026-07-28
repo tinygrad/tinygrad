@@ -140,7 +140,7 @@ def rewrite_into_function(call:UOp):
   if call.arg.precompile: return None
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
   new_args = tuple(a.src[0] if a.op is Ops.UNSHARD else a for a in call.src[1:])
-  # after multi resolution, TUPLE elements may be MULTI — strip MULTI from body, create per-shard FUNCTION, wrap each GETTUPLE in its own MULTI
+  # after multi resolution, TUPLE elements may be UNSHARD — strip UNSHARD from body, create per-shard FUNCTION, wrap each GETTUPLE in its own UNSHARD
   assert new_body.op is Ops.TUPLE
   if any(s.op is Ops.UNSHARD for s in new_body.src):
     shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.UNSHARD else s for s in new_body.src]),)+new_args)
@@ -171,19 +171,19 @@ multi_pm = PatternMatcher([
 
   # resolve TUPLE+GETTUPLE (needed in multi)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
-  # GETTUPLE on MULTI: passthrough MULTI (e.g. when FUNCTION was replaced by MULTI(GETTUPLE(...)))
+  # GETTUPLE on UNSHARD: passthrough UNSHARD (e.g. when FUNCTION was replaced by UNSHARD(GETTUPLE(...)))
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.UNSHARD, name="multi"),), name="g"),
     lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis, multi.src[1]) if multi.src[0].op in {Ops.FUNCTION, Ops.TUPLE}
     else multi),
-  # rewrite into FUNCTION calls explicitly for MULTI (value-producing)
+  # rewrite into FUNCTION calls explicitly for UNSHARD (value-producing)
   (UPat(Ops.FUNCTION, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
-  # just strip the MULTI from non-value-producing CALLs (custom kernels, etc.) — FUNCTION is handled by rewrite_into_function
+  # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — FUNCTION is handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
-  # remove MULTI from STORE
+  # remove UNSHARD from STORE
   (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True),
     lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:]), root.arg)),
 ])+replace_allreduce

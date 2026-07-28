@@ -407,7 +407,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
-      # MULTI marker has no shape
+      # UNSHARD marker has no shape
       case Ops.UNSHARD if len(self.src) == 0: return None
 
     # movement ops change the shape
@@ -483,7 +483,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
-    # MULTI ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
+    # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
     if self.op is Ops.UNSHARD: return self.src[1:]
     return ()
 
@@ -667,7 +667,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def multi(self, axis:int|None, device_range:UOp|None=None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
     assert axis is not None, "multi None is no longer supported"
-    # a MULTI always has two srcs: the value and the DEVICE range it ends (defaults to a DEVICE range over the devices)
+    # an UNSHARD always has two srcs: the value and the DEVICE range it ends (defaults to a DEVICE range over the devices)
     if device_range is None: device_range = UOp.range(len(self.device), -1, AxisType.DEVICE)
     assert device_range.op is Ops.RANGE and device_range.arg[-1] is AxisType.DEVICE
     return UOp(Ops.UNSHARD, src=(self, device_range), arg=axis)
@@ -879,7 +879,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
 
   def has_buffer_identity(self, after_ok=False):
-    """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
+    """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/UNSHARD -> BUFFER chain)."""
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
