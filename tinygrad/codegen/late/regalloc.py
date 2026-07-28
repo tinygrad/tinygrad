@@ -59,8 +59,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     else: nsrc.append(s)
 
   for v in rdefs(x):
-    if not isinstance(v, VRegister): continue
-    if v.is_sub(): ndefs.append(ctx.pmap[v.parent][v.pos])
+    if not isinstance(v, VRegister): ndefs.append(v)
+    elif v.is_sub(): ndefs.append(ctx.pmap[v.parent][v.pos])
     else: ndefs.extend(ctx.pmap[v])
 
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
