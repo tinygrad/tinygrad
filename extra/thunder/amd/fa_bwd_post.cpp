@@ -12,7 +12,9 @@ constexpr int ATTN_H = 64; // number of query heads
 constexpr int ATTN_N = 1024; // sequence length
 #endif
 
+#ifndef ATTN_D
 constexpr int ATTN_D = 128; // dimension
+#endif
 constexpr int DOT_SLICE_QO = 16;
 
 #define NUM_WARPS 4

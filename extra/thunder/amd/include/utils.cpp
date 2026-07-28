@@ -23,7 +23,7 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);
     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
 
-    int lane_offset = laneid * 2 + warpid * 512;
+    int lane_offset = laneid * 2 + warpid * (RT::rows * RT::cols);
 
     using range_type = ducks::art::get_nth_range_t<typename RT::register_ranges, N * RT::width + M>;
 
@@ -65,7 +65,7 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);
     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
 
-    int lane_offset = laneid * 2 + warpid * 512;
+    int lane_offset = laneid * 2 + warpid * (RT::rows * RT::cols);
 
     auto perform_atomic_pk_add_bf16_with_warpid = [&]<int N, int M>() {
         using range_type = ducks::art::get_nth_range_t<typename RT::register_ranges, N * RT::width + M>;

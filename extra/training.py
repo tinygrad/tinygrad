@@ -40,7 +40,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
 
 def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x,
              target_transform=lambda y: y):
-  Tensor.training = False
+  @Context(TRAINING=0)
   def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange((len(Y_test)-1)//BS+1, disable=None):

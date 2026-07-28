@@ -3,7 +3,7 @@ import math
 from typing import Self, cast
 from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
-from tinygrad.mixin import OpMixin
+from tinygrad.mixin.op import OpMixin
 from tinygrad.device import canonicalize_device
 
 
@@ -11,7 +11,7 @@ class RandMixin(OpMixin):
   @staticmethod
   def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x.threefry((key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    x = x.threefry((key[1].cast(dtypes.uint64) << 32) | key[0].cast(dtypes.uint64))
     return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
 
   @classmethod
@@ -60,7 +60,7 @@ class RandMixin(OpMixin):
     ```
     """
     dt = to_dtype(dtype or dtypes.default_float)
-    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
+    if not dtypes.is_float(dt) or dt in dtypes.weaks: raise ValueError(f"rand only supports concrete float dtypes, got {dt}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
@@ -97,9 +97,10 @@ class RandMixin(OpMixin):
     print(Tensor.randn_like(t).numpy())
     ```
     """
+    if (dt:=to_dtype(dtype or self.dtype)) in dtypes.weaks and dtype is None: raise ValueError(f"randn_like requires an explicit dtype for {dt}")
     src = self.stack(self).rand_like(**{**kwargs, "dtype": dtypes.float32})
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(to_dtype(dtype or self.dtype))
+    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dt)
 
   @classmethod
   def randn(cls, *shape, dtype:DTypeLike|None=None, **kwargs) -> Self:
@@ -268,7 +269,7 @@ class RandMixin(OpMixin):
     if replacement or num_samples == 1:
       cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
       unif_samples = type(self).rand(num_samples, cdf.shape[0], 1).to(self.device)  # type: ignore[attr-defined]
-      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+      indices = (unif_samples >= cdf).sum(2).permute((1, 0))
     else:
       # Efraimidis-Spirakis
       indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]

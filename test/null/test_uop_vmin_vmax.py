@@ -75,14 +75,14 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_variable_inside_special(self):
-    uop = UOp(Ops.SPECIAL, dtypes.int, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
+    uop = UOp(Ops.SPECIAL, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 9)
 
   def test_vmin_vmax_multiplication_0_inf(self):
     # vmin and vmax for multiplication with a variable
     x = UOp.const(dtypes.float, 0.0)
-    y = UOp.load(UOp.param(0, dtypes.float.ptr(1)), UOp.const(dtypes.int, 0), dtype=dtypes.float)
+    y = UOp.load(UOp.param(0, dtypes.float, (1,)), UOp.const(dtypes.int, 0), dtype=dtypes.float)
     uop = x * y
     # TODO: these should be 0, but definitely should not be nan
     self.assertEqual(uop.vmin, -math.inf)
@@ -127,6 +127,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x.vmin, 0)
     self.assertEqual(x.vmax, 10 >> 2)
 
+  def test_vmin_vmax_cast_unsigned(self):
+    # a fitting source keeps exact bounds: no wrap can occur
+    self.assertEqual(UOp.variable('x', 5, 10).cast(dtypes.uint8)._min_max, (5, 10))
+    # a possibly-negative or too-large source can wrap: conservative
+    self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
+    self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1
@@ -160,9 +167,8 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertNotEqual(i.vmin, i.vmax)
 
   def test_vmin_vmax_invalid_vconst(self):
-    x = UOp.const(dtypes.weakint.vec(4), (0, 4, Invalid, Invalid))
-    self.assertLess(x.vmin, 0)
-    self.assertGreater(x.vmax, 4)
+    x = UOp.const(dtypes.weakint, (0, 4, Invalid, Invalid))
+    self.assertEqual((x.vmin, x.vmax), (0, 4))
 
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):
@@ -280,46 +286,46 @@ class TestVminVmaxDivMod(unittest.TestCase):
 class TestVminVmaxVConst(unittest.TestCase):
   def test_vmin_vmax_vconst_single_element(self):
     # vmin and vmax for a single-element vector constant
-    uop = UOp.const(dtypes.int32.vec(1), (42,))
+    uop = UOp.const(dtypes.int32, (42,))
     self.assertEqual(uop.vmin, 42)
     self.assertEqual(uop.vmax, 42)
 
   def test_vmin_vmax_vconst_multiple_elements(self):
     # vmin and vmax for a multi-element vector constant
-    uop = UOp.const(dtypes.int32.vec(4), (10, 20, -5, 7))
+    uop = UOp.const(dtypes.int32, (10, 20, -5, 7))
     self.assertEqual(uop.vmin, -5)
     self.assertEqual(uop.vmax, 20)
 
   def test_vmin_vmax_vconst_all_equal(self):
     # vmin and vmax for a vector where all elements are equal
-    uop = UOp.const(dtypes.int32.vec(3), (7, 7, 7))
+    uop = UOp.const(dtypes.int32, (7, 7, 7))
     self.assertEqual(uop.vmin, 7)
     self.assertEqual(uop.vmax, 7)
 
   def test_vmin_vmax_vconst_with_negative_values(self):
     # vmin and vmax for a vector constant containing negative values
-    uop = UOp.const(dtypes.int32.vec(4), (-10, -20, -5, -15))
+    uop = UOp.const(dtypes.int32, (-10, -20, -5, -15))
     self.assertEqual(uop.vmin, -20)
     self.assertEqual(uop.vmax, -5)
 
   def test_vmin_vmax_vconst_with_floats(self):
     # vmin and vmax for a vector constant of float values
-    uop = UOp.const(dtypes.float32.vec(3), (1.5, -3.2, 0.0))
+    uop = UOp.const(dtypes.float32, (1.5, -3.2, 0.0))
     self.assertEqual(uop.vmin, -3.2)
     self.assertEqual(uop.vmax, 1.5)
 
   def test_vmin_vmax_vconst_with_bools(self):
     # vmin and vmax for a vector constant of bool values
-    uop = UOp.const(dtypes.bool.vec(3), (True, False, False))
+    uop = UOp.const(dtypes.bool, (True, False, False))
     self.assertIs(uop.vmin, False)
     self.assertIs(uop.vmax, True)
 
   def test_vmin_vmax_vector_with_gep(self):
     # vmin and vmax for a vector constant of bool values
-    d1 = UOp.param(1, dtypes.int.ptr())
+    d1 = UOp.param(1, dtypes.int, (1,))
     idx = UOp.const(dtypes.int, 0)
-    val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx).cast(dtypes.int.vec(2).ptr()),))
-    uop = (val // 32).gep(0)
+    val = UOp(Ops.LOAD, src=(d1.index(idx),))
+    uop = (val // 32)
     self.assertEqual(uop.vmin, -67108864)
     self.assertEqual(uop.vmax, 67108863)
 
@@ -364,6 +370,10 @@ class TestConstFactor(unittest.TestCase):
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
+  def test_const_factor_variable_multiple_of(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    self.assertEqual(x.const_factor(), 4)
+
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
@@ -401,6 +411,16 @@ class TestDivides(unittest.TestCase):
     uop = x * 4
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3
+
+  def test_divides_variable_multiple_of_exact(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(4)
+    self.assertIsNotNone(result)
+
+  def test_divides_variable_multiple_of_factor(self):
+    x = UOp.variable('x', 16, 32, multiple_of=4)
+    result = x.divides(2)
+    self.assertIsNotNone(result)
 
 if __name__ == '__main__':
   unittest.main()

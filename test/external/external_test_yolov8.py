@@ -67,7 +67,7 @@ class TestYOLOv8(unittest.TestCase):
     # currently rtol is 0.025 because there is a 1-2% difference in our predictions
     # because of the zero padding in SPPF module (line 280) maxpooling layers rather than the -infinity in torch.
     # This difference does not make a difference "visually".
-    np.testing.assert_allclose(onnx_output, tiny_output, atol=5e-4, rtol=0.025)
+    np.testing.assert_allclose(onnx_output, tiny_output, atol=5e-4, rtol=0.01)
 
 if __name__ == '__main__':
   unittest.main()

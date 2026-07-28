@@ -24,7 +24,7 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   reduce_idx = UOp.range(IN, 0, AxisType.REDUCE)
   product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)
-  store_op = output.index((seq_idx*OUT+out_idx+batch_idx*OUT*SEQ), ptr=True).store(reduced).end(batch_idx, seq_idx, out_idx)
+  store_op = output.index((seq_idx*OUT+out_idx+batch_idx*OUT*SEQ)).store(reduced).end(batch_idx, seq_idx, out_idx)
   return store_op.sink(arg=KernelInfo(name=f"fp8_matmul_{inp.shape}x{weight.shape}"))
 
 def custom_matmul_backward(gradient: UOp, kernel: UOp) -> tuple[UOp, UOp]:

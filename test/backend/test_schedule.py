@@ -2,7 +2,7 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import unittest
+import unittest, time
 import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
@@ -166,6 +166,13 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(t.device, dev)
     np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
 
+  def test_copy_multi_scalar(self):
+    devs = ("CPU:0", "CPU:1")
+    x = Tensor.ones(2, device="CPU").shard(devs, axis=0).realize()
+    out = (x.sum()*2).reshape(1).to("CPU")
+    run_linear(*check_schedule(out, 5))
+    np.testing.assert_equal(out.numpy(), [4.])
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
@@ -189,6 +196,20 @@ class TestLimitBufs(unittest.TestCase):
         a, b = Tensor.rand(N).realize(), Tensor.rand(N).realize()
         base = (idx >= i).where(a + b, base)
       assert all(x > 0 for x in base.tolist())
+
+  def test_limit_bufs_linear_scaling(self):
+    def sched_time(n):
+      with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+        bufs = [Tensor.ones(16).contiguous().realize() for _ in range(4)]
+        root = bufs[0]
+        for i in range(n): root = root + bufs[i % 4]
+        with Context(MAX_KERNEL_BUFFERS=8, SCACHE=0):
+          st = time.perf_counter()
+          root.schedule_linear()
+          return time.perf_counter() - st
+    sched_time(400)
+    t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
+    self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -342,9 +363,10 @@ class TestCopyFolding(unittest.TestCase):
 
   def test_one_hot_with_copy(self):
     y = Tensor([1, 2, 3]).to("CPU")
-    x = y.one_hot(10)
+    x = y.one_hot(10).int()
     check_schedule(x, 3, filter_sink=False)
 
+  @unittest.skip("no longer supported")
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).clone().realize()
     zeros = Tensor.zeros(3, buffer=False).realize()
@@ -385,6 +407,7 @@ class TestCopyFolding(unittest.TestCase):
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
+  @unittest.skip("same-device copies are no-ops")
   def test_self_assign_same_device_copy(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph
@@ -447,6 +470,14 @@ class TestCopyFolding(unittest.TestCase):
     b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
+
+  def test_permute_copy_to_device(self):
+    b = Tensor([[0, 1, 2, 3], [4, 5, 6, 7]], device="CPU").permute(1, 0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [[0, 4], [1, 5], [2, 6], [3, 7]])
+
+  def test_flip_copy_to_device(self):
+    b = Tensor([0, 1, 2, 3], device="CPU").flip(0).to("PYTHON")
+    self.assertListEqual(b.tolist(), [3, 2, 1, 0])
 
 class TestUOpBecome(unittest.TestCase):
   def test_setitem_offset(self):

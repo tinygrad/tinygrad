@@ -102,8 +102,8 @@ class TestEncodingsX86(unittest.TestCase):
 
   # test ymm encoding
   def test_ymm_encoding(self):
-    xmm0, xmm1 = def_reg(dtypes.float32.vec(8), XMM[0]), def_reg(dtypes.float32.vec(8), XMM[1])
-    add = ins(X86Ops.VADDPS, dtypes.float32.vec(8), (xmm0, xmm1), XMM[0])
+    xmm0, xmm1 = def_reg(dtypes._uint256, XMM[0]), def_reg(dtypes._uint256, XMM[1])
+    add = ins(X86Ops.VADDPS, dtypes._uint256, (xmm0, xmm1), XMM[0])
     # vaddps ymm0, ymm0, ymm1
     self.assertEqual(bytes.fromhex(self.encode(add)), bytes.fromhex("C5 FC 58 C1"))
 

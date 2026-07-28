@@ -1,6 +1,6 @@
 import unittest, math, subprocess
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, DTYPES_DICT
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
 from test.helpers import slow
@@ -25,6 +25,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
+    # weak values read back at their default.
+    target_dtype = strong_dtype(target_dtype)
     # denormals are zero
     if target_dtype in dtypes.floats and (target_dtype not in supported_dtypes or target_dtype in EMULATED_DTYPES.tolist(dtypes)):
       fe, fm = dtypes.finfo(target_dtype)
@@ -81,11 +83,13 @@ class TestTypeSpec(unittest.TestCase):
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     _assert_eq(Tensor(True), dtypes.bool, True)
-    _assert_eq(Tensor(None), dtypes.default_float, [])
-    _assert_eq(Tensor(2), dtypes.default_int, 2)
-    _assert_eq(Tensor(2.34), dtypes.default_float, 2.34)
+    _assert_eq(Tensor(None), dtypes.weakfloat, [])
+    _assert_eq(Tensor(2), dtypes.weakint, 2)
+    _assert_eq(Tensor(2.34), dtypes.weakfloat, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])
     _assert_eq(Tensor([1]), dtypes.default_int, [1])
+    # list elements are python scalars; a numpy scalar in a list has no inferred dtype (use np.array or state a dtype)
+    with self.assertRaises(RuntimeError): Tensor([np.int32(1)])
     _assert_eq(Tensor([1.1]), dtypes.default_float, [1.1])
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
@@ -148,6 +152,9 @@ class TestAutoCastType(unittest.TestCase):
     self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+
+  def test_int_sqrt(self):
+    _assert_eq(Tensor([1, 4, 9, 16]).sqrt(), dtypes.default_float, [1, 2, 3, 4])
 
   @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and d in supported_dtypes]))
   def test_int_to_float_unary_func(self, dtype):

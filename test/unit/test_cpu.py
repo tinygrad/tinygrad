@@ -17,7 +17,7 @@ class TestCPU(unittest.TestCase):
           if ren is LVPRenderer: continue # LVP does not play nice with cross compilation
           r = ren(Target(device="CPU", arch=arch))
           p = to_program(ast, r)
-          lib = r.compiler.compile(p.src[3].arg)
+          lib = r.compiler.compile(p.src[2].arg)
           out = io.StringIO()
           with redirect_stdout(out): r.compiler.disassemble(lib)
           self.assertEqual("vmov" in out.getvalue(), expect_vmov, out.getvalue())

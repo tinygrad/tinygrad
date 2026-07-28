@@ -1,7 +1,7 @@
-import unittest, pickle, types
+import unittest, pickle, types, tracemalloc
 import numpy as np
-from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters, ContextVar, Context
+from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
+from tinygrad.helpers import GlobalCounters, ContextVar, Context, DEV
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -77,6 +77,22 @@ class TestPickle(unittest.TestCase):
     del buffer
     a2:UOp = pickle.loads(s)
     self.assertListEqual(a2.base.realized.as_memoryview().cast("I").tolist(), [0, 1, 2, 3])
+
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "mock device buffers live in host RAM, not VRAM")
+  def test_pickle_oob_ram(self):
+    N, M = 8, 10**6
+    ts = [Tensor.rand(M, dtype='float32').realize() for _ in range(N)]
+    tracemalloc.start()
+    st = pickle.dumps(ts, protocol=5, buffer_callback=lambda pb: pb.release())
+    self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
+    tracemalloc.reset_peak()
+    def make_fake_buffers():
+      for _ in range(N):
+        Device[Device.DEFAULT].synchronize()
+        yield pickle.PickleBuffer(bytearray(M*4))
+    pickle.loads(st, buffers=make_fake_buffers())
+    self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
+    tracemalloc.stop()
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)

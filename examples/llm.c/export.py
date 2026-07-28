@@ -3,7 +3,7 @@ import os
 if "NOOPT" not in os.environ: os.environ["NOOPT"] = "1"
 from tinygrad import Device, nn, Tensor, dtypes
 from train_gpt2 import GPT, GPTConfig
-from tinygrad.helpers import DEV, dedup, flatten, getenv, GlobalCounters, to_function_name
+from tinygrad.helpers import DEV, dedup, flatten, getenv, GlobalCounters, to_function_name, Context
 from tinygrad.engine.realize import get_kernel
 from tinygrad.schedule.memory import memory_planner
 from tinygrad.uop.ops import Ops
@@ -23,23 +23,23 @@ if __name__ == "__main__":
   #B, T = Variable("B", 1, 128).bind(4), 64 #Variable("T", 1, 1024).bind(64)
   B, T = 4, 64
 
-  Tensor.training = True
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   warmup_count = getenv("WARMUP", 3)
-  for i in range(warmup_count):  # TODO: why does it take three and not two to stabilize
-    GlobalCounters.reset()
-    X = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
-    Y = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
-    _, loss = model(X, Y)
-    optimizer.zero_grad()
-    if getenv("BACKWARD", 1):
-      loss.backward()
-      tensors = optimizer.schedule_step()
-    else:
-      tensors = []
-    sched = loss.schedule(*tensors)
-    print(f"calls {i}:", len(sched))
-    #run_schedule(sched[:])
+  with Context(TRAINING=1):
+    for i in range(warmup_count):  # TODO: why does it take three and not two to stabilize
+      GlobalCounters.reset()
+      X = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
+      Y = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
+      _, loss = model(X, Y)
+      optimizer.zero_grad()
+      if getenv("BACKWARD", 1):
+        loss.backward()
+        tensors = optimizer.schedule_step()
+      else:
+        tensors = []
+      sched = loss.schedule(*tensors)
+      print(f"calls {i}:", len(sched))
+      #run_schedule(sched[:])
   sched = memory_planner(sched)
   ast_dedup = dedup([si.ast for si in sched if si.ast.op is Ops.SINK])
   srcs = {}

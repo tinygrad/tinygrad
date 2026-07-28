@@ -18,7 +18,19 @@ constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
 constexpr int ATTN_N = 8192; // sequence length
 #endif
 
+#ifndef ATTN_D
 constexpr int ATTN_D = 128; // dimension
+#endif
+#ifndef ATTN_SINK
+#define ATTN_SINK 0
+#endif
+#if ATTN_D == 64
+#define FA_VM2 "1"
+#define FA_VM4 "2"
+#else
+#define FA_VM2 "2"
+#define FA_VM4 "4"
+#endif
 constexpr int Q_BLOCK_SIZE = 32; // q block size
 constexpr int KV_BLOCK_SIZE = 64; // kv block size
 constexpr bool causal = true;
@@ -156,7 +168,11 @@ template<int D> struct attn_globals {
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 2)
-__global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr) {
+__global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr
+#if ATTN_SINK
+    , float *Sinks_ptr
+#endif
+    ) {
     _gl_QKVO Og{O_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     _gl_QKVO Qg{Q_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     _gl_QKVO Kg{K_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
@@ -233,7 +249,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     load(k_reg, k_smem[0]);
     __builtin_amdgcn_sched_barrier(0);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(2)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
@@ -272,7 +288,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     // All warps then collaboratively load in the second slice of V (V1) into shared memory
     G::load<1, false>(v_smem[1], g.Vg, {batch_idx, 1, head_idx_kv, 0}, swizzled_offsets_V);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(4)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
@@ -301,7 +317,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load V0 into registers
         load(v_reg, v_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(4)");
+        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -332,7 +348,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load K2 into registers
         load(k_reg, k_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(4)");
+        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -368,7 +384,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
             }
         }
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(4)");
+        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -399,7 +415,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load K3 into registers
         load(k_reg, k_smem[1]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(4)");
+        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -436,7 +452,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         }
     }
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(4)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -467,7 +483,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     //      Load K4 into registers
     load(k_reg, k_smem[0]);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(4)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -499,7 +515,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         }
     }
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(2)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -529,7 +545,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     //      Load K5 into registers
     load(k_reg, k_smem[1]);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(2)");
+    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -604,6 +620,16 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     // Cluster 12:
     //      A5V5
     mma_AtB(o_reg, v_reg, att_block_bf16_in, o_reg);
+#if ATTN_SINK
+    {
+        const float sink_l2 = Sinks_ptr[head_idx] * 1.44269504089f;
+        typename attn_tile<float, col_l, rt_32x32_s>::row_vec sink_term;
+        mul(sink_term, max_vec, -1.0f);
+        add(sink_term, sink_term, sink_l2);
+        exp2(sink_term, sink_term);
+        add(norm_vec, norm_vec, sink_term);
+    }
+#endif
     div_col(o_reg, o_reg, norm_vec);
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
@@ -625,4 +651,8 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     store(g.L_vec, norm_vec, {batch_idx, head_idx, 0, tile_idx});
 }
 
-template __global__ void attend_ker<ATTN_D>(bf16*, float*, bf16*, bf16*, bf16*);
+template __global__ void attend_ker<ATTN_D>(bf16*, float*, bf16*, bf16*, bf16*
+#if ATTN_SINK
+    , float*
+#endif
+);

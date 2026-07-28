@@ -93,7 +93,7 @@ if __name__ == "__main__":
   info = ProgramInfo(name="matmul_kernel",
                      global_size=(M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1), local_size=(32*compiled.metadata.num_warps, 1, 1))
   sink = UOp.sink(arg=KernelInfo(name="matmul_kernel"))
-  prg_uop = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info),
+  prg_uop = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info),
                        Device.default.renderer)
   rt = get_runtime(Device.DEFAULT, prg_uop)
   all_bufs = [x.ensure_allocated() for x in bufs]

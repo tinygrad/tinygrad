@@ -124,16 +124,21 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
     sizes, strides, storage_offset);
 }
 
+// shallow_copy_and_detach (nn.Parameter, aten.detach) rebuilds the base OpaqueTensorImpl, so that is the type every tiny tensor has
+at::OpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>> *tiny_impl(const at::Tensor &tensor) {
+  auto* impl = dynamic_cast<at::OpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(tensor.unsafeGetTensorImpl());
+  TORCH_CHECK(impl != nullptr, "expected a tiny tensor, got a ", tensor.device().str(), " one. move it with .to(\"tiny\") first");
+  return impl;
+}
+
 py::object unwrap_tensor(const at::Tensor &tensor) {
-  auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
-  std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
+  std::shared_ptr<c10::SafePyObject> tiny = tiny_impl(tensor)->opaque_handle();
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
 void update_metadata(const at::Tensor &tensor, const std::vector<int64_t> &sizes,
                      const std::vector<int64_t> &strides, int64_t storage_offset) {
-  auto* impl = tensor.unsafeGetTensorImpl();
+  auto* impl = tiny_impl(tensor);
   impl->set_allow_tensor_metadata_change(true);
   impl->set_sizes_and_strides(sizes, strides, storage_offset);
 }

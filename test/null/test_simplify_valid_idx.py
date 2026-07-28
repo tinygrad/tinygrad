@@ -1,6 +1,6 @@
 import unittest, itertools
 
-from tinygrad.codegen.late.devectorizer import load_store_indexing
+from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
@@ -11,19 +11,19 @@ from test.null.test_uop_symbolic import check_uop_against_string
 # symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
-def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+load_store_indexing, name="simplify_image_idx")
+def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(Ops.LOAD, dtypes.float, (
-    UOp.param(0, dtypes.float.ptr()).index(idx.valid(valid), ptr=True),
+  return UOp(Ops.LOAD, src=(
+    UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)),
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
+  return UOp(Ops.LOAD, src=(
+    UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)),
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
+def Special(expr, nmax): return UOp(Ops.SPECIAL, src=(UOp.const(dtypes.weakint, nmax),), arg=expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
@@ -409,7 +409,7 @@ class TestImageSimplification(unittest.TestCase):
     alu1 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)//768
     valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
     load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
-    self.check(load, None, "((((idx1*24)+r3)+(r5*3))+-3)", "(((idx2*2)+r4)+-1)")
+    self.check(load, None, "((((idx1*24)+(r5*3))+r3)+-3)", "(((idx2*2)+r4)+-1)")
 
   def test_simplify7(self):
     # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
@@ -495,15 +495,15 @@ class TestImageSimplification(unittest.TestCase):
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
     # test that INDEX with a constant True valid gets simplified to drop the valid
-    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.codegen.late.coalesce import indexing_simplify
     from tinygrad.uop.ops import graph_rewrite
     from tinygrad.uop.symbolic import sym
-    buf = UOp.param(0, dtypes.int.ptr())
+    buf = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(dtypes.weakint, 0)
     true_gate = UOp.const(dtypes.bool, True)
-    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx.valid(true_gate)))
+    index_with_gate = UOp(Ops.INDEX, src=(buf, idx.valid(true_gate)))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, sym+load_store_indexing)
+    result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 
@@ -542,7 +542,7 @@ class TestRangeShrink(unittest.TestCase):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
     load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
-    load2 = UOp(Ops.LOAD, dtypes.float, (UOp.param(1, dtypes.float.ptr()).index(r, ptr=True),))
+    load2 = UOp(Ops.LOAD, src=(UOp.param(1, dtypes.float, (204,)).index(r),))
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)
@@ -568,7 +568,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float.ptr()).index(r).store((r < 4).where(x, 0)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
 
@@ -577,7 +577,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float.ptr()).index(r).store((r < 4).where(0, x)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
 
