@@ -309,7 +309,8 @@ class IR3Renderer(NIRRenderer):
     super().prerender(uops)
     self.texs:set[UOp] = set()
     self.img_idx = 0
-    self.param_sz = sum([u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8 for u in uops if u.op is Ops.PARAM])
+    self.param_sz = functools.reduce(padded_idx, (u.element_size() if u.addrspace is AddrSpace.ALU else 8
+                                                 for u in uops if u.op is Ops.PARAM and not is_image_shape(u._shape)), 0)
 
   def postrender(self, uops:list[UOp]):
     bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]
