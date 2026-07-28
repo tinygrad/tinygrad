@@ -3,7 +3,7 @@ from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, Invalid
 
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
@@ -96,7 +96,8 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
+  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"),
+   lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else ((y < (c.cast(x.dtype)-x)) if no_range(x) and no_range(c) else None)),
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and dtypes.is_int(y.dtype) and y.vmin > 0 else None),
@@ -109,6 +110,8 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
      (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
   # REDUCE on ADD
+  (UPat.var("gate", dtype=dtypes.bool).where(UPat.var("x"), UPat.cvar("invalid")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+   lambda gate,x,invalid,r: gate.where(x.reduce(*r.src[1:], arg=Ops.ADD), invalid) if no_range(gate) and invalid.arg is Invalid else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # AND on WHERE
