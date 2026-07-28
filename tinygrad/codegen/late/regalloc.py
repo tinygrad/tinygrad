@@ -69,3 +69,20 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 pm_regalloc_rewrite = PatternMatcher([
   (UPat({Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
+
+# maps anonymous reg BUFFER allocations to SSA vregister form at specific program points, modeled after LLVM mem2reg/alloca 
+# each new store creates a new vregister and subsequent loads use the latest definition
+class Mem2RegContext:
+  def __init__(self, uops:list[UOp], valloc:Callable[[UOp], VRegister]):
+    self.r: dict[UOp, VRegister] = {}
+    v: dict[UOp, VRegister] = {}
+    for u in uops:
+      if u.op in [Ops.LOAD, Ops.STORE] and u.addrspace in AddrSpace.REG:
+        idx = u.src[0]
+        if u.op is Ops.STORE: v[idx] = valloc(u)
+        self.r[u] = v[idx]
+
+pm_mem2reg_rewrite = PatternMatcher([
+  (UPat().load(name="x"), lambda ctx,x: (nx := x.replace(src=x.src[0].replace(tag=(ctx.r[x],)))), [nx] if x.src[0].tag is None else None),
+  (Upat().store(UPat()).named("x"), lambda ctx,x: (nx := x.replace(tag=(ctx.r[x],))), [nx] if x.tag is None else None),
+])

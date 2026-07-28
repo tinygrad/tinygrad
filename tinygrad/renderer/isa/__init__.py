@@ -4,19 +4,6 @@ from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
 
-
-# map anonymous reg BUFFER references to SSA vregs
-# - each new store produces a new vreg
-# - each load uses the previous definition
-def mem2reg(ctx, uops:list[UOps], cons:Callable[[UOp], None]):
-  bufmap: dict[UOp, VRegister] = {}
-  for u in uops:
-    if u.op in [Ops.LOAD, Ops.STORE] and u.src[0].addrspace is AddrSpace.REG:
-      idx = u.src[0]
-      buf = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]
-      if u.op is Ops.STORE: bufmap[buf] = ctx.vreg(cons(buf), width=buf.arg[1])
-      u = u.replace(tag=(bufmap[buf],))
-
 @dataclass(frozen=True)
 class Register:
   name: str
@@ -66,6 +53,7 @@ class ISARenderer(Renderer):
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
+  mem2reg_alloc: Callable[[UOp], VRegister]|None = None
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")

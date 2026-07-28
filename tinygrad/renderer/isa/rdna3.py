@@ -45,16 +45,17 @@ OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 
 # ---- helpers ----
-def vmov(x:UOp) -> UOp: return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
-# def const(dt, v) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
 def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
   return _aluhint(UOp(Ops.SHR, dtypes.uint32 if nbits <= 32 else dtypes.uint64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
+def vmov(x:UOp) -> UOp:
+  # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
+  return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
 
 # ---- register classes/kernel init state ----
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
@@ -104,17 +105,19 @@ def _vop2(ctx, x:UOp):
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # NOTE: should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  if x.op is Ops.GROUP and (len(x.src) == 0 or x.src[0].op is not Ops.INS): return None
   if x.dtype is dtypes.void: return None
-  if x.op is Ops.BUFFER and (x.addrspace is not AddrSpace.REG or x.max_numel() > 1): return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
+  if x.op is Ops.GROUP and not all(s.op is Ops.INS for s in x.src): return None
 
   if x.op is Ops.GROUP:
-    sgpr = x.src[0].arg.opc[0] == 'S'
-    vreg = ctx.vreg(GP_SGPRS if sgpr else GP_VGPRS, width=len(x.src))
+    vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
     return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
-
-  if isinstance(x.tag, tuple):
+  elif x.op is Ops.BUFFER:
+    # equivalent of LLVMIR alloca? must be promoted on the linearized graph and assigned vregs
+    # but at that point the store instructions have already been lowered?
+    # -> lower reg load/stores pre-regalloc after mem2regs pass
+    raise NotImplementedError()
+  elif isinstance(x.tag, tuple):
     cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
     vr = ctx.vreg(cons, width=width)
   else:
@@ -136,6 +139,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
+# NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
 def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
@@ -153,52 +157,25 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.arg * scale, dtypes.uint16), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(idx.src[1].arg * scale, dtypes.uint16), base)
-  # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
   shft = const(scale.bit_length() - 1)
   offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
   return (offs, const(0, dtypes.uint16), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
+
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp):
-  base = idx.src[0]
-  assert base.addrspace is not AddrSpace.REG
-  """
-  if base.addrspace is AddrSpace.REG: 
-    assert idx.op is Ops.CONST and gate is None, "gated load on reg BUFFER"
-    if base.dtype.itemsize <= 4: return base.index(idx)
-    else: return multireg(vmov(base.index(0)), vmov(base.index(1)), dtype=base.dtype)
-  """
-
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
-  sz = n * base.dtype.itemsize
+  sz = n * idx.src[0].dtype.itemsize
   vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
-  opc = getattr(RDNA3Ops, f"{"global" if base.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
+  opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
   return x.ins(opc, src=fold_address(ctx, idx), tag=(vreg,))
 
 def store(ctx, idx:UOp, val:UOp):
-  base = idx.src[0]
-
-  assert base.addrspace is not AddrSpace.REG
-  """
-  if base.addrspace is AddrSpace.REG:
-    if len(rdefs(base)) == 0: return None
-
-    # keep addr as a control dep so reduce-identity stores re-run inside their ranges
-    if base.dtype.itemsize <= 4:
-      mov = vmov(val).replace(tag=rdefs(base))
-      return mov.replace(src=mov.src+(addr,))
-    else:
-      vreg = rdef(base)
-      buf = base.src[0] if base.op is Ops.BUFFER else base.src[0].src[0]
-      ms = [vmov(val.index(i)).replace(tag=(vreg.sub(i),)) for i in range(vreg.width)]
-      return UOp.group(*[m.replace(src=m.src+(addr,)) for m in ms])
-  """
-
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize * 8
-  opc = getattr(RDNA3Ops, f"{"global" if base.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
+  opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
   return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(ctx, idx) + (to_vgpr(ctx,val),))
 
 # ------ ALU ------
@@ -533,12 +510,9 @@ isel_matcher = PatternMatcher([
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   # 16 bit indexes get expanded into extract moves/shifts
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
-  # (UPat(Ops.INDEX, name="x"), lambda ctx,x: None if x.addrspace is not AddrSpace.REG else bufreg(ctx, x)),
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val")), store),
   (UPat.var("idx").load(name="x"), load),
-  # (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(src=(UPat.var("val"),), allow_any_len=True, name="x"), store),
-  # (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(allow_any_len=True, name="x"), load),
   # --- control flow ---
   (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
@@ -638,6 +612,9 @@ def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
+def mem2reg_alloc(u:UOp):
+  pass
+
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
@@ -646,6 +623,7 @@ class RDNA3Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
+  mem2reg_alloc = mem2reg_alloc
   def __init__(self, target:Target):
     from tinygrad.codegen.opt import tc
     super().__init__(target)
