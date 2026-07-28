@@ -326,8 +326,8 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
     self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
-    assert None not in vals
-    self.bind_sints_to_buf(*cast(tuple[sint, ...], vals), buf=self.buf, fmt='I', offset=len(prefix or []) * 4 + len(bufs) * 8)
+    for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
+      self.bind_sints_to_buf(unwrap(v), buf=self.buf, fmt=dt.fmt, offset=len(prefix or []) * 4 + (len(bufs)+i) * 8)
 
 class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, name:str, kernargs_alloc_size:int, lib:bytes|None=None, base:int|None=None):
