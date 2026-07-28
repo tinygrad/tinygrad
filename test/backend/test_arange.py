@@ -19,6 +19,12 @@ class TestArange(unittest.TestCase):
     self.assertLess(self._get_flops(Tensor.arange(256).clone(), np.arange(256)), 256*4)
     self.assertLess(self._get_flops(Tensor.arange(2560).clone(), np.arange(2560)), 2560*4)
 
+  def test_cat_complexity(self):
+    x = Tensor.arange(2**10) + Tensor.empty((), dtype=dtypes.uint32)
+    out = x.cat(x).cat(Tensor.empty(1, dtype=dtypes.uint32))
+    linear = compile_linear(out.schedule_linear())
+    self.assertLessEqual(estimate_uop(linear.src[-1]).ops, out.numel()*20)
+
   @unittest.skipIf(Device.DEFAULT == "CL", "flaky in CI")
   def test_arange_cumsum(self):
     np.testing.assert_equal(Tensor.arange(513).cumsum(0).numpy(), np.arange(513).cumsum())

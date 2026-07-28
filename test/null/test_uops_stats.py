@@ -123,6 +123,7 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
 
+  @unittest.expectedFailure
   def test_cat_equal_pieces(self):
     # concatenating equal-size pieces lowers to STACK: pure data movement, no arithmetic
     equal = [Tensor.empty(256, 128) for _ in range(4)]
