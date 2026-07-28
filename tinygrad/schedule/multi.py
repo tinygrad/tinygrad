@@ -68,7 +68,7 @@ def alu_multi(root:UOp):
   axis = root.axis
   assert axis is not None
   srcs = shard_srcs(root.src, axis)
-  return srcs[0].alu(root.op, *srcs[1:]).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.MULTI))
+  return srcs[0].alu(root.op, *srcs[1:]).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.UNSHARD))
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
@@ -121,7 +121,7 @@ def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
   axis = root.axis
   assert axis is not None
-  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.MULTI))
+  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).multi(axis, next(m.src[1] for m in root.src if m.op is Ops.UNSHARD))
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   assert multi.axis is not None, "all multi ops have axis"
@@ -133,18 +133,18 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis, src.src[1])
 
 def passthrough_multi(root:UOp, multi:UOp):
-  new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:])
+  new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
   return UOp(root.op, root.dtype, src=new_src, arg=root.arg).multi(multi.axis, multi.src[1])
 
 def rewrite_into_function(call:UOp):
   if call.arg.precompile: return None
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
-  new_args = tuple(a.src[0] if a.op is Ops.MULTI else a for a in call.src[1:])
+  new_args = tuple(a.src[0] if a.op is Ops.UNSHARD else a for a in call.src[1:])
   # after multi resolution, TUPLE elements may be MULTI — strip MULTI from body, create per-shard FUNCTION, wrap each GETTUPLE in its own MULTI
   assert new_body.op is Ops.TUPLE
-  if any(s.op is Ops.MULTI for s in new_body.src):
-    shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.MULTI else s for s in new_body.src]),)+new_args)
-    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis, s.src[1]) if s.op is Ops.MULTI else shard_call.gettuple(i)
+  if any(s.op is Ops.UNSHARD for s in new_body.src):
+    shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.UNSHARD else s for s in new_body.src]),)+new_args)
+    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis, s.src[1]) if s.op is Ops.UNSHARD else shard_call.gettuple(i)
                            for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
@@ -155,35 +155,35 @@ def param_to_multi(p:UOp):
 # NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), param_to_multi),
-  (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
-  (UPat(Ops.REDUCE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
-  (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), expand_multi),
-  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), pad_multi),
-  (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
-  (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
-  (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
-  (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.MULTI])), stack_multi),
-  (UPat(Ops.AFTER, src=(UPat(Ops.MULTI), UPat(Ops.STORE, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))))), store_after_multi),
-  (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
-  (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"),), name="red"),
+  (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.UNSHARD])), alu_multi),
+  (UPat(Ops.REDUCE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), reduce_multi),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), reshape_multi),
+  (UPat(Ops.EXPAND, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), expand_multi),
+  (UPat(Ops.PAD, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), pad_multi),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.UNSHARD, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
+  (UPat(Ops.PERMUTE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), permute_multi),
+  (UPat(Ops.FLIP, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), flip_multi),
+  (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
+  (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
+  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
+  (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).multi(multi.axis, multi.src[1])),
 
   # resolve TUPLE+GETTUPLE (needed in multi)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # GETTUPLE on MULTI: passthrough MULTI (e.g. when FUNCTION was replaced by MULTI(GETTUPLE(...)))
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.MULTI, name="multi"),), name="g"),
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.UNSHARD, name="multi"),), name="g"),
     lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis, multi.src[1]) if multi.src[0].op in {Ops.FUNCTION, Ops.TUPLE}
     else multi),
   # rewrite into FUNCTION calls explicitly for MULTI (value-producing)
   (UPat(Ops.FUNCTION, name="call"), rewrite_into_function),
-  (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the MULTI from non-value-producing CALLs (custom kernels, etc.) — FUNCTION is handled by rewrite_into_function
-  (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
-    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
+  (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
+    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
-        src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
+        src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # remove MULTI from STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True),
-    lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg)),
+  (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True),
+    lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:]), root.arg)),
 ])+replace_allreduce
