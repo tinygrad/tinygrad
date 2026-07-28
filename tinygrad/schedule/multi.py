@@ -81,7 +81,7 @@ def reduce_multi(root:UOp, multi:UOp):
     return local.allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   new_axis = multi.axis - num_axes if multi.axis is not None else None
-  return multi.src[0]._rop(op, tuple(range(num_axes))).multi(axis=new_axis, device_range=multi.src[1])
+  return multi.src[0]._rop(op, tuple(range(num_axes))).multi(new_axis, multi.src[1])
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
@@ -167,7 +167,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.MULTI), UPat(Ops.STORE, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))))), store_after_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"),), name="red"),
-    lambda multi,red: multi.src[0].allreduce(*red.arg).multi(axis=multi.axis, device_range=multi.src[1])),
+    lambda multi,red: multi.src[0].allreduce(*red.arg).multi(multi.axis, multi.src[1])),
 
   # resolve TUPLE+GETTUPLE (needed in multi)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
