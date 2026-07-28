@@ -104,14 +104,6 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
-pm_device_to_var = PatternMatcher([
-  # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)
-  (UPat(Ops.RANGE, name="r"), lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype) if r.arg[-1] is AxisType.DEVICE else None),
-  # ENDs that closed a DEVICE range no longer close it
-  (UPat(Ops.END, name="e"), lambda e: e.replace(src=(e.src[0],)+tuple(s for s in e.src[1:] if s.op is not Ops.PARAM))
-   if any(s.op is Ops.PARAM and s.arg.name == '_device_num' for s in e.src[1:]) else None),
-])
-
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
    lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
@@ -270,9 +262,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # preprocess
   sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
-
-  # lower the DEVICE axis to a launch-bound variable before any range optimization
-  sink = graph_rewrite(sink, pm_device_to_var, name="device axis to var", bottom_up=True)
 
   # first we optimize
   if optimize:
