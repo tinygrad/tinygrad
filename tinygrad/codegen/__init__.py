@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
 from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
@@ -450,7 +450,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
+  config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT)
   key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

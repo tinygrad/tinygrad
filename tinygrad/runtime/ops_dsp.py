@@ -11,26 +11,15 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-dsp_pm_late = PatternMatcher([
-  (UPat.var("x")+UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x+UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")*UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x*UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat.var("x")//UPat(Ops.STACK,src=UPat.var("y")), lambda x,y: x//UOp(Ops.CUSTOMI,x.dtype,(y,),arg="{0}") if x.op is not Ops.CUSTOMI else None),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.STACK, src=UPat(Ops.CONST, arg=0)),), dtype=dtypes.uchar, name="d", allow_any_len=True),
-   lambda d: d.replace(src=(UOp(Ops.CUSTOMI, d.dtype, arg="__builtin_HEXAGON_V6_vd0_128B()"),)+d.src[1:]) if d.addrspace is AddrSpace.REG else None),
-])
-
 # NOTE: this just increases readability of the generated code
 dsp_string = PatternMatcher([
   (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
 ])
 
 class DSPRenderer(ClangRenderer):
-  supports_float4 = True
   has_threads = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
-  extra_args = []
-  extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
