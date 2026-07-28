@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass
 from tinygrad.helpers import dedup
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs
 from tinygrad.dtype import dtypes
 
@@ -73,16 +73,20 @@ pm_regalloc_rewrite = PatternMatcher([
 # maps anonymous reg BUFFER allocations to SSA vregister form at specific program points, modeled after LLVM mem2reg/alloca 
 # each new store creates a new vregister and subsequent loads use the latest definition
 class Mem2RegContext:
-  def __init__(self, uops:list[UOp], valloc:Callable[[UOp], VRegister]):
+  def __init__(self, uops:list[UOp], valloc):
     self.r: dict[UOp, VRegister] = {}
-    v: dict[UOp, VRegister] = {}
+    v: dict[tuple[UOp, int], VRegister] = {}
+    vslot = itertools.count()
     for u in uops:
-      if u.op in [Ops.LOAD, Ops.STORE] and u.addrspace in AddrSpace.REG:
+      if u.op in [Ops.LOAD, Ops.STORE] and u.src[0].addrspace is AddrSpace.REG:
         idx = u.src[0]
-        if u.op is Ops.STORE: v[idx] = valloc(u)
-        self.r[u] = v[idx]
+        buf,i = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0], idx.src[1].arg # passthrough for AFTER/END
+        if u.op is Ops.STORE: v[(buf,i)] = valloc(f"m2vr{next(vslot)}", u)
+        self.r[u] = v[(buf,i)]
 
 pm_mem2reg_rewrite = PatternMatcher([
-  (UPat().load(name="x"), lambda ctx,x: (nx := x.replace(src=x.src[0].replace(tag=(ctx.r[x],)))), [nx] if x.src[0].tag is None else None),
-  (Upat().store(UPat()).named("x"), lambda ctx,x: (nx := x.replace(tag=(ctx.r[x],))), [nx] if x.tag is None else None),
+  (UPat().load(name="x"), lambda ctx,x: (x, [x.replace(src=x.src[0].replace(tag=(ctx.r[x],)))]) \
+    if x.src[0].addrspace is AddrSpace.REG and x.src[0].tag is None else None),
+  (UPat().store(UPat()).named("x"), lambda ctx,x: (x, [x.replace(tag=(ctx.r[x],))]) \
+    if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
 ])

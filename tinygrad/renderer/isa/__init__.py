@@ -46,6 +46,7 @@ class IselContext:
 class PreRegAllocContext:
   lock: UOp|None = None
   clobbered: set[UOp] = field(default_factory=set)
+  exec_mask_slot = itertools.count()
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
@@ -53,7 +54,7 @@ class ISARenderer(Renderer):
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
-  mem2reg_alloc: Callable[[UOp], VRegister]|None = None
+  mem2reg_alloc = None
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")

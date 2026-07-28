@@ -112,11 +112,6 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.op is Ops.GROUP:
     vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
     return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
-  elif x.op is Ops.BUFFER:
-    # equivalent of LLVMIR alloca? must be promoted on the linearized graph and assigned vregs
-    # but at that point the store instructions have already been lowered?
-    # -> lower reg load/stores pre-regalloc after mem2regs pass
-    raise NotImplementedError()
   elif isinstance(x.tag, tuple):
     cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
     vr = ctx.vreg(cons, width=width)
@@ -165,6 +160,7 @@ def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp):
+  if idx.addrspace is AddrSpace.REG: return None
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
   vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
@@ -173,6 +169,7 @@ def load(ctx, x:UOp, idx:UOp):
   return x.ins(opc, src=fold_address(ctx, idx), tag=(vreg,))
 
 def store(ctx, idx:UOp, val:UOp):
+  if idx.addrspace is AddrSpace.REG: return None
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize * 8
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
@@ -353,6 +350,7 @@ def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }
 
+"""
 def lower_gated(ctx, x:UOp):
   if x.arg.func not in memgroups: return None
   store = x.dtype is dtypes.void
@@ -366,6 +364,7 @@ def lower_gated(ctx, x:UOp):
   nx = x.replace(src=nsrc)
   line = [save, skip, nx, lbl, restoreexec(x.src[-1])]
   return nx, line
+"""
 
 def prep_range(ctx, bnd:UOp, x:UOp):
   if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
@@ -529,16 +528,22 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if x.tag is None else None),
-  (UPat((Ops.INS, Ops.GROUP, Ops.RANGE, Ops.BUFFER), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
+])
+
+# assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
+pre_regalloc_matcher = PatternMatcher([
+  (UPat((Ops.IF, Ops.RANGE), name="x"), lambda ctx,x: (x, [x.replace(tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
-  (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None),
+  (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None), # dont need
   (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat(Ops.IF, name="x"), lambda x: None),
+  (UPat(Ops.ENDIF, name="x"), lambda x: None),
   (UPat(Ops.END, name="x"), lower_end),
-  (UPat(Ops.INS, name="x"), lower_gated), # NOTE: find cleaner way to do this?
 ])
 
 def encode(ctx, x:UOp):
@@ -612,8 +617,7 @@ def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
-def mem2reg_alloc(u:UOp):
-  pass
+def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS)
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -621,9 +625,10 @@ class RDNA3Renderer(ISARenderer):
   isel_matcher = isel_matcher
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
+  pre_regalloc_matcher = pre_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
-  mem2reg_alloc = mem2reg_alloc
+  mem2reg_alloc = staticmethod(mem2reg_alloc)
   def __init__(self, target:Target):
     from tinygrad.codegen.opt import tc
     super().__init__(target)
