@@ -48,6 +48,7 @@ class TestRealWorld(unittest.TestCase):
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
     self.old_float = dtypes.default_float
+    self.enterContext(Context(CAPTURE_PROCESS_REPLAY=0))  # TODO: make default dtype ContextVar
     np.random.seed(2002)
 
   def tearDown(self):

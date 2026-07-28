@@ -1,7 +1,7 @@
 import unittest, math
 
 from tinygrad import dtypes, Tensor, Device
-from tinygrad.helpers import getenv, DEV
+from tinygrad.helpers import getenv, DEV, Context
 from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
@@ -232,6 +232,7 @@ class TestRandomness(unittest.TestCase):
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   def test_randn_finite(self, default_float):
     if default_float not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
+    self.enterContext(Context(CAPTURE_PROCESS_REPLAY=0))  # TODO: make default dtype ContextVar
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float
