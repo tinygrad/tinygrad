@@ -105,7 +105,7 @@ class CPUProgram(HCQProgram['CPUDevice']):
   except OSError: pass
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
-    self.runtimevars = {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
+    self.signature, self.runtimevars = obj.signature, {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
 
     LVP = obj.target.renderer == "LVP"
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
