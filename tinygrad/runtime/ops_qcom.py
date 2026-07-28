@@ -210,10 +210,12 @@ class QCOMArgsState(HCQArgsState):
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
       self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
+      for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
+        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
     else:
       for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
-      for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=prg.buf_offs[i+len(ubos)])
+      for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
+        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_offs[i+len(ubos)])
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
@@ -265,7 +267,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + len(self.samplers) * 4, 0x100)
-    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    super().__init__(QCOMArgsState, self.dev, obj, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),

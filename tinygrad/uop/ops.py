@@ -1734,7 +1734,7 @@ pm_lower_weak = PatternMatcher([
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=dtypes.int)).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
 def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   if ctx is None: ctx = {}
