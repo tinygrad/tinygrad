@@ -133,7 +133,8 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
    x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
-  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag[0]).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),
+  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
+   reindex(x, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag((0, dt:=l2i_dt[val.dtype])), val.rtag((0, dt)))).group(
      st.replace(src=(idx.rtag((1, dt)), val.rtag((1, dt))))) if val.tag is None else None),
@@ -150,7 +151,7 @@ pm_long_decomp = PatternMatcher([
                                              if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag[0]]
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype]),)) if x.tag is not None else None),
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
   (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
    UOp.const(x.tag[1], truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF))))
 ])
