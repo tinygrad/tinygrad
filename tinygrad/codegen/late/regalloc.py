@@ -2,7 +2,7 @@ import itertools
 from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
-from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs
+from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 
 PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK, Ops.INDEX}
@@ -14,7 +14,6 @@ class LinearScanRegallocContext:
     self.uops = [u for u in uops if u.op not in PSEUDO_OPS|{Ops.BUFFER}]
     self.live_intervals: dict[VRegister, list[int]] = {}
 
-    # TODO: handle alignment
     lis = self.live_intervals
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
@@ -55,7 +54,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)# ctx.prgpts[x]
 
   for s in x.src: # handle spills?
-    if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
+    if s.op is Ops.INDEX:
+      if rdef(s) is not None: # mem2reg ref
+        nsrc.append(s.replace(tag=ctx.pmap[rdef(s)]))
+      else: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
 
   for v in rdefs(x):
@@ -85,8 +87,8 @@ class Mem2RegContext:
         self.r[u] = v[(buf,i)]
 
 pm_mem2reg_rewrite = PatternMatcher([
-  (UPat().load(name="x"), lambda ctx,x: (x, [x.replace(src=x.src[0].replace(tag=(ctx.r[x],)))]) \
-    if x.src[0].addrspace is AddrSpace.REG and x.src[0].tag is None else None),
+  (UPat().load(name="x"), lambda ctx,x: (x, [x.replace(src=(x.src[0].replace(tag=(ctx.r[x],)),) + x.src[1:])]) \
+    if x.src[0].tag is None else None),
   (UPat().store(UPat()).named("x"), lambda ctx,x: (x, [x.replace(tag=(ctx.r[x],))]) \
     if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
 ])

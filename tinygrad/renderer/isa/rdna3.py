@@ -2,7 +2,7 @@ from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs, rdef
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
@@ -13,6 +13,7 @@ dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dty
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
+# TODO: fold MAX, MIN, GT, GE etcw.. ins patterns where possible in isel
 insdefs = [
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
   (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
@@ -106,6 +107,7 @@ def _vop2(ctx, x:UOp):
 # NOTE: should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
+  if x.op is Ops.LOAD and x.src[0].addrspace is not AddrSpace.REG: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   if x.op is Ops.GROUP and not all(s.op is Ops.INS for s in x.src): return None
 
@@ -135,7 +137,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
 # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
-def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
+def fold_global(ctx, base:UOp, idx:UOp): # (voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
   vaddr, offs = idx, const(0, dtypes.uint16)
@@ -147,7 +149,7 @@ def fold_global(ctx, base:UOp, idx:UOp): # (saddr, voff, ioffs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
-# TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is and the size of the other ones. Use isel ctx?
+# TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is (ctx.func_args) and the size of the other ones. Use isel ctx?
 def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.arg * scale, dtypes.uint16), base)
@@ -176,22 +178,6 @@ def store(ctx, idx:UOp, val:UOp):
   return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(ctx, idx) + (to_vgpr(ctx,val),))
 
 # ------ ALU ------
-def cvt(ctx, y:UOp, x:UOp): # TODO: b64 -> b64
-  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  def _cvt_ins(dtin:DType, dtout:DType):
-    try: return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
-    except Exception as e: raise Exception(f"cannot natively cast from {dtin} -> {dtout}", e)
-
-  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
-    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(lo, const(0, targ))))
-  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
-    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
-    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
-    else: return y.index(0)
-  return x.ins(_cvt_ins(y.dtype,x.dtype))
-
 def cmp(ctx, x:UOp):
   _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
   scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
@@ -270,6 +256,7 @@ def idiv(ctx, x:UOp):
     q = (is_one | is_big).where(special, q0)
   return (q ^ sign) + -sign if signed else q
 
+# TODO: move special cases out of function into PM
 _lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 _lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 def alu(ctx, x:UOp):
@@ -299,6 +286,22 @@ def alu(ctx, x:UOp):
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
+def cvt(ctx, y:UOp, x:UOp):
+  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
+  def _cvt_ins(dtin:DType, dtout:DType):
+    try: return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
+    except Exception as e: raise Exception(f"cannot natively cast from {dtin} -> {dtout}", e)
+
+  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
+    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
+    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
+    return to_vgpr(ctx, UOp(Ops.STACK, src=(lo, const(0, targ))))
+  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
+    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
+    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
+    else: return y.index(0)
+  return x.ins(_cvt_ins(y.dtype,x.dtype))
+
 # NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
 def int_to_int64(y:UOp, tdt:DType):
   do_sext = not dtypes.is_unsigned(y.dtype)
@@ -350,48 +353,20 @@ def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }
 
-"""
-def lower_gated(ctx, x:UOp):
-  if x.arg.func not in memgroups: return None
-  store = x.dtype is dtypes.void
-  gated_store, gated_load = store and len(x.src) > 4, not store and len(x.src) > 3
-  if not (gated_store or gated_load): return None
-  skip_label = "_".join(str(i) for i in x.src)
-  lbl = label(ctx, f".EXIT_{skip_label}")
-  skip = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".EXIT_{skip_label}")
-  save = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, src=(x.src[-2],))
-  nsrc = x.src[:-2] if gated_store else x.src[1:-2]
-  nx = x.replace(src=nsrc)
-  line = [save, skip, nx, lbl, restoreexec(x.src[-1])]
-  return nx, line
-"""
-
-def prep_range(ctx, bnd:UOp, x:UOp):
-  if x.dtype is dtypes.uint32: return None # this is a shit predicate, maybe utilize ctx
-  mask = def_reg(dtypes.uint32, GP_SGPRS)
-  # keep control-flow edges from pm_add_control_flow (src[1:]) so nest/sibling order is preserved through linearize
-  return x.replace(src=(bnd,)+x.src[1:]+(mask,)).replace(dtype=dtypes.uint32)
-
-def prep_end(ctx, x:UOp, rng:UOp):
-  if not (len(x.src) == 2 and rng.dtype is dtypes.uint32): return None
-  one = vmov(const(1))
-  mask, bnd = rng.src[-1], to_vgpr(ctx, rng.src[0])
-  return x.replace(src=x.src + (bnd,one,mask))
-
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
-  loop_label = "_".join(str(i) for i in x.arg[:-1])
-  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
-  mask = x.src[-1].ins(RDNA3Ops.s_mov_b32, src=(execop,))
-  ctx.loop_label[acc] = loop_label
-  lbl = label(ctx, f".LOOP_{loop_label}")
-  return acc, [acc, mask, lbl]
+  bnd,acc = x.src[:2]
+  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_ge_u32_e64, src=(acc,bnd), tag=(EXEC,))
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
+  loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
+  jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_END_{range_str(x)}")
+  mask = x.ins(RDNA3Ops.s_mov_b32, src=(execop,))
+  return mask, [mask, loop_body, pred, jmp_out, inc]
 
-def lower_end(ctx, x:UOp):
-  gate = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(x.src[1], x.src[-3]), tag=(EXEC,))
-  inc = x.src[1].ins(RDNA3Ops.v_add_nc_u32_e32, src=(x.src[1], x.src[-2])) # TODO: one fold to imm
-  loop = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
-  return inc, [inc, gate, loop, restoreexec(x.src[-1])]
+def lower_end(ctx, rng:UOp, x:UOp):
+  loop_end = label(ctx, f".LOOP_END_{range_str(rng)}")
+  jmp = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{range_str(rng)}")
+  return jmp, [jmp, loop_end, restoreexec(rng)]
 
 # --- other stuff ---
 # NOTE: this should just be triggered in to_vgpr????
@@ -500,21 +475,14 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
 ]) + pm_float_to_int + pm_int_to_float
 
-# NOTE: cmp shouldn't always be materialized to sgpr, only for where
+# NOTE: cmp shouldn't always be materialized to sgpr, only for where?
 isel_matcher = PatternMatcher([
-  # should these be necessary?
-  (UPat.var("a").cast(name="x"), lambda a,x: a if a.dtype == x.dtype else None),
-  (UPat(name="x").bitcast(), lambda x: x),
-  # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
-  (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
-  # 16 bit indexes get expanded into extract moves/shifts
-  (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val")), store),
   (UPat.var("idx").load(name="x"), load),
   # --- control flow ---
-  (UPat(Ops.RANGE, src=(UPat.var("bnd"),), allow_any_len=True, name="x"), prep_range),
-  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), prep_end),
+  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
+    lambda x,bnd: x.replace(src=(vmov(bnd), vmov(const(0))) + x.src[1:])), # (bnd,acc,...)
   # --- fused alu ---
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
@@ -528,22 +496,34 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if x.tag is None else None),
-  (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.GROUP, Ops.END, Ops.LOAD), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
+  # 16 bit indexes get expanded into extract moves/shifts
+  (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
+  # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
+  (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
+  (UPat(name="x").bitcast(), lambda x: x),
 ])
+
+def regstore(x:UOp):
+  if x.src[0].addrspace is not AddrSpace.REG: return x, [isel_matcher.rewrite(x)]
+  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],))
+  return nx, [nx]
 
 # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
 pre_regalloc_matcher = PatternMatcher([
   (UPat((Ops.IF, Ops.RANGE), name="x"), lambda ctx,x: (x, [x.replace(tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))])),
+  (UPat.var("idx").load(name="x"), lambda idx,x: (x, [x.ins(RDNA3Ops.v_mov_b32_e32, src=(idx,))])),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (x, [isel_matcher.rewrite(x)])
+    if idx.addrspace is not AddrSpace.REG else (x, [x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
-  (UPat(Ops.INS, name="x"), lambda x: (x,[]) if x.arg is RDNA3Ops.s_nop else None), # dont need
   (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.IF, name="x"), lambda x: None),
-  (UPat(Ops.ENDIF, name="x"), lambda x: None),
-  (UPat(Ops.END, name="x"), lower_end),
+  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), lower_end),
+  (UPat(Ops.IF, src=(UPat.var("gate"),), name="x"), lambda x,gate: (x, [x.ins(RDNA3Ops.s_and_saveexec, src=(gate,))])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: (x, [x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))])),
 ])
 
 def encode(ctx, x:UOp):
@@ -556,6 +536,8 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+
+  print("encoding", opc, [(u.op,u.arg,rdefs(u)) for u in x.src])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
