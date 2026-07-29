@@ -262,8 +262,8 @@ def add_raw_barrier(after:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
   if after.addrspace is not AddrSpace.LOCAL: return None
   # one toposort over all the deps
-  deps = UOp.sink(*after.src[1:]).backward_slice
-  if not any(_is_local_store(x) for x in deps) or any(x.op is Ops.BARRIER for x in deps): return None
+  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER)
+  if not any(_is_local_store(x) for x in deps): return None
   return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
 
 def add_war_barrier(end:UOp):
