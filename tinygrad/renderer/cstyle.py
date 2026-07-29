@@ -22,7 +22,7 @@ base_rewrite = PatternMatcher([
 
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
-    if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
+    if x.max_numel() > 1 and (x.addrspace is AddrSpace.REG or x.tag == "vectorized") else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: ctx[x.src[0]] if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
@@ -238,7 +238,8 @@ class CStyleLanguage(Renderer):
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
-        (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
+        (u.op in {Ops.STACK, Ops.DOT, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and
+         child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.STORE, Ops.BUFFER} and u.dtype != dtypes.void:
@@ -269,6 +270,66 @@ class ClangRenderer(CStyleLanguage):
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
+  @staticmethod
+  def _render_byte_dot(ctx, a:UOp, b:UOp, scale:UOp|None=None):
+    if a.shape != b.shape or a.shape not in ((16,), (32,)): return None
+    lanes, suffix = a.shape[0] // 2, "128" if a.shape[0] == 16 else "256"
+    if scale is None: multiplier = "1"
+    elif scale.max_numel() == 1: multiplier = ctx[scale]
+    elif scale.op is Ops.STACK and all(x is scale.src[0] for x in scale.src): multiplier = ctx[scale.src[0]]
+    else: multiplier = f"({ctx[scale]})[0]"
+    return f"__builtin_ia32_pmaddwd{suffix}(__builtin_bit_cast(short __attribute__((ext_vector_type({lanes}))), " \
+           f"__builtin_ia32_pmaddubsw{suffix}(__builtin_elementwise_abs({ctx[a]}), __builtin_ia32_psignb{suffix}({ctx[b]}, {ctx[a]}))), " \
+           f"(short __attribute__((ext_vector_type({lanes})))){{{','.join([multiplier] * lanes)}}})"
+  @staticmethod
+  def _render_contiguous_stack(ctx, x:UOp):
+    if not x.src or not all(v.op is Ops.INDEX and len(v.src) == 2 and v.src[0] is x.src[0] and
+                            v.src[1].op is Ops.CONST for v in x.src): return None
+    indices = tuple(v.src[1].arg for v in x.src)
+    if indices != tuple(range(indices[0], indices[0] + len(indices))): return None
+    return f"__builtin_shufflevector({ctx[x.src[0]]}, {ctx[x.src[0]]}, {','.join(map(str, indices))})"
+  @staticmethod
+  def _render_unpack_lut(ctx, x:UOp, packed:UOp):
+    if packed.shape not in ((16,), (32,)): return None
+    lanes, suffix = packed.shape[0], "128" if packed.shape[0] == 16 else "256"
+    charv = f"signed char __attribute__((ext_vector_type({lanes})))"
+    pv = f"__builtin_bit_cast({charv}, {ctx[packed]})"
+    lut_values = x.arg if lanes == 16 else x.arg * 2
+    lut = f"({charv}){{{','.join(map(str, lut_values))}}}"
+    mask = f"({charv}){{{','.join(['15'] * lanes)}}}"
+    lo = f"__builtin_ia32_pshufb{suffix}({lut}, {pv} & {mask})"
+    hi = f"__builtin_ia32_pshufb{suffix}({lut}, ({pv} >> 4) & {mask})"
+    if lanes == 16: indices = tuple(range(32))
+    else: indices = (*range(16), *range(32, 48), *range(16, 32), *range(48, 64))
+    return f"__builtin_shufflevector({lo}, {hi}, {','.join(map(str, indices))})"
+  @staticmethod
+  def _render_vector_load(ctx, x:UOp, address:UOp):
+    vec_type = ctx._render_dtype(x.dtype, x.max_numel(), AddrSpace.REG)
+    # GGUF block fields are not necessarily vector aligned. memcpy expresses an unaligned load without
+    # aliasing or alignment assumptions and Clang folds the fixed-size copy to a single vector load.
+    return f"({{ {vec_type} _v; __builtin_memcpy(&_v, {ctx[address]}, sizeof(_v)); _v; }})"
+  @staticmethod
+  def _render_vector_store(ctx, address:UOp, value:UOp):
+    vec_type = ctx._render_dtype(value.dtype, value.max_numel(), AddrSpace.REG)
+    # Like VLOAD, explicit vector stores can target unaligned packed data or register-backed arrays.
+    return f"do {{ {vec_type} _v = {ctx[value]}; __builtin_memcpy({ctx[address]}, &_v, sizeof(_v)); }} while (0);"
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.STACK, name="x"), lambda ctx,x: ClangRenderer._render_contiguous_stack(ctx, x)),
+    (UPat(Ops.MUL, dtypes.int32,
+          src=(UPat(Ops.DOT, dtypes.int32, src=(UPat.var("a", dtypes.int8), UPat.var("b", dtypes.int8)), arg=4),
+               UPat.var("scale", dtypes.int32))),
+     lambda ctx,a,b,scale: ClangRenderer._render_byte_dot(ctx, a, b, scale)
+     if scale.vmin >= -32768 and scale.vmax <= 32767 else None),
+    (UPat(Ops.DOT, dtypes.int32, src=(UPat.var("a", dtypes.int8), UPat.var("b", dtypes.int8)), arg=4),
+     lambda ctx,a,b: ClangRenderer._render_byte_dot(ctx, a, b)),
+    (UPat(Ops.UNPACK_LUT, dtypes.int8, src=(UPat.var("packed", dtypes.uint8),), name="x"),
+     lambda ctx,x,packed: ClangRenderer._render_unpack_lut(ctx, x, packed)),
+    (UPat(Ops.STORE, src=(UPat(Ops.SHRINK, name="address"), UPat.var("value")), name="x"),
+     lambda ctx,x,address,value: ClangRenderer._render_vector_store(ctx, address, value)
+     if x.tag == "vectorized" and value.max_numel() > 1 else None),
+    (UPat(Ops.VLOAD, src=(UPat.var("address"),), name="x"),
+     lambda ctx,x,address: ClangRenderer._render_vector_load(ctx, x, address)),
+  ]) + base_rewrite
 
   # LLVM legalizes double => half/bf16 cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   # there is also no native bfl16 <-> fp16 conversion on those CPUs

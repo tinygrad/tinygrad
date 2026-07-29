@@ -30,12 +30,13 @@ class Estimates:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
     for u in uops:
-      if u.op in {Ops.LOAD, Ops.STORE}:
+      if u.op in {Ops.LOAD, Ops.VLOAD, Ops.STORE}:
         buf = u
         while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.scalar().itemsize * mults
+          elements = u.max_numel() if u.op is Ops.VLOAD else u.src[0].max_numel()
+          accessed = mem.get((buf, u.op), 0) + elements * u.src[0].dtype.scalar().itemsize * mults
           mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.scalar().itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
@@ -46,7 +47,7 @@ class Estimates:
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.PARAM and u.arg.addrspace == AddrSpace.ALU and u.expr == 'core_id': mults *= int(u.vmax) + 1
-      elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
+      elif u.op in {Ops.LOAD, Ops.VLOAD} and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.scalar().itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.src[1].dtype.scalar().itemsize * mults

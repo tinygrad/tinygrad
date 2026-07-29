@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, os, ctypes, functools, mmap, threading, array, pathlib
-from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, getenv, CPU_COUNT
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -13,9 +13,10 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import sint, KernelInfo
+from tinygrad.uop.ops import Ops, sint, KernelInfo
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 32, 33, (16 << 10)
+PARALLEL_WORKERS, PARALLEL_PARTICIPANTS = min(31, max(1, CPU_COUNT.value-1)), min(32, max(2, CPU_COUNT.value))
 
 def signal_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
@@ -41,6 +42,12 @@ def quit_prog():
   close = fn[2].load().call(sem[0], ret_dtype=dtypes.void) # sem_close(sem)
   return fn.after(close)[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # pthread_exit(0)
 
+def post_many_prog():
+  sem, post_fn = UOp.param(0, dtypes.uint64, (1,)), UOp.param(1, dtypes.uint64, (1,))
+  count = UOp.param(2, dtypes.int, (), vmin_vmax=(1, RING_SLOTS), name="count", addrspace=AddrSpace.ALU)
+  post = UOp.range(count, 0)
+  return post_fn.after(post)[0].load().call(sem.after(post)[0], ret_dtype=dtypes.void).end(post)
+
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
@@ -54,20 +61,88 @@ def worker_prog():
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return progress.after(entry[0].call(*entry[1:], ret_dtype=dtypes.void), cur)[0].store(cur + 1).end(cur)
 
+def parallel_wait_prog():
+  generation = UOp.param(0, dtypes.uint64, (1,), volatile=True)
+  completed = UOp.param(1, dtypes.uint64, (1,), volatile=True)
+  ready = UOp.param(2, dtypes.uint64, (1,), volatile=True)
+  wait_fn, sem = UOp.param(3, dtypes.uint64, (1,)), UOp.param(4, dtypes.uint64, (1,))
+  relax = "__builtin_ia32_pause();" if platform.machine().lower() in ("x86_64", "amd64") else \
+          '__asm__ __volatile__("yield");' if platform.machine().lower() in ("aarch64", "arm64") else ""
+  value = UOp(Ops.CUSTOMI, dtypes.uint64, (generation.index(0), completed.index(0), wait_fn[0].load(), sem.index(0)), arg=
+    "({{ unsigned long _seen = *((volatile unsigned long *){1}), _v; "
+    "do {{ int _i = 0; do {{ _v = *((volatile unsigned long *){0}); if (_v > _seen) break; __RELAX__ }} while (++_i < __SPIN__); "
+    "if (_v <= _seen) while (((int (*)(unsigned long)){2})((unsigned long){3}) != 0) {{}}; }} while (_v <= _seen); _v; }})"
+    .replace("__RELAX__", relax).replace("__SPIN__", str(getenv("CPU_UOP_SPIN", 10000000))))
+  return ready[0].store(value)
+
+def parallel_worker_prog():
+  generation = UOp.param(0, dtypes.uint64, (1,), volatile=True)
+  group_count = UOp.param(1, dtypes.uint64, (1,), volatile=True)
+  ring_addr = UOp.param(2, dtypes.uint64, (1,), volatile=True)
+  completed = UOp.param(3, dtypes.uint64, (PARALLEL_WORKERS,), volatile=True)
+  worker_id = UOp.param(4, dtypes.int, (), vmin_vmax=(1, PARALLEL_WORKERS), name="worker_id", addrspace=AddrSpace.ALU)
+  wait_fn, sem = UOp.param(5, dtypes.uint64, (1,)), UOp.param(6, dtypes.uint64, (1,))
+  ready_values, helper_fn = UOp.param(7, dtypes.uint64, (PARALLEL_WORKERS,), volatile=True), UOp.param(8, dtypes.uint64, (1,))
+  cur = UOp.loop(0)
+  worker_idx = worker_id-1
+  ready = helper_fn.after(cur)[0].load().call(generation.after(cur).index(0), completed.after(cur).index(worker_idx),
+                                               ready_values.after(cur).index(worker_idx), wait_fn.after(cur).index(0),
+                                               sem.after(cur).index(0), ret_dtype=dtypes.void)
+  seen = ready_values.after(ready)[worker_idx].load()
+  worker = worker_id.cast(dtypes.uint64)
+  count = group_count.after(seen)[0].load()
+  work_count = (worker < count).where((count - worker + PARALLEL_PARTICIPANTS - 1) // PARALLEL_PARTICIPANTS, 0)
+  work = UOp.range(work_count, 2, dtype=dtypes.uint64)
+  command = worker + work * UOp.const(dtypes.uint64, PARALLEL_PARTICIPANTS)
+  address = ring_addr.after(seen)[0].load()
+  entry = [UOp(Ops.CUSTOM, dtypes.uint64, (address, command * CMD_SIZE + i),
+               arg="*((volatile unsigned long *){0} + {1})") for i in range(CMD_SIZE)]
+  finished = entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(work)
+  return completed.after(finished, seen)[worker_id-1].store(seen).end(cur, count.ne(0))
+
+def parallel_dispatch_prog():
+  commands = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
+  generation = UOp.param(1, dtypes.uint64, (1,), volatile=True)
+  group_count = UOp.param(2, dtypes.uint64, (1,), volatile=True)
+  ring_addr = UOp.param(3, dtypes.uint64, (1,), volatile=True)
+  completed = UOp.param(4, dtypes.uint64, (PARALLEL_WORKERS,), volatile=True)
+  count = UOp.param(5, dtypes.int, (), vmin_vmax=(1, PARALLEL_PARTICIPANTS), name="count", addrspace=AddrSpace.ALU)
+  post_fn, sems = UOp.param(6, dtypes.uint64, (1,)), UOp.param(7, dtypes.uint64, (PARALLEL_WORKERS,))
+  address = UOp(Ops.CUSTOM, dtypes.uint64, (commands.index(0),), arg="(unsigned long){0}")
+  publish = UOp.group(ring_addr[0].store(address), group_count[0].store(count.cast(dtypes.uint64)))
+  current = generation.after(publish)[0].load()
+  next_generation = current + 1
+  signal = generation[0].store(next_generation)
+  if WIN: wake = signal
+  else:
+    wake_worker = UOp.range(count - 1, 3)
+    wake = post_fn.after(signal)[0].load().call(sems[wake_worker].load(), ret_dtype=dtypes.void).end(wake_worker)
+  work = UOp.range((count + PARALLEL_PARTICIPANTS - 1) // PARALLEL_PARTICIPANTS, 2)
+  command = work * PARALLEL_PARTICIPANTS
+  entry = [commands.after(wake).index(command * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
+  own_done = entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(work)
+  worker = UOp.range(count - 1, 0)
+  wait = UOp.loop(1)
+  done = completed.after(own_done, wait).index(worker).load()
+  return done.end(wait, done < next_generation).end(worker).sink(arg=KernelInfo("parallel_dispatch_prog"), tag=1)
+
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):
     super().__init__()
     self.dev = dev
     self._encoded:array.array|None = None
+    self._exec_groups:list[tuple[int, int, bool]] = []
   def _cmd(self, prog, args=(), vals=()): return self.exec(prg:=self.dev.prgs[prog], prg.fill_kernargs(args, vals), None, None)
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if (lvp:=isinstance(args_state, LVPArgsState)): self.bind_args_state(args_state)
     args:list[sint|None] = [args_state.buf.va_addr] if lvp else [*[x.va_addr for x in args_state.bufs], *args_state.vals]
     assert len(args) <= MAX_ARGS, f"CPU program {prg.name!r} supports at most {MAX_ARGS} arguments, got {len(args)}"
+    start = len(self._q) // CMD_SIZE
     for tid in range(1 if lvp else (global_size or (1,))[0]):
       if not lvp and 'core_id' in prg.runtimevars: args[len(args_state.bufs)+prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
+    self._exec_groups.append((start, len(self._q) // CMD_SIZE, prg.cpu_parallel))
     return self
   def wait(self, signal, value=0): return self._cmd(wait_prog, (signal.base_buf,), (value,))
   def timestamp(self, signal): return self._cmd(timestamp_prog, (signal.base_buf.offset(8, 8), self.dev.func_table.offset(0, 8)))
@@ -77,19 +152,50 @@ class CPUComputeQueue(HWQueue):
       self._encoded = array.array('Q', ((x.addr if i % CMD_SIZE == 0 else int(x)) & ((1<<64)-1) for i,x in enumerate(self._q)))
     else:
       for off, _ in self.q_sints: self._encoded[off] = int(self._q[off]) & ((1<<64)-1)
-    cmds, submitted = len(self._q) // CMD_SIZE, 0
+    encoded = self._encoded
+    parallel_buf = None
+    if getattr(dev, "parallel_uops", False) and not getattr(dev, "parallel_shutdown", False):
+      completed = dev.progress_view[0]
+      still_inflight = []
+      for end_pos,buf in dev.parallel_command_inflight:
+        if end_pos <= completed: dev.parallel_command_pool.append(buf)
+        else: still_inflight.append((end_pos, buf))
+      dev.parallel_command_inflight = still_inflight
+      parallel_words = sum((end-start) * CMD_SIZE for start,end,parallel in self._exec_groups if parallel and end-start > 1)
+      if parallel_words:
+        required_bytes = parallel_words * 8
+        parallel_buf = next((buf for buf in dev.parallel_command_pool if buf.size >= required_bytes), None)
+        if parallel_buf is not None: dev.parallel_command_pool.remove(parallel_buf)
+        else: parallel_buf = dev.allocator.alloc(required_bytes, BufferSpec())
+        parallel_view = parallel_buf.cpu_view().view(fmt='Q')
+        transformed, parallel_offset = array.array('Q'), 0
+        dispatch = dev.prgs[parallel_dispatch_prog]
+        for start,end,parallel in self._exec_groups:
+          if not parallel or end-start == 1:
+            transformed.extend(encoded[start*CMD_SIZE:end*CMD_SIZE])
+            continue
+          words = (end-start) * CMD_SIZE
+          parallel_view[parallel_offset:parallel_offset+words] = encoded[start*CMD_SIZE:end*CMD_SIZE]
+          args = [parallel_buf.va_addr + parallel_offset * 8, dev.parallel_state.va_addr,
+                  dev.parallel_state.va_addr + 8, dev.parallel_state.va_addr + 16,
+                  dev.parallel_state.va_addr + 24, end-start, dev.func_table.va_addr + 32,
+                  dev.parallel_sems.va_addr]
+          transformed.extend(array.array('Q', [dispatch.addr, *args, *([0] * (MAX_ARGS-len(args)))]))
+          parallel_offset += words
+        encoded = transformed
+    cmds, submitted = len(encoded) // CMD_SIZE, 0
     while submitted < cmds:
       consumed = dev.progress_view[0]
       if (available:=RING_SLOTS - (dev.ring_pos - consumed)) == 0: continue
       start = dev.ring_pos % RING_SLOTS
       count = min(cmds - submitted, available, RING_SLOTS - start)
       src = submitted * CMD_SIZE
-      dev.ring_view[start*CMD_SIZE:(start+count)*CMD_SIZE] = self._encoded[src:(src+count*CMD_SIZE)]
+      dev.ring_view[start*CMD_SIZE:(start+count)*CMD_SIZE] = encoded[src:src+count*CMD_SIZE]
       dev.ring_pos += count
       if WIN: dev.sys_view[0] = dev.ring_pos
-      else:
-        for _ in range(count): assert libc.sem_post(dev.sem) == 0
+      else: dev.post_many(dev.sem_buf.va_addr, dev.func_table.va_addr + 32, count)
       submitted += count
+    if parallel_buf is not None: dev.parallel_command_inflight.append((dev.ring_pos, parallel_buf))
 
 class LVPArgsState(CLikeArgsState):
   def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
@@ -104,6 +210,7 @@ class CPUProgram(HCQProgram):
 
   def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, native=False, **kwargs):
     self.runtimevars = runtimevars or {}
+    self.cpu_parallel = bool((prg:=kwargs.get("prg")) is not None and prg.arg.cpu_parallel)
 
     LVP = isinstance(dev.renderer, LVPRenderer) and not native
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -177,20 +284,55 @@ class CPUDevice(HCQCompiled):
       self.sem_buf = HCQBuffer(sem_addr, 1, owner=self)
 
     # TODO: move to hcq2 infra
-    self.func_table = self.allocator.alloc(32, BufferSpec())
-    fns = ([0, ctypes.windll.kernel32.ExitThread, 0, 0] if WIN else  # type: ignore[attr-defined]
-           [libc.dll.clock_gettime, libc.dll.pthread_exit, libc.dll.sem_wait, libc.dll.sem_close])
+    self.func_table = self.allocator.alloc(40, BufferSpec())
+    fns = ([0, ctypes.windll.kernel32.ExitThread, 0, 0, 0] if WIN else  # type: ignore[attr-defined]
+           [libc.dll.clock_gettime, libc.dll.pthread_exit, libc.dll.sem_wait, libc.dll.sem_close, libc.dll.sem_post])
     self.func_table.cpu_view().view(fmt='Q')[:] = array.array('Q', [unwrap(ctypes.cast(f, ctypes.c_void_p).value) if f else 0 for f in fns])
 
     # TODO: move to hcq2
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
-      prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1) for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
+      prgs = {f: f().sink(arg=KernelInfo(f.__name__), tag=1)
+              for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog,
+                        post_many_prog, parallel_wait_prog, parallel_worker_prog, parallel_dispatch_prog)}
       self.prgs = {f: self.runtime(f.__name__, do_to_program(v, ClangRenderer(self.renderer.target)).src[3].arg, native=True) for f,v in prgs.items()}
+      if not WIN:
+        self.post_many = ctypes.CFUNCTYPE(None, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int)(self.prgs[post_many_prog].addr)
 
     self.worker:threading.Thread|None = threading.Thread(target=self.prgs[worker_prog].fxn, args=(ctypes.c_uint64(self.ring.va_addr),
       ctypes.c_uint64(self.sys.va_addr if WIN else self.func_table.va_addr+16), ctypes.c_uint64(sem_addr),
       ctypes.c_uint64(self.progress.va_addr)), daemon=True)
     self.worker.start()
+    self.parallel_uops = bool(getenv("CPU_PARALLEL_UOPS", 1)) and not WIN
+    if self.parallel_uops:
+      self.parallel_state = self.allocator.alloc((3 + 2 * PARALLEL_WORKERS) * 8, BufferSpec())
+      self.parallel_command_pool:list[HCQBuffer] = []
+      self.parallel_command_inflight:list[tuple[int, HCQBuffer]] = []
+      self.parallel_sems = self.allocator.alloc(PARALLEL_WORKERS * 8, BufferSpec())
+      parallel_sem_addrs, self.parallel_sem_handles = [], []
+      if not WIN:
+        for i in range(PARALLEL_WORKERS):
+          sem = libc.sem_open(sem_name:=f"/tinygrad-{os.getpid()}-{id(self):x}-p{i}".encode(),
+                              os.O_CREAT|os.O_EXCL, 0o600, 0)  # type: ignore[call-arg]
+          if (sem_addr:=unwrap(ctypes.cast(sem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(sem_name):
+            raise OSError(ctypes.get_errno(), "parallel semaphore")
+          self.parallel_sem_handles.append(sem)
+          parallel_sem_addrs.append(sem_addr)
+        self.parallel_sems.cpu_view().view(fmt='Q')[:] = array.array('Q', parallel_sem_addrs)
+      self.parallel_generation_view = self.parallel_state.cpu_view().view(0, 8, 'Q')
+      self.parallel_count_view = self.parallel_state.cpu_view().view(8, 8, 'Q')
+      self.parallel_ring_addr_view = self.parallel_state.cpu_view().view(16, 8, 'Q')
+      self.parallel_completed_view = self.parallel_state.cpu_view().view(24, PARALLEL_WORKERS * 8, 'Q')
+      self.parallel_ready = self.parallel_state.offset(24 + PARALLEL_WORKERS * 8, PARALLEL_WORKERS * 8)
+      self.parallel_helper_fn = self.allocator.alloc(8, BufferSpec())
+      self.parallel_helper_fn.cpu_view().view(fmt='Q')[0] = self.prgs[parallel_wait_prog].addr
+      self.parallel_workers = [threading.Thread(target=self.prgs[parallel_worker_prog].fxn,
+        args=(ctypes.c_uint64(self.parallel_state.va_addr), ctypes.c_uint64(self.parallel_state.va_addr + 8),
+              ctypes.c_uint64(self.parallel_state.va_addr + 16), ctypes.c_uint64(self.parallel_state.va_addr + 24),
+              ctypes.c_uint64(i+1), ctypes.c_uint64(self.func_table.va_addr + 16),
+              ctypes.c_uint64(parallel_sem_addrs[i]), ctypes.c_uint64(self.parallel_ready.va_addr),
+              ctypes.c_uint64(self.parallel_helper_fn.va_addr)),
+        daemon=True) for i in range(PARALLEL_WORKERS)]
+      for worker in self.parallel_workers: worker.start()
     self._physical_affinity = False
 
   def use_physical_cores(self):
@@ -203,10 +345,22 @@ class CPUDevice(HCQCompiled):
         key = ((topology / "physical_package_id").read_text().strip(), (topology / "core_id").read_text().strip())
         physical.setdefault(key, cpu)
     except (OSError, ValueError): return
-    if physical: os.sched_setaffinity(self.worker.native_id, set(physical.values()))
+    if physical:
+      cpus = tuple(physical.values())
+      os.sched_setaffinity(self.worker.native_id, set(cpus))
+      for i, worker in enumerate(getattr(self, "parallel_workers", ())):
+        if worker.native_id is not None: os.sched_setaffinity(worker.native_id, {cpus[(i+1) % len(cpus)]})
     self._physical_affinity = True
 
   def finalize(self):
     if self.worker is None: return
+    self.synchronize()
+    if self.parallel_uops:
+      self.parallel_shutdown = True
+      self.parallel_count_view[0] = 0
+      self.parallel_generation_view[0] += 1
+      for sem in self.parallel_sem_handles: assert libc.sem_post(sem) == 0
+      for worker in self.parallel_workers: worker.join()
+      for sem in self.parallel_sem_handles: assert libc.sem_close(sem) == 0
     CPUComputeQueue(self)._cmd(quit_prog, (self.func_table.offset(8, 8),) if WIN else (self.func_table.offset(8, 24), self.sem_buf)).submit(self)
     self.worker = None

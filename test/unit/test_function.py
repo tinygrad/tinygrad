@@ -557,6 +557,14 @@ class TestFunctionTuple(unittest.TestCase):
     def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
     with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
 
+  def test_vector_load_is_program_input(self):
+    out, inp = UOp.param(0, dtypes.float, (1,)), UOp.param(1, dtypes.float, (8,))
+    values = UOp(Ops.VLOAD, dtypes.float, (inp[0],), arg=8)
+    sink = out[0].store(values.index(0)).sink(arg=KernelInfo(name="vector_load"))
+    info = ProgramInfo.from_sink(sink)
+    self.assertEqual(info.outs, (0,))
+    self.assertEqual(info.ins, (1,))
+
   def test_custom_kernel_write_only_persistent_output_is_implicit(self):
     # a write-only custom_kernel output that is a realized buffer must be captured
     def write(C:UOp, A:UOp) -> UOp:

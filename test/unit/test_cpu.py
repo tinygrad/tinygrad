@@ -1,4 +1,4 @@
-import unittest, io
+import unittest, io, os, subprocess, sys
 from contextlib import redirect_stdout
 from tinygrad import Tensor, Device, UOp
 from tinygrad.helpers import Target
@@ -10,6 +10,13 @@ from tinygrad.uop.ops import KernelInfo
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
+  def test_parallel_workers_exit_cleanly(self):
+    env = os.environ.copy()
+    env.update(DEV="CPU", CPU_PARALLEL_UOPS="1")
+    proc = subprocess.run([sys.executable, "-c",
+      "from tinygrad import Tensor; assert Tensor.arange(32).sum().item() == 496"], env=env, capture_output=True, text=True)
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+
   def test_32_buffer_kernel(self):
     def add_inputs(out:UOp, *inputs:UOp) -> UOp:
       return out[0].store(sum((x[0] for x in inputs), start=UOp.const(out.dtype, 0))).sink(

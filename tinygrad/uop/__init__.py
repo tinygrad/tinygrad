@@ -52,12 +52,16 @@ class Ops(FastEnum):
   INDEX = auto(); SHRINK = auto()
 
   # load/store before math
-  LOAD = auto(); STORE = auto()
+  LOAD = auto(); VLOAD = auto(); STORE = auto()
 
   # ** 4 -- math **
 
   # tensor core math op, not elementwise
   WMMA = auto()
+  # grouped dot product. arg is the number of input lanes reduced into each output lane
+  DOT = auto()
+  # unpack low/high nibbles through a byte lookup table. arg is the tuple of table values
+  UNPACK_LUT = auto()
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()

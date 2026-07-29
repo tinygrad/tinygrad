@@ -125,7 +125,7 @@ unbroadcast = pm_wmma_add+PatternMatcher([
 ])
 
 def do_devectorize(b:UOp):
-  if b.shape == (): return None
+  if b.shape == () or b.tag == "vectorized": return None
   # broadcasting needs to be already unpacked
   if not all_same([x.shape for x in b.src]): return None
   src = []
@@ -375,7 +375,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink, ctx.has_threads), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())

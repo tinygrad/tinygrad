@@ -322,19 +322,7 @@ class Linear(nn.Linear):
       return out if self.bias is None else out + self.bias
     if llm_cpu.SUPPORTED and self.ggml_type in (8, 14) and str(self.weight.device).startswith("CPU") and \
        x.dtype in (dtypes.float16, dtypes.float32):
-      ggml_type = self.ggml_type
-      assert ggml_type is not None
-      if ggml_type == 8 and int(x.numel()) == self.in_features and self.cpu_repacked is not None:
-        out = llm_cpu.q8_repacked_linear(self, x)
-        return out if self.bias is None else out + self.bias
-      tokens, xc = int(x.numel()) // self.in_features, x.reshape(-1, self.in_features).contiguous()
-      out = Tensor.empty(tokens, self.out_features, dtype=x.dtype, device=x.device)
-      repacked = ggml_type == 8 and self.in_features <= 512 and self.cpu_repacked is not None
-      raw = self.cpu_repacked if repacked else self.weight
-      assert raw is not None
-      out = Tensor.custom_kernel(out, raw, xc, fxn=lambda out,raw,x:
-        llm_cpu.ggml_linear_kernel(out, raw, x, ggml_type, repacked))[0].reshape(*x.shape[:-1], self.out_features)
-      return out if self.bias is None else out + self.bias
+      return llm_cpu.uop_linear(self, x)
     if self.ggml_type is not None:
       weight = ggml_data_to_tensor(self.weight, self.out_features * self.in_features, self.ggml_type,
                                    contiguous=False).reshape(self.out_features, self.in_features)
@@ -433,7 +421,7 @@ def _packed_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, gr
 def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
                           out_features:int, in_features:int, ggml_type:int, routes_per_input:int) -> UOp:
   prefill = out.shape[0] > routes_per_input
-  output_tile = 2 if ggml_type == 21 and not prefill else 8 if ggml_type == 21 or prefill and ggml_type == 23 else 4
+  output_tile = 2 if ggml_type == 21 and not prefill else 4 if ggml_type == 21 else 8 if prefill and ggml_type == 23 else 4
   wave_count = 2 if prefill else 1
   if prefill:
     output_block, route = UOp.range(out_features // (output_tile * wave_count), 0), UOp.range(out.shape[0], 1)
@@ -484,10 +472,14 @@ class ExpertWeights:
     assert weight.shape == (self.num_experts, self.out_features, self.in_features)
     self.weight, self.ggml_type = packed.flatten(), ggml_type
   def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]:
+    if str(x.device).startswith("CPU"):
+      return llm_cpu.q8k_quantize(x, self.in_features) if self.ggml_type in (21, 23) else llm_cpu.q8_quantize(x, self.in_features)
     return _q8_quantize(x, int(x.numel()) // self.in_features, self.in_features)
   def __call__(self, sel:Tensor, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     ggml_type = self.ggml_type
+    if ggml_type in (14, 21, 23) and str(self.weight.device).startswith("CPU"):
+      return llm_cpu.uop_expert(self, sel, x, prepared)
     if ggml_type in (14, 21, 23) and str(self.weight.device).startswith("AMD"):
       input_count = int(x.numel()) // self.in_features
       routes_per_input = int(sel.numel()) // input_count
@@ -497,15 +489,6 @@ class ExpertWeights:
       out = Tensor.custom_kernel(out, self.weight, flat_sel, xq, xd, _expert_lut(str(x.device), ggml_type),
         fxn=lambda out,raw,sel,xq,xd,lut:_packed_expert_kernel(out, raw, sel, xq, xd, lut, self.out_features,
                                                               self.in_features, ggml_type, routes_per_input))[0]
-      return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
-    if llm_cpu.SUPPORTED and ggml_type in (14, 21, 23) and str(self.weight.device).startswith("CPU") and \
-       x.dtype in (dtypes.float16, dtypes.float32):
-      input_count = int(x.numel()) // self.in_features
-      routes_per_input = int(sel.numel()) // input_count
-      flat_sel, xc = sel.flatten().contiguous(), x.reshape(-1, self.in_features).contiguous()
-      out = Tensor.empty(int(sel.numel()), self.out_features, dtype=x.dtype, device=x.device)
-      out = Tensor.custom_kernel(out, self.weight, flat_sel, xc, fxn=lambda out,raw,sel,x:
-        llm_cpu.ggml_expert_kernel(out, raw, sel, x, ggml_type, routes_per_input))[0]
       return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
     if self.ggml_type is None: weight = self.weight[sel]
     else:
@@ -580,7 +563,8 @@ def biased_sigmoid_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[T
   assert x.shape[-1] == bias.shape[0] == 256
   outer = int(x.numel()) // 256
   if str(x.device).startswith("CPU") and outer <= 32 and x.dtype in (dtypes.float16, dtypes.float32) and \
-     bias.dtype in (dtypes.float16, dtypes.float32): return llm_cpu.biased_topk(x, bias, k, normalize)
+     bias.dtype in (dtypes.float16, dtypes.float32):
+    return llm_cpu.uop_biased_topk(x, bias, k, normalize)
   values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
   indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
   return tuple(Tensor.custom_kernel(values, indices, x.contiguous(), bias.contiguous(),
@@ -604,7 +588,7 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
 def topk_softmax(x:Tensor, k:int) -> tuple[Tensor, Tensor]:
   n, outer = x.shape[-1], int(x.numel()) // x.shape[-1]
   if n == 256 and outer <= 512 and str(x.device).startswith("CPU") and x.dtype in (dtypes.float16, dtypes.float32):
-    return llm_cpu.topk_softmax(x, k)
+    return llm_cpu.uop_topk_softmax(x, k)
   if n == 256 and outer <= 256 and str(x.device).startswith("AMD"):
     values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
     indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
@@ -719,8 +703,8 @@ class FFNBlock:
       logits:Tensor|None = None
       if input_norm is not None: x, logits = llm_cpu.rmsnorm_f16_linear(input_norm, self.ffn_gate_inp, x)
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      prepared = self.ffn_gate_exps.prepare(h) \
-        if self.ffn_gate_exps.ggml_type in (14, 21, 23) and str(h.device).startswith("AMD") else None
+      prepared = self.ffn_gate_exps.prepare(h) if self.ffn_gate_exps.ggml_type in (14, 21, 23) and \
+        str(h.device).startswith(("AMD", "CPU")) else None
       if logits is None:
         logits = llm_cpu.f16_linear(self.ffn_gate_inp, x) if self.ffn_gate_inp.ggml_type is None and self.ffn_gate_inp.bias is None and \
           self.ffn_gate_inp.weight.dtype == dtypes.float16 and str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
@@ -746,21 +730,28 @@ class FFNBlock:
          self.ffn_down_exps.ggml_type in (14, 23) and str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
          hasattr(self, "ffn_gate_shexp") and self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == \
          self.ffn_down_shexp.ggml_type == 8 and hasattr(self, "ffn_gate_inp_shexp") and \
+         self.ffn_gate_exps.cpu_repacked is not None and self.ffn_up_exps.cpu_repacked is not None and \
+         self.ffn_gate_shexp.cpu_repacked is not None and self.ffn_up_shexp.cpu_repacked is not None and \
+         self.ffn_down_shexp.cpu_repacked is not None and \
          int(x.numel()) == self.config.dim:
-        return llm_cpu.moe_ffn(self, x, probs, sel)
+        return llm_cpu.uop_moe_ffn(self, x, probs, sel)
       if prepared is not None:
         flat_sel = sel.flatten().clone()
-        gate, up = self.ffn_gate_exps(flat_sel, h, prepared), self.ffn_up_exps(flat_sel, h, prepared)
-        x_down = self.ffn_down_exps(flat_sel, gate, _q8_silu_mul(gate, up, self.config.hidden_dim))
-        x_down = x_down.reshape(*sel.shape, self.config.dim)
-        out = None
-      elif llm_cpu.SUPPORTED and str(h.device).startswith("CPU") and \
-           self.ffn_gate_exps.ggml_type == self.ffn_up_exps.ggml_type and self.ffn_gate_exps.ggml_type in (14, 21, 23):
-        expert_input = llm_cpu.expert_silu(self.ffn_gate_exps, self.ffn_up_exps, sel, h) if h.dtype == dtypes.float32 else \
-          llm_cpu.silu_mul(*llm_cpu.expert_pair(self.ffn_gate_exps, self.ffn_up_exps, sel, h))
-        if self.ffn_down_exps.ggml_type in (14, 23) and h.dtype == probs.dtype == dtypes.float32:
+        if str(h.device).startswith("AMD"):
+          gate, up = self.ffn_gate_exps(flat_sel, h, prepared), self.ffn_up_exps(flat_sel, h, prepared)
+          x_down = self.ffn_down_exps(flat_sel, gate, _q8_silu_mul(gate, up, self.config.hidden_dim))
+          out = None
+        elif self.ffn_gate_exps.ggml_type == self.ffn_up_exps.ggml_type == 21 and \
+             self.ffn_down_exps.ggml_type == 23 and self.ffn_gate_exps.cpu_repacked is not None and \
+             self.ffn_up_exps.cpu_repacked is not None and int(sel.numel()) > self.ffn_gate_exps.num_experts:
+          out = llm_cpu.uop_expert_silu_weighted(
+            self.ffn_gate_exps, self.ffn_up_exps, self.ffn_down_exps, sel, h, probs)
+          x_down = out
+        else:
+          expert_input = llm_cpu.expert_silu(self.ffn_gate_exps, self.ffn_up_exps, sel, h)
           out = llm_cpu.expert_weighted_sum(self.ffn_down_exps, sel, expert_input, probs)
-        else: x_down, out = self.ffn_down_exps(sel, expert_input), None
+          x_down = out
+        if out is None: x_down = x_down.reshape(*sel.shape, self.config.dim)
       else:
         x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())
         out = None
@@ -769,7 +760,8 @@ class FFNBlock:
           x_down.dtype == probs.dtype and x_down.dtype in (dtypes.float16, dtypes.float32) else \
           (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
-        if prepared is not None and self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8:
+        if prepared is not None and str(x.device).startswith("AMD") and \
+           self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8:
           gate, up = _q8_linear_pair(self.ffn_gate_shexp, self.ffn_up_shexp, x, prepared)
         elif self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8 and str(x.device).startswith("CPU"):
           gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(
@@ -813,7 +805,8 @@ class FFNBlock:
       self.pending_recurrent_inplace = False
       @function(precompile=True, allow_implicit=True)
       def _run_stateful(x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None):
-        fuse_attn_norm = x.shape[-2] == 1 and str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
+        fuse_attn_norm = x.shape[-2] == 1 and \
+          str(x.device).startswith("CPU") and x.dtype == dtypes.float32 and \
           self.attn_norm.weight is not None and self.attn_norm.weight.dtype == dtypes.float16 and \
           getattr(self, "attn_gate").ggml_type == getattr(self, "attn_qkv").ggml_type == 8 and \
           getattr(self, "attn_gate").cpu_repacked is not None and getattr(self, "attn_qkv").cpu_repacked is not None and \
@@ -1033,14 +1026,23 @@ class GatedDeltaNetBlock(FFNBlock):
       v = v.reshape(B, self.num_v_heads, self.head_v_dim)
       q = q.mul(self.head_k_dim**-0.5)
       if llm_cpu.SUPPORTED and str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
-        core, recurrent_state = llm_cpu.gated_delta(q.float(), k.float(), v.float(), beta.reshape(B, self.num_v_heads).float(),
-                                                  alpha.reshape(B, self.num_v_heads).float(), initial_state, inplace=True,
-                                                  norm_weight=self.ssm_norm.weight, norm_eps=self.ssm_norm.eps)
+        if self.ssm_out.ggml_type == 8 and self.ssm_norm.weight is not None:
+          xq, xd, recurrent_state = llm_cpu.gated_delta_q8(
+            q.float(), k.float(), v.float(), beta.reshape(B, self.num_v_heads).float(),
+            alpha.reshape(B, self.num_v_heads).float(), initial_state, out_gate.reshape(B, self.num_v_heads, self.head_v_dim),
+            self.ssm_norm.weight, self.ssm_norm.eps, inplace=True)
+          core = None
+        else:
+          core, recurrent_state = llm_cpu.gated_delta(q.float(), k.float(), v.float(), beta.reshape(B, self.num_v_heads).float(),
+                                                    alpha.reshape(B, self.num_v_heads).float(), initial_state, inplace=True,
+                                                    norm_weight=self.ssm_norm.weight, norm_eps=self.ssm_norm.eps)
         self.pending_recurrent_inplace = True
         self.pending_state = (conv_window[:, 1:, :].cast(self.conv_state.dtype).contiguous(),
                               recurrent_state)
         if self.ssm_out.ggml_type == 8:
+          if core is None: return llm_cpu.uop_q8_prequant_linear(self.ssm_out, xq, xd).reshape(B, 1, -1)
           return llm_cpu.q8_silu_linear(self.ssm_out, out_gate.reshape(B, 1, -1), core.reshape(B, 1, -1))
+        assert core is not None
         return self.ssm_out(llm_cpu.silu_mul(out_gate, core.reshape(B, 1, self.num_v_heads, self.head_v_dim)).
                             reshape(B, 1, -1).cast(x.dtype))
       beta, alpha = beta.reshape(B, self.num_v_heads, 1, 1), alpha.reshape(B, self.num_v_heads, 1, 1)
@@ -1275,7 +1277,6 @@ class Transformer:
     load_device = next(iter(state_dict.values())).device
     if str(load_device).startswith("CPU") and getenv("CPU_GGML_PHYSICAL", 1) and \
        (use_physical_cores:=getattr(Device[str(load_device)], "use_physical_cores", None)) is not None: use_physical_cores()
-    if llm_cpu.SUPPORTED and str(load_device).startswith("CPU"): llm_cpu.parallel_runtime()
     for param in nn.state.get_parameters(model): param.replace(param.to(load_device))
     model.parameter_count = sum(int(weight.numel()) for weight in state_dict.values())
     packed_weights:set[str] = set()
@@ -1305,6 +1306,8 @@ class Transformer:
 
     state_dict = {k:v if k in packed_weights else v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    # Repacking is model-load preprocessing. Realize it before JIT capture so the UOp kernels are not replayed per token.
+    if repacked_weights := [weight for _,weight in cpu_q8_weights + cpu_iq3_weights]: Tensor.realize(*repacked_weights)
     for linear,weight in cpu_q8_weights: linear.cpu_repacked = weight
     for expert,weight in cpu_iq3_weights: expert.cpu_repacked = weight
     recurrent_weights, cpu_conv_weights = [], []
@@ -1329,9 +1332,11 @@ class Transformer:
     for linear,offset in zip(packed_linears, packed_offsets): linear._raw_offset_uop = offset.uop
     expert_types = {getattr(block, name).ggml_type for block in model.blk if hasattr(block, "ffn_gate_exps")
                     for name in ("ffn_gate_exps", "ffn_down_exps")}
+    model_device = str(model.token_embd.weight.device)
     for ggml_type in expert_types:
-      if ggml_type in (14, 21, 23) and str(model.token_embd.weight.device).startswith("AMD"):
-        _expert_lut(str(model.token_embd.weight.device), ggml_type)
+      if ggml_type not in (14, 21, 23): continue
+      if model_device.startswith("AMD"): _expert_lut(model_device, ggml_type)
+      elif model_device.startswith("CPU"): llm_cpu._cpu_expert_lut(model_device, ggml_type)
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())

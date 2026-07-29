@@ -106,6 +106,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
+      if u.tag == "vectorized": continue
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue

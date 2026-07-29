@@ -147,6 +147,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
+    case Ops.DOT | Ops.UNPACK_LUT | Ops.VLOAD:
+      return None
     case Ops.GETTUPLE:
       # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
       in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
@@ -388,6 +390,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.WMMA:
         wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
         return wmma_b + (self.src[2].shape[-1],)
+      case Ops.DOT:
+        assert len(self.src) == 2 and self.src[0].shape == self.src[1].shape and len(self.src[0].shape) and \
+               isinstance(self.arg, int) and self.arg > 0 and self.src[0].shape[-1] % self.arg == 0
+        return self.src[0].shape[:-1] + (self.src[0].shape[-1] // self.arg,)
+      case Ops.UNPACK_LUT:
+        assert len(self.src) == 1 and isinstance(self.arg, tuple)
+        return self.src[0].shape[:-1] + (self.src[0].shape[-1] * 2,)
+      case Ops.VLOAD:
+        assert len(self.src) == 1 and self.src[0].shape == () and isinstance(self.arg, int) and self.arg > 0
+        return (self.arg,)
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
@@ -823,11 +835,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
-    if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
+    if self.op in {Ops.LOAD, Ops.VLOAD}: return AddrSpace.ALU # LOAD brings things into the ALU
+    if self.op in {Ops.CUSTOM, Ops.CUSTOMI}: return AddrSpace.ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    if self.op in {Ops.STACK, Ops.WMMA, Ops.GROUP} or self.op in GroupOp.Elementwise:
+    if self.op in {Ops.STACK, Ops.WMMA, Ops.DOT, Ops.UNPACK_LUT, Ops.GROUP} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
       if not len(ad) or not all_same(ad): return None
       return ad[0]
@@ -1157,6 +1170,7 @@ class ProgramInfo:
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   aux: tuple = ()
+  cpu_parallel: bool = False
 
   @property
   def function_name(self): return to_function_name(self.name)
@@ -1184,7 +1198,7 @@ class ProgramInfo:
     for u in sink.toposort():
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
-      if u.op in (Ops.STORE, Ops.LOAD):
+      if u.op in (Ops.STORE, Ops.LOAD, Ops.VLOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
@@ -1194,7 +1208,8 @@ class ProgramInfo:
       if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux,
+                       sink.tag == "cpu_parallel")
 
 @dataclass(frozen=True)
 class CallInfo:
