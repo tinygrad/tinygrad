@@ -160,9 +160,9 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
 
+
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp):
-  if idx.addrspace is AddrSpace.REG: return None
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
   vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
@@ -171,7 +171,6 @@ def load(ctx, x:UOp, idx:UOp):
   return x.ins(opc, src=fold_address(ctx, idx), tag=(vreg,))
 
 def store(ctx, idx:UOp, val:UOp):
-  if idx.addrspace is AddrSpace.REG: return None
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize * 8
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
@@ -355,18 +354,20 @@ memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3O
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
-  bnd,acc = x.src[:2]
-  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_ge_u32_e64, src=(acc,bnd), tag=(EXEC,))
-  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
+  bnd, mask = x.src[:2]
+  acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
+  ctx.loop_label[acc] = range_str(x)
+  ctx.exec_mask[acc] = mask
   loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
+  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,bnd), tag=(EXEC,))
   jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_END_{range_str(x)}")
-  mask = x.ins(RDNA3Ops.s_mov_b32, src=(execop,))
-  return mask, [mask, loop_body, pred, jmp_out, inc]
+  return acc, [acc, mask, loop_body, pred, jmp_out]
 
-def lower_end(ctx, rng:UOp, x:UOp):
-  loop_end = label(ctx, f".LOOP_END_{range_str(rng)}")
-  jmp = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{range_str(rng)}")
-  return jmp, [jmp, loop_end, restoreexec(rng)]
+def lower_end(ctx, x:UOp, acc:UOp, mask:UOp):
+  loop_end = label(ctx, f".LOOP_END_{ctx.loop_label[acc]}")
+  inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
+  jmp_back = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
+  return inc, [inc, jmp_back, loop_end, restoreexec(mask)]
 
 # --- other stuff ---
 # NOTE: this should just be triggered in to_vgpr????
@@ -393,6 +394,8 @@ def render_wmma(ctx, wmma:UOp):
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.dtype import to_storage_scalar
+
+# NOTE: redundant, move this and the llvmir pat to 
 pm_gfx1100_wmma = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
     src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
@@ -444,7 +447,8 @@ pre_isel_matcher = PatternMatcher([
   # (UPat(Ops.LOAD, src=(UPat.var("buf"), UPat.var("alt"), UPat.var("gate"))), gated_load),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
-  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
+  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
+    lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != 0),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
@@ -471,18 +475,23 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.CDIV, name="x"), idiv),
   # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
   # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), lambda y: (y & const((1 << 8) - 1, dtypes.uint8)).replace(dtype=dtypes.uint8)),
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), \
+    lambda y: (y & const((1 << 8) - 1, dtypes.uint8)).replace(dtype=dtypes.uint8)),
+  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
+    lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
 ]) + pm_float_to_int + pm_int_to_float
+
 
 # NOTE: cmp shouldn't always be materialized to sgpr, only for where?
 isel_matcher = PatternMatcher([
   # --- mem ops ---
-  (UPat.var("idx").store(UPat.var("val")), store),
-  (UPat.var("idx").load(name="x"), load),
+  (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
+  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- control flow ---
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
-    lambda x,bnd: x.replace(src=(vmov(bnd), vmov(const(0))) + x.src[1:])), # (bnd,acc,...)
+    lambda ctx,x,bnd: x.replace(src=(vmov(bnd), UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS))) + x.src[1:])),
+  # add exec mask edge to src
+  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[1])) if len(rng.src) > 1 else None), 
   # --- fused alu ---
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
@@ -496,7 +505,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if x.tag is None else None),
-  (UPat((Ops.INS, Ops.GROUP, Ops.END, Ops.LOAD), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
@@ -505,23 +514,17 @@ isel_matcher = PatternMatcher([
   (UPat(name="x").bitcast(), lambda x: x),
 ])
 
-def regstore(x:UOp):
-  if x.src[0].addrspace is not AddrSpace.REG: return x, [isel_matcher.rewrite(x)]
-  nx = x.ins(RDNA3Ops.v_mov_b32_e32, src=(x.src[1],))
-  return nx, [nx]
-
 # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
 pre_regalloc_matcher = PatternMatcher([
-  (UPat((Ops.IF, Ops.RANGE), name="x"), lambda ctx,x: (x, [x.replace(tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))])),
-  (UPat.var("idx").load(name="x"), lambda idx,x: (x, [x.ins(RDNA3Ops.v_mov_b32_e32, src=(idx,))])),
-  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (x, [isel_matcher.rewrite(x)])
-    if idx.addrspace is not AddrSpace.REG else (x, [x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))])),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: (x, [x.replace(tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))])),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: ((nx := isel_matcher.rewrite(x)), [nx])
+    if idx.addrspace is not AddrSpace.REG else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), lower_end),
+  (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat.var("mask")), name="x"), lower_end),
   (UPat(Ops.IF, src=(UPat.var("gate"),), name="x"), lambda x,gate: (x, [x.ins(RDNA3Ops.s_and_saveexec, src=(gate,))])),
   (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: (x, [x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))])),
 ])
@@ -537,7 +540,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  print("encoding", opc, [(u.op,u.arg,rdefs(u)) for u in x.src])
+  print("encoding", opc, rdefs(x), [(u.op,u.arg,rdefs(u)) for u in x.src])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -598,6 +601,7 @@ def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
 @dataclass
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
+  exec_mask: dict[UOp, UOp] = field(default_factory=dict)
 
 def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS)
 

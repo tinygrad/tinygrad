@@ -54,10 +54,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)# ctx.prgpts[x]
 
   for s in x.src: # handle spills?
-    if s.op is Ops.INDEX:
-      if rdef(s) is not None: # mem2reg ref
-        nsrc.append(s.replace(tag=ctx.pmap[rdef(s)]))
-      else: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
+    if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
 
   for v in rdefs(x):
@@ -76,19 +73,21 @@ pm_regalloc_rewrite = PatternMatcher([
 # each new store creates a new vregister and subsequent loads use the latest definition
 class Mem2RegContext:
   def __init__(self, uops:list[UOp], valloc):
-    self.r: dict[UOp, VRegister] = {}
-    v: dict[tuple[UOp, int], VRegister] = {}
-    vslot = itertools.count()
-    for u in uops:
-      if u.op in [Ops.LOAD, Ops.STORE] and u.src[0].addrspace is AddrSpace.REG:
-        idx = u.src[0]
-        buf,i = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0], idx.src[1].arg # passthrough for AFTER/END
-        if u.op is Ops.STORE: v[(buf,i)] = valloc(f"m2vr{next(vslot)}", u)
-        self.r[u] = v[(buf,i)]
+    self.cur: dict[tuple[UOp, int], UOp] = {}
+    self.vslot = itertools.count()
+    self.valloc = valloc
+
+# decouple identical BUFFER refs from UOp mutation
+def geps(idx:UOp) -> tuple[UOp, int]:
+  return (idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]), idx.src[1].arg 
+
+def promote_store(ctx, idx:UOp, x:UOp):
+  nx = x.replace(tag=(ctx.valloc(f"m2vr{next(ctx.vslot)}", x)))
+  ctx.cur[geps(idx)] = nx
+  return nx, [nx]
 
 pm_mem2reg_rewrite = PatternMatcher([
-  (UPat().load(name="x"), lambda ctx,x: (x, [x.replace(src=(x.src[0].replace(tag=(ctx.r[x],)),) + x.src[1:])]) \
-    if x.src[0].tag is None else None),
-  (UPat().store(UPat()).named("x"), lambda ctx,x: (x, [x.replace(tag=(ctx.r[x],))]) \
-    if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
+  (UPat.var("idx").load(), lambda ctx,idx: (ctx.cur[geps(idx)], [])), 
+  (UPat.var("idx").store(UPat()).named("x"), lambda ctx,idx,x: promote_store(ctx, idx, x) \
+    if idx.addrspace is AddrSpace.REG and x.tag is None else None),
 ])
