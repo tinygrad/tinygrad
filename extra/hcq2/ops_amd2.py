@@ -4,7 +4,7 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_cmdbuf
-from tinygrad.runtime.support.hcq2 import make_binary_patch, make_patch
+from tinygrad.runtime.support.hcq2 import make_binary_patch, make_patches
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -158,7 +158,7 @@ def pm4_submit(ctx, lin):
 
   ib = UOp.placeholder((size_dw + 2,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
   done_idx, submit_idx = UOp.const(dtypes.int, size_dw + 0), UOp.const(dtypes.int, size_dw + 1)
-  submitted = (counter:=ib.after(*[make_patch(ib, (size_dw + i) * 4, UOp.const(dtypes.uint32, 0)) for i in range(2)]).index(submit_idx)).load()
+  submitted = (counter:=ib.after(make_patches(ib, [((size_dw + i) * 4, UOp.const(dtypes.uint32, 0)) for i in range(2)])).index(submit_idx)).load()
   completed = ib.after(loop:=UOp.loop(0)).index(done_idx).load()
   ib_free = completed.end(loop, completed != submitted)
 
