@@ -38,7 +38,9 @@ API mapping (tilelang -> tinygrad UOps, idioms from test/backend/test_custom_ker
                                       carried by the RANGE metadata instead of a device tuple. C_local[i, j] with
                                       i in this thread's shard is INDEX on the UNSHARD, which multi_pm resolves
                                       into INDEX on the per-thread REG shard.
-    T.copy(gmem_slice, smem)       -> smem.index(thread_idx).store(gmem_slice.load()).end(copy_rng)
+    T.copy(gmem_slice, smem)       -> smem[thread_idx].set(gmem_slice[thread_idx], end=copy_rng). set returns the
+                                      smem tile AFTER the copy; the implicit-barrier pass turns the store->load
+                                      dependency of the loop that consumes it into a workgroup barrier
     T.gemm (no WMMA)               -> C_local[..].set(C_local.after(k)[..] + a_shared[..] * b_shared[..], end=k)
                                       with k an AxisType.REDUCE range (codegen builds the register accumulator
                                       from this self-referential store automatically)
@@ -77,7 +79,7 @@ def alloc_fragment(shape:tuple[int, ...], dtype:DType, axis:int, tnum:UOp) -> UO
   return fragment.unshard(axis, tnum)
 
 # ---------------------------------------------------------------------------
-# GEMM kernel: C = relu(A @ B), fp16 inputs, fp32 fragment accumulator, no WMMA
+# GEMM kernel: C = relu(A @ B), float inputs (fp16 or fp32), fp32 fragment accumulator, no WMMA
 # ---------------------------------------------------------------------------
 
 # 64x64 output tile per block, 64 threads (tilelang uses 128 with a 2D per-thread fragment layout;
@@ -91,7 +93,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   """C[M, N] = relu(A[M, K] @ B[K, N]) -- one 64x64 tile per block, locals + fragments."""
   M, K = a.shape
   K2, N = b.shape
-  assert K == K2 and a.dtype == b.dtype == dtypes.float16
+  assert K == K2 and a.dtype == b.dtype == c.dtype and not dtypes.is_int(a.dtype)
   assert not (K % BLOCK_K or M % BLOCK_M or N % BLOCK_N), "test sizes must be multiples of the block sizes"
 
   # with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=64) as (bx, by):
@@ -116,27 +118,22 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   ko = UOp.range(cdiv(K, BLOCK_K), 3, AxisType.LOOP)
 
   # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies ROWS row(s)
+  # set returns the tile AFTER the copy; codegen turns that store->load dependency into a workgroup barrier
   iar, ka = UOp.range(ROWS, 6, AxisType.LOOP), UOp.range(BLOCK_K, 7, AxisType.LOOP)
-  a_st = A_shared[tid*ROWS + iar, ka].store(a[by*BLOCK_M + tid*ROWS + iar, ko*BLOCK_K + ka]).end(iar, ka)
+  A_shared = A_shared[tid*ROWS + iar, ka].set(a[by*BLOCK_M + tid*ROWS + iar, ko*BLOCK_K + ka], end=(iar, ka))
 
   # T.copy(B[ko * BLOCK_K, bx * BLOCK_N], B_shared) -- each thread copies ROWS_B column(s)
   kb, ibr = UOp.range(BLOCK_K, 8, AxisType.LOOP), UOp.range(ROWS_B, 9, AxisType.LOOP)
-  b_st = B_shared[kb, tid*ROWS_B + ibr].store(b[ko*BLOCK_K + kb, bx*BLOCK_N + tid*ROWS_B + ibr]).end(kb, ibr)
-
-  # the AFTERs carry the store->load dependency on the tiles; codegen inserts the workgroup barrier automatically
-  A_ready = A_shared.after(a_st, b_st)
-  B_ready = B_shared.after(a_st, b_st)
+  B_shared = B_shared[kb, tid*ROWS_B + ibr].set(b[ko*BLOCK_K + kb, bx*BLOCK_N + tid*ROWS_B + ibr], end=(kb, ibr))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment rows.
   # identical to custom_gemm: a self-referential store over an AxisType.REDUCE range,
   # which codegen turns into a register accumulator
   ir, jj = UOp.range(ROWS, 10, AxisType.LOOP), UOp.range(BLOCK_N, 11, AxisType.LOOP)
   kk = UOp.range(BLOCK_K, 12, AxisType.REDUCE)
-  acc = C_loc.after(kk)[tid*ROWS + ir, jj] + A_ready[tid*ROWS + ir, kk].cast(dtypes.float32) * B_ready[kk, jj].cast(dtypes.float32)
-  st_acc = C_loc[tid*ROWS + ir, jj].store(acc).end(kk)
-
-  # close the ko loop; codegen adds the barrier so no thread overwrites the tiles while others still read them
-  C_loc = C_loc.after(st_acc.end(ir, jj, ko))
+  acc = C_loc.after(kk)[tid*ROWS + ir, jj] + A_shared[tid*ROWS + ir, kk].cast(dtypes.float32) * B_shared[kk, jj].cast(dtypes.float32)
+  # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
+  C_loc = C_loc[tid*ROWS + ir, jj].set(acc, end=(kk, ir, jj, ko))
 
   # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
   # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
