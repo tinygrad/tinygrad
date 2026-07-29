@@ -424,8 +424,8 @@ class TestUOpGraph(unittest.TestCase):
     # mnist indexing with split reduceop
     # Make sure we are not doign math on the loaded index, which would promote it to long
     c0 = UOp.param(0, dtypes.uchar, (128000,))
-    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.WEAK)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
@@ -441,8 +441,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_idx_no_math_on_loaded(self):
     # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
     c0 = UOp.param(0, dtypes.uchar, (128000,))
-    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.WEAK)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)  # c4 is a load
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)

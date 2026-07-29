@@ -16,7 +16,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
 
   wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
   tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
+  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.WEAK)
   lane = UOp.range(VEC, 3, AxisType.UNROLL)
 
   idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
