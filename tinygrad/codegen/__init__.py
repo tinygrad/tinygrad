@@ -257,37 +257,29 @@ pm_cast_float_alu = PatternMatcher([
 
 def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
 
-def add_implicit_barriers(s:UOp):
-  sink = s
-  # movement through LOCAL memory shared by the workgroup needs barriers, add them if the user didn't
-  subs: dict[UOp, UOp] = {}
-  topo = sink.toposort()
+def add_raw_barrier(a:UOp):
+  # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
+  if len(a.src) <= 1 or a.src[0].addrspace is not AddrSpace.LOCAL: return None
+  dep_slice = set().union(*[d.backward_slice_with_self for d in a.src[1:]])
+  if any(x.op is Ops.BARRIER for x in dep_slice) or not any(_is_local_store(x) for x in dep_slice): return None
+  return a.src[0].after(UOp(Ops.BARRIER, src=a.src[1:]))
 
-  # RAW: an AFTER on a LOCAL buffer that depends on stores to LOCAL memory needs a workgroup barrier between the stores and the loads
-  for a in [u for u in topo if u.op is Ops.AFTER and len(u.src) > 1 and u.src[0].addrspace is AddrSpace.LOCAL]:
-    dep_slice = set().union(*[d.backward_slice_with_self for d in a.src[1:]])
-    if any(x.op is Ops.BARRIER for x in dep_slice) or not any(_is_local_store(x) for x in dep_slice): continue
-    subs[a] = a.src[0].after(UOp(Ops.BARRIER, src=a.src[1:]))
-
-  # WAR: a LOCAL buffer that is both stored and loaded inside a loop needs a workgroup barrier at the end of the loop body,
-  # otherwise the stores of the next iteration can race with the loads of the current one
-  war_loads: dict[UOp, list[UOp]] = {}
-  for r in [u for u in topo if u.op is Ops.RANGE and u.arg[1] in (AxisType.REDUCE, AxisType.LOOP) and u.vmax > 0]:
-    body = [u for u in topo if r in u.ranges]
-    store_bufs = {u.buf_uop for u in body if _is_local_store(u)}
-    loads = [u for u in body if u.op is Ops.LOAD and u.src[0].addrspace is AddrSpace.LOCAL and u.src[0].buf_uop in store_bufs]
-    if len(loads): war_loads[r] = loads
-  for e in [u for u in topo if u.op is Ops.END]:
-    loads = [l for r in e.src[1:] if r in war_loads for l in war_loads[r]]
-    if not len(loads): continue
-    # don't add a second barrier if there's already one at the end of this loop body (barriers after stores don't have an END src)
-    if any(b.op is Ops.BARRIER and any(s.op is Ops.END for s in b.src) for b in e.src[0].backward_slice_with_self): continue
-    subs[e] = e.replace(src=(UOp(Ops.BARRIER, src=(e.src[0], *loads)),)+e.src[1:])
-
-  return sink.substitute(subs) if len(subs) else None
+def add_war_barrier(e:UOp):
+  # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
+  rngs = [r for r in e.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.LOOP) and r.vmax > 0]
+  if not rngs: return None
+  if e.src[0].op is Ops.BARRIER: return None
+  sl = e.src[0].backward_slice_with_self
+  # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
+  store_bufs = {x.buf_uop for x in sl if _is_local_store(x) and any(r in x.ranges for r in rngs)}
+  if not store_bufs: return None
+  loads = [x for x in sl if x.op is Ops.LOAD and x.src[0].addrspace is AddrSpace.LOCAL and x.src[0].buf_uop in store_bufs]
+  if not loads: return None
+  return e.replace(src=(UOp(Ops.BARRIER, src=(e.src[0], *loads)),)+e.src[1:])
 
 pm_implicit_barriers = PatternMatcher([
-  (UPat(Ops.SINK, name="s"), add_implicit_barriers),
+  (UPat(Ops.AFTER, name="a"), add_raw_barrier),
+  (UPat(Ops.END, name="e"), add_war_barrier),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -380,7 +372,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers", walk=True)
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
