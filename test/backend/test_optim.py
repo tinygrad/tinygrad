@@ -143,12 +143,11 @@ class TestOptim(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_mixed_precision(self):
-    old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.half))
     # weight update would overflow without upcasting
     self._test_sgd(10, {'lr': 1e10}, 1e-6, 3e-4)
     self._test_adam(1, {'lr': 1e10}, 1e-4, 1e-4)
     self._test_adamw(1, {'lr': 1e10}, 1e-4, 1e-4)
-    dtypes.default_float = old_default_float
 
   def test_assert_tensor_train(self):
     t = Tensor.ones((1,1))

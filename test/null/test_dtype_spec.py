@@ -2,7 +2,7 @@ import unittest, math, struct, operator
 from tinygrad import Tensor, Device
 from tinygrad.dtype import DTYPES_DICT, dtypes, Invalid, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from hypothesis import given, settings, strategies as strat
 import numpy as np
 import torch
@@ -245,19 +245,14 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.weakfloat, dtypes.float64) == dtypes.float64
 
 class TestTypeSpec(unittest.TestCase):
-  def setUp(self):
-    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
-  def tearDown(self):
-    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
-
   def test_set_dtype_default(self):
     for default_int in [dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64]:
-      dtypes.default_int = default_int
-      assert dtypes.default_int == default_int
+      with Context(DEFAULT_INT=default_int):
+        assert dtypes.default_int == default_int
 
     for default_float in [*dtypes.fp8s, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
-      dtypes.default_float = default_float
-      assert dtypes.default_float == default_float
+      with Context(DEFAULT_FLOAT=default_float):
+        assert dtypes.default_float == default_float
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):
@@ -265,7 +260,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_functions_return_index(self, dtype, default_int, default_float):
-    dtypes.default_int, dtypes.default_float = default_int, default_float
+    self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
     assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.int32
     assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.int32
     assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.int32
@@ -285,7 +280,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
   def test_attention_returns_same_dtype(self, data_dtype, default_float):
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     query = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
     key = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
     value = Tensor.rand(32, 8, 128, 64, dtype=data_dtype)
@@ -296,19 +291,14 @@ class TestTypeSpec(unittest.TestCase):
     assert query.scaled_dot_product_attention(key, value, attn_mask=mask).dtype == data_dtype
 
 class TestAutoCastType(unittest.TestCase):
-  def setUp(self):
-    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
-  def tearDown(self):
-    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
-
   @given(strat.sampled_from(dtype_floats), strat.sampled_from(dtype_floats))
   def test_least_upper_float_input_is_float(self, input_dtype, default_float):
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     self.assertEqual(least_upper_float(input_dtype), input_dtype)
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_least_upper_float_input_is_int(self, input_dtype, default_float):
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     self.assertEqual(least_upper_float(input_dtype), default_float)
 
   @given(strat.sampled_from(core_dtypes))
@@ -332,7 +322,7 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_floats))
   def test_int_div_int(self, default_float):
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     self.assertEqual(Tensor([1]).div(Tensor([2])).dtype, default_float)
 
   def test_sum(self):

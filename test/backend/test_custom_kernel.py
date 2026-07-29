@@ -55,7 +55,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
-  G = UOp.range(src.shape[0], 0)
+  G = UOp.range(src.shape[0], 0, dtype=dtypes.int)
   slice_src = src[G, :]
   reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
@@ -130,7 +130,7 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
     b = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
     # ugly construction to get a sharded empty tensor
-    c = Tensor(Tensor.empty(8, 16, device=devs).uop.multi(0), device=devs)
+    c = Tensor(Tensor.empty(8, 16, device=devs).uop.unshard(0), device=devs)
     c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
@@ -139,7 +139,7 @@ class TestCustomKernel(unittest.TestCase):
     # PYTHON backend explicitly checks for OOB access for wrong multi shape regression
     devs = ("PYTHON:0", "PYTHON:1")
     a = Tensor.ones(4, 4).contiguous().shard(devs, axis=0)
-    c = Tensor(Tensor.empty(2, 4, device=devs).uop.multi(0), device=devs)
+    c = Tensor(Tensor.empty(2, 4, device=devs).uop.unshard(0), device=devs)
     c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
     assert (c == 2).all().item()
 
@@ -213,7 +213,7 @@ class TestCustomKernel(unittest.TestCase):
     N = 16
     a = Tensor.randn(N, N).shard_(devs, axis=0)
     b = Tensor.randn(N, N).to(devs)
-    c = Tensor(Tensor.empty(N//2, N, device=devs).uop.multi(0), device=devs)
+    c = Tensor(Tensor.empty(N//2, N, device=devs).uop.unshard(0), device=devs)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
@@ -330,7 +330,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
     a = Tensor.ones(4, 4).shard(devs, axis=0).realize()
-    c = Tensor(Tensor.invalids(2, 4, dtype=dtypes.float, device=devs).uop.multi(0), device=devs)
+    c = Tensor(Tensor.invalids(2, 4, dtype=dtypes.float, device=devs).uop.unshard(0), device=devs)
     c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     c.realize()

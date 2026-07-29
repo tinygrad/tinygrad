@@ -48,7 +48,7 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
     axis = logits_u.axis
     ndev = len(device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate((MBS, SEQ, VOCAB)))
-    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.multi(axis), device=device)
+    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.unshard(axis), device=device)
     rows_per_dev = local_shape[0] * local_shape[1]
     seq_per_dev = local_shape[1]
   else:
@@ -74,11 +74,11 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
     axis = logits.uop.axis
     assert axis in (0, 1), f"unsupported sharding axis={axis} for CE loss"
     ndev = len(logits.device)
-    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate(logits.shape))
     rows_per_dev = local_shape[0] * local_shape[1]
