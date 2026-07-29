@@ -7,6 +7,7 @@ from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister,
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 from dataclasses import dataclass, field
 import itertools
+from enum import Enum, auto
 
 # ---- (UOp, dtype) -> Instruction tables ----
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
@@ -159,7 +160,6 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   return (offs, const(0, dtypes.uint16), base)
 
 def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
-
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp):
@@ -357,7 +357,6 @@ def const64(x:UOp):
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
-memgroups = { RDNA3Ops.GLOBAL, RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
@@ -444,6 +443,9 @@ pm_int_to_float = PatternMatcher([
 pre_isel_matcher = PatternMatcher([
   # --- gated ---
   (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")), gated_load),
+  # lower the store ins into src[0] but keep Ops.STORE to be linearized to IF/ENDIF in codegen
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate:
+    x.replace(src=(x.replace(src=(idx,val)), val, gate))),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -485,8 +487,6 @@ pre_isel_matcher = PatternMatcher([
 isel_matcher = PatternMatcher([
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
-  # lower the store ins into src[0] but keep Ops.STORE to be linearized to IF/ENDIF in codegen
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate: x.replace(src=(store(ctx,idx,val), val, gate))),
   (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- control flow ---
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
@@ -519,6 +519,7 @@ pre_regalloc_matcher = PatternMatcher([
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
     ((nx := x.ins(RDNA3Ops.s_and_saveexec_b32, tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))), [nx])),
+  # how to detect it used to be gated?
   (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (idx, [idx]) if idx.addrspace is not AddrSpace.REG \
     else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
 ])
@@ -527,7 +528,8 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),
-  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: ((nx := x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))), [nx])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: \
+    ((nx := x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))), [nx])),
 ])
 
 def encode(ctx, x:UOp):
@@ -576,35 +578,19 @@ def encode(ctx, x:UOp):
   ret = enc(**kw) if kw is not None else enc(*args)
   return x.replace(arg=ret)
 
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L250
-from enum import Enum, auto
 class CntType(Enum):
   DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
 
-def ctp(x:UOp) -> CntType|None:
-  if x.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }: return CntType.STORE_CNT if x.dtype is dtypes.void else CntType.LOAD_CNT
-  if x.arg.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
-  return None
-
-# TODO: buffered flush
-def insertwaitcnts(uops:list[UOp]) -> list[UOp]:
-  nuops = []
-  deps: set[Register] = set()
-  for u in uops:
-    if any(r in deps for s in u.src for r in rdefs(s)):
-      nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
-      deps.clear()
-    if (tp := ctp(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
-      deps.update(rdefs(u))
-    nuops.append(u)
-  return nuops
+  def get(u:UOp) -> CntType|None:
+    if u.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }:
+      return CntType.STORE_CNT if u.dtype is dtypes.void else CntType.LOAD_CNT
+    if u.arg.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
+    return None
 
 @dataclass
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
   exec_mask: dict[UOp, UOp] = field(default_factory=dict)
-
-def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS)
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -615,40 +601,42 @@ class RDNA3Renderer(ISARenderer):
   pre_regalloc_matcher = pre_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
-  mem2reg_alloc = staticmethod(mem2reg_alloc)
   def __init__(self, target:Target):
     from tinygrad.codegen.opt import tc
     super().__init__(target)
     self.tensor_cores = tc.get_amd(target.arch)
 
+  @staticmethod
+  def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS)
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
   def copy(self, u:UOp, r:VRegister|Register) -> UOp: return u.ins(RDNA3Ops.v_mov_b32_e32, src=(u,), tag=(r,))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
-    nuops = insertwaitcnts(lin.src)
+    deps: set[Register] = set()
+    nuops = []
+    for u in lin.src:
+      if any(r in deps for s in u.src for r in rdefs(s)):
+        nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
+        deps.clear()
+      if (tp := CntType.get(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
+        deps.update(rdefs(u))
+      nuops.append(u)
 
-    # labels + encode
     pc = 0
     targets: dict[str, int] = {}
-    _asm: list[tuple[UOp,int]] = []
-    for u in nuops:
-      if u.arg is RDNA3Ops.s_nop:
-        if isinstance(u.tag, str):
-          targets[u.tag] = pc
-        continue
-      l = encode(self,u)
-      pc += l.arg.size()
-      _asm.append((l,pc))
+    upc: dict[UOp, int] = {}
+    uops = nuops.copy()
+    nuops = []
+    for u in uops:
+      if u.arg is RDNA3Ops.s_nop and isinstance(u.tag, str): targets[u.tag] = pc
+      else:
+        upc[u] = pc = pc + (u := encode(self,u)).arg.size()
+        nuops.append(u)
 
-    # if (cond) PC = PC + (SIMM16 *4) +4
-    def _reslv(u:UOp,upc:int):
-      if not isinstance(u.tag, str): return u
-      simm = (targets[u.tag] - upc) // 4
-      return u.replace(arg=RDNA3Ops.SOPP(u.arg.op, simm))
-    lin = lin.replace(src=tuple([_reslv(u,p) for u,p in _asm]))
+    lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
+      u.replace(arg=RDNA3Ops.SOPP(u.arg.op, (targets[u.tag] - upc[u]) // 4)) for u in nuops]))
 
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch, scratch_size=0)
-
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
