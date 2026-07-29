@@ -439,7 +439,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.UNSHARD: return tuple(s*(int(self.src[1].vmax)+1) if a == self.axis else s for a,s in enumerate(ps))
+        case Ops.UNSHARD: return tuple(s*(int(self.src[1:][self.arg.index(a)].vmax)+1) if a in self.arg else s for a,s in enumerate(ps))
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -665,15 +665,26 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** multi-device helpers ***
 
-  def unshard(self, axis:int|None, device_range:UOp|None=None):
+  def unshard(self, axis:int|tuple[int, ...]|None, device_range:UOp|tuple[UOp, ...]|None=None):
     assert axis is not None, "multi None is no longer supported"
-    # an UNSHARD always has two srcs: the value and the range it ends (defaults to a DEVICE range over the devices)
-    # the range need not be DEVICE, e.g. a LOCAL range shards a kernel tile into per-thread fragments
-    if device_range is None:
-      assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
-      device_range = UOp.range(len(self.device), -1, AxisType.DEVICE)
-    assert device_range.op is Ops.RANGE
-    return UOp(Ops.UNSHARD, src=(self, device_range), arg=axis)
+    # an UNSHARD carries the value and one sharding range per sharded axis (arg is the tuple of sharded axes,
+    # sorted). the single-axis axis form defaults the range to a DEVICE range over the devices; a range need not
+    # be DEVICE, e.g. a LOCAL range shards a kernel tile into per-thread fragments
+    if isinstance(axis, int):
+      if device_range is None:
+        assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
+        device_range = UOp.range(len(self.device), -1, AxisType.DEVICE)
+      assert isinstance(device_range, UOp) and device_range.op is Ops.RANGE, "single-axis unshard requires one RANGE"
+      axis, device_range = (axis,), (device_range,)
+    assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
+    assert all(x.op is Ops.RANGE for x in device_range), f"unshard requires RANGEs, not {device_range}"
+    axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
+    return UOp(Ops.UNSHARD, src=(self, *device_range), arg=axis)
+
+  @property
+  def sharding(self) -> tuple[tuple[int, UOp], ...]:
+    """(axis, RANGE) pairs this value is sharded over (the source of truth for shard bounds/counts)."""
+    return tuple(zip(self.arg, self.src[1:])) if self.op is Ops.UNSHARD else ()
 
   @property
   def bounds(self):
@@ -685,7 +696,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def axis(self) -> int|None:
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None
-    if self.op is Ops.UNSHARD: return self.arg
+    if self.op is Ops.UNSHARD:
+      if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
+      return self.arg[0]
     # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
     if self.op is Ops.GETTUPLE:
       in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
