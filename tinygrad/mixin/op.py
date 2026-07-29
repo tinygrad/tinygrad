@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, itertools, math, string
-from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
+from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args, Any
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
@@ -14,6 +14,49 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
 
 ReductionStr = Literal["mean", "sum", "none"]
+
+
+def tree_map(fn: Callable, *trees):
+  if not isinstance(t:=trees[0], (tuple, list, dict)): return fn(*trees)
+  if isinstance(t, tuple): return tuple(tree_map(fn, *cols) for cols in zip(*trees))
+  if isinstance(t, list): return [tree_map(fn, *cols) for cols in zip(*trees)]
+  return {k: tree_map(fn, *(tr[k] for tr in trees)) for k in t}
+
+def _get_leaf(tree):
+  if not isinstance(tree, (tuple, list, dict)): return tree
+  if isinstance(tree, (tuple, list)): return _get_leaf(tree[0])
+  return _get_leaf(next(iter(tree.values())))
+
+def associative_scan(fn: Callable, elems: Any, axis: int = 0) -> Any:
+  leaf = _get_leaf(elems)
+  axis = axis % leaf.ndim
+  N = leaf.shape[axis]
+  if N <= 1: return elems
+
+  sl_even = tuple(slice(None) if i != axis else slice(0, None, 2) for i in range(leaf.ndim))
+  sl_odd = tuple(slice(None) if i != axis else slice(1, None, 2) for i in range(leaf.ndim))
+  x_even, x_odd = tree_map(lambda t: t[sl_even], elems), tree_map(lambda t: t[sl_odd], elems)
+
+  sl_pair = tuple(slice(None) if i != axis else slice(0, N // 2) for i in range(leaf.ndim))
+  reduced = fn(tree_map(lambda t: t[sl_pair], x_even), x_odd)
+  res_odd = associative_scan(fn, reduced, axis=axis)
+
+  sl_0 = tuple(slice(None) if i != axis else slice(0, 1) for i in range(leaf.ndim))
+  res_even_0 = tree_map(lambda t: t[sl_0], x_even)
+
+  if N // 2 > 0:
+    sl_odd_head = tuple(slice(None) if i != axis else slice(0, (N + 1) // 2 - 1) for i in range(leaf.ndim))
+    sl_even_tail = tuple(slice(None) if i != axis else slice(1, None) for i in range(leaf.ndim))
+    res_even_tail = fn(tree_map(lambda t: t[sl_odd_head], res_odd), tree_map(lambda t: t[sl_even_tail], x_even))
+    res_even = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), res_even_0, res_even_tail)
+  else:
+    res_even = res_even_0
+
+  def _interleave(a, b):
+    b_padded = b.pad(tuple((0, a.shape[axis] - b.shape[axis]) if i == axis else None for i in range(leaf.ndim)))
+    return a.stack(b_padded, dim=axis + 1).flatten(axis, axis + 1)[tuple(slice(None) if i != axis else slice(0, N) for i in range(leaf.ndim))]
+
+  return tree_map(_interleave, res_even, res_odd)
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
@@ -770,6 +813,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
+
+  def associative_scan(self, fn: Callable, axis: int = 0) -> Self:
+    """
+    Computes an associative parallel scan along `axis` using binary function `fn`.
+    """
+    return associative_scan(fn, self, axis=axis)
 
   def cummax(self, axis:int=0) -> tuple[Self, Self]:
     """

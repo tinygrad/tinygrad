@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Callable
 import torch
 from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, associative_scan
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -1122,6 +1122,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,0,4)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1))
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
+
+  def test_associative_scan(self):
+    helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(20, 30)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
+    helper_test_op([(10)], lambda x: torch.cumprod(x, dim=0), lambda x: x.associative_scan(lambda a,b: a*b, axis=0))
+    a, b = Tensor.randn(2, 8, 4).abs() + 0.1, Tensor.randn(2, 8, 4)
+    scanned_a, scanned_b = associative_scan(lambda e1, e2: (e2[0]*e1[0], e2[0]*e1[1] + e2[1]), (a, b), axis=1)
+    ref_a, ref_b = np.zeros((2, 8, 4)), np.zeros((2, 8, 4))
+    cur_a, cur_b = np.ones((2, 4)), np.zeros((2, 4))
+    a_np, b_np = a.numpy(), b.numpy()
+    for i in range(8):
+      cur_a = a_np[:, i, :] * cur_a
+      cur_b = a_np[:, i, :] * cur_b + b_np[:, i, :]
+      ref_a[:, i, :], ref_b[:, i, :] = cur_a, cur_b
+    np.testing.assert_allclose(scanned_a.numpy(), ref_a, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(scanned_b.numpy(), ref_b, rtol=1e-4, atol=1e-4)
 
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))

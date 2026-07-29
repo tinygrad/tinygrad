@@ -8,6 +8,7 @@ from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, Tracin
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike
 from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin.op import associative_scan
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
