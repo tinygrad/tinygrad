@@ -145,6 +145,8 @@ class PTXRenderer(Renderer):
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
     self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
     self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(target.arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
+    if ver < 80: self.extra_matcher += PatternMatcher([(UPat((Ops.MAX, Ops.EXP2), dtype=dtypes.half, name="x"),
+      lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))])
 
   # language options
   kernel_prefix = """.version VERSION
