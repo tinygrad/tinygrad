@@ -54,7 +54,7 @@ API mapping (tilelang -> tinygrad UOps, idioms from test/backend/test_custom_ker
 
 from tinygrad.dtype import dtypes, AddrSpace, DType
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
-from tinygrad.helpers import cdiv
+from tinygrad.helpers import cdiv, getenv
 from tinygrad.tensor import Tensor
 
 # ---------------------------------------------------------------------------
@@ -126,11 +126,15 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies its own 8x8 sub-tile
   # set returns the tile AFTER the copy; codegen turns that store->load dependency into a workgroup barrier
   iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.LOOP)
-  A_shared = A_shared[ty*TM + iar, tx*TN + ka].set(a[by*BLOCK_M + ty*TM + iar, ko*BLOCK_K + tx*TN + ka], end=(iar, ka))
+  A_store = A_shared[ty*TM + iar, tx*TN + ka].store(a[by*BLOCK_M + ty*TM + iar, ko*BLOCK_K + tx*TN + ka]).end(iar, ka)
 
   # T.copy(B[ko * BLOCK_K, bx * BLOCK_N], B_shared)
   kb, ibr = UOp.range(TM, 9, AxisType.LOOP), UOp.range(TN, 10, AxisType.LOOP)
-  B_shared = B_shared[ty*TM + kb, tx*TN + ibr].set(b[ko*BLOCK_K + ty*TM + kb, bx*BLOCK_N + tx*TN + ibr], end=(kb, ibr))
+  B_store = B_shared[ty*TM + kb, tx*TN + ibr].store(b[ko*BLOCK_K + ty*TM + kb, bx*BLOCK_N + tx*TN + ibr]).end(kb, ibr)
+
+  # get the shared after the stores (single barrier)
+  A_shared = A_shared.after(A_store, B_store)
+  B_shared = B_shared.after(A_store, B_store)
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment sub-tile.
   # identical to custom_gemm: a self-referential store over the loop-carried kk range,
@@ -167,7 +171,7 @@ def matmul_relu(a:Tensor, b:Tensor) -> Tensor:
 if __name__ == "__main__":
   from tinygrad import Device
   assert Device[Device.DEFAULT].renderer.has_local, "this GPU-style kernel needs a backend with local memory (LOCAL ranges + barriers)"
-  M = K = N = 256  # 4x4 grid of 64x64 tiles, 4 K chunks
+  M = K = N = getenv("N", 256)  # 4x4 grid of 64x64 tiles, 4 K chunks
 
   a = Tensor.randn(M, K, dtype=dtypes.float16).contiguous()
   b = Tensor.randn(K, N, dtype=dtypes.float16).contiguous()
