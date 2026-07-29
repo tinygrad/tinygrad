@@ -84,9 +84,9 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
     q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
     k[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
-  qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
-  Q_lds = Q_lds.after(qk_load_barrier)
-  KV_lds_k = KV_lds.after(qk_load_barrier)
+  # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+  Q_lds = Q_lds.after(UOp.group(Q_store, K_store))
+  KV_lds_k = KV_lds.after(UOp.group(Q_store, K_store))
 
   # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
@@ -147,9 +147,9 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   # load V into KV_lds (must wait for QK WMMA to finish reading K from KV_lds)
   V_store = KV_lds.after(qk_done).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
     v[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
-  pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
-  P_lds = P_lds.after(pv_barrier)
-  KV_lds_v = KV_lds.after(pv_barrier)
+  # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+  P_lds = P_lds.after(UOp.group(P_store, V_store))
+  KV_lds_v = KV_lds.after(UOp.group(P_store, V_store))
 
   # -- acc += P @ V via WMMA --
   k_pv = UOp.range(BLOCK_N // WMMA_K, 400, AxisType.REDUCE)
@@ -161,7 +161,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   pv = UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), *WMMA_ARG)
 
   # end KV tile loop
-  n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).barrier().end(n_tile)
+  n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).end(n_tile)
   acc = acc.after(n_tile_end)
   l_i = l_i.after(n_tile_end)
   m_i = m_i.after(n_tile_end)
