@@ -38,8 +38,8 @@ def associative_scan(fn: Callable, elems: Any, axis: int = 0) -> Any:
   for step in range((N - 1).bit_length()):
     offset = 1 << step
     sl_head = tuple(slice(None) if i != axis else slice(0, offset) for i in range(leaf.ndim))
-    sl_left = tuple(slice(None) if i != axis else slice(0, -offset) for i in range(leaf.ndim))
-    sl_right = tuple(slice(None) if i != axis else slice(offset, None) for i in range(leaf.ndim))
+    sl_left = tuple(slice(None) if i != axis else slice(0, N - offset) for i in range(leaf.ndim))
+    sl_right = tuple(slice(None) if i != axis else slice(offset, N) for i in range(leaf.ndim))
 
     elems_head = tree_map(lambda t: t[sl_head], elems)
     elems_left = tree_map(lambda t: t[sl_left], elems)
