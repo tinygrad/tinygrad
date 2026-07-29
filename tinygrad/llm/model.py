@@ -194,48 +194,6 @@ def _q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UO
   return UOp.group(*stores).end(token_block, output, lane).sink(arg=KernelInfo(name="linear_q8_pair", opts_to_apply=()))
 
 @functools.cache
-def _q8_linear_concat_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UOp,
-                             out_features0:int, out_features1:int, in_features:int, offset0:UOp, offset1:UOp, shared_raw:bool) -> UOp:
-  token_tile = 4 if out0.shape[0] % 4 == 0 else 1
-  token_block, output = UOp.range(out0.shape[0] // token_tile, 0), UOp.range(out_features0 + out_features1, 1)
-  tokens = tuple(token_block * token_tile + i for i in range(token_tile))
-  group_count, lane_count = in_features // 32, min(32, in_features // 32)
-  lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
-  first = output < out_features0
-  output0, output1 = output.valid(first), (output - out_features0).valid(~first)
-
-  values = [UOp.const(dtypes.float32, 0)] * token_tile
-  for group_offset in range(0, group_count, lane_count):
-    group = (lane + group_offset).valid(lane + group_offset < group_count)
-    block0, block1 = output0 * group_count + group, output1 * group_count + group
-    base0, odd0 = offset0.cast(dtypes.weakint) + block0 * 8 + block0 // 2, (block0 & 1).ne(0)
-    base1, odd1 = offset1.cast(dtypes.weakint) + block1 * 8 + block1 // 2, (block1 & 1).ne(0)
-    accs = [UOp.const(dtypes.int32, 0)] * token_tile
-    if shared_raw:
-      local_output = first.where(output, output - out_features0)
-      block = local_output * group_count + group
-      offset = first.where(offset0, offset1).cast(dtypes.weakint)
-      base, odd = offset + block * 8 + block // 2, (block & 1).ne(0)
-      for word_idx in range(8):
-        word = odd.where(raw0[base + 1 + word_idx], (raw0[base + word_idx] >> 16) | (raw0[base + 1 + word_idx] << 16))
-        accs = [_amd_dp4a(word, xq[token, group, word_idx], acc) for token,acc in zip(tokens, accs)]
-      scale = odd.where(raw0[base] >> 16, raw0[base] & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
-    else:
-      for word_idx in range(8):
-        word0 = odd0.where(raw0[base0 + 1 + word_idx], (raw0[base0 + word_idx] >> 16) | (raw0[base0 + 1 + word_idx] << 16))
-        word1 = odd1.where(raw1[base1 + 1 + word_idx], (raw1[base1 + word_idx] >> 16) | (raw1[base1 + 1 + word_idx] << 16))
-        word = first.where(word0, word1)
-        accs = [_amd_dp4a(word, xq[token, group, word_idx], acc) for token,acc in zip(tokens, accs)]
-      dbits0 = odd0.where(raw0[base0] >> 16, raw0[base0] & 0xffff).cast(dtypes.uint16)
-      dbits1 = odd1.where(raw1[base1] >> 16, raw1[base1] & 0xffff).cast(dtypes.uint16)
-      scale = first.where(dbits0, dbits1).bitcast(dtypes.float16).float()
-    values = [value + acc.cast(dtypes.float32) * xd[token, group] * scale for token,acc,value in zip(tokens, accs, values)]
-  totals = [_amd_wave_sum(value, lane, lane_count) for value in values]
-  stores = [out0[token.valid(lane.eq(0) & first), output0].store(total) for token,total in zip(tokens, totals)] + \
-           [out1[token.valid(lane.eq(0) & ~first), output1].store(total) for token,total in zip(tokens, totals)]
-  return UOp.group(*stores).end(token_block, output, lane).sink(arg=KernelInfo(name="linear_q8_concat", opts_to_apply=()))
-
-@functools.cache
 def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
   if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.weakint)
   output_tile = 2
@@ -1158,7 +1116,6 @@ class Transformer:
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
-    self.parameter_count = 0
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     self._state_checkpoints: list[Tensor] = []
@@ -1278,7 +1235,6 @@ class Transformer:
     if str(load_device).startswith("CPU") and getenv("CPU_GGML_PHYSICAL", 1) and \
        (use_physical_cores:=getattr(Device[str(load_device)], "use_physical_cores", None)) is not None: use_physical_cores()
     for param in nn.state.get_parameters(model): param.replace(param.to(load_device))
-    model.parameter_count = sum(int(weight.numel()) for weight in state_dict.values())
     packed_weights:set[str] = set()
     packed_linears:list[Linear] = []
     cpu_q8_weights:list[tuple[Linear, Tensor]] = []

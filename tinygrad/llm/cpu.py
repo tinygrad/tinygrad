@@ -34,9 +34,6 @@ def _dot_bytes_ptr(a:UOp, b:UOp) -> UOp:
   bv = _contiguous_vector_load(b, 32, dtypes.int8)
   return UOp(Ops.DOT, dtypes.int32, (av, bv), arg=4)
 
-def _vector_load(ptr:UOp, lanes:int) -> UOp:
-  return UOp.stack(*(ptr.replace(src=(*ptr.src[:-1], ptr.src[-1] + i)).load() for i in range(lanes)))
-
 def _dot_nibbles_ptr(packed:UOp, x:UOp, values:tuple[int, ...]) -> UOp:
   assert len(values) == 16
   pv = _contiguous_vector_load(packed, 16)
@@ -369,24 +366,6 @@ def _cpu_iq3_repacked_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:U
     total = total + parts0 * scale0 + parts1 * scale1
   return total, _load_f16(raw, meta)
 
-def _cpu_iq3_repacked_subgroup_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
-                                     subgroup:int, out_features:int, in_features:int) -> tuple[UOp, UOp]:
-  blocks = in_features // 256
-  meta_size = (blocks * 6 + 63) // 64 * 64
-  row_size = meta_size + blocks * 128
-  base = (expert * out_features + output) * row_size
-  meta, data = base + block * 6, base + meta_size + block * 128
-  values = (1, 3, 5, 7, 9, 11, 13, 15, -1, -3, -5, -7, -9, -11, -13, -15)
-  parts = _dot_nibbles_ptr(raw[data + subgroup * 16], xq[xidx, block, subgroup * 32], values)
-  scale_byte = raw[meta + 2 + subgroup // 2].load()
-  scale = 1 + 2 * ((scale_byte >> (4 * (subgroup % 2))) & 15).cast(dtypes.float32)
-  return parts, scale * _load_f16(raw, meta)
-
-def _cpu_iq3_repacked_block_dot(raw:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
-                                out_features:int, in_features:int) -> UOp:
-  parts, scale = _cpu_iq3_repacked_block_parts(raw, xq, expert, xidx, block, output, out_features, in_features)
-  return sum((parts.index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32) * xd[xidx, block] * scale
-
 def _cpu_iq4_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
                          out_features:int, in_features:int) -> tuple[UOp, UOp]:
   row_size = in_features // 256 * _GGML_QUANT[23][1]
@@ -403,11 +382,6 @@ def _cpu_iq4_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:UOp, outpu
     scale1 = (low1.cast(dtypes.uint16) | (high1 << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.int32) - 32
     total = total + parts[0] * scale0 + parts[1] * scale1
   return total, _load_f16(raw, base)
-
-def _cpu_iq4_block_dot(raw:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
-                       out_features:int, in_features:int) -> UOp:
-  parts, scale = _cpu_iq4_block_parts(raw, xq, expert, xidx, block, output, out_features, in_features)
-  return sum((parts.index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32) * xd[xidx, block] * scale
 
 def _cpu_q6_block_parts(raw:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
                         out_features:int, in_features:int) -> UOp:
