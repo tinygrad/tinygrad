@@ -40,7 +40,7 @@ class SSMConfig:
   group_count: int
   time_step_rank: int
   inner_size: int
-  layers: tuple[bool, ...] = ()
+  kda: bool = False
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -63,7 +63,7 @@ class TransformerConfig:
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
-  full_attention_interval: int = 0
+  ssm_layers: tuple[bool, ...] = ()
   attn_output_gate: bool = False
   ssm: SSMConfig|None = None
   shared_expert_gate: bool = True
@@ -212,13 +212,13 @@ class MLATransformerBlock(FFNBlock):
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.layers: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.layers: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
@@ -245,7 +245,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
     self.attn_qkv = nn.Linear(config.dim, self.conv_channels, bias=False)
-    if ssm.layers:
+    if ssm.kda:
       self.ssm_g_a, self.ssm_g_b = nn.Linear(config.dim, self.head_v_dim, bias=False), nn.Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = nn.Linear(config.dim, self.head_k_dim, bias=False), nn.Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
@@ -253,8 +253,8 @@ class GatedDeltaNetBlock(FFNBlock):
       self.ssm_alpha = nn.Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
-    self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.layers else self.num_v_heads)}
-    self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.layers else Tensor.zeros(self.num_v_heads)
+    self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
+    self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -310,7 +310,7 @@ class Transformer:
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
     self.blk:list[FFNBlock] = [GatedDeltaNetBlock(dense_config if i < config.leading_dense_blocks else config, config.ssm)
-                               if config.ssm and (config.ssm.layers[i] if config.ssm.layers else (i+1) % config.full_attention_interval != 0) else
+                               if config.ssm and config.ssm_layers[i] else
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -349,14 +349,16 @@ class Transformer:
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
 
     ssm = None
+    ssm_layers: tuple[bool, ...] = ()
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
+      ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(kv[f'{arch}.block_count']))
     elif arch == 'kimi-linear':
-      kda_layers = tuple(x == 0 for x in n_kv_heads)
+      ssm_layers = tuple(x == 0 for x in n_kv_heads)
       n_kv_heads = max(n_kv_heads)
-      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda_layers)
-      for i, is_kda in enumerate(kda_layers):
-        if not is_kda: continue
+      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], n_heads, n_heads, n_heads*kv[f'{arch}.kda.head_dim'], kda=True)
+      for i, is_ssm in enumerate(ssm_layers):
+        if not is_ssm: continue
         state_dict[f"blk.{i}.attn_qkv.weight"] = state_dict.pop(f"blk.{i}.attn_q.weight").cat(
           state_dict.pop(f"blk.{i}.attn_k.weight"), state_dict.pop(f"blk.{i}.attn_v.weight"), dim=0).contiguous()
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
@@ -402,7 +404,7 @@ class Transformer:
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
-      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0),
+      ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
