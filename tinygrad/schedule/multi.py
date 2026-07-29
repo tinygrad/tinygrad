@@ -188,14 +188,14 @@ def index_multi(root:UOp, multi:UOp):
   for ax, rng in multi.sharding:
     shard_sz = multi.src[0].shape[ax]
     local = (idxs[ax] - rng*shard_sz).simplify()
-    if not (local.vmin < 0 or local.vmax >= shard_sz):
+    if local.vmin >= 0 and local.vmax < shard_sz:
       idxs[ax] = local
       continue
     # strided ownership: idx ≡ rng (mod shard_sz), intra-shard position is (idx - rng) // shard_sz
     diff = (idxs[ax] - rng).simplify()
     if (mod:=(diff % shard_sz).simplify()).op is Ops.CONST and mod.arg == 0:
       local = (diff // shard_sz).simplify()
-      if not (local.vmin < 0 or local.vmax >= shard_sz):
+      if local.vmin >= 0 and local.vmax < shard_sz:
         idxs[ax] = local
         continue
     raise RuntimeError(f"index_multi: cannot shard index {idxs[ax]} for UNSHARD axis {ax} with shard size {shard_sz}")
