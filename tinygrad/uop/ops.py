@@ -670,12 +670,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # an UNSHARD carries the value and one sharding range per sharded axis (arg is the tuple of sharded axes,
     # sorted). the single-axis axis form defaults the range to a DEVICE range over the devices; a range need not
     # be DEVICE, e.g. a LOCAL range shards a kernel tile into per-thread fragments
-    if isinstance(axis, int):
-      if device_range is None:
-        assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
-        device_range = UOp.range(len(self.device), -1, AxisType.DEVICE)
-      assert isinstance(device_range, UOp) and device_range.op is Ops.RANGE, "single-axis unshard requires one RANGE"
-      axis, device_range = (axis,), (device_range,)
+    if isinstance(axis, int): axis = (axis,)
+    if device_range is None:
+      assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
+      device_range = (UOp.range(len(self.device), -1, AxisType.DEVICE),)
+    if isinstance(device_range, UOp): device_range = (device_range,)
     assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
     assert all(x.op is Ops.RANGE for x in device_range), f"unshard requires RANGEs, not {device_range}"
     axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
