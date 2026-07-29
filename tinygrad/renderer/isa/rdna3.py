@@ -176,6 +176,13 @@ def store(ctx, idx:UOp, val:UOp):
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
   return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(ctx, idx) + (to_vgpr(ctx,val),))
 
+def gated_load(idx:UOp, alt:UOp, gate:UOp):
+  buf = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]
+  n = alt.max_numel()
+  dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
+  out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
+  return out.store(idx.load(), gate).after(out.store(alt))
+
 # ------ ALU ------
 def cmp(ctx, x:UOp):
   _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
@@ -363,11 +370,11 @@ def lower_range(ctx, x:UOp):
   jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_END_{range_str(x)}")
   return acc, [acc, mask, loop_body, pred, jmp_out]
 
-def lower_end(ctx, x:UOp, acc:UOp, mask:UOp):
+def lower_end(ctx, x:UOp, acc:UOp):
   loop_end = label(ctx, f".LOOP_END_{ctx.loop_label[acc]}")
   inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
   jmp_back = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
-  return inc, [inc, jmp_back, loop_end, restoreexec(mask)]
+  return inc, [inc, jmp_back, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # --- other stuff ---
 # NOTE: this should just be triggered in to_vgpr????
@@ -433,18 +440,10 @@ pm_int_to_float = PatternMatcher([
   (UPat.var("x", dtypes.int64s).cast(dtypes.float64), long2double),
 ])
 
-"""
-  n = alt.max_numel()
-  dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
-  alts = [dst.index(i).store(alt.index(i)) for i in range(n)]
-  val = buf.load()
-  idx = dst.shrink(((0,n),))
-  return idx.store(buf.load(), gate).after(idx.store(alt))
-"""
 
 pre_isel_matcher = PatternMatcher([
   # --- gated ---
-  # (UPat(Ops.LOAD, src=(UPat.var("buf"), UPat.var("alt"), UPat.var("gate"))), gated_load),
+  (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")), gated_load),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -518,7 +517,7 @@ isel_matcher = PatternMatcher([
 
 pre_regalloc_matcher = PatternMatcher([
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
-  (UPat(Ops.IF, src=(UPat.var("gate"),UPat()), name="x"), lambda ctx,x,gate: \
+  (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
     ((nx := x.ins(RDNA3Ops.s_and_saveexec_b32, tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))), [nx])),
   (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (idx, [idx]) if idx.addrspace is not AddrSpace.REG \
     else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
@@ -527,7 +526,7 @@ pre_regalloc_matcher = PatternMatcher([
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat.var("mask")), name="x"), lower_end),
+  (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),
   (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: ((nx := x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))), [nx])),
 ])
 
@@ -541,6 +540,8 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+
+  print("encoding", opc, rdefs(x), [(u.op, u.arg, rdefs(u)) for u in oprs])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None

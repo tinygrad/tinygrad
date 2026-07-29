@@ -75,13 +75,13 @@ def geps(idx:UOp) -> tuple[UOp, int]:
 
 # maps anonymous reg BUFFER allocations to SSA vregister form at specific program points, modeled after LLVM mem2reg/alloca 
 # each new store creates a new vregister and subsequent loads use the latest definition
+# NOTE: only 1 level CF for now
 class Mem2RegContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.ren = ren
     self.vslot = itertools.count()
     self.cur: dict[tuple[UOp, int], UOp] = {}
     self.in_range = False
-    # only 1 level CF for now
     self.phi: VRegister|None = None
     self.end_footer: UOp|None = None
 
