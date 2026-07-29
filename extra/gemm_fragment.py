@@ -86,13 +86,15 @@ def alloc_fragment(shape:tuple[int, ...], dtype:DType, axes:tuple[int, ...], rng
 # GEMM kernel: C = relu(A @ B), float inputs (fp16 or fp32), fp32 fragment accumulator, no WMMA
 # ---------------------------------------------------------------------------
 
-# 64x64 output tile per block, 64 threads as an 8x8 grid; each thread owns an 8x8 fragment sub-tile
-# (the 2-D per-thread layout tilelang infers for this GEMM)
+# 64x64 output tile per block, 128 threads as an 8x16 grid; each thread owns an 8x4 fragment sub-tile
+# (the 2-D per-thread layout tilelang infers for this GEMM). The 4 contiguous columns (TN=4) are what
+# let codegen vectorize loads/stores to float4, matching tilelang's lowering exactly.
 BLOCK_M = BLOCK_N = BLOCK_K = 64
-TY = TX = 8
+TY = 8
+TX = 16
 THREADS = TY * TX
-TM = BLOCK_M // TY   # fragment rows per thread
-TN = BLOCK_N // TX   # fragment columns per thread
+TM = BLOCK_M // TY   # fragment rows per thread  (8)
+TN = BLOCK_N // TX   # fragment columns per thread (4)
 
 def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   """C[M, N] = relu(A[M, K] @ B[K, N]) -- one 64x64 tile per block, locals + a 2-D fragment."""
@@ -101,7 +103,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   assert K == K2 and a.dtype == b.dtype == c.dtype and not dtypes.is_int(a.dtype)
   assert not (K % BLOCK_K or M % BLOCK_M or N % BLOCK_N), "test sizes must be multiples of the block sizes"
 
-  # with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=64) as (bx, by):
+  # with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=128) as (bx, by):
   bx = UOp.range(cdiv(N, BLOCK_N), 0, AxisType.GLOBAL)
   by = UOp.range(cdiv(M, BLOCK_M), 1, AxisType.GLOBAL)
   ty = UOp.range(TY, 2, AxisType.LOCAL)
@@ -112,7 +114,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype)
   B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype)
 
-  # C_local = T.alloc_fragment((BLOCK_M, BLOCK_N), accum_dtype) -- an 8x8 REG tile per thread of the 8x8 grid
+  # C_local = T.alloc_fragment((BLOCK_M, BLOCK_N), accum_dtype) -- an 8x4 REG tile per thread of the 8x16 grid
   C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, (0, 1), (ty, tx))
 
   # T.clear(C_local) -- each thread zeroes its own fragment sub-tile
@@ -123,7 +125,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # (num_stages pipelining is async copy + multi-buffering; this is the synchronous single-buffer version)
   ko = UOp.range(cdiv(K, BLOCK_K), 6, AxisType.LOOP)
 
-  # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies its own 8x8 sub-tile
+  # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies its own 8x4 sub-tile
   # set returns the tile AFTER the copy; codegen turns that store->load dependency into a workgroup barrier
   iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.LOOP)
   A_store = A_shared[ty*TM + iar, tx*TN + ka].store(a[by*BLOCK_M + ty*TM + iar, ko*BLOCK_K + tx*TN + ka]).end(iar, ka)
@@ -139,7 +141,9 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment sub-tile.
   # identical to custom_gemm: a self-referential store over the loop-carried kk range,
   # which codegen turns into a register accumulator
-  ir, kk = UOp.range(TM, 11, AxisType.LOOP), UOp.range(BLOCK_K, 12, AxisType.LOOP)
+  # kk is the outer compute loop (axis 11) so that for each kk we read all 8 A rows and reuse
+  # the B[kk] read across them -- matching tilelang's ko > kk > row > col access order exactly.
+  kk, ir = UOp.range(BLOCK_K, 11, AxisType.LOOP), UOp.range(TM, 12, AxisType.LOOP)
   jj = UOp.range(TN, 13, AxisType.LOOP)
   acc = C_loc.after(kk)[ty*TM + ir, tx*TN + jj] + A_shared[ty*TM + ir, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
