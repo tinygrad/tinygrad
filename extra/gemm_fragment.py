@@ -172,10 +172,11 @@ if __name__ == "__main__":
   from tinygrad import Device
   assert Device[Device.DEFAULT].renderer.has_local, "this GPU-style kernel needs a backend with local memory (LOCAL ranges + barriers)"
   M = K = N = getenv("N", 256)  # 4x4 grid of 64x64 tiles, 4 K chunks
+  dtype_in = dtypes.half if getenv("HALF") else dtypes.float
 
-  a = Tensor.randn(M, K, dtype=dtypes.float16).contiguous()
-  b = Tensor.randn(K, N, dtype=dtypes.float16).contiguous()
-  ref = (a.float() @ b.float()).relu().realize()
+  a = Tensor.randn(M, K, dtype=dtype_in).contiguous()
+  b = Tensor.randn(K, N, dtype=dtype_in).contiguous()
+  ref = (a @ b).relu().realize()
 
   out = matmul_relu(a, b).realize()
 
