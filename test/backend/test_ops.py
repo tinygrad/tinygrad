@@ -1135,7 +1135,7 @@ class TestOps(unittest.TestCase):
     x_fp16 = Tensor.randn(100, dtype=dtypes.float16).realize()
     res_fp16 = x_fp16.associative_scan(lambda a,b: a+b, axis=0).realize()
     assert res_fp16.dtype == dtypes.float16
-    np.testing.assert_allclose(res_fp16.numpy(), np.cumsum(x_fp16.numpy()), rtol=1e-2, atol=1e-2)
+    np.testing.assert_allclose(res_fp16.numpy(), np.cumsum(x_fp16.numpy().astype(np.float32)).astype(np.float16), rtol=1e-2, atol=1e-2)
     # Mamba tuple state scan (L=37 non-power-of-2)
     a, b = (Tensor.randn(2, 37, 4).abs() + 0.1).realize(), Tensor.randn(2, 37, 4).realize()
     scanned_a, scanned_b = associative_scan(lambda e1, e2: (e2[0]*e1[0], e2[0]*e1[1] + e2[1]), (a, b), axis=1)
