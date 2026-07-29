@@ -49,7 +49,7 @@ def replace_contig_with_store_after(u:UOp):
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
@@ -66,24 +66,24 @@ def _make_buffer_view(src:UOp) -> UOp|None:
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
   buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.MULTI}: return None
+  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.UNSHARD}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
   if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
 
-  if buf.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+  if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
     view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
-  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
-    if resolved.op is not Ops.MULTI: return None
+    if resolved.op is not Ops.UNSHARD: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.reshape(resolved.src[0].shape).multi(resolved.arg).contiguous(tag=c.tag)
+    return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1]).contiguous(tag=c.tag)
 
   return None
 
@@ -92,7 +92,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # materialize straight into t
   if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
+  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:

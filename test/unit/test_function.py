@@ -535,7 +535,7 @@ class TestFunctionTuple(unittest.TestCase):
 
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
-      c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(f(a).numpy(), 14.0)
@@ -543,7 +543,7 @@ class TestFunctionTuple(unittest.TestCase):
     # g is f with empty output instead of invalids
     @function(precompile=True, allow_implicit=True)
     def g(a:Tensor):
-      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(g(a).numpy(), 14.0)
@@ -608,7 +608,7 @@ class TestFunctionTuple(unittest.TestCase):
     @function(precompile=True)
     def f(a:Tensor):
       c = Tensor.invalids(*a.uop.shard_shape, dtype=a.dtype, device=a.device)
-      if multi: c = Tensor(c.uop.multi(a.uop.axis), device=a.device)
+      if multi: c = Tensor(c.uop.unshard(a.uop.axis), device=a.device)
       c = Tensor.custom_kernel(c, a, fxn=my_kernel)[0]
       return c + 1
 

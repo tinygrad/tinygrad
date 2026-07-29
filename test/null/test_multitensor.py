@@ -181,7 +181,7 @@ class TestMultiScalarALU(unittest.TestCase):
     @functools.cache
     def _fxn(x_p, device):
       t = Tensor(x_p, device=device)
-      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.MULTI else t
+      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.UNSHARD else t
       return (inner.sum(),)
     param = x.as_param(0)
     fxn = _fxn(param.uop, x.device)
