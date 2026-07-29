@@ -70,8 +70,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
 
   if use_wmma:
     k = UOp.range(BLOCK_K // WMMA_K, 101, AxisType.REDUCE)
-    tile_m = UOp.range(TM // WMMA_ACC, 200, AxisType.LOOP)
-    tile_n = UOp.range(TN, 201, AxisType.LOOP)
+    tile_m = UOp.range(TM // WMMA_ACC, 200)
+    tile_n = UOp.range(TN, 201)
 
     acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0,2,1)[tile_m, tile_n]
     a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]

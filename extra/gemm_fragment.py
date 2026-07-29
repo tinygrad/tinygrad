@@ -42,7 +42,7 @@ API mapping (tilelang -> tinygrad UOps, idioms from test/backend/test_custom_ker
                                       smem tile AFTER the copy; the implicit-barrier pass turns the store->load
                                       dependency of the loop that consumes it into a workgroup barrier
     T.gemm (no WMMA)               -> C_local[..].set(C_local.after(k)[..] + a_shared[..] * b_shared[..], end=k)
-                                      with k a loop-carried STRONGLOOP range (codegen builds the register accumulator
+                                      with k a loop-carried LOOP range (codegen builds the register accumulator
                                       from this self-referential store automatically)
     T.copy(fragment, gmem)         -> gmem.index(gidx).store(C_local[..]).end(all_ranges)
     UNSHARD lowering               -> multi_pm in codegen (full_rewrite_to_sink): INDEX/AFTER/STORE ops on the
@@ -110,20 +110,20 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, axis=0, tnum=tid)
 
   # T.clear(C_local) -- each thread zeroes its own fragment rows
-  ir0, j0 = UOp.range(ROWS, 4, AxisType.STRONGLOOP), UOp.range(BLOCK_N, 5, AxisType.STRONGLOOP)
+  ir0, j0 = UOp.range(ROWS, 4, AxisType.LOOP), UOp.range(BLOCK_N, 5, AxisType.LOOP)
   C_loc = C_local[tid*ROWS + ir0, j0].set(0.0, end=(ir0, j0))
 
   # for ko in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
   # (num_stages pipelining is async copy + multi-buffering; this is the synchronous single-buffer version)
-  ko = UOp.range(cdiv(K, BLOCK_K), 3, AxisType.STRONGLOOP)
+  ko = UOp.range(cdiv(K, BLOCK_K), 3, AxisType.LOOP)
 
   # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies ROWS row(s)
   # set returns the tile AFTER the copy; codegen turns that store->load dependency into a workgroup barrier
-  iar, ka = UOp.range(ROWS, 6, AxisType.STRONGLOOP), UOp.range(BLOCK_K, 7, AxisType.STRONGLOOP)
+  iar, ka = UOp.range(ROWS, 6, AxisType.LOOP), UOp.range(BLOCK_K, 7, AxisType.LOOP)
   A_shared = A_shared[tid*ROWS + iar, ka].set(a[by*BLOCK_M + tid*ROWS + iar, ko*BLOCK_K + ka], end=(iar, ka))
 
   # T.copy(B[ko * BLOCK_K, bx * BLOCK_N], B_shared) -- each thread copies ROWS_B column(s)
-  kb, ibr = UOp.range(BLOCK_K, 8, AxisType.STRONGLOOP), UOp.range(ROWS_B, 9, AxisType.STRONGLOOP)
+  kb, ibr = UOp.range(BLOCK_K, 8, AxisType.LOOP), UOp.range(ROWS_B, 9, AxisType.LOOP)
   B_shared = B_shared[kb, tid*ROWS_B + ibr].set(b[ko*BLOCK_K + kb, bx*BLOCK_N + tid*ROWS_B + ibr], end=(kb, ibr))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment rows.
@@ -131,16 +131,16 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # which codegen turns into a register accumulator
   # kk nests outside the fragment row/col loops (lower ids nest outer), so B loads are contiguous and
   # the A row value is loaded once per kk
-  ir, kk = UOp.range(ROWS, 10, AxisType.STRONGLOOP), UOp.range(BLOCK_K, 11, AxisType.STRONGLOOP)
-  jj = UOp.range(BLOCK_N, 12, AxisType.STRONGLOOP)
+  ir, kk = UOp.range(ROWS, 10, AxisType.LOOP), UOp.range(BLOCK_K, 11, AxisType.LOOP)
+  jj = UOp.range(BLOCK_N, 12, AxisType.LOOP)
   acc = C_loc.after(kk)[tid*ROWS + ir, jj] + A_shared[tid*ROWS + ir, kk].cast(dtypes.float32) * B_shared[kk, jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
   C_loc = C_loc[tid*ROWS + ir, jj].set(acc, end=(kk, ir, jj, ko))
 
   # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
   # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
-  # STRONGLOOP: these loops are the per-thread output layout; convert_loop_to_global must not globalize them
-  ie, je = UOp.range(ROWS, 13, AxisType.STRONGLOOP), UOp.range(BLOCK_N, 14, AxisType.STRONGLOOP)
+  # LOOP: these loops are the per-thread output layout; convert_loop_to_global must not globalize them
+  ie, je = UOp.range(ROWS, 13, AxisType.LOOP), UOp.range(BLOCK_N, 14, AxisType.LOOP)
   c_st = c[by*BLOCK_M + tid*ROWS + ie, bx*BLOCK_N + je].store(C_loc[tid*ROWS + ie, je].relu().cast(c.dtype))
 
   # all open ranges are closed at the final store (ko was closed above).
