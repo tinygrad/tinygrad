@@ -597,7 +597,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8))).contiguous()
       a.schedule_linear()

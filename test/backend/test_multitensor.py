@@ -426,6 +426,49 @@ class TestMultiBufferView(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), ref[5].numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
+class Test2DShard(unittest.TestCase):
+  def setUp(self):
+    self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
+    self.rng = UOp.range(4, -1, AxisType.DEVICE)
+    self.rng0, self.rng1 = self.rng // 2, self.rng % 2
+
+  def _shard_2d(self, t:Tensor) -> Tensor:
+    u = t.uop.copy_to_device(self.devices_4)._shard(0, self.rng0)._shard(1, self.rng1).unshard((0, 1), (self.rng0, self.rng1))
+    return Tensor(u)
+
+  def test_2d_shard_basic(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy())
+
+  def test_2d_shard_elementwise(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = (t + 1).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy() + 1)
+
+  def test_2d_shard_sum_all(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.sum().contiguous().realize()
+    np.testing.assert_equal(out.numpy(), np.array(ref.numpy().sum()))
+
+  def test_2d_shard_sum_non_sharded_axis(self):
+    ref = Tensor.arange(4*4*2).reshape(4, 4, 2).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.sum(axis=2).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy().sum(axis=2))
+
+  def test_2d_shard_matmul(self):
+    a = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    b = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    a_s = self._shard_2d(a)
+    b_s = self._shard_2d(b)
+    out = (a_s @ b_s).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), a.numpy() @ b.numpy())
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
   @needs_second_gpu
   def test_transformer(self):
