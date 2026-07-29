@@ -9,17 +9,18 @@ def shard_count(multi:UOp) -> int:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
+def _apply_shrink(marg, s:UOp, i:int) -> UOp:
+  new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
+                    (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in marg]
+  return s._mop(Ops.SHRINK, tuple(new_arg))
+
 def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
-  def apply_shrink(s:UOp, i:int) -> UOp:
-    new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
-                      (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in shrink.marg]
-    return s._mop(Ops.SHRINK, tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
-      ret.append(apply_shrink(x.src[0], i).copy_to_device(x.device))
+      ret.append(_apply_shrink(shrink.marg, x.src[0], i).copy_to_device(x.device))
     else:
-      ret.append(apply_shrink(x, i).contiguous())
+      ret.append(_apply_shrink(shrink.marg, x, i).contiguous())
   return ms.replace(src=tuple(ret))
 
 def lower_broadcast_copy(c:UOp, x:UOp):

@@ -36,13 +36,13 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
   lmax_val = lmax.after(lmax_store.end(it))[0]
 
   lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(lds[tid].store(lmax_val).barrier())
+  lds = lds.after(lds[tid].store(lmax_val))
 
   step = THREADS_PER_WG // 2
   while step:
     active = tid < step
     other = lds[(tid + step).valid(active)].load()
-    lds = lds.after(lds[tid.valid(active)].store(lds[tid].maximum(other)).barrier())
+    lds = lds.after(lds[tid.valid(active)].store(lds[tid].maximum(other)))
     step //= 2
 
   device = device[0].split(":")[0] if isinstance(device, tuple) else device.split(":")[0]

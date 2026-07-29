@@ -158,7 +158,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
           ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
-              replacements[oo] = ld.index(UOp.const(None, i)) if len(grp) > 1 else ld
+              replacements[oo] = ld.index(i) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
   # apply

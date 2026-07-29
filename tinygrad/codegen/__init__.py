@@ -136,7 +136,7 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp.stack(*[b.index(UOp.const(None, i)) for i in range(b.max_numel())]))
+      src.append(UOp.stack(*[b.index(i) for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -162,7 +162,7 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(None, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> STACK
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
    lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
@@ -243,7 +243,7 @@ pm_add_loads = PatternMatcher([
 
 def add_local_buffer(ctx, x:UOp):
   buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
-  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]).barrier())
+  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
@@ -254,6 +254,32 @@ pm_add_local_buffers = PatternMatcher([
 pm_cast_float_alu = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(name="x"),), name="u"),
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
+])
+
+def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
+
+def add_raw_barrier(after:UOp):
+  # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
+  if after.addrspace is not AddrSpace.LOCAL: return None
+  # one toposort over all the deps
+  deps = UOp.sink(*after.src[1:]).backward_slice
+  if not any(_is_local_store(x) for x in deps) or any(x.op is Ops.BARRIER for x in deps): return None
+  return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
+
+def add_war_barrier(end:UOp):
+  # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
+  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.LOOP) and r.vmax > 0]
+  if not rngs or end.src[0].op is Ops.BARRIER: return None
+  sl = end.src[0].backward_slice_with_self
+  # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
+  store_bufs = {x.buf_uop for x in sl if _is_local_store(x) and any(r in x.ranges for r in rngs)}
+  # a load whose buffer matches a local store's buffer is necessarily a local load
+  if not (loads:=[x for x in sl if x.op is Ops.LOAD and x.src[0].buf_uop in store_bufs]): return None
+  return end.replace(src=(UOp(Ops.BARRIER, src=(end.src[0], *loads)),)+end.src[1:])
+
+pm_implicit_barriers = PatternMatcher([
+  (UPat(Ops.AFTER, name="after"), add_raw_barrier),
+  (UPat(Ops.END, name="end"), add_war_barrier),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
@@ -347,6 +373,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
+
+  # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

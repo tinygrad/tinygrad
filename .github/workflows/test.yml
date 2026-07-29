@@ -167,6 +167,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
+        python-version: '3.11'
         deps: testing_unit
         llvm: 'true'
         amd: 'true'
@@ -200,6 +201,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
+        python-version: '3.11'
         pydeps: "pre-commit"
         deps: testing_unit
         llvm: 'true'
