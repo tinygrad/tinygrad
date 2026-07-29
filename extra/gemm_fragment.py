@@ -142,10 +142,9 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
   # UPCAST (unrolled) so apply_opts doesn't globalize these per-thread output loops (convert_loop_to_global)
   ie, je = UOp.range(ROWS, 13, AxisType.UPCAST), UOp.range(BLOCK_N, 14, AxisType.UPCAST)
-  relu = C_loc[tid*ROWS + ie, je].alu(Ops.MAX, UOp.const(dtypes.float32, 0.0))
-  c_st = c[by*BLOCK_M + tid*ROWS + ie, bx*BLOCK_N + je].store(relu.cast(c.dtype))
+  c_st = c[by*BLOCK_M + tid*ROWS + ie, bx*BLOCK_N + je].store(C_loc[tid*ROWS + ie, je].relu().cast(c.dtype))
 
-  # all open ranges are closed at the final store (ko was closed by the barrier above).
+  # all open ranges are closed at the final store (ko was closed above).
   # the fragment UNSHARDs go to codegen as is: multi_pm there resolves the full-tile view into per-thread shard code
   return c_st.end(je, ie, tid, by, bx).sink(arg=KernelInfo(name="matmul_relu", opts_to_apply=()))
 
@@ -155,10 +154,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
 
 def matmul_relu(a:Tensor, b:Tensor) -> Tensor:
   """C = relu(A @ B), fp16 in/out with an fp32 fragment accumulator."""
-  M, K = a.shape
-  K2, N = b.shape
-  assert K == K2
-  c = Tensor.empty(M, N, dtype=a.dtype, device=a.device)
+  c = Tensor.empty(a.shape[0], b.shape[1], dtype=a.dtype, device=a.device)
   return c.custom_kernel(a, b, fxn=matmul_relu_kernel)[0]
 
 # ---------------------------------------------------------------------------
