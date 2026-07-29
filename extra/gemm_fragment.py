@@ -123,11 +123,9 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   kb, ibr = UOp.range(BLOCK_K, 8, AxisType.LOOP), UOp.range(ROWS_B, 9, AxisType.LOOP)
   b_st = B_shared[kb, tid*ROWS_B + ibr].store(b[ko*BLOCK_K + kb, bx*BLOCK_N + tid*ROWS_B + ibr]).end(kb, ibr)
 
-  # sync: all tile stores complete before any thread reads the tiles.
-  # void stores are grouped into the barrier; the buffer AFTERs carry the dependency to the loads
-  sync = UOp.group(a_st, b_st).barrier()
-  A_ready = A_shared.after(sync)
-  B_ready = B_shared.after(sync)
+  # the AFTERs carry the store->load dependency on the tiles; codegen inserts the workgroup barrier automatically
+  A_ready = A_shared.after(a_st, b_st)
+  B_ready = B_shared.after(a_st, b_st)
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment rows.
   # identical to custom_gemm: a self-referential store over an AxisType.REDUCE range,
@@ -137,8 +135,8 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   acc = C_loc.after(kk)[tid*ROWS + ir, jj] + A_ready[tid*ROWS + ir, kk].cast(dtypes.float32) * B_ready[kk, jj].cast(dtypes.float32)
   st_acc = C_loc[tid*ROWS + ir, jj].store(acc).end(kk)
 
-  # barrier so no thread overwrites the tiles while others are still reading them; this also closes the ko loop
-  C_loc = C_loc.after(st_acc.barrier().end(ir, jj, ko))
+  # close the ko loop; codegen adds the barrier so no thread overwrites the tiles while others still read them
+  C_loc = C_loc.after(st_acc.end(ir, jj, ko))
 
   # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
   # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
