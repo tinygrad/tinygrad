@@ -421,19 +421,16 @@ class TestCustomKernel(unittest.TestCase):
 
   @Context(DEV="CPU")
   def test_simple_from_source(self):
-    a = Tensor([0., 1., 2.]).realize()
-
-    src = "void test_src(float* restrict a) { a[0] = 1.0; }"
+    a = Tensor.arange(4).clone().realize()
+    src = "void test_src(int* restrict a) { a[0] = 1; }"
     # TODO: it currently requires a compiler for Ops.BINARY
     from tinygrad.device import Device
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),
-                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
-
-    a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]
-    self.assertEqual(a.tolist(), [1., 1., 2.])
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+    a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
+    self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
