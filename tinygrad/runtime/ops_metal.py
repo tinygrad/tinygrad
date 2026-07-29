@@ -113,7 +113,7 @@ class MetalCompiler(Compiler):
 
 class MetalProgram(Program[MetalDevice]):
   def __init__(self, dev:MetalDevice, obj:TinyELF):
-    self.dev, self.name, self.lib = dev, obj.name, obj.lib
+    self.dev, self.name, self.lib, self.signature = dev, obj.name, obj.lib, obj.signature
     data = objc.dispatch_data_create(obj.lib, len(obj.lib), None, None)
     self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
     error_check(error_lib)
@@ -138,7 +138,8 @@ class MetalProgram(Program[MetalDevice]):
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
+    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
+      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?

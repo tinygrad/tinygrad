@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, Variable, dtypes
+from tinygrad import Device, Tensor, Variable, TinyJit, dtypes
 from tinygrad.helpers import CHECK_OOB
 
 class TestTensorVariable(unittest.TestCase):
@@ -18,10 +18,18 @@ class TestTensorVariable(unittest.TestCase):
       self.assertListEqual((vv * t).tolist(), [2, 2, 2])
     except RuntimeError: pass
 
-  # TODO: a Variable PARAM lowers to int32, so a bound value that doesn't fit int32 truncates or fails to bind
-  @unittest.expectedFailure
+  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires long support")
   def test_large_range_variable(self):
-    self.assertEqual(Tensor(Variable("b", 0, 2**40).bind(2**35)).item(), 2**35)
+    self.assertEqual(Tensor(Variable("b", 0, 2**40, dtype=dtypes.long).bind(2**35)).clone(Device.DEFAULT).item(), 2**35)
+
+  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires long support")
+  def test_large_range_variable_jit(self):
+    @TinyJit
+    def f(a,b): return (Tensor(a+b).clone(Device.DEFAULT) * 2).realize()
+    for i in range(3):
+      a = Variable("a", 0, 2**10, dtype=dtypes.int).bind(i)
+      b = Variable("b", 0, 2**40, dtype=dtypes.long).bind(2**35)
+      self.assertEqual(f(a,b).item(), (2**35 + i) * 2)
 
   def test_variable_defers_like_a_literal(self):
     vv = Variable("a", 1, 10).bind(2)
