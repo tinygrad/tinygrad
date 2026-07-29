@@ -176,6 +176,20 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
 
+  def test_kda_channel_decay(self):
+    config = self._make_config(n_heads=2, ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
+    block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.]]])
+    # f_b(f_a(x)) = [1, 2, 3, 4]
+    block.ssm_f_a.weight = Tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])
+    block.ssm_f_b.weight = Tensor([[1., 0.], [0., 1.], [1., 1.], [2., 1.]])
+    block._init_state(x)
+    initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
+    block.recurrent_state.assign(initial_state).realize()
+    block.ssm_a = Tensor([[-1.], [-1.]])
+    block._attention(x, 0).realize()
+    alpha = np.exp(-self._softplus_np(np.arange(1, 5)).reshape(1, 2, 1, 2))
+    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha, rtol=1e-5, atol=1e-5)
+
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):
     x = Tensor([[[1.0, 3.0, 2.0, 5.0, 4.0]]])
