@@ -390,7 +390,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     # handle locals
     buf = UOp.placeholder((size,), dtype, next(ctx), AddrSpace.LOCAL)
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store.barrier()).cast(x.dtype)
+    return buf.after(do_store).cast(x.dtype)
 
 # collapse any BUFFERIZE to single input BUFFERIZE
 def flatten_bufferize(x:UOp):
