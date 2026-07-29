@@ -456,10 +456,7 @@ class Test2DShard(unittest.TestCase):
 
   def test_2d_shard_sum_non_sharded_axis(self):
     ref = Tensor.arange(4*4*2).reshape(4, 4, 2).contiguous().realize()
-    rng = UOp.range(4, -1, AxisType.DEVICE)
-    rng0, rng1 = rng // 2, rng % 2
-    u = ref.uop.copy_to_device(self.devices_4)._shard(0, rng0)._shard(1, rng1).unshard((0, 1), (rng0, rng1))
-    t = Tensor(u)
+    t = self._shard_2d(ref)
     out = t.sum(axis=2).contiguous().realize()
     np.testing.assert_equal(out.numpy(), ref.numpy().sum(axis=2))
 

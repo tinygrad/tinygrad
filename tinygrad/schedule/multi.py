@@ -83,11 +83,10 @@ def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
   if not multis: return None
   sharding = multis[0].sharding
-  # fast path: all sources are UNSHARD with the same sharding
-  if len(multis) == len(root.src) and all(m.sharding == sharding for m in multis):
+  if all(m.sharding == sharding for m in multis) and all(m.op is Ops.UNSHARD for m in root.src):
     srcs = [m.src[0] for m in root.src]
     return _rewrap(multis[0], srcs[0].alu(root.op, *srcs[1:]))
-  # fallback: single-axis resharding via shard_srcs
+  # resharding: single-axis fallback via shard_srcs
   axis = root.axis
   assert axis is not None
   srcs = shard_srcs(root.src, axis)
@@ -99,14 +98,13 @@ def reduce_multi(root:UOp, multi:UOp):
   reduced = [(ax, rng) for ax, rng in sharding if ax < num_axes]
   remaining = [(ax, rng) for ax, rng in sharding if ax >= num_axes]
   local = multi.src[0]._rop(op, tuple(range(num_axes)))
-  if reduced and not remaining:
+  if reduced:
+    assert not remaining, f"partial allreduce not supported for multi-axis sharding {sharding}"
     # all sharded axes are reduced: full allreduce
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
-  if reduced and remaining:
-    raise RuntimeError(f"partial allreduce not supported for multi-axis sharding {sharding}")
   # no sharded axes reduced: piecewise, keep all remaining sharding
   if remaining:
     new_axes = tuple(ax - num_axes for ax, _ in remaining)
@@ -186,7 +184,7 @@ def stack_multi(root:UOp):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
     new_sharding = tuple((ax+1, rng) for ax, rng in sharding)
     return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(a for a,_ in new_sharding), tuple(r for _,r in new_sharding))
-  # fallback: single-axis
+  # resharding: single-axis fallback
   axis = root.axis
   assert axis is not None
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, next(m.src[1] for m in root.src if m.op is Ops.UNSHARD))
@@ -213,29 +211,21 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   sharding = multi.sharding
   assert len(sharding) > 0, "all multi ops have sharding"
   if isinstance(device, str):
-    if len(sharding) == 1:
-      ax = sharding[0][0]
-      pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
-      return pieces[0].cat(*pieces[1:], dim=ax)
-    # multi-axis: reconstruct by concatenating along each axis from last to first
-    sharding_list = list(sharding)
-    # track (shard_indices, piece) for each device
+    # reconstruct by concatenating along each axis from last to first
     piece_info: list[tuple[tuple, UOp]] = []
     for i in range(len(multi.device)):
-      idxs = tuple(_shard_idx(r, i) for _, r in sharding_list)
+      idxs = tuple(_shard_idx(r, i) for _, r in sharding)
       piece_info.append((idxs, multi.src[0].mselect(i).copy_to_device(device)))
-    for j in range(len(sharding_list) - 1, -1, -1):
-      ax, rng = sharding_list[j]
-      # group by shard indices on all axes except j
+    for j in range(len(sharding) - 1, -1, -1):
+      ax, rng = sharding[j]
       groups: dict[tuple, list[tuple[int, UOp]]] = {}
       for idxs, p in piece_info:
         key = idxs[:j] + idxs[j+1:]
         groups.setdefault(key, []).append((idxs[j], p))
-      new_piece_info: list[tuple[tuple, UOp]] = []
+      piece_info = []
       for key in sorted(groups):
         grp = sorted(groups[key], key=lambda x: x[0])
-        new_piece_info.append((key, grp[0][1].cat(*[x[1] for x in grp[1:]], dim=ax)))
-      piece_info = new_piece_info
+        piece_info.append((key, grp[0][1].cat(*[x[1] for x in grp[1:]], dim=ax)))
     return piece_info[0][1]
   # multi-device target: unshard all axes and allreduce
   val = multi.src[0]
