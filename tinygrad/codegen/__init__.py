@@ -260,21 +260,19 @@ def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpac
 def add_raw_barrier(a:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
   if len(a.src) <= 1 or a.src[0].addrspace is not AddrSpace.LOCAL: return None
-  dep_slice = set().union(*[d.backward_slice_with_self for d in a.src[1:]])
-  if any(x.op is Ops.BARRIER for x in dep_slice) or not any(_is_local_store(x) for x in dep_slice): return None
+  deps = set().union(*(d.backward_slice_with_self for d in a.src[1:]))
+  if not any(_is_local_store(x) for x in deps) or any(x.op is Ops.BARRIER for x in deps): return None
   return a.src[0].after(UOp(Ops.BARRIER, src=a.src[1:]))
 
 def add_war_barrier(e:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
   rngs = [r for r in e.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.LOOP) and r.vmax > 0]
-  if not rngs: return None
-  if e.src[0].op is Ops.BARRIER: return None
+  if not rngs or e.src[0].op is Ops.BARRIER: return None
   sl = e.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
   store_bufs = {x.buf_uop for x in sl if _is_local_store(x) and any(r in x.ranges for r in rngs)}
-  if not store_bufs: return None
-  loads = [x for x in sl if x.op is Ops.LOAD and x.src[0].addrspace is AddrSpace.LOCAL and x.src[0].buf_uop in store_bufs]
-  if not loads: return None
+  # a load whose buffer matches a local store's buffer is necessarily a local load
+  if not (loads:=[x for x in sl if x.op is Ops.LOAD and x.src[0].buf_uop in store_bufs]): return None
   return e.replace(src=(UOp(Ops.BARRIER, src=(e.src[0], *loads)),)+e.src[1:])
 
 pm_implicit_barriers = PatternMatcher([
