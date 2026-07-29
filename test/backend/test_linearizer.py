@@ -397,8 +397,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_two_grouped_stores_local(self):
     # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
-    a = Tensor.rand(256, 256).realize()
-    opts = [Opt(OptOps.GROUP, 1, 32), Opt(OptOps.GROUP, 2, 32)]
+    a = Tensor.rand(32, 32).realize()
+    opts = [Opt(OptOps.GROUP, 1, 4), Opt(OptOps.GROUP, 2, 4)]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
