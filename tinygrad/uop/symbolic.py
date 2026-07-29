@@ -19,6 +19,25 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
   return None
 
+def int_pow(x:UOp, exponent:UOp) -> UOp:
+  # exponentiation by squaring avoids the lossy float log2/exp2 decomposition used by non-integer POW
+  unsigned_dtype = {dtypes.int8:dtypes.uint8, dtypes.int16:dtypes.uint16, dtypes.int32:dtypes.uint32, dtypes.int64:dtypes.uint64}.get(exponent.dtype)
+  ret, base = x.const_like(1), x
+  if unsigned_dtype is not None:
+    negative = exponent < 0
+    e = negative.where(0, exponent).cast(unsigned_dtype)
+    ret = ret.cast(unsigned_dtype)
+    base = base.const_like(base.arg, unsigned_dtype) if base.op is Ops.CONST else base.cast(unsigned_dtype)
+  else: negative, e = None, exponent
+  for _ in range(exponent.dtype.bitsize):
+    squared = base.const_like(exec_alu(Ops.MUL, base.dtype, (base.arg, base.arg))) if base.op is Ops.CONST else base*base
+    ret, e, base = (e&1).ne(0).where(ret*base, ret), e>>1, squared
+  if negative is None: return ret
+  ret = ret.cast(x.dtype)
+  # integer negative powers truncate to zero, except for the two integer units
+  negative_ret = x.eq(-1).where((exponent&1).eq(0).where(1, -1), x.eq(1).where(1, 0))
+  return negative.where(negative_ret, ret)
+
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.fmt) is None or (to_fmt:=root.dtype.fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
@@ -165,6 +184,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
+  (UPat.var("x", dtype=dtypes.ints).alu(Ops.POW, UPat.var("exponent")), int_pow),
   # positive const ** x
   (UPat.cvar("c").alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
   # rules for threefry
