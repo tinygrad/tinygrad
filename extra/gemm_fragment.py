@@ -106,8 +106,13 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=128) as (bx, by):
   bx = UOp.range(cdiv(N, BLOCK_N), 0, AxisType.GLOBAL)
   by = UOp.range(cdiv(M, BLOCK_M), 1, AxisType.GLOBAL)
-  ty = UOp.range(TY, 2, AxisType.LOCAL)
-  tx = UOp.range(TX, 3, AxisType.LOCAL)
+  # tx (N, 16) is the fast/inner LOCAL axis so a warp covers 16 cols x 2 rows --
+  # matching tilelang's (tidx>>4, tidx&15) warp composition. This keeps the 8 A_shared
+  # reads in a warp on only 2 row-groups (broadcast across 16 cols) instead of 8 rows
+  # (8-way bank conflict), since A_shared[row*512 + ...] all map to the same bank when 8
+  # distinct rows land in one warp.
+  tx = UOp.range(TX, 2, AxisType.LOCAL)
+  ty = UOp.range(TY, 3, AxisType.LOCAL)
 
   # A_shared = T.alloc_shared((BLOCK_M, BLOCK_K), dtype)
   # B_shared = T.alloc_shared((BLOCK_K, BLOCK_N), dtype)
@@ -118,7 +123,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, (0, 1), (ty, tx))
 
   # T.clear(C_local) -- each thread zeroes its own fragment sub-tile
-  ic, jc = UOp.range(TM, 4, AxisType.LOOP), UOp.range(TN, 5, AxisType.LOOP)
+  ic, jc = UOp.range(TM, 4, AxisType.LOOP), UOp.range(TN, 5, AxisType.UPCAST)
   C_loc = C_local[ty*TM + ic, tx*TN + jc].set(0.0, end=(ic, jc))
 
   # for ko in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
@@ -127,11 +132,11 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
 
   # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies its own 8x4 sub-tile
   # set returns the tile AFTER the copy; codegen turns that store->load dependency into a workgroup barrier
-  iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.LOOP)
+  iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.UPCAST)
   A_store = A_shared[ty*TM + iar, tx*TN + ka].store(a[by*BLOCK_M + ty*TM + iar, ko*BLOCK_K + tx*TN + ka]).end(iar, ka)
 
   # T.copy(B[ko * BLOCK_K, bx * BLOCK_N], B_shared)
-  kb, ibr = UOp.range(TM, 9, AxisType.LOOP), UOp.range(TN, 10, AxisType.LOOP)
+  kb, ibr = UOp.range(TM, 9, AxisType.LOOP), UOp.range(TN, 10, AxisType.UPCAST)
   B_store = B_shared[ty*TM + kb, tx*TN + ibr].store(b[ko*BLOCK_K + ty*TM + kb, bx*BLOCK_N + tx*TN + ibr]).end(kb, ibr)
 
   # get the shared after the stores (single barrier)
@@ -143,8 +148,8 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # which codegen turns into a register accumulator
   # kk is the outer compute loop (axis 11) so that for each kk we read all 8 A rows and reuse
   # the B[kk] read across them -- matching tilelang's ko > kk > row > col access order exactly.
-  kk, ir = UOp.range(BLOCK_K, 11, AxisType.LOOP), UOp.range(TM, 12, AxisType.LOOP)
-  jj = UOp.range(TN, 13, AxisType.LOOP)
+  kk, ir = UOp.range(BLOCK_K, 11, AxisType.LOOP), UOp.range(TM, 12, AxisType.UPCAST)
+  jj = UOp.range(TN, 13, AxisType.UPCAST)
   acc = C_loc.after(kk)[ty*TM + ir, tx*TN + jj] + A_shared[ty*TM + ir, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
   C_loc = C_loc[ty*TM + ir, tx*TN + jj].set(acc, end=(kk, ir, jj, ko))
@@ -152,7 +157,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
   # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
   # LOOP: these loops are the per-thread output layout; convert_loop_to_global must not globalize them
-  ie, je = UOp.range(TM, 14, AxisType.LOOP), UOp.range(TN, 15, AxisType.LOOP)
+  ie, je = UOp.range(TM, 14, AxisType.LOOP), UOp.range(TN, 15, AxisType.UPCAST)
   c_st = c[by*BLOCK_M + ty*TM + ie, bx*BLOCK_N + tx*TN + je].store(C_loc[ty*TM + ie, tx*TN + je].relu().cast(c.dtype))
 
   # all open ranges are closed at the final store (ko was closed above).
