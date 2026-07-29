@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.renderer.ptx import PTXRenderer
 
 # **** kernels ****
 
@@ -444,8 +445,13 @@ class TestUnshardIndex(unittest.TestCase):
   def _run(self, kernel, shape=(8, 8)):
     c = Tensor.empty(*shape)
     out = Tensor.custom_kernel(c, fxn=kernel)[0]
-    return out.numpy()
+    try: return out.numpy()
+    except RuntimeError as e:
+      if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) and "dynamic register indexing" in str(e):
+        self.skipTest("PTX does not support dynamic register indexing")
+      raise
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
   def test_contiguous_fragment_index(self):
     # thread ty owns rows [ty*8, ty*8+8) of a 64-row fragment -- contiguous ownership.
     # This is the pre-existing case that index_multi always handled.
@@ -459,6 +465,7 @@ class TestUnshardIndex(unittest.TestCase):
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
   def test_strided_fragment_index(self):
     # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment --
     # strided ownership. idx = ty + ir*8 where shard_sz=8 (8 threads, shard rows=8).
@@ -473,6 +480,18 @@ class TestUnshardIndex(unittest.TestCase):
       return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
+
+  def test_fragment_index_cannot_shard(self):
+    # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither
+    # the contiguous nor the strided ownership pattern, so index_multi must raise.
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      ir = UOp.range(8, 1, AxisType.LOOP)
+      j = UOp.range(8, 2, AxisType.LOOP)
+      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      return C[ty + ir, j].store(frag[ty + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
+    with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
+      self._run(kernel, (64, 8))
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
