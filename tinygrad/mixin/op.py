@@ -27,32 +27,20 @@ def _get_leaf(tree):
   if isinstance(tree, (tuple, list)): return _get_leaf(tree[0])
   return _get_leaf(next(iter(tree.values())))
 
-def _power_of_2_scan(fn: Callable, elems: Any, axis: int) -> Any:
+def _flat_scan_small(fn: Callable, elems: Any, axis: int) -> Any:
   leaf = _get_leaf(elems)
   N = leaf.shape[axis]
   if N <= 1: return elems
-
-  new_shape = leaf.shape[:axis] + (N // 2, 2) + leaf.shape[axis+1:]
-  sl_0 = tuple(slice(None) if i != axis + 1 else 0 for i in range(len(new_shape)))
-  sl_1 = tuple(slice(None) if i != axis + 1 else 1 for i in range(len(new_shape)))
-
-  x_reshaped = tree_map(lambda t: t.reshape(new_shape), elems)
-  x_even = tree_map(lambda t: t[sl_0], x_reshaped)
-  x_odd = tree_map(lambda t: t[sl_1], x_reshaped)
-
-  res_odd = _power_of_2_scan(fn, fn(x_even, x_odd), axis)
-
-  sl_head = tuple(slice(None) if i != axis else slice(0, 1) for i in range(leaf.ndim))
-  res_even_0 = tree_map(lambda t: t[sl_head], x_even)
-  if N > 2:
-    sl_odd_body = tuple(slice(None) if i != axis else slice(0, -1) for i in range(leaf.ndim))
-    sl_even_tail = tuple(slice(None) if i != axis else slice(1, None) for i in range(leaf.ndim))
-    res_even_tail = fn(tree_map(lambda t: t[sl_odd_body], res_odd), tree_map(lambda t: t[sl_even_tail], x_even))
-    res_even = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), res_even_0, res_even_tail)
-  else:
-    res_even = res_even_0
-
-  return tree_map(lambda a, b: a.stack(b, dim=axis + 1).reshape(leaf.shape), res_even, res_odd)
+  for step in range((N - 1).bit_length()):
+    offset = 1 << step
+    sl_head = tuple(slice(None) if i != axis else slice(0, offset) for i in range(leaf.ndim))
+    sl_left = tuple(slice(None) if i != axis else slice(0, N - offset) for i in range(leaf.ndim))
+    sl_right = tuple(slice(None) if i != axis else slice(offset, N) for i in range(leaf.ndim))
+    elems_head = tree_map(lambda t: t[sl_head], elems)
+    elems_left = tree_map(lambda t: t[sl_left], elems)
+    elems_right = tree_map(lambda t: t[sl_right], elems)
+    elems = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), elems_head, fn(elems_left, elems_right))
+  return elems
 
 def associative_scan(fn: Callable, elems: Any, axis: int = 0) -> Any:
   leaf = _get_leaf(elems)
@@ -62,16 +50,42 @@ def associative_scan(fn: Callable, elems: Any, axis: int = 0) -> Any:
   if orig_dtype in (dtypes.float16, dtypes.bfloat16):
     elems = tree_map(lambda t: t.cast(dtypes.float32), elems)
 
-  pad_len = (1 << (N - 1).bit_length()) - N
-  if pad_len > 0:
-    pad_arg = tuple((0, pad_len) if i == axis else None for i in range(leaf.ndim))
-    elems = tree_map(lambda t: t.pad(pad_arg), elems)
+  CHUNK = 16
+  if N <= CHUNK:
+    res = _flat_scan_small(fn, elems, axis)
+  else:
+    num_chunks = (N + CHUNK - 1) // CHUNK
+    pad_len = num_chunks * CHUNK - N
+    if pad_len > 0:
+      pad_arg = tuple((0, pad_len) if i == axis else None for i in range(leaf.ndim))
+      elems = tree_map(lambda t: t.pad(pad_arg), elems)
 
-  res = _power_of_2_scan(fn, elems, axis)
+    chunk_shape = leaf.shape[:axis] + (num_chunks, CHUNK) + leaf.shape[axis+1:]
+    elems_chunked = tree_map(lambda t: t.reshape(chunk_shape), elems)
 
-  if pad_len > 0:
-    sl_orig = tuple(slice(None) if i != axis else slice(0, N) for i in range(leaf.ndim))
-    res = tree_map(lambda t: t[sl_orig], res)
+    chunks_scanned = _flat_scan_small(fn, elems_chunked, axis + 1)
+
+    sl_last = tuple(slice(None) if i != axis + 1 else slice(CHUNK-1, CHUNK) for i in range(len(chunk_shape)))
+    chunk_lasts = tree_map(lambda t: t[sl_last].squeeze(axis + 1), chunks_scanned)
+
+    outer_scanned = _flat_scan_small(fn, chunk_lasts, axis)
+
+    sl_outer_prev = tuple(slice(None) if i != axis else slice(0, -1) for i in range(leaf.ndim))
+    sl_chunks_tail = tuple(slice(None) if i != axis else slice(1, None) for i in range(len(chunk_shape)))
+    sl_chunks_head = tuple(slice(None) if i != axis else slice(0, 1) for i in range(len(chunk_shape)))
+
+    chunks_head = tree_map(lambda t: t[sl_chunks_head], chunks_scanned)
+    chunks_tail = tree_map(lambda t: t[sl_chunks_tail], chunks_scanned)
+
+    outer_prev = tree_map(lambda t: t[sl_outer_prev].unsqueeze(axis + 1), outer_scanned)
+    chunks_tail_offset = fn(outer_prev, chunks_tail)
+
+    res_chunked = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), chunks_head, chunks_tail_offset)
+    res = tree_map(lambda t: t.reshape(leaf.shape[:axis] + (num_chunks * CHUNK,) + leaf.shape[axis+1:]), res_chunked)
+
+    if pad_len > 0:
+      sl_orig = tuple(slice(None) if i != axis else slice(0, N) for i in range(leaf.ndim))
+      res = tree_map(lambda t: t[sl_orig], res)
 
   if orig_dtype in (dtypes.float16, dtypes.bfloat16):
     res = tree_map(lambda t: t.cast(orig_dtype), res)
