@@ -29,34 +29,28 @@ def _get_leaf(tree):
 
 def associative_scan(fn: Callable, elems: Any, axis: int = 0) -> Any:
   leaf = _get_leaf(elems)
-  axis = axis % leaf.ndim
-  N = leaf.shape[axis]
+  axis, N, orig_dtype = axis % leaf.ndim, leaf.shape[axis], leaf.dtype
   if N <= 1: return elems
 
-  sl_even = tuple(slice(None) if i != axis else slice(0, None, 2) for i in range(leaf.ndim))
-  sl_odd = tuple(slice(None) if i != axis else slice(1, None, 2) for i in range(leaf.ndim))
-  x_even, x_odd = tree_map(lambda t: t[sl_even], elems), tree_map(lambda t: t[sl_odd], elems)
+  if orig_dtype in (dtypes.float16, dtypes.bfloat16):
+    elems = tree_map(lambda t: t.cast(dtypes.float32), elems)
 
-  sl_pair = tuple(slice(None) if i != axis else slice(0, N // 2) for i in range(leaf.ndim))
-  reduced = fn(tree_map(lambda t: t[sl_pair], x_even), x_odd)
-  res_odd = associative_scan(fn, reduced, axis=axis)
+  for step in range((N - 1).bit_length()):
+    offset = 1 << step
+    sl_head = tuple(slice(None) if i != axis else slice(0, offset) for i in range(leaf.ndim))
+    sl_left = tuple(slice(None) if i != axis else slice(0, -offset) for i in range(leaf.ndim))
+    sl_right = tuple(slice(None) if i != axis else slice(offset, None) for i in range(leaf.ndim))
 
-  sl_0 = tuple(slice(None) if i != axis else slice(0, 1) for i in range(leaf.ndim))
-  res_even_0 = tree_map(lambda t: t[sl_0], x_even)
+    elems_head = tree_map(lambda t: t[sl_head], elems)
+    elems_left = tree_map(lambda t: t[sl_left], elems)
+    elems_right = tree_map(lambda t: t[sl_right], elems)
 
-  if N // 2 > 0:
-    sl_odd_head = tuple(slice(None) if i != axis else slice(0, (N + 1) // 2 - 1) for i in range(leaf.ndim))
-    sl_even_tail = tuple(slice(None) if i != axis else slice(1, None) for i in range(leaf.ndim))
-    res_even_tail = fn(tree_map(lambda t: t[sl_odd_head], res_odd), tree_map(lambda t: t[sl_even_tail], x_even))
-    res_even = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), res_even_0, res_even_tail)
-  else:
-    res_even = res_even_0
+    elems_combined = fn(elems_left, elems_right)
+    elems = tree_map(lambda t1, t2: t1.cat(t2, dim=axis), elems_head, elems_combined)
 
-  def _interleave(a, b):
-    b_padded = b.pad(tuple((0, a.shape[axis] - b.shape[axis]) if i == axis else None for i in range(leaf.ndim)))
-    return a.stack(b_padded, dim=axis + 1).flatten(axis, axis + 1)[tuple(slice(None) if i != axis else slice(0, N) for i in range(leaf.ndim))]
-
-  return tree_map(_interleave, res_even, res_odd)
+  if orig_dtype in (dtypes.float16, dtypes.bfloat16):
+    elems = tree_map(lambda t: t.cast(orig_dtype), elems)
+  return elems
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):

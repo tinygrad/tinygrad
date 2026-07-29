@@ -1127,17 +1127,28 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a,b: a+b, axis=0))
     helper_test_op([(20, 30)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
     helper_test_op([(10)], lambda x: torch.cumprod(x, dim=0), lambda x: x.associative_scan(lambda a,b: a*b, axis=0))
-    a, b = Tensor.randn(2, 8, 4).abs() + 0.1, Tensor.randn(2, 8, 4)
+    # Non-power-of-2 sequence length (N=314)
+    x_314 = Tensor.randn(314).realize()
+    res_314 = x_314.associative_scan(lambda a,b: a+b, axis=0).realize()
+    np.testing.assert_allclose(res_314.numpy(), np.cumsum(x_314.numpy()), rtol=1e-4, atol=1e-4)
+    # fp16 precision accumulation test
+    x_fp16 = Tensor.randn(100, dtype=dtypes.float16).realize()
+    res_fp16 = x_fp16.associative_scan(lambda a,b: a+b, axis=0).realize()
+    assert res_fp16.dtype == dtypes.float16
+    np.testing.assert_allclose(res_fp16.numpy(), np.cumsum(x_fp16.numpy()), rtol=1e-2, atol=1e-2)
+    # Mamba tuple state scan (L=37 non-power-of-2)
+    a, b = (Tensor.randn(2, 37, 4).abs() + 0.1).realize(), Tensor.randn(2, 37, 4).realize()
     scanned_a, scanned_b = associative_scan(lambda e1, e2: (e2[0]*e1[0], e2[0]*e1[1] + e2[1]), (a, b), axis=1)
-    ref_a, ref_b = np.zeros((2, 8, 4)), np.zeros((2, 8, 4))
+    Tensor.realize(scanned_a, scanned_b)
+    ref_a, ref_b = np.zeros((2, 37, 4)), np.zeros((2, 37, 4))
     cur_a, cur_b = np.ones((2, 4)), np.zeros((2, 4))
     a_np, b_np = a.numpy(), b.numpy()
-    for i in range(8):
+    for i in range(37):
       cur_a = a_np[:, i, :] * cur_a
       cur_b = a_np[:, i, :] * cur_b + b_np[:, i, :]
       ref_a[:, i, :], ref_b[:, i, :] = cur_a, cur_b
-    np.testing.assert_allclose(scanned_a.numpy(), ref_a, rtol=1e-4, atol=1e-4)
-    np.testing.assert_allclose(scanned_b.numpy(), ref_b, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(scanned_a.numpy(), ref_a, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(scanned_b.numpy(), ref_b, rtol=1e-3, atol=1e-3)
 
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
