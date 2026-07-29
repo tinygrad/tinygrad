@@ -80,6 +80,14 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   return srcs
 
 def alu_multi(root:UOp):
+  multis = [m for m in root.src if m.op is Ops.UNSHARD]
+  if not multis: return None
+  sharding = multis[0].sharding
+  # fast path: all sources are UNSHARD with the same sharding
+  if len(multis) == len(root.src) and all(m.sharding == sharding for m in multis):
+    srcs = [m.src[0] for m in root.src]
+    return _rewrap(multis[0], srcs[0].alu(root.op, *srcs[1:]))
+  # fallback: single-axis resharding via shard_srcs
   axis = root.axis
   assert axis is not None
   srcs = shard_srcs(root.src, axis)
@@ -87,16 +95,24 @@ def alu_multi(root:UOp):
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
-  if multi.axis is not None and multi.axis < num_axes:
-    local = multi.src[0]._rop(op, tuple(range(num_axes)))
-    # allreduce in pre-cast dtype when sum_acc_dtype promoted from bf16/half
+  sharding = multi.sharding
+  reduced = [(ax, rng) for ax, rng in sharding if ax < num_axes]
+  remaining = [(ax, rng) for ax, rng in sharding if ax >= num_axes]
+  local = multi.src[0]._rop(op, tuple(range(num_axes)))
+  if reduced and not remaining:
+    # all sharded axes are reduced: full allreduce
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
-  # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  new_axis = multi.axis - num_axes if multi.axis is not None else None
-  return multi.src[0]._rop(op, tuple(range(num_axes))).unshard(new_axis, multi.src[1])
+  if reduced and remaining:
+    raise RuntimeError(f"partial allreduce not supported for multi-axis sharding {sharding}")
+  # no sharded axes reduced: piecewise, keep all remaining sharding
+  if remaining:
+    new_axes = tuple(ax - num_axes for ax, _ in remaining)
+    new_rngs = tuple(rng for _, rng in remaining)
+    return local.unshard(new_axes, new_rngs)
+  return local
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=tuple(root.marg)): raise RuntimeError("reshape must maintain prod(shape)")
@@ -157,11 +173,20 @@ def shrink_multi(root:UOp, multi:UOp):
   return val if not remaining else val.unshard(tuple(a for a,_ in remaining), tuple(r for _,r in remaining))
 
 def flip_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
-  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).unshard(multi.axis, multi.src[1])
+  for ax, _ in multi.sharding:
+    assert not root.marg[ax], "flipping not supported on sharded axis"
+  return _rewrap(multi, multi.src[0].flip([i for i,x in enumerate(root.marg) if x]))
 
 def stack_multi(root:UOp):
   # STACK adds a leading axis: srcs are sharded one axis below the output
+  multis = [m for m in root.src if m.op is Ops.UNSHARD]
+  if not multis: return None
+  sharding = multis[0].sharding
+  if all(m.sharding == sharding for m in multis):
+    srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
+    new_sharding = tuple((ax+1, rng) for ax, rng in sharding)
+    return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(a for a,_ in new_sharding), tuple(r for _,r in new_sharding))
+  # fallback: single-axis
   axis = root.axis
   assert axis is not None
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, next(m.src[1] for m in root.src if m.op is Ops.UNSHARD))
@@ -178,12 +203,47 @@ def index_multi(root:UOp, multi:UOp):
     idxs[ax] = local
   return multi.src[0].index(*idxs)
 
+def _shard_idx(rng:UOp, dev_idx:int) -> int:
+  """Evaluate a sharding range expression for a specific device index."""
+  drngs = [r for r in rng.ranges if r.arg[-1] is AxisType.DEVICE]
+  if not drngs: return 0
+  return int(rng.substitute({drngs[0]: drngs[0].const_like(dev_idx)}).ssimplify())
+
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
-  assert multi.axis is not None, "all multi ops have axis"
+  sharding = multi.sharding
+  assert len(sharding) > 0, "all multi ops have sharding"
   if isinstance(device, str):
-    pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
-    return pieces[0].cat(*pieces[1:], dim=multi.axis)
-  return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
+    if len(sharding) == 1:
+      ax = sharding[0][0]
+      pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
+      return pieces[0].cat(*pieces[1:], dim=ax)
+    # multi-axis: reconstruct by concatenating along each axis from last to first
+    sharding_list = list(sharding)
+    # track (shard_indices, piece) for each device
+    piece_info: list[tuple[tuple, UOp]] = []
+    for i in range(len(multi.device)):
+      idxs = tuple(_shard_idx(r, i) for _, r in sharding_list)
+      piece_info.append((idxs, multi.src[0].mselect(i).copy_to_device(device)))
+    for j in range(len(sharding_list) - 1, -1, -1):
+      ax, rng = sharding_list[j]
+      # group by shard indices on all axes except j
+      groups: dict[tuple, list[tuple[int, UOp]]] = {}
+      for idxs, p in piece_info:
+        key = idxs[:j] + idxs[j+1:]
+        groups.setdefault(key, []).append((idxs[j], p))
+      new_piece_info: list[tuple[tuple, UOp]] = []
+      for key in sorted(groups):
+        grp = sorted(groups[key], key=lambda x: x[0])
+        new_piece_info.append((key, grp[0][1].cat(*[x[1] for x in grp[1:]], dim=ax)))
+      piece_info = new_piece_info
+    return piece_info[0][1]
+  # multi-device target: unshard all axes and allreduce
+  val = multi.src[0]
+  for ax, rng in sharding:
+    count = int(rng.vmax)+1
+    bsz = val.shape[ax]
+    val = val.pad(tuple((0,0) if a != ax else (bsz*rng, bsz*(count-1) - bsz*rng) for a in range(len(val.shape))))
+  return val.allreduce(Ops.ADD, device)
 
 def store_after_multi(dest:UOp, src:UOp): return _rewrap(src, dest.after(dest.store(src.src[0])))
 

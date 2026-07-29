@@ -676,7 +676,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       device_range = (UOp.range(len(self.device), -1, AxisType.DEVICE),)
     if isinstance(device_range, UOp): device_range = (device_range,)
     assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
-    assert all(x.op is Ops.RANGE for x in device_range), f"unshard requires RANGEs, not {device_range}"
     axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
     return UOp(Ops.UNSHARD, src=(self, *device_range), arg=axis)
 
@@ -735,7 +734,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
   def _shard(self, axis:int, rng:UOp) -> UOp:
-    assert rng.op is Ops.RANGE, f"_shard requires a RANGE, got {rng.op}"
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
     dcount = int(rng.vmax)+1
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
@@ -891,7 +889,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # CL 1.1 provides the clCreateSubBuffer API, but at the time of writing, relevant CL runtimes (rusticl, adreno, nvidia, amd) do not provide
     # reasonable values for CL_DEVICE_MEM_BASE_ADDR_ALIGN. cl_ext_buffer_device_address could potentially help, but this extension is not provided
     # by relevant CL runtimes at time of writing.
-    if any(d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str) else self.device)): return None
+    if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
