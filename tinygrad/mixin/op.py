@@ -139,13 +139,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
       if v is None: return x  # advanced getitem
       # advanced setitem: resolve tensor dims in collapsed space, then fall through to basic setitem path
-      vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
+      vb = v._broadcast_to(_broadcast_shape(x.shape, v.shape))
       for dim in sum_axis: vb = vb.unsqueeze(dim)  # add back reduced dims from sum
       start = dims[0] if not permuted else 0
       vb = x_pre._masked_merge(vb, mask, tuple(range(start, start + len(big_shape))))
     elif v is None: return x  # basic getitem
     # basic setitem: broadcast v, reshape to self.ndim (unsqueeze int dims, squeeze None dims)
-    else: vb = v.cast(self.dtype)._broadcast_to(x.shape)
+    else: vb = v._broadcast_to(x.shape)
     vb = vb.reshape(tuple(1 if p['collapse_dim'] else p['size'] for p in indices_parsed if p['index'] is not None))
     per_dim = []
     for d, m in enumerate(mops):
