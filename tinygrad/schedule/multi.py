@@ -54,12 +54,12 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
   # normalize srcs to local shards on axis
   devices = [x.device for x in msrcs if x.device is not None]
   assert all_same(devices), f"all buffers must have the same device {devices}"
-  # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range)
-  if len(devices): dcount, sharding_rng = len(devices[0]), None
+  # without devices the sharding range comes from the UNSHARD itself (e.g. a LOCAL thread range);
+  # device shards range over the devices instead
+  if len(devices): sharding_rng = UOp.range(len(devices[0]), -1, AxisType.DEVICE)
   else:
     sharding_rng = next((m.src[1] for m in msrcs if m.op is Ops.UNSHARD), None)
     assert sharding_rng is not None, "shard_srcs requires a device or a sharding range"
-    dcount = int(sharding_rng.vmax)+1
 
   out_shape = _broadcast_shape(*[x.shape for x in msrcs])
   srcs:list[UOp] = []
@@ -71,7 +71,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
     else:
       # otherwise every shard gets the full copy, sharded iff this src has the axis (broadcast srcs stay whole)
       full = mlb if mlb.axis is None else copy_multi(mlb, mlb.device)
-      srcs.append(full if axis in broadcast_axes(mlb.shape, out_shape) else full._shard(src_axis, dcount, sharding_rng))
+      srcs.append(full if axis in broadcast_axes(mlb.shape, out_shape) else full._shard(src_axis, sharding_rng))
   return srcs
 
 def alu_multi(root:UOp):
