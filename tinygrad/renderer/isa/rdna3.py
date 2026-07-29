@@ -486,6 +486,8 @@ pre_isel_matcher = PatternMatcher([
 isel_matcher = PatternMatcher([
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
+  # lower the store ins into src[0] but keep Ops.STORE to be linearized to IF/ENDIF in codegen
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate: x.replace(src=(store(ctx,idx,val), val, gate))),
   (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- control flow ---
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
@@ -514,19 +516,19 @@ isel_matcher = PatternMatcher([
   (UPat(name="x").bitcast(), lambda x: x),
 ])
 
-# assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.IF, name="x"), lambda ctx,x: (x, [x.replace(tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))])),
-  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: ((nx := isel_matcher.rewrite(x)), [nx])
-    if idx.addrspace is not AddrSpace.REG else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
+  # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
+  (UPat(Ops.IF, src=(UPat.var("gate"),UPat()), name="x"), lambda ctx,x,gate: \
+    ((nx := x.ins(RDNA3Ops.s_and_saveexec_b32, tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))), [nx])),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (idx, [idx]) if idx.addrspace is not AddrSpace.REG \
+    else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat.var("mask")), name="x"), lower_end),
-  (UPat(Ops.IF, src=(UPat.var("gate"),), name="x"), lambda x,gate: (x, [x.ins(RDNA3Ops.s_and_saveexec, src=(gate,))])),
-  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: (x, [x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: ((nx := x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))), [nx])),
 ])
 
 def encode(ctx, x:UOp):
@@ -539,8 +541,6 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
-
-  print("encoding", opc, rdefs(x), [(u.op,u.arg,rdefs(u)) for u in x.src])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
