@@ -360,7 +360,7 @@ def lower_range(ctx, x:UOp):
   ctx.exec_mask[acc] = mask
   loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
   pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,bnd), tag=(EXEC,))
-  jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_END_{range_str(x)}")
+  jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_END_{range_str(x)}")
   return acc, [acc, mask, loop_body, pred, jmp_out]
 
 def lower_end(ctx, x:UOp, acc:UOp, mask:UOp):
@@ -622,17 +622,7 @@ class RDNA3Renderer(ISARenderer):
 
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
-
-  # NOTE; FLAT_SCRATCH base implicit, since this is only used for spill/fill just fold ioffs
-  def fill(self, spill_offset:int, x:UOp) -> UOp:
-    bufsz = sum([r.size for r in rdefs(x)])
-    _insmap = {4:RDNA3Ops.scratch_load_b32,8:RDNA3Ops.scratch_load_b64,16:RDNA3Ops.scratch_load_b128}
-    return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(spill_offset),), tag=rdefs(x))
-
-  def spill(self, spill_offset:int, x:UOp) -> UOp:
-    bufsz = sum([r.size for r in rdefs(x)])
-    _insmap = {4:RDNA3Ops.scratch_store_b32,8:RDNA3Ops.scratch_store_b64,16:RDNA3Ops.scratch_store_b128}
-    return UOp(Ops.INS, arg=_insmap[bufsz], src=(const(spill_offset),x))
+  def copy(self, u:UOp, r:VRegister|Register) -> UOp: return u.ins(RDNA3Ops.v_mov_b32_e32, src=(u,), tag=(r,))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     nuops = insertwaitcnts(lin.src)

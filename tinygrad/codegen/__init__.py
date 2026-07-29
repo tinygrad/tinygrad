@@ -387,7 +387,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    if ctx.mem2reg_alloc is not None: lst = line_rewrite(lst, pm_mem2reg_rewrite, Mem2RegContext(lst, ctx.mem2reg_alloc))
+    if ctx.mem2reg_alloc is not None: lst = line_rewrite(lst, pm_mem2reg_rewrite, Mem2RegContext(lst, ctx))
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))

@@ -69,25 +69,45 @@ pm_regalloc_rewrite = PatternMatcher([
   (UPat({Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
 
-# maps anonymous reg BUFFER allocations to SSA vregister form at specific program points, modeled after LLVM mem2reg/alloca 
-# each new store creates a new vregister and subsequent loads use the latest definition
-class Mem2RegContext:
-  def __init__(self, uops:list[UOp], valloc):
-    self.cur: dict[tuple[UOp, int], UOp] = {}
-    self.vslot = itertools.count()
-    self.valloc = valloc
-
 # decouple identical BUFFER refs from UOp mutation
 def geps(idx:UOp) -> tuple[UOp, int]:
   return (idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]), idx.src[1].arg 
 
-def promote_store(ctx, idx:UOp, x:UOp):
-  nx = x.replace(tag=(ctx.valloc(f"m2vr{next(ctx.vslot)}", x)))
-  ctx.cur[geps(idx)] = nx
-  return nx, [nx]
+# maps anonymous reg BUFFER allocations to SSA vregister form at specific program points, modeled after LLVM mem2reg/alloca 
+# each new store creates a new vregister and subsequent loads use the latest definition
+class Mem2RegContext:
+  def __init__(self, uops:list[UOp], ren:ISARenderer):
+    self.ren = ren
+    self.vslot = itertools.count()
+    self.cur: dict[tuple[UOp, int], UOp] = {}
+    self.in_range = False
+    # only 1 level CF for now
+    self.phi: VRegister|None = None
+    self.end_footer: UOp|None = None
+
+  def r(self): self.in_range = True
+
+  def promos(self, u:UOp):
+    nu = u.replace(tag=(self.ren.mem2reg_alloc(f"m2vr{next(self.vslot)}", u)))
+    self.cur[geps(u.src[0])] = nu
+    if self.in_range and self.phi is not None:
+      self.end_footer = self.ren.copy(nu, self.phi)
+    return nu, [nu]
+
+  def promol(self, u:UOp):
+    if self.in_range: self.phi = rdef(self.cur[geps(u.src[0])])
+    return self.cur[geps(u.src[0])], []
+
+  def resolve_phi(self, u:UOp):
+    self.in_range, self.phi = False, None
+    return u, [self.end_footer, u]
+
 
 pm_mem2reg_rewrite = PatternMatcher([
-  (UPat.var("idx").load(), lambda ctx,idx: (ctx.cur[geps(idx)], [])), 
-  (UPat.var("idx").store(UPat()).named("x"), lambda ctx,idx,x: promote_store(ctx, idx, x) \
-    if idx.addrspace is AddrSpace.REG and x.tag is None else None),
+  (UPat(Ops.LOAD, name="x"), lambda ctx,x: ctx.promol(x)),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: ctx.promos(x) \
+    if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
+  # insert backedge phi copy if load then store in RANGE
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx.r()),
+  (UPat(Ops.END, name="x"), lambda ctx, x: ctx.resolve_phi(x)),
 ])
