@@ -13,7 +13,9 @@ from tinygrad.codegen.decomp.transcendental import xpow
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
-  if c.arg < 0: return x.reciprocal().pow(-c)
+  if c.arg < 0:
+    if dtypes.is_int(x.dtype): return x.eq(-1).where(-1 if c.arg%2 else 1, x.eq(1).where(1, 0))
+    return x.reciprocal().pow(-c)
   if c.arg == 0: return x.const_like(1)
   if int(c.arg-0.5)+0.5 == c.arg: return x.pow(c.const_like(c.arg-0.5)) * x.sqrt()
   if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
