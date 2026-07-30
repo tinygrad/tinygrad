@@ -154,6 +154,14 @@ class TestGGUF(unittest.TestCase):
       with self.assertRaises(FileNotFoundError):
         gguf_load(d / "test-00001-of-00002.gguf")
 
+  def test_disk_backed_payload(self):
+    with tempfile.TemporaryDirectory() as d:
+      fd = pathlib.Path(d) / "test.gguf"
+      a = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+      fd.write_bytes(self._build_gguf([("weight", (4,), 0, a.tobytes())], []))
+      _, tensors = gguf_load(Tensor(fd))
+      np.testing.assert_equal(tensors["weight"].numpy(), a)
+
   def _test_dequantization(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
     n_el, n_bytes = ggml_test_block_count * block_size, ggml_test_block_count * type_size
