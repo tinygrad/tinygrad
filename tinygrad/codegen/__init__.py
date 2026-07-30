@@ -7,7 +7,7 @@ from tinygrad.uop.ops import AxisType
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
+from tinygrad.renderer.isa import ISARenderer, PreRegallocContext
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -388,7 +388,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.mem2reg_alloc is not None: lst = line_rewrite(lst, pm_mem2reg_rewrite, Mem2RegContext(ctx))
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, ctx.pre_regalloc_context)
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
     regalloc_ctx = LinearScanRegallocContext(lst, ctx)
@@ -448,7 +448,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      renderer.pre_regalloc_context = PreRegallocContext(full_sink)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))

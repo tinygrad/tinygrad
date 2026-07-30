@@ -29,26 +29,19 @@ def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
-class IselContext:
+class PreRegallocContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    self.buf_slots: dict[UOp, int] = {} # find better, more arch independent way?
+    self.lock: UOp|None = None
+    self.clobbered: set[UOp] = set()
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
-    # self.alloca: dict[UOp, 
-
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
-
-@dataclass
-class PreRegAllocContext:
-  lock: UOp|None = None
-  clobbered: set[UOp] = field(default_factory=set)
-  exec_mask_slot = itertools.count()
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher

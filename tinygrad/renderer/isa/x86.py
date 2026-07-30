@@ -5,7 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, rdef
+from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
 # ***** X86 Ops *****
@@ -255,7 +255,7 @@ def vpins(x:UOp) -> UOp:
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
 # we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
-def idiv(ctx:IselContext, x:UOp) -> UOp:
+def idiv(ctx:PreRegallocContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
   # for >8bit need to zero/sign extend rax to rdx
   if x.dtype in dtypes.int8s: ext = []
@@ -292,7 +292,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
-def abi(ctx:IselContext, x:UOp) -> UOp|None:
+def abi(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
   # buffer params hold addresses, their value moves as a 64bit int
@@ -325,7 +325,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
   if bits >= 8: return X86Ops.VMOVSDm
   return X86Ops.VMOVSSm
 
-def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
+def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
   if x.arg is X86Ops.DEFINE and x.tag is not None: return None
   if x.arg is X86Ops.LOOP_CMP: return None

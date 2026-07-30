@@ -3,7 +3,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp
-from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs, rdef
+from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
@@ -109,7 +109,7 @@ def _vop2(ctx, x:UOp):
 
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
 # NOTE: should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
-def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
+def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   if x.op is Ops.LOAD and x.src[0].addrspace is not AddrSpace.REG: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
@@ -127,7 +127,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 
 # TODO: batch param loading? ex. s_load_b128
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
-def abi(ctx:IselContext, x:UOp) -> UOp|None:
+def abi(ctx, x:UOp) -> UOp|None:
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
     if x.arg[0] == 'g': return vmov(x.replace(tag=(WGIDS[dim],), dtype=dtypes.uint32)).rtag()
@@ -141,7 +141,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
 # NOTE: manual SHL construction to avoid none shape error mixing with Ops.INS? fix this somehow
-def fold_global(ctx, base:UOp, idx:UOp): # (voff, ioffs)
+def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
   vaddr, offs = idx, const(0, dtypes.uint16)
@@ -154,7 +154,7 @@ def fold_global(ctx, base:UOp, idx:UOp): # (voff, ioffs)
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # NOTE: keep base in src to maintain graph dependencies?
 # TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is (ctx.func_args) and the size of the other ones. Use isel ctx?
-def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
+def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.arg * scale, dtypes.uint16), base)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(idx.src[1].arg * scale, dtypes.uint16), base)
@@ -162,7 +162,7 @@ def fold_lds(ctx, base:UOp, idx:UOp): # (vaddr, ioffs)
   offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
   return (offs, const(0, dtypes.uint16), base)
 
-def fold_address(ctx, x:UOp): return fold_lds(ctx, *x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(ctx, *x.src[:2])
+def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp):
@@ -171,13 +171,13 @@ def load(ctx, x:UOp, idx:UOp):
   vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
-  return x.ins(opc, src=fold_address(ctx, idx), tag=(vreg,))
+  return x.ins(opc, src=fold_address(idx), tag=(vreg,))
 
 def store(ctx, idx:UOp, val:UOp):
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize * 8
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
-  return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(ctx, idx) + (to_vgpr(ctx,val),))
+  return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(ctx,val),))
 
 def gated_load(idx:UOp, alt:UOp, gate:UOp):
   buf = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]
@@ -427,9 +427,6 @@ pm_int_to_float = PatternMatcher([
 pre_isel_matcher = PatternMatcher([
   # --- gated ---
   (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")), gated_load),
-  # lower the store ins into src[0] but keep Ops.STORE to be linearized to IF/ENDIF in codegen
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate:
-    x.replace(src=(x.replace(src=(idx,val)), val, gate))),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -469,6 +466,9 @@ pre_isel_matcher = PatternMatcher([
 # NOTE: cmp shouldn't always be materialized to sgpr, only for where?
 isel_matcher = PatternMatcher([
   # --- mem ops ---
+  # prevent members of gated store address to be irrepareably lowered ahead of time in isel
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate: \
+    x.replace(src=(idx.store(val), val, gate)) if idx.addrspace is not AddrSpace.REG else None),
   (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
   (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- control flow ---
@@ -503,10 +503,8 @@ isel_matcher = PatternMatcher([
 pre_regalloc_matcher = PatternMatcher([
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
-    ((nx := x.ins(RDNA3Ops.s_and_saveexec_b32, tag=VRegister(f"ex{next(ctx.exec_mask_slot)}", GP_SGPRS))), [nx])),
-  # how to detect it used to be gated?
-  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda x,idx,val: (idx, [idx]) if idx.addrspace is not AddrSpace.REG \
-    else ((nx := x.ins(RDNA3Ops.v_mov_b32_e32, src=(val,))), [nx])),
+    ((nx := UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))), [nx])),
+  (UPat.var("idx").store(UPat()), lambda idx: (idx, [idx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([

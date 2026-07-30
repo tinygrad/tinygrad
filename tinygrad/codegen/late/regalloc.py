@@ -51,8 +51,9 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if x.op in PSEUDO_OPS: return None
   nsrc, ndefs, before, after = [], [], [], []
-  i = next(ctx.idx)# ctx.prgpts[x]
+  i = next(ctx.idx)
 
+  print(x.op, x.arg)
   for s in x.src: # handle spills?
     if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
@@ -68,7 +69,6 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 pm_regalloc_rewrite = PatternMatcher([
   (UPat({Ops.INS, Ops.LOAD, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
-
 
 @dataclass(frozen=True)
 class RegSlot:
@@ -96,6 +96,6 @@ pm_mem2reg_rewrite = PatternMatcher([
   # reg store is copy, should handle copying directly from memory?
   # ex. store((global buffer).index(0), (reg buffer).index(1))
   # should perform a single load directly into reg buffer
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: ((nx := ctx.ren.copy(x.src[1], ctx.vr(x))), [nx])
-    if x.src[0].addrspace is AddrSpace.REG else None),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda ctx,idx,val,x: \
+    ((nx := ctx.ren.copy(val, ctx.vr(x))), [nx]) if idx.addrspace is AddrSpace.REG else None),
 ])
