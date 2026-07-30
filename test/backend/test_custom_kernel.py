@@ -433,6 +433,40 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
+  def test_mop_input(self, mop_fxn=lambda x: x.reshape(16, 2), kcount:int=0):
+    # raw: mop outside, input is a realized BUFFER
+    x = mop_fxn(Tensor.arange(32).clone("CPU").realize())
+    y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    y.realize()
+    kernel_count = GlobalCounters.kernel_count
+    self.assertEqual(y.tolist(), x.add(1).tolist())
+    self.assertEqual(kernel_count, 1+kcount)
+    # same test wrapped in @function like the trainer (mop inside, input is a PARAM)
+    from tinygrad import function
+    x0 = Tensor.arange(32).clone("CPU").realize()
+    @function(precompile=True)
+    def run(a:Tensor) -> Tensor:
+      xv = mop_fxn(a)
+      y = Tensor.invalids(*xv.shape, dtype=xv.dtype, device=a.device)
+      return Tensor.custom_kernel(y, xv, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    y = run(x0).realize()
+    kernel_count = GlobalCounters.kernel_count
+    self.assertEqual(y.tolist(), mop_fxn(x0).add(1).tolist())
+    self.assertEqual(kernel_count, 1+kcount)
+
+  # becomes a SLICE when the device supports it
+  def test_shrink_input(self): self.test_mop_input(lambda x: x[:4], kcount=0)
+  def test_double_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T.T, kcount=0)
+  # must materialize the movement op before CALL
+  def test_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T, kcount=1)
+  def test_offset_shrink_input(self): self.test_mop_input(lambda x: x[4:8], kcount=0)
+  def test_2d_shrink_input(self): self.test_mop_input(lambda x: x.reshape(4, 8)[:, 2:6], kcount=1)
+  def test_pad_input(self): self.test_mop_input(lambda x: x[:4].pad(((0, 4),)), kcount=1)
+  def test_flip_input(self): self.test_mop_input(lambda x: x.flip(0), kcount=1)
+  def test_expand_input(self): self.test_mop_input(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), kcount=1)
+
 class TestUnshardIndex(unittest.TestCase):
   """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
 
