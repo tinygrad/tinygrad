@@ -1378,15 +1378,6 @@ class Transformer:
         prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 16 if str(device).startswith("CPU") else 128)
         with Context(JIT_BATCH_SIZE=prefill_batch): next(warm)
         next(warm)
-        # AMD flash decode specializes on its attention partition. Fused CPU decode uses one graph for the full cache.
-        if self.max_context > short_decode_len and not str(device).startswith("CPU"):
-          self.rollout_jits[self.max_context] = TinyJit(
-            functools.partial(self.forward_recurrent_decode, decode_len=self.max_context, sample=False))
-          self.rollout_jits[self.max_context].cnt = 1
-          long_result = self(Tensor([[0]], dtype="int32", device=device),
-                             UOp.variable("start_pos", 0, self.max_context-1).bind(short_decode_len), Tensor([0.0], device=device))
-          assert isinstance(long_result, Tensor)
-          long_result.realize()
         self._warming_up = False
       else:
         for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))

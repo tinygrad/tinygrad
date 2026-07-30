@@ -163,9 +163,8 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    # run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+    with Context(DEBUG=max(DEBUG.value, 1), PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12)):
+      model.warmup()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

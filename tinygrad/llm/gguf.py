@@ -1,10 +1,11 @@
-import functools, io, pathlib, re, struct, weakref
+import functools, io, pathlib, re, struct, weakref, mmap
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up
+from tinygrad.helpers import prod, round_up, mv_address
+from tinygrad.device import Device
 from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
@@ -22,6 +23,17 @@ _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
 _quantized_tensors:weakref.WeakKeyDictionary[UOp, tuple[UOp, int]] = weakref.WeakKeyDictionary()
+_cpu_mapped_ggufs:dict[tuple[pathlib.Path, int, int], tuple[mmap.mmap, Tensor]] = {}
+
+def _gguf_tensor(path:pathlib.Path) -> Tensor:
+  path = path.resolve()
+  if not Device.DEFAULT.startswith("CPU"): return Tensor(path).to(None)
+  stat = path.stat()
+  key = (path, stat.st_mtime_ns, stat.st_size)
+  if key not in _cpu_mapped_ggufs:
+    with path.open("rb") as f: mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_COPY)
+    _cpu_mapped_ggufs[key] = mm, Tensor.from_blob(mv_address(memoryview(mm)), (len(mm),), dtype=dtypes.uint8, device=Device.DEFAULT)
+  return _cpu_mapped_ggufs[key][1]
 
 def get_ggml_quantization(tensor:Tensor) -> tuple[Tensor, int]|None:
   if (meta:=_quantized_tensors.get(tensor.uop)) is None: return None
@@ -184,8 +196,8 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)).to(None))
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else _gguf_tensor(pathlib.Path(fn)))
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp).to(None))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(_gguf_tensor(pp))[1])
   return kv, sd

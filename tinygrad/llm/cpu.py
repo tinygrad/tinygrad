@@ -1679,7 +1679,7 @@ def _cpu_topk_uop(out:UOp, sel:UOp, x:UOp, k:int, bias:UOp|None=None, normalize:
                        indices[worst_slot.valid(take)].store(index.cast(dtypes.int32))).end(index)
 
   sorted_values = selected
-  # Ascending score order, with larger indices first on ties, matches reversing the C fallback's descending list.
+  # Ascending score order, with larger indices first on ties, matches the reference implementation's reversed descending list.
   for end in range(k - 1, 0, -1):
     for slot in range(end):
       left_score, right_score = scores.after(sorted_values)[slot].load(), scores.after(sorted_values)[slot + 1].load()

@@ -482,8 +482,15 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
-def to_program(ast:UOp, renderer:Renderer) -> UOp:
+def program_cache_key(ast:UOp, renderer:Renderer) -> tuple:
   config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+  return (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+
+def parallel_to_program(args:tuple[UOp, Renderer, tuple]) -> tuple[tuple, UOp]:
+  ast, renderer, key = args
+  return key, do_to_program(ast, renderer)
+
+def to_program(ast:UOp, renderer:Renderer) -> UOp:
+  key = program_cache_key(ast, renderer)
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg
