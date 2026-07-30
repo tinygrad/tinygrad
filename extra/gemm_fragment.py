@@ -140,12 +140,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
   C_local = C_local[ir*TM + ty, tx*TN + jj].set(acc, end=(kk, ir, jj, ko))
 
-  # c <- C_local (with relu and cast)
-  #ie, je = UOp.range(TM, 14, AxisType.UPCAST), UOp.range(TN, 15, AxisType.UPCAST)
-  #c_st = c[ty*TM + ie, tx*TN + je].store(C_local[ty*TM + ie, tx*TN + je].relu().cast(c.dtype)).end(je, ie)
-  #c_st = with_threads(c).store(with_threads(C_local).relu().cast(c.dtype))
-
-  # TODO: this should work
+  # c <- C_local (with relu and cast): every thread stores its shard's sub-view of the output tile
   c_st = c.store(C_local.relu().cast(c.dtype))
 
   # close the locals and globals
@@ -174,7 +169,7 @@ if __name__ == "__main__":
   b = Tensor.randn(K, N, dtype=dtype_in).contiguous()
   ref = (a @ b).relu().realize()
 
-  for i in range(10):
+  for _ in range(10):  # a few iterations to catch stale-cache hazards
     out = matmul_relu(a, b).realize()
 
   import numpy as np

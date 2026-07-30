@@ -53,6 +53,9 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 # an OWNER factor (its value is the owning shard's coordinate on that factor); a plain const is a LOCAL factor.
 # pos(idx coords) = sum over factors of coord_f * multiplier_f, multiplier_f = prod of the spans of all later factors.
 # layouts: [rng, L] contiguous, [L, rng] strided, [L, rng, L] middle insert, [rng_i, rng_j, L] stacked owners.
+# NOTE: layouts are pure mixed-radix interleavings: ownership of a position must be an exact digit decomposition
+# (idx // w) % span. swizzled ownership (e.g. XOR-shuffled layouts) cannot be expressed and index resolution
+# requires the idx's digits to symbolically cancel exactly, no vmin/vmax range analysis.
 
 def is_owner(f:UOp) -> bool: return len(f.ranges) > 0
 def owners_of(fs:tuple[UOp, ...]) -> list[UOp]: return [f for f in fs if is_owner(f)]
@@ -66,8 +69,8 @@ def layout_weights(fs:tuple[UOp, ...]) -> tuple[sint, ...]:
 
 def _is_zero(x:UOp) -> bool: return (sx := sint_to_uop(x).ssimplify()) == 0 or (isinstance(sx, UOp) and sx.op is Ops.CONST and int(sx.arg) == 0)
 
-def _check_unshard(val:UOp, args:tuple[UOp, ...]):
-  # invariant: the LOCAL factor spans of every axis multiply to the shard's dims
+def _check_unshard(val:UOp, args:tuple[UOp, ...]) -> None:
+  # invariant: one factor arg per axis, and the LOCAL factor spans of every axis multiply to the shard's dims
   assert len(args) == len(val.shape) and all(prod([factor_span(f) for f in (a.src if a.op is Ops.STACK else (a,)) if not is_owner(f)]) == s
                                              for a, s in zip(args, val.shape)), f"UNSHARD layout {args} does not match shard shape {val.shape}"
 
@@ -110,14 +113,12 @@ def resolve_axis_index(idx:UOp, fs:tuple[UOp, ...]) -> UOp|None:
 
 def index_multi(root:UOp, multi:UOp):
   idxs:list[UOp] = []
-  for ax, fs in enumerate(multi.factors):
-    if ax >= len(root.src)-1: break
-    idx = root.src[1+ax]
-    if not owners_of(fs): idxs.append(idx)
+  for ax, idx in enumerate(root.src[1:]):
+    fs = multi.factors[ax]
+    if not owners_of(fs): idxs.append(idx)  # no owners on this axis: the shard index is the full index
     elif (local := resolve_axis_index(idx, fs)) is None:
       raise RuntimeError(f"index_multi: cannot shard index {idx} for UNSHARD axis {ax} with factors {fs}")
     else: idxs.append(local)
-  idxs += list(root.src[1+len(idxs):])
   return multi.src[0].index(*idxs)
 
 def factor_subview(full:UOp, multi:UOp, reshape_to:tuple[sint, ...]|None=None) -> UOp:
@@ -142,7 +143,7 @@ def store_value_multi(dest:UOp, multi:UOp):
 # ***** multi functions *****
 
 def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
-  # normalize srcs to local shards on axis (legacy single-axis contiguous resharding)
+  # normalize srcs to local shards on axis (single-axis contiguous resharding: the device-multi reshard)
   devices = [x.device for x in msrcs if x.device is not None]
   assert all_same(devices), f"all buffers must have the same device {devices}"
   if not len(devices):
@@ -183,7 +184,7 @@ def alu_multi(root:UOp):
       if same_layout(m): srcs.append(m.src[0])
       else: srcs.append(m if len(m.shape) == 0 else factor_subview(m, target, reshape_to=target.src[0].shape))
     return _unshard_with(srcs[0].alu(root.op, *srcs[1:]), target)
-  # legacy: single-axis contiguous resharding via shard_srcs (multi-axis results fall back to the last axis)
+  # mismatched layouts: reshard everything to the last sharded axis (device-multi only, layouts must be canonical)
   if not all(is_contig(m) for m in multis): raise RuntimeError(f"cannot reshard layouts in ALU: {multis}")
   axis = root.sharding[-1][0]
   srcs = shard_srcs(root.src, axis)
@@ -237,8 +238,6 @@ def reshaped_shard_shape(multi:UOp, new_shape:tuple[sint, ...]) -> tuple[sint, .
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg):
-    print('RESHAPE FAIL: multi full', multi.shape, '->', root.marg, 'shard', multi.src[0].shape,
-          'factors', [[(f.op.name, getattr(f, 'arg', None), [r.arg for r in f.ranges]) for f in fs] for fs in multi.factors])
     raise RuntimeError("reshape must maintain prod(shape)")
   shard = multi.src[0].reshape(reshaped_shard_shape(multi, new_shape))
   new_args = [UOp.factor_arg(fs) for fs in reshape_layout(multi, new_shape)]
@@ -290,7 +289,7 @@ def shrink_multi(root:UOp, multi:UOp):
       local_marg.append((0, lspan))
       new_args.append(tuple(f for f in fs if not is_owner(f)))
       continue
-    # legacy device path: selecting a single contiguous partition (copied to all devices and optimized out later)
+    # device-multi path: selecting a single contiguous partition (copied to all devices and optimized out later)
     if len(own) != 1 or len(fs) > 2 or not isinstance(multi.device, tuple) or len(multi.sharding) != 1:
       raise RuntimeError(f"shrinking not supported for {fs=} with {s=} {l=}")
     count = int(own[0].vmax)+1
@@ -315,7 +314,7 @@ def stack_multi(root:UOp):
   if all(m.op is Ops.UNSHARD and m.shape == target.shape and tuple(m.src[1:]) == tuple(target.src[1:]) for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
     return UOp(Ops.UNSHARD, src=(UOp(Ops.STACK, src=tuple(srcs)), UOp.local_factor(len(srcs)), *target.src[1:]))
-  # legacy: single-axis contiguous resharding fallback
+  # mismatched layouts: reshard everything to the target axis (device-multi only)
   axis = root.axis
   assert axis is not None
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, next(m.sharding[0][1] for m in root.src if m.op is Ops.UNSHARD))
@@ -410,4 +409,6 @@ multi_pm = PatternMatcher([
   # remove UNSHARD from STORE
   (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True),
     lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:]), root.arg)),
+  # every UNSHARD that survives multi_pm must satisfy the layout invariant (rangeify-mangled ones are resolved above)
+  (UPat(Ops.UNSHARD, name="multi"), lambda multi: _check_unshard(multi.src[0], multi.src[1:])),
 ])+replace_allreduce

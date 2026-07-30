@@ -1,10 +1,10 @@
 import unittest
-from tinygrad.uop.ops import UOp, AxisType, graph_rewrite
+from tinygrad.uop.ops import UOp, AxisType, Ops, graph_rewrite
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.schedule.multi import multi_pm, factor_span, is_owner, resolve_axis_index
 
 def rng(n, i, at=AxisType.LOCAL): return UOp.range(n, i, at)
-def nodes(fs): return [(('o', int(factor_span(f))) if is_owner(f) else ('l', int(factor_span(f)))) for f in fs]
+def nodes(fs): return [('o' if is_owner(f) else 'l', int(factor_span(f))) for f in fs]
 
 class TestFactorLayout(unittest.TestCase):
   """The factor-list algebra of UNSHARD: every axis carries an ordered factor list (owner factors with RANGEs,
@@ -127,6 +127,50 @@ class TestFactorLayout(unittest.TestCase):
     dev = (rng(2, 0, AxisType.DEVICE),)
     x = UOp.placeholder((2, 4), dtypes.float32, 0).unshard((0,), dev)
     self.assertEqual(x.bounds, ((0, 2), (2, 4)))
+
+  def test_expand_prepends_local_factors(self):
+    # broadcasting in new leading axes: the new axes are pure local factors, the layout below is untouched
+    x = UOp.placeholder((2, 4), dtypes.float32, 0).unshard((0,), (rng(2, 0, AxisType.DEVICE),))
+    out = self.resolve(x.expand((3,)+x.shape))
+    self.assertEqual(out.shape, (3, 4, 4))
+    self.assertEqual([nodes(fs) for fs in out.factors], [[('l', 3)], [('o', 2), ('l', 2)], [('l', 4)]])
+    self.assertEqual(out.src[0].shape, (3, 2, 4))
+
+  def test_pad(self):
+    x = UOp.placeholder((2, 4), dtypes.float32, 0).unshard((0,), (rng(2, 0, AxisType.DEVICE),))
+    # padding an unsharded axis grows its local factor span to the padded size
+    out = self.resolve(x.pad((None, (1, 1))))
+    self.assertEqual(out.shape, (4, 6))
+    self.assertEqual([nodes(fs) for fs in out.factors], [[('o', 2), ('l', 2)], [('l', 6)]])
+    self.assertEqual(out.src[0].shape, (2, 6))
+    # padding a sharded axis (other than full-axis) is not ownership-preserving
+    with self.assertRaises(AssertionError):
+      self.resolve(x.pad(((1, 1), None)))
+
+  def test_flip(self):
+    x = UOp.placeholder((2, 4), dtypes.float32, 0).unshard((0,), (rng(2, 0, AxisType.DEVICE),))
+    # flipping an unsharded axis is local to the shard, the layout is unchanged
+    out = self.resolve(x.flip((1,)))
+    self.assertEqual(out.shape, (4, 4))
+    self.assertEqual([nodes(fs) for fs in out.factors], [[('o', 2), ('l', 2)], [('l', 4)]])
+    self.assertEqual(out.src[0].op, Ops.FLIP)
+    # flipping a sharded axis would move items between shard owners
+    with self.assertRaisesRegex(RuntimeError, "flipping not supported"):
+      self.resolve(x.flip((0,)))
+
+  def test_store_sharded_value_into_whole_dest(self):
+    # STORE(whole dest, sharded value): every shard stores into its own sub-view of the dest (store_value_multi)
+    drng = rng(2, 0, AxisType.DEVICE)
+    x = UOp.placeholder((2, 4), dtypes.float32, 0).unshard((0,), (drng,))
+    dest = UOp.placeholder((4, 4), dtypes.float32, 0)
+    st = self.resolve(dest.store(x))
+    self.assertEqual(st.op, Ops.STORE)
+    self.assertFalse([u for u in st.toposort() if u.op is Ops.UNSHARD])
+    # dest is factored to (2, 2, 4) and shrunk at this shard's owner coordinate; the value is the (1, 2, 4) shard
+    self.assertEqual(st.src[0].op, Ops.SHRINK)
+    self.assertEqual(st.src[0].src[0].op, Ops.RESHAPE)
+    self.assertTrue(st.src[0].marg[0][0] is drng and st.src[0].marg[0][1] == 1)  # SHRINK marg is (start, len)
+    self.assertEqual(st.src[0].shape, st.src[1].shape)
 
 
 if __name__ == "__main__":
