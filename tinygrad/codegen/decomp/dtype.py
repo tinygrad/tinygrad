@@ -20,13 +20,17 @@ def reindex(idx:UOp, off:int, mul=2) -> UOp:
 def l2i(op: Ops, dt: DType, *uops:UOp):
   zero = UOp.const(dt, 0)
   if len(uops) == 2: a0, a1 = uops
+  elif len(uops) == 3: a0, a1, b0 = uops  # a shift's count is a single word
   elif len(uops) == 4: a0, a1, b0, b1 = uops
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong) and uops[0].dtype not in dtypes.floats:
-      return uops[0].cast(l2i_dt[dt]), (uops[0] < 0).where(UOp.const(l2i_dt[dt], -1), UOp.const(l2i_dt[dt], 0))
+      # the high word is the sign extension; bool has no sign, test the already-cast low word instead (bool < 0 would promote to weakint)
+      x, lo = uops[0], uops[0].cast(l2i_dt[dt])
+      sign = lo if x.dtype is dtypes.bool else x
+      return lo, (sign < sign.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
-      return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0)).cast(l2i_dt[dt])
+      return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
       return small.where(a0.cast(dt), ((a1.cast(dtypes.float32) * (2**32)) + a0.bitcast(dtypes.uint).cast(dtypes.float32)).cast(dt))
@@ -41,8 +45,8 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       lo, hi = ((a0u >> n) | ((a1u << 1) << (31 - n))).bitcast(dt), a1 >> (b0 & 31)
       fill = a1 >> 31 if dt == dtypes.int else zero  # vacated high word: sign bits when signed, else 0
       return (b0 >= 32).where(hi, lo), (b0 >= 32).where(fill, hi)
-    case Ops.ADD: return (low:=a0+b0), (a1 + b1).replace(dtype=dt) + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)).cast(dt)
-    case Ops.SUB: return a0 - b0, a1 - b1 - (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)).cast(dt)
+    case Ops.ADD: return (low:=a0+b0), a1 + b1 + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint))
+    case Ops.SUB: return a0 - b0, a1 - b1 - (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint))
     case Ops.MUL:
       (a00, a01), (b00, b01) = unpack32(a0), unpack32(b0)
       mid = l2i(Ops.ADD, dt, shl(a00*b01, 16).bitcast(dt), shr(a00*b01, 16).bitcast(dt), shl(a01*b00, 16).bitcast(dt), shr(a01*b00, 16).bitcast(dt))
@@ -65,19 +69,23 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         (nq0, nq1), (nr0, nr1) = l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *q)), l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *r))
         (q0, q1), (r0, r1) = l2i(Ops.BITCAST, dt, *q), l2i(Ops.BITCAST, dt, *r)
         return (a_neg.where(nr0, r0), a_neg.where(nr1, r1)) if op == Ops.CMOD else ((a_neg^b_neg).where(nq0, q0), (a_neg^b_neg).where(nq1, q1))
-      return (r[0].bitcast(dt), r[1].bitcast(dt)) if op == Ops.CMOD else (q[0].bitcast(dt), q[1].bitcast(dt))
+      return r if op == Ops.CMOD else q
     case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
     case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
     case Ops.CMPNE: return a0.ne(b0) | a1.ne(b1)
-    case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, dt, src=(a0, b0)), UOp(op, dt, src=(a1, b1))
+    case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, src=(a0, b0)), UOp(op, src=(a1, b1))
     case Ops.WHERE: return uops[0].where(uops[1], uops[3]), uops[0].where(uops[2], uops[4])
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
+def split_l2i(op: Ops, dt: DType, *uops:UOp):
+  # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself
+  return l2i(op, dt, *graph_rewrite(UOp.sink(*uops), pm_long_decomp, bottom_up=True).src)
+
 # ***** floats *****
 f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
 
-def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
+def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0) | (shr(v, s) & 1)))
 
 def f2f(v, fr:DType, to:DType, sat=True):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
@@ -122,27 +130,35 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
+# tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
    x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
-  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]) if x.tag is not None else None),
-  (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
-   st.replace(src=(idx.rtag(0), val.rtag(0))).group(st.replace(src=(idx.rtag(1), val.rtag(1)))) if val.tag is None else None),
-  (UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
-   l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt))),
-  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
-   l2i(x.op, x.dtype, a)[x.tag] if x.tag is not None and a.dtype not in l2i_dt else None),
+  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
+   reindex(x, x.tag[0]).replace(dtype=x.tag[1], tag=None) if x.tag is not None else None),
+  (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:
+   st.replace(src=(idx.rtag((0, dt:=l2i_dt[idx.dtype])), val.rtag((0, dt)))).group(
+     st.replace(src=(idx.rtag((1, dt)), val.rtag((1, dt))))) if val.tag is None else None),
+  (UPat(GroupOp.Comparison, src=[UPat.var('a', tuple(l2i_dt.keys())), UPat()], name="x"), lambda a,x:
+   split_l2i(x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-   (a.rtag(0).cast(dt:=l2i_dt[a.dtype]).bitcast(xdt:=l2i_dt[x.dtype]), a.rtag(1).cast(dt).bitcast(xdt))[x.tag]),
+   split_l2i(Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
+   split_l2i(x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-   l2i(x.op, x.dtype, a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt)) if x.dtype not in l2i_dt and a.tag is None else None),
-  (UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
-   l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
-                                       if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
+   split_l2i(x.op, x.dtype, a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt))) if x.dtype not in l2i_dt and a.tag is None else None),
+  (UPat((Ops.SHL, Ops.SHR), tuple(l2i_dt.keys()), src=(UPat.var('a'), UPat.var('b')), name="x"), lambda a,b,x:
+   split_l2i(x.op, dt:=l2i_dt[x.dtype], a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)))[x.tag[0]] if x.tag is not None else None),
+  (UPat(Ops.WHERE, tuple(l2i_dt.keys()), src=(UPat.var('c'), UPat.var('a'), UPat.var('b')), name="x"), lambda a,b,c,x:
+   split_l2i(x.op, dt:=l2i_dt[x.dtype], c, a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)), b.rtag((1, dt)))[x.tag[0]]
+   if x.tag is not None else None),
+  (UPat((*(GroupOp.ALU - GroupOp.Comparison - {Ops.SHL, Ops.SHR, Ops.WHERE}), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
+   split_l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
+   if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag).replace(dtype=l2i_dt[x.dtype]),))),
-  (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-   UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
+  (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
+   UOp.const(x.tag[1], truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF))))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

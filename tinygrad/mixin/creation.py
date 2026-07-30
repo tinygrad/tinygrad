@@ -17,7 +17,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     from tinygrad.uop.ops import UOp
     assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
     if self._uop.axis is None: return self._wrap_uop(fxn(self.shape, None)._uop.shard(self.device, None))
-    return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).multi(self._uop.axis))
+    return self._wrap_uop(UOp.mstack(*[fxn(self._uop.shard_shape, d)._uop for d in self.device]).unshard(self._uop.axis))
 
   @classmethod
   def empty(cls, *shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None) -> Self:
@@ -80,7 +80,9 @@ class CreationMixin(DTypeMixin, MovementMixin):
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
     val = cls.const(dt, fill_value)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
-    return val.clone(device=device) if buffer else val
+    if not buffer: return val
+    ret = val.empty_like(dt if dtype is not None else None, device)
+    return cls._wrap_uop(ret._uop.after(ret._uop.store(val._uop)))
 
   def full_like(self, fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, buffer=True) -> Self:
     """

@@ -238,7 +238,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   Q_lds = QP_lds[:, :D]
   Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(
     q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
-  load_k = UOp.range(KV_ELEMS_PER_THREAD, 90, AxisType.LOOP)
+  load_k = UOp.range(KV_ELEMS_PER_THREAD, 90, AxisType.WEAK)
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(
     k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k]).end(load_k)
   qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
@@ -249,8 +249,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
   S_reg = S_reg.after(S_reg.after(n_tile).store(S_reg.const_like(0)))
   k_qk = UOp.range(D // WMMA_K, 101, AxisType.REDUCE)
-  tm1 = UOp.range(TM // WMMA_ACC, 200, AxisType.LOOP)
-  tn1 = UOp.range(TN, 201, AxisType.LOOP)
+  tm1 = UOp.range(TM // WMMA_ACC, 200)
+  tn1 = UOp.range(TN, 201)
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(TN, WMMA_N, D // WMMA_K, WMMA_K)[tn1, lane_n, k_qk]
@@ -264,8 +264,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   if causal:
     # WMMA accumulator ownership: each lane owns an 8x4 fragment of the 64x64 score tile.
     # q is aligned to the right of k, matching PyTorch's causal_lower_right mask.
-    rm = UOp.range(TM, 250, AxisType.LOOP)
-    rn = UOp.range(TN, 251, AxisType.LOOP)
+    rm = UOp.range(TM, 250, AxisType.WEAK)
+    rn = UOp.range(TN, 251, AxisType.WEAK)
     q_idx = N - M + block_m * BLOCK_M + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
     k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
     valid = k_idx <= q_idx
@@ -279,7 +279,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
   # warp reduce max (in-place)
-  ri_w = UOp.range(TM, 270, AxisType.LOOP)
+  ri_w = UOp.range(TM, 270)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce_max(m_ij[ri_w], lane)).end(ri_w))
 
   # compute P = exp(S - m_ij) in S_reg
@@ -287,7 +287,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
 
   p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
-  ri_ws = UOp.range(TM, 295, AxisType.LOOP)
+  ri_ws = UOp.range(TM, 295, AxisType.WEAK)
   # Reduce contiguous 16-key groups independently, matching the ordinary softmax reduction tree.
   p_sum = p_local.after(p_local[ri_ws].store(
     sum((warp_reduce_sum(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
@@ -300,11 +300,11 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
 
   # -- online softmax correction --
   beta_i = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
-  ri4 = UOp.range(TM, 330, AxisType.LOOP)
+  ri4 = UOp.range(TM, 330, AxisType.WEAK)
   m_new_val = m_i[ri4].maximum(m_ij[ri4])
   alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
   beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
-  rj4 = UOp.range(TD, 331, AxisType.LOOP)
+  rj4 = UOp.range(TD, 331)
   correction = UOp.group(
     acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
     l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
@@ -320,7 +320,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   # It reuses K's slot and must wait for QK WMMA to finish reading that slot.
   V_lds = UOp.placeholder((D, BLOCK_N + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
   V_copy = V_lds.after(qk_done).permute(1, 0)
-  load_v = UOp.range(KV_ELEMS_PER_THREAD, 390, AxisType.LOOP)
+  load_v = UOp.range(KV_ELEMS_PER_THREAD, 390, AxisType.WEAK)
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(
     v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v]).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
@@ -331,8 +331,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   pv_acc = UOp.placeholder((TM, TD), dtypes.float, slot=10, addrspace=AddrSpace.REG)
   pv_acc = pv_acc.after(pv_acc.after(n_tile).store(pv_acc.const_like(0))).after(pv_barrier)
   k_pv = UOp.range(BLOCK_N // WMMA_K, 400, AxisType.REDUCE)
-  tm2 = UOp.range(TM // WMMA_ACC, 401, AxisType.LOOP)
-  tn2 = UOp.range(TD, 402, AxisType.LOOP)
+  tm2 = UOp.range(TM // WMMA_ACC, 401, AxisType.WEAK)
+  tn2 = UOp.range(TD, 402, AxisType.WEAK)
   pv_frag = pv_acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
@@ -340,8 +340,8 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   pv_done = pv_frag.store(pv).end(tm2, tn2).end(k_pv)
   pv_acc = pv_acc.after(pv_done)
 
-  ri5 = UOp.range(TM, 410, AxisType.LOOP)
-  rj5 = UOp.range(TD, 411, AxisType.LOOP)
+  ri5 = UOp.range(TM, 410, AxisType.WEAK)
+  rj5 = UOp.range(TD, 411, AxisType.WEAK)
   accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5)
 
   # end KV tile loop

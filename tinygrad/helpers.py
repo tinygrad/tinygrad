@@ -247,8 +247,20 @@ FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
 EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
+DEFAULT_FLOAT, DEFAULT_INT = ContextVar("DEFAULT_FLOAT", "float32"), ContextVar("DEFAULT_INT", "int32")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
-CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+def _get_cpu_count() -> int:
+  # os.process_cpu_count (3.13+) respects cgroup limits
+  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count())
+  # cgroup v2 (containers with --cpus=N)
+  try:
+    with open("/sys/fs/cgroup/cpu.max") as f:
+      quota, period = f.read().strip().split()
+      if quota != "max": return max(1, int(quota) // int(period))
+  except (FileNotFoundError, ValueError, ZeroDivisionError): pass
+  # fall back to affinity (respects taskset but not cgroup quota)
+  return max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1))
+NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)

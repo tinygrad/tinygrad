@@ -29,6 +29,7 @@
 \definecolor{axbrred}{HTML}{E53935}      % GROUP_REDUCE
 \definecolor{axyellow}{HTML}{F9A825}     % UPCAST
 \definecolor{axmagenta}{HTML}{7B1FA2}    % UNROLL
+\definecolor{axgreen}{HTML}{2E7D32}      % DEVICE
 
 \title{tinygrad: a single dialect from Tensor programs to Command Buffers}
 \author{tinygrad, Corp. \\ \texttt{research@tinygrad.org}}
@@ -79,6 +80,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
 \op{Bitcast} & $(T,)$ & dtype & Reinterpret storage as target dtype; preserve total bytes. \\
+\op{Unshard} & $(T, R_0, R_1, \ldots)$ & axes $(a_0, a_1, \ldots)$ & Concatenate shards of \op{Range} $R_k$ along axis $a_k$; $R_k$ is outer. \\
 \bottomrule
 \end{tabular}
 
@@ -258,6 +260,7 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
 \op{Param} & from arg & from $\mathrm{src}[0]$ & from arg & from src or dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
+\op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
 \op{Cast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & clamped to dtype \\
 \op{Bitcast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
@@ -283,9 +286,9 @@ $[a,A]$, $[b,B]$, $[c,C]$ denote min\_max of $\mathrm{src}[0]$, $\mathrm{src}[1]
 Default \emph{dtype range}: $[\mathrm{dtype\_min},\, \mathrm{dtype\_max}]$.
 
 \medskip
-\textbf{axis} tracks the multi-device sharding dimension. \op{Buffer} with $n$-tuple device: axis $= 0$ (device dim).
-\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts axis right by $|\mathbf{n}|$.
-\op{Reduce} on the shard axis $\to$ \textsc{null} (shard axis is among the first $n$ axes). \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
+\textbf{sharding} tracks multi-device sharding as a set of (axis, \op{Range}) pairs. \op{Unshard} defines it: arg is the tuple of sharded axes, one \op{Range} in src per axis (positional: the $k$-th \op{Range} shards the $k$-th axis). \op{Buffer} with $n$-tuple device: sharded on axis $0$ (device dim). The single-axis convenience \textbf{axis} is \textsc{null} unless exactly one axis is sharded.
+\op{Reshape} remaps each sharded axis to preserve its shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts all sharded axes right by $|\mathbf{n}|$.
+\op{Reduce} on a sharded axis drops it. \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
 
 %% ============================================================
 \subsection*{Kernel Optimizations (OptOps) \normalfont\small--- schedule-level transforms on kernel ranges}
@@ -297,6 +300,7 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 \toprule
 \textbf{AxisType} & \textbf{Letter} & \textbf{Split from} & \textbf{Direction} & \textbf{Semantics} \\
 \midrule
+{\color{axgreen}\texttt{DEVICE}} & \texttt{d} & --- & --- & Multi-device sharding dimension. \\
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
 {\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
@@ -377,6 +381,8 @@ def scatter_add(T, idx, val):
 
 Let $D = (d_0, \ldots, d_{n-1})$ be an $n$-tuple device.
 \op{Copy} to an $n$-tuple device reshards with axis $= 0$. \op{Copy} never changes shape.
+
+\textbf{Sharding} splits a tensor along an axis across $n$ devices. It opens a \op{Range} of type \texttt{DEVICE} (a symbolic per-device index $d$), shrinks each device's view to its piece, then closes the range with \op{Unshard}$(T, R, a)$. The result is a logical tensor whose shape along axis $a$ is the full size; each device holds $1/n$ of it. \op{Unshard} is the inverse of sharding --- it marks the boundary between per-device computation and the logical multi-device tensor. The range need not be \texttt{DEVICE}; e.g.\ a \texttt{WARP} range closes the same way, concatenating per-lane shards along $a$ with the range as the outer factor. A tensor may be sharded along several axes at once: \op{Unshard}$(T, R_0, R_1, \ldots;\; a_0, a_1, \ldots)$ carries one \op{Range} per sharded axis, and every movement op maps each sharded axis independently.
 
 \begin{lstlisting}
 # T has shape (s,) on a single device.

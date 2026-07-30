@@ -1639,7 +1639,7 @@ def silu_mul_kernel(out:UOp, gate:UOp, up:UOp) -> UOp:
     value = gate[idx].load()
     return out[idx].store(value * value.sigmoid() * up[idx].load()).end(job, core).sink(
       arg=KernelInfo(name=f"cpu_silu_mul_{elements}", opts_to_apply=())).rtag("cpu_parallel")
-  idx = UOp.range(elements, 0, axis_type=AxisType.LOOP)
+  idx = UOp.range(elements, 0, axis_type=AxisType.WEAK)
   value = gate[idx].load()
   return out[idx].store(value * value.sigmoid() * up[idx].load()).end(idx).sink(
     arg=KernelInfo(name=f"cpu_silu_mul_{elements}", opts_to_apply=()))
@@ -1651,7 +1651,7 @@ def silu_kernel(out:UOp, x:UOp) -> UOp:
     value = x[idx].load()
     return out[idx].store(value * value.sigmoid()).end(job, core).sink(
       arg=KernelInfo(name=f"cpu_silu_{elements}", opts_to_apply=())).rtag("cpu_parallel")
-  idx = UOp.range(elements, 0, axis_type=AxisType.LOOP)
+  idx = UOp.range(elements, 0, axis_type=AxisType.WEAK)
   value = x[idx].load()
   return out[idx].store(value * value.sigmoid()).end(idx).sink(arg=KernelInfo(name=f"cpu_silu_{elements}", opts_to_apply=()))
 

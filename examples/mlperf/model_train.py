@@ -1285,7 +1285,7 @@ def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1482,7 +1482,8 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
@@ -1667,7 +1668,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1733,7 +1734,12 @@ def train_gptoss():
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+  params_wd = [p for p in params if p.ndim >= 3]
+  params_no_wd = [p for p in params if p.ndim < 3]
+  optim = GradAccClipAdamWGroup(
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+  )
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
@@ -1775,7 +1781,8 @@ def train_gptoss():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)

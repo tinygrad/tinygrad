@@ -3,7 +3,7 @@ import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, CPU_COUNT, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, NUM_CPU_THREADS, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 
@@ -76,9 +76,9 @@ base_rewrite = PatternMatcher([
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
-    (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
-     lambda b,x,y: UOp(Ops.WHERE, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(x.dtype)),
-    (UPat(GroupOp.ALU, dtype=dts, name="x"),
+    (UPat(Ops.WHERE, dtype=dts, src=(UPat.var("b"), UPat.var("x"), UPat.var("y")), name="w"),
+     lambda w,b,x,y: b.where(x.cast(dtypes.float), y.cast(dtypes.float)).cast(w.dtype)),
+    (UPat(GroupOp.ALU-{Ops.WHERE}, dtype=dts, name="x"),
      lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
      lambda alu,x,y: UOp(alu.op, src=(x.cast(dtypes.float), y.cast(dtypes.float)), arg=alu.arg))])
@@ -123,7 +123,8 @@ class CStyleLanguage(Renderer):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
-  arg_int_prefix: str = "const int"
+  var_prefix: str = "const "
+  var_suffix: str = ""
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
@@ -149,9 +150,9 @@ class CStyleLanguage(Renderer):
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, ("volatile " if u.arg.volatile else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+self.buffer_suffix \
-                 if u.addrspace == AddrSpace.GLOBAL else self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
+    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
+                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
+                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -259,7 +260,7 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = (NUM_CPU_THREADS.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
 
@@ -364,8 +365,6 @@ class ClangRenderer(CStyleLanguage):
     self.compiler = ClangCompiler(target.arch.split(","))
 
 class OpenCLRenderer(CStyleLanguage):
-  has_aux = True
-
   # language options
   kernel_typedef = "__kernel void"
   buffer_prefix = "__global "
@@ -397,19 +396,11 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def aux(self, uops:list[UOp]):
-    arg_dtypes:list[list[tuple[int, DType, tuple|None]]] = []
-    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
-      arg_dtypes[u.arg.slot].append((i, u.dtype, u._shape))
-    return tuple(tuple(a) for a in arg_dtypes),
-
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
                                       if (d != dtypes.half or "cl_khr_fp16" in self.target.arch) and
                                       (d != dtypes.double or "cl_khr_fp64" in self.target.arch) and d not in dtypes.fp8s}
 
 class MetalRenderer(CStyleLanguage):
-  shared_max = 32768
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
@@ -419,7 +410,8 @@ class MetalRenderer(CStyleLanguage):
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
-  arg_int_prefix = "constant int&"
+  var_prefix = "constant "
+  var_suffix = "&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}

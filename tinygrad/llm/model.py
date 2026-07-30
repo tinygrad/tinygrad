@@ -79,7 +79,7 @@ def _amd_wave_sum(value:UOp, lane:UOp, lane_count:int, wave:UOp|None=None) -> UO
 
 @functools.cache
 def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.weakint)
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
   token_tile = 8 if out.shape[0] % 8 == 0 else 1
   wave_count = 4 if token_tile == 1 else 1
   token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // wave_count, 1)
@@ -113,7 +113,7 @@ def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fea
 @functools.cache
 def _q8_linear_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
   raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
-  raw_offset = raw_offset.cast(dtypes.weakint)
+  raw_offset = raw_offset.cast(dtypes.uint64)
   def load_word(byte_offset:UOp) -> UOp:
     word_index, half_aligned = byte_offset // 4, (byte_offset & 2).ne(0)
     word = raw[word_index]
@@ -177,7 +177,7 @@ def _q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UO
     for group_offset in range(0, group_count, lane_count):
       group = (lane + group_offset).valid(lane + group_offset < group_count)
       block = output_idx * group_count + group
-      base, odd = raw_offset.cast(dtypes.weakint) + block * 8 + block // 2, (block & 1).ne(0)
+      base, odd = raw_offset.cast(dtypes.uint64) + block * 8 + block // 2, (block & 1).ne(0)
       accs = [UOp.const(dtypes.int32, 0)] * token_tile
       for word_idx in range(8):
         word = odd.where(raw[base + 1 + word_idx], (raw[base + word_idx] >> 16) | (raw[base + 1 + word_idx] << 16))
@@ -195,7 +195,7 @@ def _q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UO
 
 @functools.cache
 def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.weakint)
+  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
   output_tile = 2
   output_block, lane = UOp.range(out_features // output_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   outputs, group_count = tuple(output_block * output_tile + i for i in range(output_tile)), in_features // 32

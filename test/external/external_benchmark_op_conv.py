@@ -13,9 +13,9 @@ from tinygrad.dtype import Invalid
 
 def vision_conv_143():
   c0 = UOp.param(0, dtypes.half, shape=(16, 1024, 4))
-  c2 = UOp.range(32, 3, AxisType.LOOP)
-  c5 = UOp.range(128, 4, AxisType.LOOP)
-  c8 = UOp.range(16, 2, AxisType.LOOP)
+  c2 = UOp.range(32, 3)
+  c5 = UOp.range(128, 4)
+  c8 = UOp.range(16, 2)
   c16 = UOp.range(7, 0, AxisType.REDUCE)
   c17 = c8*2+c16
   c24 = ((c17<3)!=True)&(c17<35)
@@ -39,9 +39,9 @@ def vision_conv_143():
 
 def vision_conv_153():
   c0 = UOp.param(0, dtypes.half, shape=(8, 1024, 4))
-  c2 = UOp.range(16, 3, AxisType.LOOP)
-  c5 = UOp.range(256, 4, AxisType.LOOP)
-  c8 = UOp.range(8, 2, AxisType.LOOP)
+  c2 = UOp.range(16, 3)
+  c5 = UOp.range(256, 4)
+  c8 = UOp.range(8, 2)
   c16 = UOp.range(7, 0, AxisType.REDUCE)
   c17 = c8*2+c16
   c24 = ((c17<3)!=True)&(c17<19)
@@ -65,7 +65,7 @@ def vision_conv_153():
 
 def dm_conv_172():
   c0 = UOp.param(0, dtypes.half, shape=(1, 240, 4))
-  c2 = UOp.range(960, 4, AxisType.LOOP)
+  c2 = UOp.range(960, 4)
   c5 = UOp.param(1, dtypes.half, shape=(8, 384, 4))
   c7 = UOp.range(32, 0, AxisType.REDUCE)
   c10 = UOp.range(4, 1, AxisType.REDUCE)

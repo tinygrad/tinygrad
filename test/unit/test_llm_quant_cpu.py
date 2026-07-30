@@ -39,6 +39,17 @@ def random_packed(rng:np.random.Generator, ggml_type:int, elements:int) -> np.nd
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires DEV=AMD")
 class TestLLMQuantAMD(unittest.TestCase):
+  def test_packed_linear_offset_matches_reference(self):
+    rng = np.random.default_rng(32)
+    for ggml_type,in_features in ((8, 256), (14, 256)):
+      raw, out_features = random_packed(rng, ggml_type, 64 * in_features), 64
+      weight = ggml_data_to_tensor(Tensor(raw), out_features * in_features, ggml_type).numpy().reshape(out_features, in_features)
+      storage = Tensor(np.concatenate((np.zeros(68, dtype=np.uint8), raw)), dtype=dtypes.uint8, device="AMD").realize()
+      layer = Linear(in_features, out_features, bias=False)
+      layer.set_quantized(storage[68:], ggml_type)
+      x = rng.standard_normal((1, in_features), dtype=np.float32)
+      np.testing.assert_allclose(layer(Tensor(x, device="AMD")).numpy(), q8_activation(x) @ weight.T, rtol=1e-5, atol=5e-4)
+
   def test_iq3_expert_prefill_and_decode_match_reference(self):
     rng = np.random.default_rng(31)
     num_experts, in_features, out_features = 2, 256, 16

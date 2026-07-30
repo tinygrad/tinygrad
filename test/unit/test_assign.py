@@ -1066,5 +1066,13 @@ class TestAfterCachePatterns(unittest.TestCase):
     np.testing.assert_array_equal(head.numpy(), [3])
     np.testing.assert_array_equal(full.numpy(), [1, 2])
 
+class TestBatchNormRunningStats(unittest.TestCase):
+  @unittest.expectedFailure  # TODO: nothing reads the stat update so it is never scheduled, and the chain grows every step
+  def test_running_stats_are_realized(self):
+    from tinygrad import nn
+    bn, x = nn.BatchNorm(4), Tensor.randn(2, 4, 3, 3).contiguous().realize()
+    with Context(TRAINING=1): bn(x).realize()
+    self.assertTrue(bn.running_mean.uop.base.is_realized)
+
 if __name__ == "__main__":
   unittest.main()
