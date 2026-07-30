@@ -248,6 +248,14 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
 
+  def test_devectorize_derives_lane_dtype(self):
+    from tinygrad.codegen import do_devectorize
+    # an Invalid lane derives bool while the value lane derives float: the lane rebuild must derive, not inherit
+    lhs = UOp.stack(UOp.invalid(), UOp.const(None, 1.0).cast(dtypes.float))
+    out = do_devectorize(lhs * lhs)
+    invalid_lane_mul = next(u for u in out.src[0].toposort() if u.op is Ops.MUL)
+    self.assertIs(invalid_lane_mul.dtype, dtypes.bool)
+
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
     d0 = UOp.param(0, dtypes.float, (1,))
