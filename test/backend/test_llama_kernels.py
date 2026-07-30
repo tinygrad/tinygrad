@@ -131,6 +131,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
       self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
 
   def test_llama31_8b_backward(self):
+    if not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"): self.skipTest("requires CDNA4")
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
     PARTIALS = 2

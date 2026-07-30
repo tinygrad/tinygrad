@@ -103,6 +103,9 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   return ret
 
 def not_support_multi_device():
+  if (indices:=DEV.target(Device.DEFAULT).indices):
+    visible = list(range(int(indices.split('-')[0]), int(indices.split('-')[1])+1)) if '-' in indices else indices.split(',')
+    if len(visible) < 2: return True
   # CL and CUDA don't support multi device if in CI
   return (Device.DEFAULT == "CL" and Device[Device.DEFAULT].count() < 2) or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
 
