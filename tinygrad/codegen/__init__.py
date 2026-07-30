@@ -3,7 +3,7 @@ import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import AxisType
+from tinygrad.uop.ops import AxisType, pm_commit_weak
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -358,11 +358,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
+  pm_decomp = symbolic_simple+pm_commit_weak+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)

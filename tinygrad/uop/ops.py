@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, weak_dtype
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
@@ -191,8 +191,10 @@ class UOpMetaClass(type):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     # CONST derives its dtype by value only when the constructor omits one
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
+    # an INDEX presents its access dtype, which a still-weak source matches up to weakness
     if SPEC == 2 and op is not Ops.CONST and \
-       not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+       not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
+       not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -586,7 +588,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp.const(dtype or self.dtype, b).broadcast(self.max_numel())
   def ufix(self, x):
     if isinstance(x, UOp): return x
-    return UOp.const(least_upper_dtype(self.dtype, dtypes.from_py(x)), x)
+    return UOp.const(None, x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -1780,7 +1782,21 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
   ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
   return None if ret is u else ret
-pm_lower_index_dtype = PatternMatcher([
+
+def commit_weak_srcs(u:UOp) -> UOp|None:
+  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
+  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
+  return u.replace(dtype=None, src=tuple(s.cast(dt) if s.dtype in dtypes.weaks else s for s in u.src))
+
+# runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
+pm_commit_weak = PatternMatcher([
+  (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
+  # demand from the destination: a STORE's weak value commits at the destination's dtype
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
+   lambda u: u.replace(src=(u.src[0], u.src[1].cast(u.src[0].dtype), *u.src[2:]))),
+])
+
+pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
