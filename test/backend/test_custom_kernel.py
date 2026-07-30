@@ -433,7 +433,8 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
-  def _test_mop_input(self, mop_fxn, max_kernels):
+class TestCustomKernelInput(unittest.TestCase):
+  def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
     x = mop_fxn(Tensor.arange(32).clone("CPU").realize())
     y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
@@ -456,15 +457,15 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(y.tolist(), mop_fxn(x0).add(1).tolist())
     self.assertLessEqual(kernel_count, max_kernels)
 
-  def test_shrink_input(self): self._test_mop_input(lambda x: x[:4], max_kernels=2)
-  def test_double_permute_input(self): self._test_mop_input(lambda x: x.reshape(4, 8).T.T, max_kernels=3)
-  def test_reshape_input(self): self._test_mop_input(lambda x: x.reshape(16, 2), max_kernels=2)
-  def test_permute_input(self): self._test_mop_input(lambda x: x.reshape(4, 8).T, max_kernels=3)
-  def test_offset_shrink_input(self): self._test_mop_input(lambda x: x[4:8], max_kernels=2)
-  def test_2d_shrink_input(self): self._test_mop_input(lambda x: x.reshape(4, 8)[:, 2:6], max_kernels=3)
-  def test_pad_input(self): self._test_mop_input(lambda x: x[:4].pad(((0, 4),)), max_kernels=2)
-  def test_flip_input(self): self._test_mop_input(lambda x: x.flip(0), max_kernels=2)
-  def test_expand_input(self): self._test_mop_input(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), max_kernels=3)
+  def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=2)
+  def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=3)
+  def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=3)
+  def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=2)
+  def test_pad(self): self._test_mop(lambda x: x[:4].pad(((0, 4),)), max_kernels=2)
+  def test_flip(self): self._test_mop(lambda x: x.flip(0), max_kernels=2)
+  def test_offset_shrink(self): self._test_mop(lambda x: x[4:8], max_kernels=2)
+  def test_2d_shrink(self): self._test_mop(lambda x: x.reshape(4, 8)[:, 2:6], max_kernels=3)
+  def test_expand(self): self._test_mop(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), max_kernels=3)
 
 class TestUnshardIndex(unittest.TestCase):
   """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
