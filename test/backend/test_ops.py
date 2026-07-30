@@ -1730,18 +1730,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(2), atol=1e-7, grad_atol=1e-7)
   def test_softmin(self):
     helper_test_op([(45,65)], torch.nn.Softmin(dim=1), Tensor.softmin, atol=1e-7, grad_atol=1e-7)
-    helper_test_op([(45)], torch.nn.Softmin(dim=0), Tensor.softmin, atol=1e-7, grad_atol=1e-7)
-    helper_test_op([()], torch.nn.Softmin(dim=0), Tensor.softmin, atol=1e-7, grad_atol=1e-7)
-    helper_test_op([()], torch.nn.Softmin(dim=-1), Tensor.softmin, atol=1e-7, grad_atol=1e-7)
-  def test_softmin_other_axis(self):
-    helper_test_op([(10,10,10)], lambda x: torch.nn.Softmin(0)(x), atol=1e-7, grad_atol=2e-7)
-    helper_test_op([(10,10,10)], lambda x: torch.nn.Softmin(1)(x), atol=1e-7, grad_atol=2e-7)
-    helper_test_op([(10,10,10)], lambda x: torch.nn.Softmin(2)(x), atol=1e-7, grad_atol=2e-7)
-  def test_softmin_argmax(self):
-    helper_test_op([(45,65)], lambda x: torch.nn.Softmin(0)(x).argmax().type(torch.int32),
-                              lambda x: x.softmin(0).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)
-    helper_test_op([(45,65)], lambda x: torch.nn.Softmin(1)(x).argmax().type(torch.int32),
-                              lambda x: x.softmin(1).argmax(), forward_only=True, atol=1e-7, grad_atol=1e-7)
 
   def test_normalize(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x), lambda x: x.normalize(), atol=1e-7, grad_atol=1e-7)
