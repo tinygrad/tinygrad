@@ -21,6 +21,7 @@ from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -261,13 +262,13 @@ def add_raw_barrier(after:UOp):
   # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
   if after.addrspace is not AddrSpace.LOCAL: return None
   # one toposort over all the deps
-  deps = UOp.sink(*after.src[1:]).backward_slice
-  if not any(_is_local_store(x) for x in deps) or any(x.op is Ops.BARRIER for x in deps): return None
+  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER)
+  if not any(_is_local_store(x) for x in deps): return None
   return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
 
 def add_war_barrier(end:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
-  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.LOOP) and r.vmax > 0]
+  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
   if not rngs or end.src[0].op is Ops.BARRIER: return None
   sl = end.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
@@ -286,8 +287,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
+  # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
+  sink = graph_rewrite(ast, multi_pm, name="multi_pm")
+
   # preprocess
-  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:

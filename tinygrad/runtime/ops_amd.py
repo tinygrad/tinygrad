@@ -602,8 +602,7 @@ class AMDProgram(HCQProgram['AMDDevice']):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
-                     base=self.lib_gpu.va_addr)
+    super().__init__(CLikeArgsState, self.dev, obj, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),

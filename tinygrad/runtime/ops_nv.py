@@ -240,8 +240,10 @@ class NVVideoQueue(NVCommandQueue):
 
 class NVArgsState(CLikeArgsState):
   def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    if isinstance(prg.dev.iface, MOCKIface): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.cbuf_0 or None)
+    if (is_mock:=isinstance(prg.dev.iface, MOCKIface)): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
+    super().__init__(buf, prg, bufs, vals=() if is_mock else vals, prefix=prg.cbuf_0 or None)
+    # mock expects all vars to be 64 bit
+    if is_mock and vals: self.bind_sints_to_buf(*vals, buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4 + len(bufs)*8)
 
 class NVProgram(HCQProgram['NVDevice']):
   def __init__(self, dev:NVDevice, obj:TinyELF):
@@ -314,7 +316,7 @@ class NVProgram(HCQProgram['NVDevice']):
     self.max_threads = ((65536 // round_up(max(1, self.regs_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer, then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    super().__init__(NVArgsState, self.dev, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
+    super().__init__(NVArgsState, self.dev, obj, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def _parse_elf_info(self, sh, start_off=0):

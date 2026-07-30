@@ -262,12 +262,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # (x//c1)//c2 -> x//(c1*c2) for c2>0
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 else None),
   # ** lt **
-  # c0*x<c1 for positive int c0,c1
+  # c0*x<c1 -> sign(c0)*x < ceil(c1/abs(c0))
   ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
-   lambda x,c0,c1: x<math.ceil(c1.arg/c0.arg) if c0.arg > 0 and c1.arg > 0 else None),
-  # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
-   lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+   lambda x,c0,c1: (x if c0.arg > 0 else -x)<-(-c1.arg//abs(c0.arg)) if abs(c0.arg) > 1 else None),
   # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
    lambda x,d,c: (x<c.arg*d.arg) if d.arg > 0 else (x>c.arg*d.arg) if d.arg < 0 else None),

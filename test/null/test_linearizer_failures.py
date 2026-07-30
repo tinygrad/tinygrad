@@ -8,8 +8,8 @@ from tinygrad.codegen import to_program
 class TestLinearizerFailures(unittest.TestCase):
   def test_fail_1(self):
     c0 = UOp.param(0, dtypes.float, (64,))
-    c1 = UOp.range(UOp.const(dtypes.weakint, 2), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.weakint, 32), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 2), 1, AxisType.WEAK)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 32), 2, AxisType.WEAK)
     c3 = ((c1*UOp.const(dtypes.weakint, 32))+c2)
     c4 = UOp.param(1, dtypes.float, (163840,))
     c5 = UOp.range(UOp.const(dtypes.weakint, 2560), 0, AxisType.REDUCE)

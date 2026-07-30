@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.renderer.ptx import PTXRenderer
 
 # **** kernels ****
 
@@ -431,6 +432,66 @@ class TestCustomKernel(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
     a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
+
+class TestUnshardIndex(unittest.TestCase):
+  """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
+
+  A fragment is a per-thread REG buffer wrapped in UNSHARD over LOCAL thread ranges.
+  index_multi must resolve an INDEX on the UNSHARD view into an INDEX on the per-thread
+  shard. Two ownership patterns must work:
+    contiguous: idx = rng*shard_sz + local   (thread rng owns [rng*shard_sz, ...))
+    strided:    idx = rng + ir*shard_sz      (thread rng owns {rng, rng+shard_sz, ...})
+  """
+  def _run(self, kernel, shape=(8, 8)):
+    c = Tensor.empty(*shape)
+    out = Tensor.custom_kernel(c, fxn=kernel)[0]
+    try: return out.numpy()
+    except RuntimeError as e:
+      if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) and "dynamic register indexing" in str(e):
+        self.skipTest("PTX does not support dynamic register indexing")
+      raise
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_contiguous_fragment_index(self):
+    # thread ty owns rows [ty*8, ty*8+8) of a 64-row fragment -- contiguous ownership.
+    # This is the pre-existing case that index_multi always handled.
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      ir = UOp.range(8, 1, AxisType.LOOP)
+      j = UOp.range(8, 2, AxisType.LOOP)
+      # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows [ty*8, ty*8+8).
+      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      return C[ty*8 + ir, j].store(frag[ty*8 + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="contig_frag"))
+    out = self._run(kernel, (64, 8))
+    assert out.shape == (64, 8)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_strided_fragment_index(self):
+    # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment --
+    # strided ownership. idx = ty + ir*8 where shard_sz=8 (8 threads, shard rows=8).
+    # The contiguous check (idx - rng*shard_sz) fails; the strided check
+    # (idx-rng) % shard_sz == 0 must succeed. This is the pattern the index_multi fix adds.
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      ir = UOp.range(8, 1, AxisType.LOOP)
+      j = UOp.range(8, 2, AxisType.LOOP)
+      # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows {ty, ty+8, ..., ty+56}.
+      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
+    out = self._run(kernel, (64, 8))
+    assert out.shape == (64, 8)
+
+  def test_fragment_index_cannot_shard(self):
+    # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither
+    # the contiguous nor the strided ownership pattern, so index_multi must raise.
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      ir = UOp.range(8, 1, AxisType.LOOP)
+      j = UOp.range(8, 2, AxisType.LOOP)
+      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      return C[ty + ir, j].store(frag[ty + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
+    with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
+      self._run(kernel, (64, 8))
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):

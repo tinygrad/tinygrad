@@ -65,7 +65,7 @@ class Scheduler:
   def _output_rngs(self) -> list[UOp]:
     return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
-    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
+    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
       if x.op is Ops.STAGE:
@@ -86,8 +86,8 @@ class Scheduler:
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
-      elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
-      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("white")
+      elif r not in output_rngs and x == AxisType.WEAK: ret.append("BLACK")
+      elif r not in globalizible_rngs and x == AxisType.WEAK: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -108,7 +108,7 @@ class Scheduler:
 
   # copied from kernel.py
   @property
-  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
+  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
   def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
@@ -161,10 +161,10 @@ class Scheduler:
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
         check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.WEAK}, "local is for globals")
       if opt.op is OptOps.THREAD:
         check(self.ren is not None and self.ren.has_threads, "target does not support threads")
         check(self.ren is not None and self.ren.global_max is not None and amt <= self.ren.global_max[0], "too many threads")
