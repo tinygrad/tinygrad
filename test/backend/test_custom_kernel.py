@@ -436,11 +436,13 @@ class TestCustomKernel(unittest.TestCase):
 class TestUnshardIndex(unittest.TestCase):
   """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
 
-  A fragment is a per-thread REG buffer wrapped in UNSHARD over LOCAL thread ranges.
-  index_multi must resolve an INDEX on the UNSHARD view into an INDEX on the per-thread
-  shard. Two ownership patterns must work:
-    contiguous: idx = rng*shard_sz + local   (thread rng owns [rng*shard_sz, ...))
-    strided:    idx = rng + ir*shard_sz      (thread rng owns {rng, rng+shard_sz, ...})
+  A fragment is a per-thread REG buffer wrapped in UNSHARD over LOCAL thread ranges. an UNSHARD
+  carries, per axis, the ordered factor list of the logical axis: owner factors (the thread ranges)
+  and local factors. The interleaving of owner and local factors is the ownership layout:
+    contiguous: factors [rng, local]  (thread rng owns [rng*local_sz, rng*local_sz+local_sz))
+    strided:    factors [local, rng]  (thread rng owns {rng + local_idx*count})
+  index_multi must resolve an INDEX on the UNSHARD view into an INDEX on the per-thread shard
+  for any layout.
   """
   def _run(self, kernel, shape=(8, 8)):
     c = Tensor.empty(*shape)
@@ -467,16 +469,16 @@ class TestUnshardIndex(unittest.TestCase):
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
   def test_strided_fragment_index(self):
-    # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment --
-    # strided ownership. idx = ty + ir*8 where shard_sz=8 (8 threads, shard rows=8).
-    # The contiguous check (idx - rng*shard_sz) fails; the strided check
-    # (idx-rng) % shard_sz == 0 must succeed. This is the pattern the index_multi fix adds.
+    # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment -- strided ownership,
+    # i.e. the rows factor as [local 8, owner ty]: full row = local_idx*8 + ty.
     def kernel(C:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
-      # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows {ty, ty+8, ..., ty+56}.
-      frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
+      # 8x8 fragment, 8 threads -> 64x8 full tile, strided layout on the row axis
+      frag = UOp(Ops.UNSHARD, src=(UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG),
+                                   UOp.factor_arg((UOp.local_factor(8), ty)), UOp.local_factor(8)))
+      assert frag.shape == (64, 8)
       return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)

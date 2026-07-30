@@ -45,6 +45,14 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # ***** new specs *****
 def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.arg is Invalid  # Invalid matches any dtype
+
+def _unshard_spec(multi:UOp):
+  # structural validity of the factor args; UNSHARDs transiently rank-mangled by rangeify are resolved by multi_pm
+  return multi.arg is None and matches_dtype(multi.src[0], multi.dtype) \
+    and all(dtypes.is_int(f.dtype) for fs in multi.factors for f in fs)
+
+# ***** multi helpers *****
+
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
@@ -176,9 +184,10 @@ spec_tensor = PatternMatcher([
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
   # UNSHARD/MSELECT/MSTACK
-  # an UNSHARD carries the value and one sharding range per sharded axis (usually a DEVICE RANGE, but can be a derived expression)
-  (UPat(Ops.UNSHARD, name="multi"), lambda multi: len(multi.src) == 1+len(multi.arg) and matches_dtype(multi.src[0], multi.dtype)
-    and all(isinstance(a, int) for a in multi.arg) and all(r.dtype in dtypes.weaks for r in multi.src[1:])),
+  # an UNSHARD carries the value and one factor arg per axis (a bare int UOp or a STACK of them). each factor is an int
+  # UOp with span vmax+1; a factor containing RANGEs is an owner (sharding) factor, a plain const is a local factor.
+  # the full shape is the per-axis product of spans, the shard shape is the per-axis product of the local spans.
+  (UPat(Ops.UNSHARD, name="multi"), lambda multi: _unshard_spec(multi)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 

@@ -64,6 +64,7 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL, Ops.BIND}: return ()
   if op in GroupOp.Movement|{Ops.INDEX, Ops.SLICE, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
+  if op is Ops.UNSHARD: return src[:1]  # src[1:] are factor args (layout metadata), not data
   return src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:

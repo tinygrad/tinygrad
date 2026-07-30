@@ -439,7 +439,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.UNSHARD: return tuple(s*(int(self.src[1:][self.arg.index(a)].vmax)+1) if a in self.arg else s for a,s in enumerate(ps))
+        case Ops.UNSHARD: return tuple(prod([ssimplify(int(f.vmax)+1) for f in fs]) for fs in self.factors)
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -474,7 +474,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
-    dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
+    dcount = int(self.sharding[0][1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
     return tuple(x//dcount if i == self.axis else x for i,x in enumerate(self.shape))
 
   @property
@@ -484,8 +484,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
-    # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
-    if self.op is Ops.UNSHARD: return self.src[1:]
+    # UNSHARD ends the DEVICE range: its owner factors hold per-device index math, the device axis is carried by the
+    # sharding metadata
+    if self.op is Ops.UNSHARD: return tuple(r for _, f in self.sharding for r in f.ranges)
     return ()
 
   # determine what ranges this is in
@@ -665,24 +666,87 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** multi-device helpers ***
 
+  @staticmethod
+  def factor_arg(factors:tuple[UOp, ...]|list[UOp]) -> UOp:
+    """build the per-axis factor arg of an UNSHARD: a bare UOp for a single factor, a STACK for several (major -> minor)."""
+    if len(factors) == 1: return factors[0]
+    return UOp(Ops.STACK, src=tuple(factors))
+
+  @staticmethod
+  def local_factor(size:sint) -> UOp:
+    """a LOCAL factor of an UNSHARD axis, encoded as a UOp with span size (like RANGE, its span is vmax+1)."""
+    s = sint_to_uop(size)
+    return UOp.const(dtypes.weakint, int(s.arg)-1) if s.op is Ops.CONST else s-1
+
+  @functools.cached_property
+  def factors(self) -> tuple[tuple[UOp, ...], ...]:
+    """UNSHARD: the ordered (major -> minor) factor list of every axis. each factor is an int UOp with span vmax+1;
+    a factor containing RANGEs is an OWNER (sharding) factor, a plain const is a LOCAL factor. the full shape is the
+    per-axis product of spans, the shard shape is the per-axis product of the LOCAL spans, and the interleaving of
+    owner and local factors within a list is the layout (e.g. [rng, s] contiguous, [s, rng] strided)."""
+    assert self.op is Ops.UNSHARD
+    # NOTE: we do not assert len(src) == 1+rank here: scheduling passes (rangeify) may transiently rewrite the
+    # value's rank while the factor args stay attached; those nodes are resolved by multi_pm before programs
+    return tuple(a.src if a.op is Ops.STACK else (a,) for a in self.src[1:])
+
   def unshard(self, axis:int|tuple[int, ...]|None, device_range:UOp|tuple[UOp, ...]|None=None):
     assert axis is not None, "multi None is no longer supported"
-    # an UNSHARD carries the value and one sharding range per sharded axis (arg is the tuple of sharded axes,
-    # sorted). the single-axis axis form defaults the range to a DEVICE range over the devices; a range need not
-    # be DEVICE, e.g. a LOCAL range shards a kernel tile into per-thread fragments
+    # an UNSHARD carries the value (src[0], the local shard) and one factor arg per axis (src[1:]). this builder
+    # creates the canonical contiguous layout [rng, s] per sharded axis: the LOCAL factor spans the shard's full dim,
+    # the owner range multiplies it into the full logical axis. reshard/insert layouts come from reshapes of these
+    # (see reshape_multi). a range need not be DEVICE, e.g. a LOCAL range shards a kernel tile into fragments
     if isinstance(axis, int): axis = (axis,)
     if device_range is None:
       assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
       device_range = (UOp.range(len(self.device), -1, AxisType.DEVICE),)
     if isinstance(device_range, UOp): device_range = (device_range,)
     assert isinstance(device_range, tuple) and len(axis) == len(device_range) and len(set(axis)) == len(axis)
-    axis, device_range = map(tuple, zip(*sorted(zip(axis, device_range))))
-    return UOp(Ops.UNSHARD, src=(self, *device_range), arg=axis)
+    by_axis = dict(zip(axis, device_range))
+    factors:list[UOp] = []
+    for i, s in enumerate(self.shape):
+      if i in by_axis: fs:tuple[UOp, ...] = (by_axis[i],) if int(s) == 1 else (by_axis[i], UOp.local_factor(s))
+      else: fs = (UOp.local_factor(s),)
+      factors.append(UOp.factor_arg(fs))
+    return UOp(Ops.UNSHARD, src=(self, *factors))
 
-  @property
+  @functools.cached_property
   def sharding(self) -> tuple[tuple[int, UOp], ...]:
-    """(axis, RANGE) pairs this value is sharded over (the source of truth for shard bounds/counts)."""
-    return tuple(zip(self.arg, self.src[1:])) if self.op is Ops.UNSHARD else ()
+    """(axis, owner-factor) pairs this value is sharded over, recursive through ops (the source of truth for shard
+    bounds/counts). one axis can carry several owner factors (e.g. two ranges merged into one axis by a reshape)."""
+    # COPY removes sharding. TODO: add more tests for this, and consider MSELECT/MSTACK
+    if self.op is Ops.COPY: return ()
+    if self.op is Ops.UNSHARD:
+      return tuple((ax, f) for ax, fs in enumerate(self.factors) for f in fs if len(f.ranges) > 0)
+    # GETTUPLE: sharding comes from the specific TUPLE element, not src[0]
+    if self.op is Ops.GETTUPLE:
+      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
+      return in_tuple.src[self.arg].sharding if in_tuple.op is Ops.TUPLE else ()
+    if self.op is Ops.PARAM:
+      if self.arg.axis is None or not isinstance(self.device, tuple): return ()
+      return ((self.arg.axis, UOp.range(len(self.device), -1, AxisType.DEVICE)),)
+    # ALU (and STACK): the union of the src shardings, right-aligned into the output shape
+    if self.op in GroupOp.ALU.union({Ops.STACK}):
+      return tuple(dedup([(ax+len(self.shape)-len(x.shape), rng) for x in self.src for ax, rng in x.sharding]))
+    if len(self.src) == 0: return ()
+    src_sharding = self.src[0].sharding
+    if self.op is Ops.SHRINK: # SHRINK removes a sharding if it's shrunk on that axis
+      return tuple((ax, f) for ax, f in src_sharding if self.marg[ax] == (0, self.src[0].shape[ax]))
+    if self.op is Ops.REDUCE: # REDUCE removes the shardings on the reduced axes
+      return tuple((ax-self.arg[1], f) for ax, f in src_sharding if ax >= self.arg[1])
+    if self.op is Ops.RESHAPE:
+      # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+      arg_acc:list[sint] = [ssimplify(x) for x in itertools.accumulate(self.marg, operator.mul, initial=1)]
+      ret:list[tuple[int, UOp]] = []
+      for ax, f in src_sharding:
+        target = ssimplify(prod(self.src[0].shape[:ax]))
+        if target not in arg_acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
+        new_ax = len(arg_acc) - arg_acc[::-1].index(target) - 1
+        if self.shape[new_ax] % (int(f.vmax)+1) != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
+        ret.append((new_ax, f))
+      return tuple(ret)
+    if self.op is Ops.PERMUTE: return tuple((self.marg.index(ax), f) for ax, f in src_sharding)
+    if self.op is Ops.EXPAND: return tuple((ax+len(self.marg), f) for ax, f in src_sharding)
+    return src_sharding
 
   @property
   def bounds(self):
@@ -692,41 +756,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
-    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
-    if self.op is Ops.COPY: return None
-    if self.op is Ops.UNSHARD:
-      if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
-      return self.arg[0]
-    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
-    if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
-    if self.op is Ops.PARAM: return self.arg.axis
-    # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
-    if self.op in GroupOp.ALU.union({Ops.STACK}):
-      return axes[-1] if (axes := dedup([x.axis+len(self.shape)-len(x.shape) for x in self.src if x.axis is not None])) else None
-    if len(self.src) == 0: return None
-    src_axis = self.src[0].axis
-    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
-      return None # SHRINK will remove the sharding if it's on axis
-    if self.op is Ops.REDUCE:
-      if src_axis is None: return None
-      if src_axis < self.arg[1]: return None
-      return src_axis - self.arg[1]
-    if self.op is Ops.RESHAPE:
-      if src_axis is None: return None
-      arg_acc:list[sint] = [ssimplify(x) for x in itertools.accumulate(self.marg, operator.mul, initial=1)]
-      # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
-      target = ssimplify(prod(self.src[0].shape[:src_axis]))
-      if target not in arg_acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      new_axis = len(arg_acc) - arg_acc[::-1].index(target) - 1
-      dcount = len(self.device) if isinstance(self.device, tuple) else \
-        int(next(u.src[1] for u in self.src[0].toposort() if u.op is Ops.UNSHARD).vmax)+1
-      if self.shape[new_axis] % dcount != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
-      return new_axis
-    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
-    if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
-    return src_axis
+    if len(sharding := self.sharding) == 0: return None
+    if len(sharding) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {[ax for ax,_ in sharding]}, use .sharding")
+    return sharding[0][0]
 
   def _unshard(self, axis:int) -> UOp:
     bsz, dcount = self.shape[axis], len(self.device)

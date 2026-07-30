@@ -68,15 +68,14 @@ def alloc_shared(shape:tuple[int, ...], dtype:DType, slot:int) -> UOp:
 def alloc_fragment(shape:tuple[int, ...], dtype:DType, slot:int, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
   """T.alloc_fragment: per-thread REG fragment + UNSHARD over the LOCAL thread grid.
 
-  Each thread privately owns shape[axis]//threads elements along every sharded
-  axis in a REG buffer. The UNSHARDs over the LOCAL thread ranges present the
-  full logical tile: full_shape = shard_shape with each sharded axis multiplied
-  by its range size. This is exactly how UNSHARD carries a DEVICE axis today,
-  except the sharding axes are thread axes carried by the RANGE metadata.
+  shape is the full logical tile, given as the per-thread split: every sharded axis sits next to its thread-grid
+  factor (e.g. rows (TM, TY), cols (TX, TN)). Each thread privately owns the LOCAL factors in a REG buffer; the
+  thread factors are OWNER factors, inserted by the ranges at their axes[1:]. Reshaping the tile later (e.g.
+  flattening (TM, TY) -> BLOCK_M) puts the shard elements wherever the threads' factors land: strided, contiguous,
+  or in the middle of an axis.
   """
   assert len(axes) == len(rngs)
   assert all(tnum.op is Ops.RANGE and tnum.arg[-1] is AxisType.LOCAL for tnum in rngs), "fragments shard over LOCAL ranges"
-  assert all(shape[a] % (int(rng.vmax)+1) == 0 for a, rng in zip(axes, rngs))
   by_axis = dict(zip(axes, rngs))
   shard_shape = tuple(s // (int(by_axis[i].vmax)+1) if i in by_axis else s for i, s in enumerate(shape))
   fragment = UOp.placeholder(shard_shape, dtype, slot, AddrSpace.REG)
@@ -110,12 +109,11 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # 16*8 threads = 128 threads
   tx = UOp.range(TX, 2, AxisType.LOCAL)
   ty = UOp.range(TY, 3, AxisType.LOCAL)
-  def with_threads(x:UOp): return x.rearrange("(tm ty) (tx tn) -> ty tx tm tn", tm=TM, tn=TN)[ty, tx]
 
   # shared + fragment (regs)
   A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype, 0)
   B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype, 1)
-  C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, 0, (0, 1), (ty, tx))
+  C_local = alloc_fragment((TM, TY, TX, TN), dtypes.float32, 0, (1, 2), (ty, tx)).reshape(BLOCK_M, BLOCK_N)
 
   # zero out the regs to start. this is expanded by the devectorizer
   C_local = C_local.after(C_local.store(0.0))
@@ -128,11 +126,13 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   b = b.rearrange("(k bk) (n bn) -> k n bk bn", bk=BLOCK_K, bn=BLOCK_N)[ko, bx]
   c = c.rearrange("(m bm) (n bn) -> m n bm bn", bm=BLOCK_M, bn=BLOCK_N)[by, bx]
 
-  # A_shared <- a, B_shared <- b
+  # T.copy: A_shared <- a, B_shared <- b
+  def with_threads(x:UOp): return x.rearrange("(tm ty) (tx tn) -> ty tx tm tn", tm=TM, tn=TN)[ty, tx]
   A_shared = A_shared.after(with_threads(A_shared).store(with_threads(a)))
   B_shared = B_shared.after(with_threads(B_shared).store(with_threads(b)))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA
+
   kk = UOp.range(BLOCK_K, 11, AxisType.LOOP)
   ir = UOp.range(TM, 12, AxisType.LOOP)
   jj = UOp.range(TN, 13, AxisType.UPCAST)
@@ -140,10 +140,13 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
   C_local = C_local[ir*TM + ty, tx*TN + jj].set(acc, end=(kk, ir, jj, ko))
 
-  # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
+  # c <- C_local (with relu and cast)
+  #ie, je = UOp.range(TM, 14, AxisType.UPCAST), UOp.range(TN, 15, AxisType.UPCAST)
+  #c_st = c[ty*TM + ie, tx*TN + je].store(C_local[ty*TM + ie, tx*TN + je].relu().cast(c.dtype)).end(je, ie)
   #c_st = with_threads(c).store(with_threads(C_local).relu().cast(c.dtype))
-  ie, je = UOp.range(TM, 14, AxisType.LOOP), UOp.range(TN, 15, AxisType.UPCAST)
-  c_st = c[ie*TM + ty, tx*TN + je].store(C_local[ie*TM + ty, tx*TN + je].relu().cast(c.dtype)).end(je, ie)
+
+  # TODO: this should work
+  c_st = c.store(C_local.relu().cast(c.dtype))
 
   # close the locals and globals
   return c_st.end(tx, ty, bx, by).sink(arg=KernelInfo(name="matmul_relu", opts_to_apply=()))
