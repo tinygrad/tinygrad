@@ -186,6 +186,10 @@ class TestAiterMXFP4(unittest.TestCase):
     from extra.gemm.aiter_mxfp4 import aiter_mxfp4_kernargs, shuffle_mxfp4_scales, shuffle_mxfp4_weight
     args = aiter_mxfp4_kernargs(256, 256, 256)
     self.assertEqual(len(args), 384)
+    self.assertEqual(tuple(struct.unpack_from("<Q", args, off)[0] for off in (0, 16, 32, 48, 272, 288)), (0, 0, 0, 0, 0, 0))
+    self.assertEqual(tuple(struct.unpack_from("<f", args, off)[0] for off in (64, 80)), (1.0, 0.0))
+    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (96, 112, 128, 144, 160, 176, 192, 208)),
+                     (256, 1, 256, 1, 256, 1, 256, 1))
     self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (224, 240, 256)), (256, 256, 256))
     self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (304, 336)), (8, 8))
     weight = np.arange(16 * 32, dtype=np.uint16).astype(np.uint8).reshape(16, 32)
