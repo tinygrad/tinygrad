@@ -149,9 +149,68 @@ class TestAsmGEMM(unittest.TestCase):
   def test_unsupported_n(self):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
-
+# AITER gfx950 packed E2M1 GEMM
+def _quantize_mxfp4_numpy(x):
+  import numpy as np
+  rows, K = x.shape
+  blocks = x.reshape(rows, K // 32, 32)
+  amax = np.max(np.abs(blocks), axis=-1)
+  rounded = ((amax.view(np.uint32) + 0x200000) & 0xFF800000).view(np.float32)
+  with np.errstate(divide="ignore"):
+    unbiased = np.clip(np.floor(np.log2(np.maximum(rounded, 1e-45))) - 2, -127, 127)
+  scales = np.where(amax == 0, 127, unbiased + 127).astype(np.uint8)
+  scaled = blocks * np.exp2(127.0 - scales.astype(np.float32))[..., None]
+  code = sum((np.abs(scaled) >= threshold).astype(np.uint8) for threshold in (0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0))
+  nibbles = (code | ((scaled < 0).astype(np.uint8) << 3)).reshape(rows, K)
+  return nibbles[:, 0::2] | (nibbles[:, 1::2] << 4), scales
+def _dequantize_mxfp4_numpy(packed, scales):
+  import numpy as np
+  values = np.array((0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6), dtype=np.float32)
+  rows, half_k = packed.shape
+  nibbles = np.stack((packed & 0xf, packed >> 4), axis=-1).reshape(rows, half_k * 2)
+  return (values[nibbles].reshape(rows, half_k // 16, 32) *
+          np.exp2(scales.astype(np.float32) - 127)[:, :, None]).reshape(rows, half_k * 2)
+class TestAiterMXFP4(unittest.TestCase):
+  def test_empty(self):
+    if not Device.DEFAULT.startswith("AMD") or not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("AITER MXFP4 requires a real gfx950 AMD device")
+    from extra.gemm.aiter_mxfp4 import aiter_mxfp4_gemm
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    a = Tensor.empty(M, K // 2, dtype=dtypes.uint8)
+    b = Tensor.empty(N, K // 2, dtype=dtypes.uint8)
+    scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
+    scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
+    aiter_mxfp4_gemm(a, b, scale_a, scale_b).realize()
+  def test_packed_abi_and_layouts(self):
+    import numpy as np, struct
+    from extra.gemm.aiter_mxfp4 import aiter_mxfp4_kernargs, shuffle_mxfp4_scales, shuffle_mxfp4_weight
+    args = aiter_mxfp4_kernargs(256, 256, 256)
+    self.assertEqual(len(args), 384)
+    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (224, 240, 256)), (256, 256, 256))
+    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (304, 336)), (8, 8))
+    weight = np.arange(16 * 32, dtype=np.uint16).astype(np.uint8).reshape(16, 32)
+    expected_weight = weight.reshape(1, 16, 1, 2, 16).transpose(0, 2, 3, 1, 4).reshape(16, 32)
+    np.testing.assert_array_equal(shuffle_mxfp4_weight(Tensor(weight, device="CPU")).numpy(), expected_weight)
+    scales = np.arange(32 * 8, dtype=np.uint16).astype(np.uint8).reshape(32, 8)
+    expected_scales = scales.reshape(1, 2, 16, 1, 2, 4).transpose(0, 3, 5, 2, 4, 1).reshape(32, 8)
+    np.testing.assert_array_equal(shuffle_mxfp4_scales(Tensor(scales, device="CPU")).numpy(), expected_scales)
+  def test_gemm(self):
+    import numpy as np
+    if not Device.DEFAULT.startswith("AMD") or not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("AITER MXFP4 correctness requires a real gfx950 AMD device")
+    from extra.gemm.aiter_mxfp4 import aiter_mxfp4_gemm, shuffle_mxfp4_scales, shuffle_mxfp4_weight
+    rng = np.random.default_rng(7)
+    a = rng.standard_normal((256, 256), dtype=np.float32) * 0.5
+    b = rng.standard_normal((256, 256), dtype=np.float32) * 0.5
+    aq, ae = _quantize_mxfp4_numpy(a)
+    bq, be = _quantize_mxfp4_numpy(b)
+    expected = _dequantize_mxfp4_numpy(aq, ae) @ _dequantize_mxfp4_numpy(bq, be).T
+    gpu = [Tensor(x, device=Device.DEFAULT) for x in
+           (aq, shuffle_mxfp4_weight(Tensor(bq, device="CPU")).numpy(),
+            shuffle_mxfp4_scales(Tensor(ae, device="CPU")).numpy(), shuffle_mxfp4_scales(Tensor(be, device="CPU")).numpy())]
+    actual = aiter_mxfp4_gemm(*gpu).float().numpy()
+    np.testing.assert_allclose(actual, expected, atol=0.25, rtol=0.01)
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
-
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestGemmLlama(unittest.TestCase):
   dtype = FP8_DTYPE

@@ -3,7 +3,8 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, CLikeArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec, TinyELF
@@ -557,10 +558,23 @@ class AMDCopyQueue(HWQueue):
 
     sdma_queue.signal_doorbell(dev)
 
+class PackedArgsState(HCQArgsState):
+  def __init__(self, buf:HCQBuffer, prg:'AMDProgram', bufs:tuple[HCQBuffer, ...], vals:tuple[sint|None, ...]=()):
+    super().__init__(buf, prg, bufs, vals=vals)
+    assert not vals and len(bufs) == len(prg.packed_arg_offsets)
+    self.buf.cpu_view().view(size=len(prg.packed_arg_template), fmt='B')[:] = prg.packed_arg_template
+    for arg, offset in zip(bufs, prg.packed_arg_offsets):
+      self.bind_sints_to_buf(arg.va_addr, buf=self.buf, fmt='Q', offset=offset)
 class AMDProgram(HCQProgram['AMDDevice']):
   def __init__(self, dev:AMDDevice, obj:TinyELF):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.dev, self.name, self.lib = dev, obj.name, obj.lib
+    args_state_t:type[HCQArgsState] = CLikeArgsState
+    packed_args = bool(obj.aux)
+    if packed_args:
+      assert len(obj.aux) == 3 and obj.aux[0] == "packed", f"unsupported AMD program auxiliary data {obj.aux[0]!r}"
+      self.packed_arg_template, self.packed_arg_offsets = obj.aux[1:]
+      args_state_t = PackedArgsState
 
     image, sections, relocs = elf_loader(self.lib)
 
@@ -579,7 +593,7 @@ class AMDProgram(HCQProgram['AMDDevice']):
     desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+desc_sz]))
     self.group_segment_size = desc.group_segment_fixed_size
     self.private_segment_size = desc.private_segment_fixed_size
-    self.kernargs_segment_size = desc.kernarg_size
+    self.kernargs_segment_size = len(self.packed_arg_template) if packed_args and desc.kernarg_size == 0 else desc.kernarg_size
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.dev.iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
 
@@ -602,7 +616,10 @@ class AMDProgram(HCQProgram['AMDDevice']):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    super().__init__(CLikeArgsState, self.dev, obj, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, base=self.lib_gpu.va_addr)
+    if packed_args:
+      assert len(self.packed_arg_template) == self.kernargs_segment_size, \
+        f"{self.name}: packed template is {len(self.packed_arg_template)} bytes, code object expects {self.kernargs_segment_size}"
+    super().__init__(args_state_t, self.dev, obj, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
