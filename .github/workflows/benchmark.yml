@@ -426,7 +426,7 @@ jobs:
     - name: IR3 openpilot compile3 0.11.2 supercombo
       run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=41 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
     - name: openpilot compile3 0.11.2 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
+      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
