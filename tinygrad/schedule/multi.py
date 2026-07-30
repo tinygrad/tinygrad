@@ -135,7 +135,7 @@ def factor_subview(full:UOp, multi:UOp, reshape_to:tuple[sint, ...]|None=None) -
 
 def store_value_multi(dest:UOp, multi:UOp):
   # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest
-  val_shape = tuple(t for fs in multi.factors for f in fs for t in ([1] if is_owner(f) else [factor_span(f)]))
+  val_shape = tuple(1 if is_owner(f) else factor_span(f) for fs in multi.factors for f in fs)
   dest, val = factor_subview(dest, multi), multi.src[0].reshape(val_shape)
   assert tuple(dest.shape) == tuple(val.shape), f"store sub-view shape mismatch {dest.shape} != {val.shape}"
   return dest.store(val)
