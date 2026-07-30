@@ -457,11 +457,9 @@ class TestCustomKernel(unittest.TestCase):
     # TODO: another +1 is because function copies the output
     self.assertEqual(kernel_count, 1+kcount+1)
 
-  # becomes a SLICE when the device supports it
   def test_shrink_input(self): self.test_mop_input(lambda x: x[:4], kcount=0)
   @unittest.expectedFailure
   def test_double_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T.T, kcount=0)
-  # must materialize the movement op before CALL
   def test_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T, kcount=1)
   def test_offset_shrink_input(self): self.test_mop_input(lambda x: x[4:8], kcount=0)
   def test_2d_shrink_input(self): self.test_mop_input(lambda x: x.reshape(4, 8)[:, 2:6], kcount=1)
