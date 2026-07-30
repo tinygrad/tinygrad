@@ -15,9 +15,10 @@ def check(status):
     error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
-def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
-  c_args = init_c_struct_t(len(args) * 8 + len(vals) * 4, tuple([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-                                                                [(f'v{i}', ctypes.c_int, len(args)*8 + i*4) for i in range(len(vals))]))(*args, *vals)
+def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
+  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
+            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
+  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
@@ -35,7 +36,7 @@ def cu_time_execution(cb, enable=False) -> float|None:
 
 class CUDAProgram(Program['CUDADevice']):
   def __init__(self, dev:CUDADevice, obj:TinyELF, smem:int=0):
-    self.dev, self.name, self.lib, self.smem = dev, obj.name, obj.lib, smem
+    self.dev, self.name, self.lib, self.signature, self.smem = dev, obj.name, obj.lib, obj.signature, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(obj.lib.decode('utf-8')).split("\n"))]))
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
@@ -54,7 +55,7 @@ class CUDAProgram(Program['CUDADevice']):
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
-      self.c_args, self.vargs = encode_args(args, vals)
+      self.c_args, self.vargs = encode_args(args, vals, self.signature)
 
       # HACK: For MOCKGPU send the args struct itself.
       if MOCKGPU: self.vargs = self.c_args # type: ignore[assignment]
