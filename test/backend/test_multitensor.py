@@ -53,9 +53,10 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     assert X.uop.src[0].shape == (128,)
-    # the MULTI carries and ends the DEVICE range as its second src
-    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
-    assert X.uop.ended_ranges == X.uop.src[1:]
+    # the MULTI carries and ends the DEVICE range in its sharding's owner factor
+    (ax, owner), = X.uop.sharding
+    assert ax == 0 and owner.op is Ops.RANGE and owner.arg[-1] is AxisType.DEVICE
+    assert X.uop.ended_ranges == (owner,)
     (X + X).realize()
 
   @unittest.expectedFailure # TODO: fix

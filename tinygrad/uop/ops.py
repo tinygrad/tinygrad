@@ -473,9 +473,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
-    if not isinstance(self.device, tuple) or self.axis is None: return self.shape
-    dcount = int(self.sharding[0][1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
-    return tuple(x//dcount if i == self.axis else x for i,x in enumerate(self.shape))
+    # NOTE: for multi-axis sharded values this divides the LAST sharded axis, matching the legacy .axis semantics
+    sharding = self.sharding
+    if not isinstance(self.device, tuple) or not len(sharding): return self.shape
+    ax, f = sharding[-1]
+    return tuple(x//(int(f.vmax)+1) if i == ax else x for i,x in enumerate(self.shape))
 
   @property
   def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
@@ -851,7 +853,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return uop
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
-    axis = self.axis if isinstance(device, tuple) else None
+    # NOTE: like shard_shape, a multi-axis sharded value falls back to its LAST sharded axis here
+    axis = self.sharding[-1][0] if isinstance(device, tuple) and len(self.sharding) else None
     ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=strong_dtype(self.dtype) if dtype is None else dtype, device=device)
     return ret.unshard(axis) if axis is not None else ret
   @staticmethod

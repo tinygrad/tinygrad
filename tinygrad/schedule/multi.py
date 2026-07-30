@@ -314,9 +314,9 @@ def stack_multi(root:UOp):
   if all(m.op is Ops.UNSHARD and m.shape == target.shape and tuple(m.src[1:]) == tuple(target.src[1:]) for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
     return UOp(Ops.UNSHARD, src=(UOp(Ops.STACK, src=tuple(srcs)), UOp.local_factor(len(srcs)), *target.src[1:]))
-  # mismatched layouts: reshard everything to the target axis (device-multi only)
-  axis = root.axis
-  assert axis is not None
+  # mismatched layouts: reshard everything to the last sharded axis (device-multi only)
+  assert root.sharding, "STACK on UNSHARD must be sharded"
+  axis = root.sharding[-1][0]
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, next(m.sharding[0][1] for m in root.src if m.op is Ops.UNSHARD))
 
 def _shard_idx(rng:UOp, dev_idx:int) -> int:
