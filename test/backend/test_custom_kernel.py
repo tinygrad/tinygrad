@@ -434,7 +434,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
   def test_mop_input(self, mop_fxn=lambda x: x.reshape(16, 2), kcount:int=0):
-    # raw: mop outside, input is a realized BUFFER
+    # default: input is BUFFER
     x = mop_fxn(Tensor.arange(32).clone("CPU").realize())
     y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
@@ -442,7 +442,7 @@ class TestCustomKernel(unittest.TestCase):
     kernel_count = GlobalCounters.kernel_count
     self.assertEqual(y.tolist(), x.add(1).tolist())
     self.assertEqual(kernel_count, 1+kcount)
-    # same test wrapped in @function like the trainer (mop inside, input is a PARAM)
+    # same test with @function, input is PARAM
     from tinygrad import function
     x0 = Tensor.arange(32).clone("CPU").realize()
     @function(precompile=True)
@@ -454,7 +454,8 @@ class TestCustomKernel(unittest.TestCase):
     y = run(x0).realize()
     kernel_count = GlobalCounters.kernel_count
     self.assertEqual(y.tolist(), mop_fxn(x0).add(1).tolist())
-    self.assertEqual(kernel_count, 1+kcount)
+    # TODO: another +1 is because function copies the output
+    self.assertEqual(kernel_count, 1+kcount+1)
 
   # becomes a SLICE when the device supports it
   def test_shrink_input(self): self.test_mop_input(lambda x: x[:4], kcount=0)
