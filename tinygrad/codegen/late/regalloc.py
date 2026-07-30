@@ -93,6 +93,9 @@ pm_mem2reg_rewrite = PatternMatcher([
   # regspace LOAD is just an empty register carrier
   (UPat(Ops.LOAD, name="x"), lambda ctx,x: ((nx := x.replace(src=(), tag=(ctx.vr(x),))), [nx]) \
     if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
+  # reg store is copy, should handle copying directly from memory?
+  # ex. store((global buffer).index(0), (reg buffer).index(1))
+  # should perform a single load directly into reg buffer
   (UPat(Ops.STORE, name="x"), lambda ctx,x: ((nx := ctx.ren.copy(x.src[1], ctx.vr(x))), [nx])
     if x.src[0].addrspace is AddrSpace.REG else None),
 ])

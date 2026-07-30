@@ -1,12 +1,14 @@
-from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType
+from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_storage_scalar
+from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
-from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, VRegister, rdefs, rdef
+from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
+from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
-from dataclasses import dataclass, field
 import itertools
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 # ---- (UOp, dtype) -> Instruction tables ----
@@ -58,6 +60,7 @@ def getsign(u:UOp, nbits):
 def vmov(x:UOp) -> UOp:
   # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
   return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
+def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 
 # ---- register classes/kernel init state ----
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
@@ -397,31 +400,13 @@ def render_wmma(ctx, wmma:UOp):
   return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.vreg(GP_VGPRS, width=8),))
 
 # ---- lowering passes ----
-from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
-from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
-from tinygrad.dtype import to_storage_scalar
-
-# NOTE: redundant, move this and the llvmir pat to 
-pm_gfx1100_wmma = PatternMatcher([
-  (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
-    src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
-      for j in range(x.max_numel()*2)))),
-    arg=(*x.arg[:4], None)).index(i*2)
-    for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
-  (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
-    src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
-    if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
-])
-
 extra_matcher = PatternMatcher([
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(to_storage_scalar(x.arg, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
-]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + pm_gfx1100_wmma
+]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
  
-def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
-
 pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
@@ -438,7 +423,6 @@ pm_int_to_float = PatternMatcher([
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half), name="x"), lambda y,x: long2double(y).cast(dtypes.float).cast(x.dtype)),
   (UPat.var("x", dtypes.int64s).cast(dtypes.float64), long2double),
 ])
-
 
 pre_isel_matcher = PatternMatcher([
   # --- gated ---
@@ -481,7 +465,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
     lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
 ]) + pm_float_to_int + pm_int_to_float
-
 
 # NOTE: cmp shouldn't always be materialized to sgpr, only for where?
 isel_matcher = PatternMatcher([
@@ -603,7 +586,6 @@ class RDNA3Renderer(ISARenderer):
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
-    from tinygrad.codegen.opt import tc
     super().__init__(target)
     self.tensor_cores = tc.get_amd(target.arch)
 
