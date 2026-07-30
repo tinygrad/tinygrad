@@ -61,11 +61,11 @@ from tinygrad.tensor import Tensor
 # tilelang builtins, expressed with tinygrad UOp APIs
 # ---------------------------------------------------------------------------
 
-def alloc_shared(shape:tuple[int, ...], dtype:DType) -> UOp:
+def alloc_shared(shape:tuple[int, ...], dtype:DType, slot:int) -> UOp:
   """T.alloc_shared: one LOCAL buffer shared by all threads in the block."""
-  return UOp.placeholder(tuple(shape), dtype, next(UOp.unique_num), AddrSpace.LOCAL)
+  return UOp.placeholder(tuple(shape), dtype, slot, AddrSpace.LOCAL)
 
-def alloc_fragment(shape:tuple[int, ...], dtype:DType, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
+def alloc_fragment(shape:tuple[int, ...], dtype:DType, slot:int, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
   """T.alloc_fragment: per-thread REG fragment + UNSHARD over the LOCAL thread grid.
 
   Each thread privately owns shape[axis]//threads elements along every sharded
@@ -79,7 +79,7 @@ def alloc_fragment(shape:tuple[int, ...], dtype:DType, axes:tuple[int, ...], rng
   assert all(shape[a] % (int(rng.vmax)+1) == 0 for a, rng in zip(axes, rngs))
   by_axis = dict(zip(axes, rngs))
   shard_shape = tuple(s // (int(by_axis[i].vmax)+1) if i in by_axis else s for i, s in enumerate(shape))
-  fragment = UOp.placeholder(shard_shape, dtype, next(UOp.unique_num), AddrSpace.REG)
+  fragment = UOp.placeholder(shard_shape, dtype, slot, AddrSpace.REG)
   return fragment.unshard(axes, rngs)
 
 # ---------------------------------------------------------------------------
@@ -110,45 +110,40 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # 16*8 threads = 128 threads
   tx = UOp.range(TX, 2, AxisType.LOCAL)
   ty = UOp.range(TY, 3, AxisType.LOCAL)
+  def with_threads(x:UOp): return x.rearrange("(tm ty) (tx tn) -> ty tx tm tn", tm=TM, tn=TN)[ty, tx]
 
   # shared + fragment (regs)
-  A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype)
-  B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype)
-  C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, (0, 1), (ty, tx))
+  A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype, 0)
+  B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype, 1)
+  C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, 0, (0, 1), (ty, tx))
 
-  # zero out the regs to start
-  ic, jc = UOp.range(TM, 4, AxisType.LOOP), UOp.range(TN, 5, AxisType.UPCAST)
-  C_local = C_local[ic*TM + ty, tx*TN + jc].set(0.0, end=(ic, jc))
+  # zero out the regs to start. this is expanded by the devectorizer
+  C_local = C_local.after(C_local.store(0.0))
 
   # for ko in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
   ko = UOp.range(cdiv(K, BLOCK_K), 6, AxisType.LOOP)
 
-  # index the outer matrix
+  # index the outer matrices
   a = a.rearrange("(m bm) (k bk) -> m k bm bk", bm=BLOCK_M, bk=BLOCK_K)[by, ko]
   b = b.rearrange("(k bk) (n bn) -> k n bk bn", bk=BLOCK_K, bn=BLOCK_N)[ko, bx]
+  c = c.rearrange("(m bm) (n bn) -> m n bm bn", bm=BLOCK_M, bn=BLOCK_N)[by, bx]
 
-  # A_shared <- a
-  iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.UPCAST)
-  A_store = A_shared[iar*TM + ty, tx*TN + ka].store(a[iar*TM + ty, tx*TN + ka]).end(iar, ka)
-
-  # B_shared <- b
-  kb, ibr = UOp.range(TM, 9, AxisType.LOOP), UOp.range(TN, 10, AxisType.UPCAST)
-  B_store = B_shared[kb*TM + ty, tx*TN + ibr].store(b[kb*TM + ty, tx*TN + ibr]).end(kb, ibr)
-
-  # get the shared after the stores (single barrier)
-  A_shared = A_shared.after(A_store, B_store)
-  B_shared = B_shared.after(A_store, B_store)
+  # A_shared <- a, B_shared <- b
+  A_shared = A_shared.after(with_threads(A_shared).store(with_threads(a)))
+  B_shared = B_shared.after(with_threads(B_shared).store(with_threads(b)))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA
-  kk, ir = UOp.range(BLOCK_K, 11, AxisType.LOOP), UOp.range(TM, 12, AxisType.LOOP)
+  kk = UOp.range(BLOCK_K, 11, AxisType.LOOP)
+  ir = UOp.range(TM, 12, AxisType.LOOP)
   jj = UOp.range(TN, 13, AxisType.UPCAST)
   acc = C_local.after(kk)[ir*TM + ty, tx*TN + jj] + A_shared[ir*TM + ty, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
   C_local = C_local[ir*TM + ty, tx*TN + jj].set(acc, end=(kk, ir, jj, ko))
 
   # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
+  #c_st = with_threads(c).store(with_threads(C_local).relu().cast(c.dtype))
   ie, je = UOp.range(TM, 14, AxisType.LOOP), UOp.range(TN, 15, AxisType.UPCAST)
-  c_st = c[by*BLOCK_M + ie*TM + ty, bx*BLOCK_N + tx*TN + je].store(C_local[ie*TM + ty, tx*TN + je].relu().cast(c.dtype)).end(je, ie)
+  c_st = c[ie*TM + ty, tx*TN + je].store(C_local[ie*TM + ty, tx*TN + je].relu().cast(c.dtype)).end(je, ie)
 
   # close the locals and globals
   return c_st.end(tx, ty, bx, by).sink(arg=KernelInfo(name="matmul_relu", opts_to_apply=()))
