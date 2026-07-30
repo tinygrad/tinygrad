@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.schedule.multi import multi_pm, factor_span, is_owner, resolve_axis_index
 
 def rng(n, i, at=AxisType.LOCAL): return UOp.range(n, i, at)
-def nodes(fs): return [(('o', int(f.vmax)+1) if is_owner(f) else ('l', int(f.vmax)+1)) for f in fs]
+def nodes(fs): return [(('o', int(factor_span(f))) if is_owner(f) else ('l', int(factor_span(f)))) for f in fs]
 
 class TestFactorLayout(unittest.TestCase):
   """The factor-list algebra of UNSHARD: every axis carries an ordered factor list (owner factors with RANGEs,

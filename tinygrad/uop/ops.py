@@ -439,7 +439,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.UNSHARD: return tuple(prod([ssimplify(int(f.vmax)+1) for f in fs]) for fs in self.factors)
+        case Ops.UNSHARD: return tuple(prod([self.factor_span(f) for f in fs]) for fs in self.factors)
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -674,16 +674,21 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def local_factor(size:sint) -> UOp:
-    """a LOCAL factor of an UNSHARD axis, encoded as a UOp with span size (like RANGE, its span is vmax+1)."""
-    s = sint_to_uop(size)
-    return UOp.const(dtypes.weakint, int(s.arg)-1) if s.op is Ops.CONST else s-1
+    """a LOCAL factor of an UNSHARD axis: a plain value whose span IS the value (a const or any int expr)."""
+    return sint_to_uop(size)
+
+  @staticmethod
+  def factor_span(f:UOp) -> sint:
+    """the span of an UNSHARD factor: LOCAL factors (plain values) carry their span directly, OWNER factors
+    (containing RANGEs) span their coordinate domain vmax+1 (a RANGE's own span)."""
+    return ssimplify(f) if len(f.ranges) == 0 else ssimplify(int(f.vmax)+1)
 
   @functools.cached_property
   def factors(self) -> tuple[tuple[UOp, ...], ...]:
-    """UNSHARD: the ordered (major -> minor) factor list of every axis. each factor is an int UOp with span vmax+1;
-    a factor containing RANGEs is an OWNER (sharding) factor, a plain const is a LOCAL factor. the full shape is the
-    per-axis product of spans, the shard shape is the per-axis product of the LOCAL spans, and the interleaving of
-    owner and local factors within a list is the layout (e.g. [rng, s] contiguous, [s, rng] strided)."""
+    """UNSHARD: the ordered (major -> minor) factor list of every axis. a factor is a plain const (LOCAL factor,
+    its span is its value) or an int expr containing RANGEs (OWNER factor, its span is vmax+1). the full shape is
+    the per-axis product of spans, the shard shape is the per-axis product of the LOCAL spans, and the interleaving
+    of owner and local factors within a list is the layout (e.g. [rng, s] contiguous, [s, rng] strided)."""
     assert self.op is Ops.UNSHARD
     # NOTE: we do not assert len(src) == 1+rank here: scheduling passes (rangeify) may transiently rewrite the
     # value's rank while the factor args stay attached; those nodes are resolved by multi_pm before programs
@@ -751,7 +756,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def bounds(self):
     if self.axis is None: raise RuntimeError("bounds is not defined when axis is None")
-    dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
+    dcount = int(self.sharding[0][1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
     return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in range(dcount)], initial=0)))
 
   @functools.cached_property

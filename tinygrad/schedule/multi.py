@@ -1,6 +1,8 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape
 from tinygrad.uop.ops import sint, ssimplify, sint_to_uop
+
+def factor_span(f:UOp) -> sint: return UOp.factor_span(f)
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -52,7 +54,6 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 # pos(idx coords) = sum over factors of coord_f * multiplier_f, multiplier_f = prod of the spans of all later factors.
 # layouts: [rng, L] contiguous, [L, rng] strided, [L, rng, L] middle insert, [rng_i, rng_j, L] stacked owners.
 
-def factor_span(f:UOp) -> sint: return ssimplify(int(f.vmax) + 1)
 def is_owner(f:UOp) -> bool: return len(f.ranges) > 0
 def owners_of(fs:tuple[UOp, ...]) -> list[UOp]: return [f for f in fs if is_owner(f)]
 def local_span(fs:tuple[UOp, ...]) -> sint: return prod([factor_span(f) for f in fs if not is_owner(f)])

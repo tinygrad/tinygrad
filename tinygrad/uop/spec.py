@@ -184,9 +184,9 @@ spec_tensor = PatternMatcher([
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
   # UNSHARD/MSELECT/MSTACK
-  # an UNSHARD carries the value and one factor arg per axis (a bare int UOp or a STACK of them). each factor is an int
-  # UOp with span vmax+1; a factor containing RANGEs is an owner (sharding) factor, a plain const is a local factor.
-  # the full shape is the per-axis product of spans, the shard shape is the per-axis product of the local spans.
+  # an UNSHARD carries the value and one factor arg per axis (a bare int UOp or a STACK of them). const factors are
+  # LOCAL (their value is the span), factors containing RANGEs are OWNER factors (span vmax+1). the full shape is
+  # the per-axis product of spans, the shard shape is the per-axis product of the local spans.
   (UPat(Ops.UNSHARD, name="multi"), lambda multi: _unshard_spec(multi)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
