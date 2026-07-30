@@ -23,7 +23,7 @@ class ElementwiseMixin(CreationMixin):
     x, y = (self, y) if not reverse else (y, self)
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     # keep weak CONST weak, might lift weakint -> weakfloat
-    def promote(t:Self) -> Self:
+    def promote(t):
       if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const(weak_dtype(out_dtype), t._uop.base.arg, t.shape))
       return t.cast(out_dtype)
     return promote(x), promote(y)

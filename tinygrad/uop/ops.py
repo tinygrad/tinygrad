@@ -1785,7 +1785,8 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
-  return u.replace(src=tuple(s.cast(dt) if s.dtype in dtypes.weaks else s for s in u.src))
+  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
+  return u.replace(dtype=None, src=tuple(s.cast(dt) if s.dtype in dtypes.weaks else s for s in u.src))
 
 # runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
 pm_commit_weak = PatternMatcher([
