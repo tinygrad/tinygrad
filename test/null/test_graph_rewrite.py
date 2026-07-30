@@ -322,6 +322,25 @@ class TestRecurse(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
 
+# TODO: delete this class with _rebuild_dtype once the dtype field is removed — every rebuild
+# derives then, and the stored SHL form these tests pin becomes inexpressible
+class TestRebuildRederivesDtype(unittest.TestCase):
+  def test_rebuild_rederives_dtype(self):
+    # a rule may return an existing node of a different dtype; the rebuilt parent derives, never inherits
+    x = UOp.const(None, 1.0).cast(dtypes.float)
+    pm = PatternMatcher([(UPat(Ops.CAST, src=(UPat.cvar("c"),)), lambda c: c)])
+    self.assertIs(graph_rewrite(x+x, pm).dtype, dtypes.weakfloat)
+    self.assertIs(graph_rewrite(x+x, pm, walk=True).dtype, dtypes.weakfloat)
+
+  def test_rebuild_keeps_dtype_on_invalid_src(self):
+    # Invalid is dtype-agnostic poison: a src becoming Invalid never invalidates the stored dtype.
+    # the explicit dtype IS the subject: the renderer-lowered shift keeps src[0]'s dtype with a uint
+    # count, a stored form derivation cannot reproduce (re-deriving it over the poisoned src raises)
+    x = UOp.const(None, 5).cast(dtypes.int)
+    shl = UOp(Ops.SHL, dtypes.int, (x, UOp.const(None, 2).cast(dtypes.uint)))
+    out = graph_rewrite(shl, PatternMatcher([(UPat(Ops.CAST, dtype=dtypes.int), lambda: UOp.invalid())]))
+    self.assertIs(out.dtype, dtypes.int)
+
 def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
