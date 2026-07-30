@@ -54,8 +54,6 @@ def add_gpudims(ctx:Renderer, s:UOp):
   # get global and local shape
   global_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in global_dims)
   local_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in local_dims)
-  # Threaded CPU kernels need a GLOBAL range to supply core_id. A local-only kernel runs those ranges as ordinary loops.
-  if ctx.has_threads and not global_shape: return None
 
   # get the idxs
   ki: KernelInfo = s.arg
@@ -82,9 +80,9 @@ def add_gpudims(ctx:Renderer, s:UOp):
         mask: UOp = UOp.uprod(*[x.eq(0) for x in missing_locals])
         subs[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
     if r.op is not Ops.RANGE: continue
-    if r.arg[1] in (AxisType.LOOP, AxisType.REDUCE): continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])
+      if r.arg[1] == AxisType.REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)

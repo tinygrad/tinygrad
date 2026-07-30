@@ -120,6 +120,7 @@ spec_shared = PatternMatcher([
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
 
@@ -206,10 +207,8 @@ spec_program = PatternMatcher([
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
 
-  # register-vector views can remain when the renderer consumes their shape (for example a native horizontal reduction)
   (UPat((Ops.RESHAPE, Ops.PERMUTE), name="x"), lambda x: x.addrspace is AddrSpace.ALU),
-  (UPat(Ops.REDUCE, src=(UPat(),), name="x"),
-   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce and isinstance(x.arg[1], int)),
+  (UPat(Ops.REDUCE, src=(UPat(name="x"),), arg=(Ops.ADD, 1)), lambda x: x.addrspace is AddrSpace.ALU),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),

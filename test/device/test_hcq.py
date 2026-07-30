@@ -172,7 +172,7 @@ class TestHCQ(unittest.TestCase):
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
-    zb._buf.view[:zb.nbytes] = bytes(zb.nbytes)
+    ctypes.memset(zb._buf.va_addr, 0, zb.nbytes)
     kernargs = runtime.fill_kernargs([zt._buf, zb._buf])
 
     q = TestHCQ.d0.hw_compute_queue_t()
@@ -183,7 +183,7 @@ class TestHCQ(unittest.TestCase):
     for x in range(1, 4):
       for y in range(1, 4):
         for z in range(1, 4):
-          zt._buf.view[:zt.nbytes] = bytes(zt.nbytes)
+          ctypes.memset(zt._buf.va_addr, 0, zb.nbytes)
 
           q.submit(TestHCQ.d0, {virt_val.expr: TestHCQ.d0.timeline_value, virt_local[0].expr: x, virt_local[1].expr: y, virt_local[2].expr: z})
           TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -480,7 +480,7 @@ class TestHCQ(unittest.TestCase):
     kernargs_ptr = runtime.fill_kernargs([buf1._buf, buf2._buf])
 
     for i in range(255):
-      buf2._buf.view[:buf2.nbytes] = bytes([i]) * buf2.nbytes
+      ctypes.memset(buf2._buf.va_addr, i, 2)
 
       # Need memory_barrier after direct write to vram
       TestHCQ.d0.hw_compute_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
@@ -500,7 +500,7 @@ class TestHCQ(unittest.TestCase):
     buf3 = Buffer(Device.DEFAULT, 1, dtypes.int8, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
     for i in range(256):
-      buf3._buf.view[:buf3.nbytes] = bytes([i]) * buf3.nbytes
+      ctypes.memset(buf3._buf.va_addr, i, 1)
 
       # Need memory_barrier after direct write to vram
       TestHCQ.d0.hw_compute_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \

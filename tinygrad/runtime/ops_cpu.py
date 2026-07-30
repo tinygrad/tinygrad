@@ -281,8 +281,6 @@ class CPUAllocator(HCQAllocator):
   def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQCompiled):
-  graph_batch_size_limit = 64
-
   pm_lower = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_host_queue)])
 

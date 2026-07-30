@@ -131,7 +131,6 @@ class CStyleLanguage(Renderer):
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
   gep_arr_threshold: int = 4
-  def should_inline_where(self, x:UOp) -> bool: return False
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
@@ -240,8 +239,7 @@ class CStyleLanguage(Renderer):
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
-        (u.op in {Ops.STACK, Ops.REDUCE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and (u.op is not Ops.WHERE or self.should_inline_where(u)) and
-         child_count[u] == 1 and not getenv("EXPAND_SSA"))):
+        (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.STORE, Ops.BUFFER} and u.dtype != dtypes.void:
@@ -261,7 +259,6 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  def should_inline_where(self, x:UOp) -> bool: return self._render_lut_lookup(self, x) is not None
   @staticmethod
   def _byte_dot_reduce(x:UOp) -> tuple[UOp, UOp, UOp|None]|None:
     if x.op is not Ops.REDUCE or x.arg != (Ops.ADD, 1) or len(x.src) != 1: return None

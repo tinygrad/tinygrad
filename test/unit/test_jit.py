@@ -1,9 +1,7 @@
 import unittest, numpy as np
-from unittest.mock import patch
 from test.helpers import assert_jit_cache_len
 from tinygrad import Tensor, TinyJit, Context, UOp, dtypes
-from tinygrad.engine.jit import JitError, graph_split_rewrite
-from tinygrad.uop.ops import Ops
+from tinygrad.engine.jit import JitError
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -14,25 +12,8 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
-  def test_graph_batch_size_limit(self):
-    class FakeGraph:
-      @staticmethod
-      def supports_uop(_devs, _call): return True
-
-    def graph_sizes(limit:int|None) -> list[int]:
-      class FakeDevice:
-        graph, graph_batch_size_limit = FakeGraph, limit
-      dev = FakeDevice()
-      buf = UOp.new_buffer("FAKE", 1, dtypes.float)
-      prg = UOp(Ops.PROGRAM, src=(UOp.sink(),))
-      with patch("tinygrad.engine.jit.Device", {"FAKE":dev}):
-        linear = graph_split_rewrite(UOp(Ops.LINEAR, src=tuple(prg.call(buf) for _ in range(20))), max_batch_size=4)
-      return [len(call.src[0].src[0].src) for call in linear.src]
-
-    self.assertEqual(graph_sizes(4), [4, 4, 4, 4, 4])
-    self.assertEqual(graph_sizes(None), [4, 8, 8])
-
   def test_jitbeam_triggers_beam(self):
+    from unittest.mock import patch
     from tinygrad.helpers import getenv as _getenv
     @TinyJit
     def add(a, b): return (a+b).realize()

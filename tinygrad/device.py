@@ -333,7 +333,6 @@ class Program(Generic[DeviceType]):
 
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
-  graph_batch_size_limit:int|None = None
 
   pm_lower:Any = None
   pm_bufferize:Any = None

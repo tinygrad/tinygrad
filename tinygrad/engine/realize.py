@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array, os, multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, PARALLEL_COMPILE
@@ -279,11 +278,9 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
       if key not in to_program_cache: pending.setdefault(key, (call.src[0], renderer, key))
     if len(pending) >= 16:
       workers = min(PARALLEL_COMPILE.value, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1), len(pending))
-      try:
-        start_method = "fork" if all(renderer.target.device == "CPU" for _,renderer,_ in pending.values()) else "spawn"
-        with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context(start_method)) as pool:
-          for key,program in pool.map(parallel_to_program, pending.values()): to_program_cache[key] = program
-      except BrokenProcessPool: pass
+      start_method = "fork" if all(renderer.target.device == "CPU" for _,renderer,_ in pending.values()) else "spawn"
+      with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context(start_method)) as pool:
+        for key,program in pool.map(parallel_to_program, pending.values()): to_program_cache[key] = program
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, jit=jit)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
