@@ -54,11 +54,10 @@ def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:in
   sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, threads, groups_x, groups_y,
                   arg=KernelInfo(f"aiter_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
   root = pathlib.Path(__file__).parent/"amd"/"aiter_f4"
-  stem = f"f4gemm_bf16_per1x32Fp4_BpreShuffle_{tile_m}x{tile_n}"
+  src = (root/"aiter_mxfp4.s").read_text().replace(".set AITER_MXFP4_TILE, 0", f".set AITER_MXFP4_TILE, {tile_m}{tile_n}")
   info = replace(_aiter_mxfp4_program_info(sink, M, N, K, tile_m, tile_n), target=Device[C.device].renderer.target)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=f"AITER gfx950 opaque code object: {stem}"),
-                               UOp(Ops.BINARY, arg=(root/f"{stem}.co").read_bytes())),
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=Device[C.device].compiler.compile_cached(src))),
              arg=info)
 def shuffle_mxfp4_weight(x:Tensor) -> Tensor:
   assert x.ndim == 2 and x.dtype == dtypes.uint8
