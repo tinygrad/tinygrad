@@ -337,7 +337,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     BLOCK_J = min(256, embed_size)
     n_j_blocks = (embed_size + BLOCK_J - 1) // BLOCK_J
     i = UOp.range(grad_emb_flat.shape[0], 0)         # batch_size * sequence_length -> GLOBAL
-    j_inner = UOp.range(BLOCK_J, 2, AxisType.LOOP if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
+    j_inner = UOp.range(BLOCK_J, 2, AxisType.WEAK if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
     j_outer = UOp.range(n_j_blocks, 1)
     j = j_outer * BLOCK_J + j_inner
     # mask padded embed

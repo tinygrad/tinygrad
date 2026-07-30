@@ -28,10 +28,10 @@ REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)
 assert WAVES_PER_BLOCK_M*REG_TILES_PER_WAVE_M*LANES_PER_WAVE_M*TM == BLOCK_M, "M reshape is wrong"
 assert WAVES_PER_BLOCK_N*REG_TILES_PER_WAVE_N*LANES_PER_WAVE_N*TN == BLOCK_N, "N reshape is wrong"
 
-def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.LOOP): return [UOp.range(s, rng+i, axis_type) for i,s in enumerate(shape)]
+def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.WEAK): return [UOp.range(s, rng+i, axis_type) for i,s in enumerate(shape)]
 def copy(dest:UOp, src:UOp, rng:int, upcast=False):
   assert dest.shape == src.shape
-  rngs = rngs_for_shape(src.shape, rng, AxisType.UPCAST if upcast else AxisType.LOOP)
+  rngs = rngs_for_shape(src.shape, rng, AxisType.UPCAST if upcast else AxisType.WEAK)
   return dest[*rngs].store(src[*rngs]).end(*rngs)
 
 def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:

@@ -18,9 +18,9 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   SEQ = inp.shape[1]
   OUT = weight.shape[0]
   IN = weight.shape[-1]
-  seq_idx = UOp.range(SEQ, 2, AxisType.LOOP)
-  out_idx = UOp.range(OUT, 3, AxisType.LOOP)
-  batch_idx = UOp.range(output.size//SEQ//OUT, 1, AxisType.LOOP)
+  seq_idx = UOp.range(SEQ, 2)
+  out_idx = UOp.range(OUT, 3)
+  batch_idx = UOp.range(output.size//SEQ//OUT, 1)
   reduce_idx = UOp.range(IN, 0, AxisType.REDUCE)
   product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)

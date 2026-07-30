@@ -79,8 +79,8 @@ class TestWeakPromotion(unittest.TestCase):
   def test_weak_int_binop(self):
     v = UOp.variable("i", 0, 10, dtypes.weakint)
     self.assertEqual((v << 1).dtype, dtypes.weakint)
-    self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.uint32, 1)), None), dtypes.int64)
-    self.assertEqual(UOp.const(dtypes.weakint, 1).alu(Ops.SHL, UOp.const(dtypes.uint8, 1)).dtype, dtypes.uint8)
+    self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(dtypes.int8, 1), UOp.const(dtypes.uint32, 1)), None), dtypes.int8)
+    self.assertEqual(UOp.const(dtypes.weakint, 1).alu(Ops.SHL, UOp.const(dtypes.uint, 1)).dtype, dtypes.weakint)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
     with self.assertRaises(RuntimeError): Tensor.const(dtypes.weakfloat, 1.0) << Tensor.const(dtypes.weakfloat, 1.0)
     with self.assertRaises(RuntimeError): UOp.const(dtypes.int32, 1).alu(Ops.SHL, UOp.const(dtypes.float64, 1))
@@ -116,6 +116,13 @@ class TestWeakPromotion(unittest.TestCase):
               Tensor.full((1,), 1.0, dtype=dtypes.float64, device="NULL") + (1.0 + 2**-40)):
       t.realize()
       self.assertNotIn(t.uop.buffer.dtype, dtypes.weaks)
+
+  def test_computed_float_index_lowers(self):
+    # a half-pixel nearest index resolves its float-scaled range before the gather
+    idx = (Tensor.arange(8) + 0.5) / 4 - 0.5
+    idx = (idx.clip(0, 1) - 0.5).ceil().int()
+    out = Tensor([0, 1], device="NULL")[idx].contiguous().realize()
+    self.assertNotIn(out.uop.buffer.dtype, dtypes.weaks)
 
 
 class TestWeakStorageBoundary(unittest.TestCase):

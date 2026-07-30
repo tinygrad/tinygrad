@@ -51,7 +51,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
@@ -446,7 +446,7 @@ class _Ctx:
     """Create a lane range UOp with unique axis ID."""
     if n is None: n = self.wave_size
     self._axis_id += 1
-    return UOp.range(n, self._axis_id, AxisType.LOOP, dtype=dtypes.int)
+    return UOp.range(n, self._axis_id, dtype=dtypes.int)
 
   def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
     """Combine lane bits into a mask using RANGE+REDUCE (32-bit for RDNA, 64-bit for CDNA)."""
