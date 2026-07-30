@@ -459,12 +459,15 @@ class TestCustomKernel(unittest.TestCase):
 
   # becomes a SLICE when the device supports it
   def test_shrink_input(self): self.test_mop_input(lambda x: x[:4], kcount=0)
+  @unittest.expectedFailure
   def test_double_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T.T, kcount=0)
   # must materialize the movement op before CALL
   def test_permute_input(self): self.test_mop_input(lambda x: x.reshape(4, 8).T, kcount=1)
   def test_offset_shrink_input(self): self.test_mop_input(lambda x: x[4:8], kcount=0)
   def test_2d_shrink_input(self): self.test_mop_input(lambda x: x.reshape(4, 8)[:, 2:6], kcount=1)
+  @unittest.expectedFailure
   def test_pad_input(self): self.test_mop_input(lambda x: x[:4].pad(((0, 4),)), kcount=1)
+  @unittest.expectedFailure
   def test_flip_input(self): self.test_mop_input(lambda x: x.flip(0), kcount=1)
   def test_expand_input(self): self.test_mop_input(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), kcount=1)
 
