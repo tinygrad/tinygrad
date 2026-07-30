@@ -842,7 +842,7 @@ class TransformerBlock(FFNBlock):
     if flash_decode:
       decode_len = kv_len if isinstance(kv_len, int) else self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
-      from extra.gemm.amd_flash_attention import amd_flash_attention_decode
+      from tinygrad.llm.amd import amd_flash_attention_decode
       attn = amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
     elif llm_cpu.SUPPORTED and self.attn_k.ggml_type == self.attn_v.ggml_type == 8 and resolve(T == 1) and \
          kv_len is not None and str(x.device).startswith("CPU"):
@@ -851,7 +851,7 @@ class TransformerBlock(FFNBlock):
          str(x.device).startswith("CPU"):
       attn = llm_cpu.attention_prefill(q.float(), assigned_kv, start_pos)
     elif use_flash:
-      from extra.gemm.amd_flash_attention import amd_flash_attention_causal_cached
+      from tinygrad.llm.amd import amd_flash_attention_causal_cached
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
       valid = valid_len.unbind()[0] if isinstance(valid_len, UOp) else valid_len
       valid_kv_len, key_limit = start + T, start + valid if valid is not None else None

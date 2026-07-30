@@ -68,7 +68,7 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
-  shapes, ren = ctx
+  shapes, ren = ctx[:2]
   if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"}: return None
   valid, x = x.get_valid(), x.get_idx()
   # search for dims that drop the most valid statements

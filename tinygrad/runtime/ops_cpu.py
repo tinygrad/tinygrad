@@ -156,7 +156,7 @@ class CPUComputeQueue(HWQueue):
     for tid in range(1 if lvp else (global_size or (1,))[0]):
       if not lvp and 'core_id' in prg.runtimevars: args[prg.runtimevars['core_id']] = tid
       self.q(prg, *[unwrap(x) for x in args], *([0] * (MAX_ARGS - len(args))))
-    self._exec_groups.append((start, len(self._q) // CMD_SIZE, prg.cpu_parallel))
+    self._exec_groups.append((start, len(self._q) // CMD_SIZE, prg.parallel))
     return self
   def wait(self, signal, value=0): return self._cmd(wait_prog, (signal.base_buf,), (value,))
   def timestamp(self, signal): return self._cmd(timestamp_prog, (signal.base_buf.offset(8, 8), self.dev.func_table._buf.offset(0, 8)))
@@ -169,7 +169,7 @@ class CPUComputeQueue(HWQueue):
       for off, _ in self.q_sints: self._encoded[off] = int(self._q[off]) & ((1<<64)-1)
     encoded = self._encoded
     parallel_buf = None
-    if getattr(dev, "parallel_uops", False) and not getattr(dev, "parallel_shutdown", False):
+    if dev.parallel_uops and not dev.parallel_shutdown:
       completed = dev.progress_view[0]
       still_inflight = []
       for end_pos,buf in dev.parallel_command_inflight:
@@ -226,7 +226,7 @@ class CPUProgram(HCQProgram['CPUDevice']):
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.signature, self.runtimevars = obj.signature, {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
-    self.cpu_parallel = obj.cpu_parallel
+    self.parallel = obj.parallel
 
     LVP = obj.target.renderer == "LVP"
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here

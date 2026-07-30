@@ -128,8 +128,8 @@ def _uses_shrink_memory(x:UOp) -> bool:
     return any(_uses_shrink_memory(y) for y in x.src)
   return False
 
-def do_devectorize(ctx:Renderer|tuple[set[UOp], Renderer], b:UOp):
-  preserved = ctx[0] if isinstance(ctx, tuple) else set()
+def do_devectorize(ctx:Renderer|tuple[dict, Renderer, set[UOp]], b:UOp):
+  preserved = ctx[2] if isinstance(ctx, tuple) and len(ctx) == 3 else set()
   if b.shape == () or b in preserved or _uses_shrink_memory(b): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.arg is Invalid for x in b.src): return None
@@ -341,9 +341,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple, name="pre-devectorize symbolic")
   native_reduce_uops = {u for r in sink.toposort() if ren.has_native_reduce(r) for u in r.src[0].backward_slice_with_self}
-  sink = graph_rewrite(sink, devectorizer2, ctx=(native_reduce_uops, ren), name="devectorize2")
+  if native_reduce_uops:
+    sink = graph_rewrite(sink, symbolic_simple, name="pre-devectorize symbolic")
+    native_reduce_uops = {u for r in sink.toposort() if ren.has_native_reduce(r) for u in r.src[0].backward_slice_with_self}
+  sink = graph_rewrite(sink, devectorizer2 if native_reduce_uops else symbolic_simple+devectorizer2,
+                       ctx=({}, ren, native_reduce_uops) if native_reduce_uops else ren, name="devectorize2")
 
   # simplify indexing
   sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
@@ -353,9 +356,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple, name="pre-image symbolic", bottom_up=True)
   native_reduce_uops = {u for r in sink.toposort() if ren.has_native_reduce(r) for u in r.src[0].backward_slice_with_self}
-  sink = graph_rewrite(sink, ew_devectorizer+pm_simplify_add_image, name="add images", ctx=(native_reduce_uops, ren), bottom_up=True)
+  if native_reduce_uops:
+    sink = graph_rewrite(sink, symbolic_simple, name="pre-image symbolic", bottom_up=True)
+    native_reduce_uops = {u for r in sink.toposort() if ren.has_native_reduce(r) for u in r.src[0].backward_slice_with_self}
+  sink = graph_rewrite(sink, (ew_devectorizer if native_reduce_uops else symbolic_simple+ew_devectorizer)+pm_simplify_add_image,
+                       name="add images", ctx=({}, ren, native_reduce_uops), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   sink = graph_rewrite(sink, sym, name="extra symbolic")

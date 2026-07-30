@@ -2,6 +2,7 @@ import unittest, numpy as np
 from test.helpers import assert_jit_cache_len
 from tinygrad import Tensor, TinyJit, Context, UOp, dtypes
 from tinygrad.engine.jit import JitError
+from tinygrad.uop.ops import Ops
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -12,6 +13,19 @@ def _simple_test(add, extract=lambda x: x, N=10):
   assert_jit_cache_len(add, 1)
 
 class TestJit(unittest.TestCase):
+  def test_parallel_compile(self):
+    from tinygrad.codegen import to_program_cache
+    from tinygrad.engine.realize import compile_linear
+    calls = [call for i in range(16) for call in (Tensor.empty(1, device="CPU") + i).schedule_linear().src]
+    cache = to_program_cache.copy()
+    try:
+      to_program_cache.clear()
+      with Context(PARALLEL_COMPILE=2): linear = compile_linear(UOp(Ops.LINEAR, src=tuple(calls)), jit=True)
+      self.assertTrue(all(call.op is not Ops.CALL or call.src[0].op is Ops.PROGRAM for call in linear.src))
+    finally:
+      to_program_cache.clear()
+      to_program_cache.update(cache)
+
   def test_jitbeam_triggers_beam(self):
     from unittest.mock import patch
     from tinygrad.helpers import getenv as _getenv

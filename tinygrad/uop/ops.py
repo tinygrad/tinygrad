@@ -1180,7 +1180,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
     sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
                 for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
-    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.arg.cpu_parallel)
+    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.arg.parallel)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1204,7 +1204,7 @@ class ProgramInfo:
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
-  cpu_parallel: bool = False
+  parallel: bool = False
 
   @property
   def function_name(self): return to_function_name(self.name)
@@ -1243,7 +1243,7 @@ class ProgramInfo:
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
                        tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))),
-                       target, sink.tag == "cpu_parallel")
+                       target, sink.tag == "parallel")
 
 @dataclass(frozen=True)
 class CallInfo:
