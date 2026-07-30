@@ -3,7 +3,8 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
 
@@ -82,7 +83,8 @@ class TestWeakPromotion(unittest.TestCase):
       dst = UOp.param(0, dtypes.bfloat16, (1,)).index(UOp.const(None, 0).cast(dtypes.int32))
       gate = UOp.const(None, True)
       out = graph_rewrite(dst.store(UOp.const(None, 5.0), gate), pm_lower_index_dtype, ctx={})
-    self.assertEqual((out.src[1].dtype, out.src[2]), (dtypes.bfloat16, gate))
+    # a bare weak CONST commits directly: the pass runs without symbolic, so a CAST here would survive it
+    self.assertEqual((out.src[1], out.src[2]), (UOp.const(dtypes.bfloat16, 5.0), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
     weak_lub = UOp(Ops.ADD, src=(UOp.const(None, 1), UOp.const(None, 1.0)))
@@ -90,6 +92,11 @@ class TestWeakPromotion(unittest.TestCase):
     concrete = UOp.const(None, 2.0).cast(dtypes.float16)
     where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(None, True), concrete, UOp.const(None, 1.0))), pm_lower_index_dtype, ctx={})
     self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.float16))
+
+  def test_weak_shift_lhs_commits_the_node(self):
+    # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
+    shl = graph_rewrite(UOp.const(None, 0xFFFF) << UOp.variable("x", 0, 16, dtypes.uint), symbolic_simple+pm_commit_weak)
+    self.assertEqual((shl.dtype, shl.src[0]), (dtypes.uint, UOp.const(dtypes.uint, 0xFFFF)))
 
   @unittest.expectedFailure  # TODO: a weak const defers to its consumer (JAX): these dtypes change once python scalars are weak consts
   def test_changed_rows(self):

@@ -1783,17 +1783,21 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
   return None if ret is u else ret
 
+def commit_weak(s:UOp, dt:DType) -> UOp:
+  # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
+  return UOp.const(dt, s.arg) if s.op is Ops.CONST else s.cast(dt)
+
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  return u.replace(dtype=None, src=tuple(s.cast(dt) if s.dtype in dtypes.weaks else s for s in u.src))
+  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
 
 # runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
 pm_commit_weak = PatternMatcher([
   (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
   # demand from the destination: a STORE's weak value commits at the destination's dtype
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
-   lambda u: u.replace(src=(u.src[0], u.src[1].cast(u.src[0].dtype), *u.src[2:]))),
+   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
 ])
 
 pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
