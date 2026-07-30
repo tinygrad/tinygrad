@@ -489,6 +489,8 @@ isel_matcher = PatternMatcher([
   (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
   (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- control flow ---
+  # how to remove positional arg contracts, make inter-lowering semantics explicit
+  # so its clear what src args represent. try to match spec
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
     lambda ctx,x,bnd: x.replace(src=(vmov(bnd), UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS))) + x.src[1:])),
   # add exec mask edge to src
@@ -528,8 +530,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),
-  (UPat(Ops.ENDIF, src=(UPat.var("mif"),), name="x"), lambda x,mif: \
-    ((nx := x.ins(RDNA3Ops.s_or_b32, src=(execop,mif), tag=(EXEC,))), [nx])),
+  (UPat(Ops.ENDIF, src=(UPat.var("mif"),)), lambda mif: ((nx := restoreexec(mif)), [nx])),
 ])
 
 def encode(ctx, x:UOp):
