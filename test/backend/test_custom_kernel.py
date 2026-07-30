@@ -466,6 +466,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_2d_shrink_input(self): self._test_mop_input(lambda x: x.reshape(4, 8)[:, 2:6], pre_kernel=True)
   def test_pad_input(self): self._test_mop_input(lambda x: x[:4].pad(((0, 4),)), pre_kernel=True)
   def test_flip_input(self): self._test_mop_input(lambda x: x.flip(0), pre_kernel=True)
+  def test_expand_input(self): self._test_mop_input(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), pre_kernel=True)
 
 class TestUnshardIndex(unittest.TestCase):
   """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
