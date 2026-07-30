@@ -515,6 +515,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset chestnut
+      run: python3 extra/usbgpu/debug.py -rn
     - name: openpilot compile3 0.10.1 driving_vision
       run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot load_pickle 0.10.1 driving_vision
