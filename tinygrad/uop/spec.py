@@ -120,22 +120,11 @@ spec_shared = PatternMatcher([
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
-  # VLOAD reinterprets a scalar address as a contiguous vector of its output dtype
-  (UPat(Ops.VLOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted(),), name="x"),
-   lambda x,uidx: isinstance(x.arg, int) and x.arg > 0 and validate_index(uidx)),
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
-  # DOT reduces equal vector inputs in fixed-size groups
-  (UPat(Ops.DOT, src=(UPat(), UPat()), name="x"), lambda x:
-   isinstance(x.arg, int) and x.arg > 0 and x.src[0].shape == x.src[1].shape and len(x.src[0].shape) > 0 and
-   isinstance(x.src[0].shape[-1], int) and x.src[0].shape[-1] % x.arg == 0),
-  # UNPACK_LUT maps the low nibbles followed by the high nibbles through an immutable byte table
-  (UPat(Ops.UNPACK_LUT, dtypes.int8, src=(UPat(dtype=dtypes.uint8),), name="x"), lambda x:
-   len(x.src[0].shape) > 0 and isinstance(x.src[0].shape[-1], int) and isinstance(x.arg, tuple) and len(x.arg) == 16 and
-   all(isinstance(v, int) and -128 <= v <= 127 for v in x.arg)),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
@@ -216,6 +205,11 @@ spec_program = PatternMatcher([
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+
+  # register-vector views can remain when the renderer consumes their shape (for example a native horizontal reduction)
+  (UPat((Ops.RESHAPE, Ops.PERMUTE), name="x"), lambda x: x.addrspace is AddrSpace.ALU),
+  (UPat(Ops.REDUCE, src=(UPat(),), name="x"),
+   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce and isinstance(x.arg[1], int)),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),

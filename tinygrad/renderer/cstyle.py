@@ -22,7 +22,7 @@ base_rewrite = PatternMatcher([
 
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
-    if x.max_numel() > 1 and (x.addrspace is AddrSpace.REG or x.tag == "vectorized") else None),
+    if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: ctx[x.src[0]] if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
@@ -131,6 +131,7 @@ class CStyleLanguage(Renderer):
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
   gep_arr_threshold: int = 4
+  def should_inline_where(self, x:UOp) -> bool: return False
   type_map: dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
@@ -239,7 +240,7 @@ class CStyleLanguage(Renderer):
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
-        (u.op in {Ops.STACK, Ops.DOT, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and
+        (u.op in {Ops.STACK, Ops.REDUCE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and (u.op is not Ops.WHERE or self.should_inline_where(u)) and
          child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
@@ -260,6 +261,23 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
+  def should_inline_where(self, x:UOp) -> bool: return self._render_lut_lookup(self, x) is not None
+  @staticmethod
+  def _byte_dot_reduce(x:UOp) -> tuple[UOp, UOp, UOp|None]|None:
+    if x.op is not Ops.REDUCE or x.arg != (Ops.ADD, 1) or len(x.src) != 1: return None
+    permute = x.src[0]
+    if permute.op is not Ops.PERMUTE or permute.arg != (1, 0) or permute.src[0].op is not Ops.RESHAPE: return None
+    product, scale = permute.src[0].src[0], None
+    if product.op is Ops.MUL:
+      for base, candidate_scale in (product.src, product.src[::-1]):
+        if base.op is Ops.MUL and all(s.op is Ops.CAST and s.dtype is dtypes.int32 and s.src[0].dtype is dtypes.int8 for s in base.src):
+          product, scale = base, candidate_scale
+          break
+    if product.op is not Ops.MUL or not all(s.op is Ops.CAST and s.dtype is dtypes.int32 and s.src[0].dtype is dtypes.int8 for s in product.src):
+      return None
+    a, b = (s.src[0] for s in product.src)
+    return (a, b, scale) if a.shape == b.shape and a.shape in ((16,), (32,)) else None
+  def has_native_reduce(self, x:UOp) -> bool: return self._byte_dot_reduce(x) is not None
   global_max = (NUM_CPU_THREADS.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
@@ -283,6 +301,32 @@ class ClangRenderer(CStyleLanguage):
            f"__builtin_ia32_pmaddubsw{suffix}(__builtin_elementwise_abs({ctx[a]}), __builtin_ia32_psignb{suffix}({ctx[b]}, {ctx[a]}))), " \
            f"(short __attribute__((ext_vector_type({lanes})))){{{','.join([multiplier] * lanes)}}})"
   @staticmethod
+  def _uniform_vector_const(x:UOp):
+    return x.src[0].arg if x.op is Ops.STACK and x.src and all(v.op is Ops.CONST and v.arg == x.src[0].arg for v in x.src) else None
+  @staticmethod
+  def _render_lut_lookup(ctx, x:UOp):
+    values:dict[int, int] = {}
+    index:UOp|None = None
+    node = x
+    while node.op is Ops.WHERE and node.src[0].op in (Ops.CMPEQ, Ops.CMPNE):
+      cond, true_value, false_value = node.src
+      left, right = cond.src
+      key = ClangRenderer._uniform_vector_const(right)
+      if key is None: left, right, key = right, left, ClangRenderer._uniform_vector_const(left)
+      if not isinstance(key, int) or not 0 <= key < 16 or (index is not None and left is not index): return None
+      index = left
+      selected, node = (true_value, false_value) if cond.op is Ops.CMPEQ else (false_value, true_value)
+      value = ClangRenderer._uniform_vector_const(selected)
+      if not isinstance(value, int): return None
+      values[key] = value
+    default = ClangRenderer._uniform_vector_const(node)
+    if index is None or not isinstance(default, int) or index.shape not in ((16,), (32,)): return None
+    lut_values = tuple(values.get(i, default) for i in range(16))
+    lanes, suffix = index.shape[0], "128" if index.shape == (16,) else "256"
+    charv = f"signed char __attribute__((ext_vector_type({lanes})))"
+    lut = f"({charv}){{{','.join(map(str, lut_values * (lanes // 16)))}}}"
+    return f"__builtin_ia32_pshufb{suffix}({lut}, __builtin_bit_cast({charv}, {ctx[index]}))"
+  @staticmethod
   def _render_contiguous_stack(ctx, x:UOp):
     if not x.src or not all(v.op is Ops.INDEX and len(v.src) == 2 and v.src[0] is x.src[0] and
                             v.src[1].op is Ops.CONST for v in x.src): return None
@@ -290,19 +334,25 @@ class ClangRenderer(CStyleLanguage):
     if indices != tuple(range(indices[0], indices[0] + len(indices))): return None
     return f"__builtin_shufflevector({ctx[x.src[0]]}, {ctx[x.src[0]]}, {','.join(map(str, indices))})"
   @staticmethod
-  def _render_unpack_lut(ctx, x:UOp, packed:UOp):
-    if packed.shape not in ((16,), (32,)): return None
-    lanes, suffix = packed.shape[0], "128" if packed.shape[0] == 16 else "256"
-    charv = f"signed char __attribute__((ext_vector_type({lanes})))"
-    pv = f"__builtin_bit_cast({charv}, {ctx[packed]})"
-    lut_values = x.arg if lanes == 16 else x.arg * 2
-    lut = f"({charv}){{{','.join(map(str, lut_values))}}}"
-    mask = f"({charv}){{{','.join(['15'] * lanes)}}}"
-    lo = f"__builtin_ia32_pshufb{suffix}({lut}, {pv} & {mask})"
-    hi = f"__builtin_ia32_pshufb{suffix}({lut}, ({pv} >> 4) & {mask})"
-    if lanes == 16: indices = tuple(range(32))
-    else: indices = (*range(16), *range(32, 48), *range(16, 32), *range(48, 64))
-    return f"__builtin_shufflevector({lo}, {hi}, {','.join(map(str, indices))})"
+  def _render_concat_stack(ctx, x:UOp):
+    if len(x.src) != 2 or x.src[0].shape != x.src[1].shape or len(x.src[0].shape) != 1: return None
+    lanes = x.src[0].shape[0]
+    return f"__builtin_shufflevector({ctx[x.src[0]]}, {ctx[x.src[1]]}, {','.join(map(str, range(lanes*2)))})"
+  @staticmethod
+  def _render_vector_permute(ctx, x:UOp):
+    old_shape, order = x.src[0].shape, x.arg
+    new_shape = tuple(old_shape[i] for i in order)
+    indices = []
+    for flat in range(x.max_numel()):
+      coord, rem = [], flat
+      for size in reversed(new_shape):
+        coord.append(rem % size)
+        rem //= size
+      new_coord = tuple(reversed(coord))
+      old_coord = tuple(new_coord[order.index(i)] for i in range(len(order)))
+      old_flat = sum(c * math.prod(old_shape[i+1:]) for i,c in enumerate(old_coord))
+      indices.append(old_flat)
+    return f"__builtin_shufflevector({ctx[x.src[0]]}, {ctx[x.src[0]]}, {','.join(map(str, indices))})"
   @staticmethod
   def _render_vector_load(ctx, x:UOp, address:UOp):
     vec_type = ctx._render_dtype(x.dtype, x.max_numel(), AddrSpace.REG)
@@ -312,23 +362,25 @@ class ClangRenderer(CStyleLanguage):
   @staticmethod
   def _render_vector_store(ctx, address:UOp, value:UOp):
     vec_type = ctx._render_dtype(value.dtype, value.max_numel(), AddrSpace.REG)
-    # Like VLOAD, explicit vector stores can target unaligned packed data or register-backed arrays.
+    # Explicit vector stores can target unaligned packed data or register-backed arrays.
     return f"do {{ {vec_type} _v = {ctx[value]}; __builtin_memcpy({ctx[address]}, &_v, sizeof(_v)); }} while (0);"
   string_rewrite = PatternMatcher([
+    (UPat(Ops.WHERE, name="x"), lambda ctx,x: ClangRenderer._render_lut_lookup(ctx, x)),
+    (UPat(Ops.MUL, dtypes.int32, src=(UPat(Ops.REDUCE, name="dot"), UPat.var("scale"))),
+     lambda ctx,dot,scale: ClangRenderer._render_byte_dot(ctx, pair[0], pair[1], scale)
+     if (pair:=ClangRenderer._byte_dot_reduce(dot)) is not None and pair[2] is None and scale.vmin >= -32768 and scale.vmax <= 32767 else None),
+    (UPat(Ops.REDUCE, name="x"), lambda ctx,x: ClangRenderer._render_byte_dot(ctx, *pair)
+     if (pair:=ClangRenderer._byte_dot_reduce(x)) is not None else None),
+    (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})"
+     if x.max_numel() > 1 else None),
+    (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: ctx[x.src[0]]),
+    (UPat(Ops.PERMUTE, name="x"), lambda ctx,x: ClangRenderer._render_vector_permute(ctx, x)),
+    (UPat(Ops.STACK, name="x"), lambda ctx,x: ClangRenderer._render_concat_stack(ctx, x)),
     (UPat(Ops.STACK, name="x"), lambda ctx,x: ClangRenderer._render_contiguous_stack(ctx, x)),
-    (UPat(Ops.MUL, dtypes.int32,
-          src=(UPat(Ops.DOT, dtypes.int32, src=(UPat.var("a", dtypes.int8), UPat.var("b", dtypes.int8)), arg=4),
-               UPat.var("scale", dtypes.int32))),
-     lambda ctx,a,b,scale: ClangRenderer._render_byte_dot(ctx, a, b, scale)
-     if scale.vmin >= -32768 and scale.vmax <= 32767 else None),
-    (UPat(Ops.DOT, dtypes.int32, src=(UPat.var("a", dtypes.int8), UPat.var("b", dtypes.int8)), arg=4),
-     lambda ctx,a,b: ClangRenderer._render_byte_dot(ctx, a, b)),
-    (UPat(Ops.UNPACK_LUT, dtypes.int8, src=(UPat.var("packed", dtypes.uint8),), name="x"),
-     lambda ctx,x,packed: ClangRenderer._render_unpack_lut(ctx, x, packed)),
     (UPat(Ops.STORE, src=(UPat(Ops.SHRINK, name="address"), UPat.var("value")), name="x"),
      lambda ctx,x,address,value: ClangRenderer._render_vector_store(ctx, address, value)
-     if x.tag == "vectorized" and value.max_numel() > 1 else None),
-    (UPat(Ops.VLOAD, src=(UPat.var("address"),), name="x"),
+     if value.max_numel() > 1 else None),
+    (UPat(Ops.LOAD, src=(UPat(Ops.SHRINK, name="address"),), name="x"),
      lambda ctx,x,address: ClangRenderer._render_vector_load(ctx, x, address)),
   ]) + base_rewrite
 

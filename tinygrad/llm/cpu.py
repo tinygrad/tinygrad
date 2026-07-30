@@ -5,7 +5,7 @@ from tinygrad import Tensor, nn, UOp, getenv, dtypes
 from tinygrad.dtype import DType, AddrSpace
 from tinygrad.llm.gguf import _GGML_QUANT
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, GroupOp, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, KernelInfo, AxisType
 if TYPE_CHECKING:
   from tinygrad.llm.model import ExpertWeights, FFNBlock, Linear
 
@@ -17,14 +17,33 @@ def _concrete_int(value:int|UOp) -> int:
 
 def _dot_byte_parts(a:tuple[UOp, ...], b:tuple[UOp, ...]) -> UOp:
   av, bv = UOp.stack(*a), UOp.stack(*b)
-  return UOp(Ops.DOT, dtypes.int32, (av, bv), arg=4)
+  return _dot_byte_vectors(av, bv)
+
+def _dot_byte_vectors(a:UOp, b:UOp, scale:UOp|None=None) -> UOp:
+  assert a.shape == b.shape and len(a.shape) == 1 and a.shape[0] % 4 == 0
+  product = a.cast(dtypes.int32) * b.cast(dtypes.int32)
+  if scale is not None: product = product * scale
+  return product.reshape(a.shape[0]//4, 4)._rop(Ops.ADD, (1,))
+
+def _unpack_nibbles(packed:UOp, values:tuple[int, ...]) -> UOp:
+  assert packed.shape == (16,) and len(values) == 16
+  def lookup(index:UOp) -> UOp:
+    value = UOp.stack(*(UOp.const(dtypes.int8, values[-1]) for _ in range(packed.shape[0])))
+    for i in range(14, -1, -1): value = index.eq(i).where(UOp.const(dtypes.int8, values[i]), value)
+    return value
+  lowv, highv = lookup(packed & 15), lookup((packed >> 4) & 15)
+  return UOp.stack(lowv, highv).reshape(32)
 
 def _dot_bytes(a:tuple[UOp, ...], b:tuple[UOp, ...]) -> UOp:
   parts = _dot_byte_parts(a, b)
   return sum((parts.index(i) for i in range(len(a)//4)), UOp.const(dtypes.int32, 0))
 
 def _contiguous_vector_load(ptr:UOp, lanes:int, dtype:DType|None=None) -> UOp:
-  return UOp(Ops.VLOAD, dtype or ptr.dtype, (ptr,), arg=lanes)
+  assert ptr.op is Ops.INDEX
+  buf, coords = ptr.src[0], ptr.src[1:]
+  index = sum((coord * math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(dtypes.weakint, 0))
+  address = UOp(Ops.SHRINK, src=(buf.flatten(), index, UOp.const(dtypes.weakint, lanes)))
+  return address.load(dtype=dtype or ptr.dtype)
 
 def _contiguous_vector_ptr(buf:UOp, index:UOp, lanes:int) -> UOp:
   return UOp(Ops.SHRINK, src=(buf, index, UOp.const(dtypes.weakint, lanes)))
@@ -32,14 +51,14 @@ def _contiguous_vector_ptr(buf:UOp, index:UOp, lanes:int) -> UOp:
 def _dot_bytes_ptr(a:UOp, b:UOp) -> UOp:
   av = _contiguous_vector_load(a, 32, dtypes.int8)
   bv = _contiguous_vector_load(b, 32, dtypes.int8)
-  return UOp(Ops.DOT, dtypes.int32, (av, bv), arg=4)
+  return _dot_byte_vectors(av, bv)
 
 def _dot_nibbles_ptr(packed:UOp, x:UOp, values:tuple[int, ...]) -> UOp:
   assert len(values) == 16
   pv = _contiguous_vector_load(packed, 16)
-  qvalues = UOp(Ops.UNPACK_LUT, dtypes.int8, (pv,), arg=values)
+  qvalues = _unpack_nibbles(pv, values)
   xv = _contiguous_vector_load(x, 32, dtypes.int8)
-  return UOp(Ops.DOT, dtypes.int32, (qvalues, xv), arg=4)
+  return _dot_byte_vectors(qvalues, xv)
 
 def _dot_nibbles_pair_ptr(packed:UOp, x:UOp, values:tuple[int, ...]) -> tuple[UOp, UOp]:
   assert len(values) == 16
@@ -56,7 +75,7 @@ def _dot_q6_ptr(block:UOp, x:UOp, subgroup:int) -> UOp:
   hi = ((_contiguous_vector_load(hi_ptr, 32) >> high_shift) & 3) << 4
   qvalues = ((lo | hi) - 32).bitcast(dtypes.int8)
   xv = _contiguous_vector_load(x, 32, dtypes.int8)
-  return UOp(Ops.DOT, dtypes.int32, (qvalues, xv), arg=4)
+  return _dot_byte_vectors(qvalues, xv)
 
 def _rms_f16_product_ptr(x:UOp, norm:UOp, weight:UOp, scale:UOp) -> UOp:
   return _contiguous_vector_load(x, 8).cast(dtypes.float32) * _contiguous_vector_load(norm, 8).cast(dtypes.float32) * \
@@ -250,23 +269,18 @@ def _load_f16(raw:UOp, offset:UOp) -> UOp:
   return bits.bitcast(dtypes.float16).cast(dtypes.float32)
 
 def _load_f16x8_ptr(raw:UOp) -> UOp:
-  return UOp(Ops.VLOAD, dtypes.float16, (raw,), arg=8).cast(dtypes.float32).rtag("vectorized")
+  return _contiguous_vector_load(raw, 8, dtypes.float16).cast(dtypes.float32)
 
 def _vector_reg(reg:UOp, *deps:UOp) -> UOp:
   reg = reg.after(*deps)
   return UOp(Ops.SHRINK, src=(reg, UOp.const(dtypes.weakint, 0), UOp.const(dtypes.weakint, reg.max_numel())))
 
 def _vector_acc_init(reg:UOp, *deps:UOp) -> UOp:
-  return reg.after(_vector_reg(reg, *deps).store(reg.const_like(0), tag="vectorized"))
-
-def _vectorized_tree(x:UOp) -> UOp:
-  if x.max_numel() == 1: return x
-  src = tuple(_vectorized_tree(y) if y.max_numel() > 1 else y for y in x.src)
-  return x.replace(src=src, tag="vectorized") if x.op in GroupOp.Elementwise else x.replace(src=src)
+  return reg.after(_vector_reg(reg, *deps).store(reg.const_like(0)))
 
 def _vector_acc_update(reg:UOp, value:UOp, *deps:UOp) -> UOp:
-  previous = _vector_reg(reg, *deps).load(tag="vectorized")
-  return _vector_reg(reg, *deps).store((previous + _vectorized_tree(value)).rtag("vectorized"), tag="vectorized")
+  previous = _vector_reg(reg, *deps).load()
+  return _vector_reg(reg, *deps).store(previous + value)
 
 def _finite_exp2(x:UOp) -> UOp:
   # The causal-convolution activation is finite. Bounding the exponent preserves sigmoid saturation while avoiding
@@ -512,7 +526,7 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
   qvalues, scales = [], []
   for subgroup in range(8):
     packed = _contiguous_vector_load(raw[base + 8 + subgroup * 16], 16)
-    qvalues.append(UOp(Ops.UNPACK_LUT, dtypes.int8, (packed,), arg=values))
+    qvalues.append(_unpack_nibbles(packed, values))
     low_byte = raw[base + 4 + subgroup // 2].load()
     low = (low_byte >> (4 * (subgroup % 2))) & 15
     high = (high_word >> (2 * subgroup)) & 3
@@ -526,10 +540,10 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
   route = matched_routes[route_idx].load().cast(dtypes.weakint)
   input_idx = route // routes_per_input
   block_acc = UOp.placeholder((8,), dtypes.int32, slot=4, addrspace=AddrSpace.REG)
-  stage = _vector_reg(block_acc, route_loop).store(block_acc.const_like(0), tag="vectorized")
+  stage = _vector_reg(block_acc, route_loop).store(block_acc.const_like(0))
   for subgroup in range(8):
     xv = _contiguous_vector_load(xq[route, block, subgroup * 32], 32, dtypes.int8)
-    stage = _vector_acc_update(block_acc, UOp(Ops.DOT, dtypes.int32, (qvalues[subgroup], xv), arg=4) * scales[subgroup], stage)
+    stage = _vector_acc_update(block_acc, _dot_byte_vectors(qvalues[subgroup], xv, scales[subgroup]), stage)
   dot = sum((block_acc.after(stage).index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32)
   contribution = dot * xd[route, block] * block_scale * matched_probs[route_idx].load()
   updated = totals[output_lane, input_idx].store(totals.after(route_loop)[output_lane, input_idx].load() + contribution)
@@ -573,7 +587,7 @@ def _cpu_expert_silu_uop(out:UOp, raw0:UOp, raw1:UOp, sel:UOp, xq:UOp, xd:UOp, l
   vectorized = ggml_type in (14, 23) or (ggml_type == 21 and repacked)
   acc0 = UOp.placeholder((8 if vectorized else 1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   acc1 = UOp.placeholder((8 if vectorized else 1,), dtypes.float32, slot=1, addrspace=AddrSpace.REG)
-  initialized = UOp.group(*((_vector_reg(acc, job).store(acc.const_like(0), tag="vectorized") if vectorized else
+  initialized = UOp.group(*((_vector_reg(acc, job).store(acc.const_like(0)) if vectorized else
                              acc.after(job).store(acc.const_like(0))) for acc in (acc0, acc1)))
   if ggml_type == 23:
     block = UOp.range(in_features // 256, 110)
@@ -684,9 +698,9 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
     qvalues:list[UOp] = []
     scales:list[UOp] = []
     for subgroup in range(0, 8, 2):
-      packed = _contiguous_vector_load(raw[row_base + meta_size + block * 128 + subgroup * 16], 32)
-      unpacked = UOp(Ops.UNPACK_LUT, dtypes.int8, (packed,), arg=values)
-      qvalues.extend(UOp.stack(*(unpacked.index(i) for i in range(off, off + 32))) for off in (0, 32))
+      for offset in (0, 16):
+        packed = _contiguous_vector_load(raw[row_base + meta_size + block * 128 + subgroup * 16 + offset], 16)
+        qvalues.append(_unpack_nibbles(packed, values))
     for subgroup in range(8):
       scale_byte = raw[meta + 2 + subgroup // 2].load()
       scales.append(1 + 2 * ((scale_byte >> (4 * (subgroup % 2))) & 15).cast(dtypes.int32))
@@ -698,11 +712,11 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
     route = matched[route_idx].load().cast(dtypes.weakint)
     xidx = (route.cast(dtypes.uint32) // routes_per_input).cast(dtypes.weakint)
     block_acc = UOp.placeholder((8,), dtypes.int32, slot=6 + projection, addrspace=AddrSpace.REG)
-    stage = _vector_reg(block_acc, route_loop).store(block_acc.const_like(0), tag="vectorized")
+    stage = _vector_reg(block_acc, route_loop).store(block_acc.const_like(0))
     for subgroup in range(8):
       xv = _contiguous_vector_load(xq[xidx, block, subgroup * 32], 32, dtypes.int8)
-      parts = UOp(Ops.DOT, dtypes.int32, (qvalues[subgroup], xv), arg=4)
-      stage = _vector_acc_update(block_acc, parts * scales[subgroup], stage)
+      parts = _dot_byte_vectors(qvalues[subgroup], xv, scales[subgroup])
+      stage = _vector_acc_update(block_acc, parts, stage)
     block_sum = block_acc.after(stage)
     value = sum((block_sum.index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32) * \
       xd[xidx, block] * _load_f16(raw, meta)
@@ -771,7 +785,7 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
   expert = sel[route].load().cast(dtypes.weakint)
   racc0 = UOp.placeholder((8 if expert_repacked else 1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   racc1 = UOp.placeholder((8 if expert_repacked else 1,), dtypes.float32, slot=1, addrspace=AddrSpace.REG)
-  rinit = UOp.group(*((_vector_reg(acc, routed_job).store(acc.const_like(0), tag="vectorized") if expert_repacked else
+  rinit = UOp.group(*((_vector_reg(acc, routed_job).store(acc.const_like(0)) if expert_repacked else
                        acc.after(routed_job).store(acc.const_like(0))) for acc in (racc0, racc1)))
   if expert_repacked:
     rblock = UOp.range(dim // 256, 100)
@@ -802,7 +816,7 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
   shared_output, groups = shared_begin + shared_job, dim // 32
   sacc0 = UOp.placeholder((8,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
   sacc1 = UOp.placeholder((8,), dtypes.float32, slot=3, addrspace=AddrSpace.REG)
-  sinit = UOp.group(*(_vector_reg(acc, shared_job).store(acc.const_like(0), tag="vectorized") for acc in (sacc0, sacc1)))
+  sinit = UOp.group(*(_vector_reg(acc, shared_job).store(acc.const_like(0)) for acc in (sacc0, sacc1)))
   if shared_repacked and groups % 8 == 0:
     sblock = UOp.range(groups // 8, 101)
     svalues = []
@@ -1264,7 +1278,7 @@ def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> U
   row_sums = tuple(UOp.placeholder((1,), dtypes.float32, slot=2*token_tile+i, addrspace=AddrSpace.REG) for i in range(token_tile))
   clear = UOp.range(chunks, 90)
   cleared = UOp.group(*(_contiguous_vector_ptr(numerator.after(job), clear * 8, 8).store(
-    UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))), tag="vectorized") for numerator in numerators)).end(clear)
+    UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8)))) for numerator in numerators)).end(clear)
   initialized = UOp.group(cleared,
     *(row_max.after(job).store(-math.inf) for row_max in row_maxes),
     *(row_sum.after(job).store(0.0) for row_sum in row_sums))
@@ -1299,8 +1313,7 @@ def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> U
     nbase = vchunk * 8
     previous = _contiguous_vector_load(numerator.after(initialized, position)[nbase], 8)
     updated = previous * old_scale + values * weight
-    numerator_updates.append(_contiguous_vector_ptr(numerator.after(qk_done), nbase, 8).store(
-      _vectorized_tree(updated), tag="vectorized"))
+    numerator_updates.append(_contiguous_vector_ptr(numerator.after(qk_done), nbase, 8).store(updated))
   values_done = UOp.group(*numerator_updates).end(vchunk)
   state_updates = [row_max[0].store(next_max) for row_max,next_max in zip(row_maxes, next_maxes)]
   state_updates += [row_sum[0].store(row_sum.after(initialized, position)[0].load() * old_scale + weight)
@@ -1312,7 +1325,7 @@ def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> U
   for token_offset,(numerator,row_sum) in enumerate(zip(numerators, row_sums)):
     query = bh * tokens + token_base + token_offset
     value = _contiguous_vector_load(numerator.after(positions_done)[output * 8], 8) / row_sum.after(positions_done)[0].load()
-    stores.append(_contiguous_vector_ptr(outf, query * dim + output * 8, 8).store(_vectorized_tree(value), tag="vectorized"))
+    stores.append(_contiguous_vector_ptr(outf, query * dim + output * 8, 8).store(value))
   return UOp.group(*stores).end(output, job, core).sink(
     arg=KernelInfo(name=f"attention_prefill_online_uop_{batch}_{heads}_{tokens}_{kv_heads}_{dim}_{cache_len}",
                    opts_to_apply=())).rtag("cpu_parallel")
@@ -1364,8 +1377,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   current = UOp.placeholder((dim * dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   init_chunk = UOp.range(dim * dim // 8, 90)
   initial_values = _contiguous_vector_load(statef[bh * dim * dim + init_chunk * 8], 8).cast(dtypes.float32)
-  initialized_state = _contiguous_vector_ptr(current, init_chunk * 8, 8).store(
-    _vectorized_tree(initial_values), tag="vectorized").end(init_chunk)
+  initialized_state = _contiguous_vector_ptr(current, init_chunk * 8, 8).store(initial_values).end(init_chunk)
 
   token = UOp.range(tokens, 91)
   token_base = (bh * tokens + token) * dim
@@ -1381,8 +1393,8 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   row = UOp.range(dim, 93)
   state_k = UOp.placeholder((8,), dtypes.float32, slot=3, addrspace=AddrSpace.REG)
   state_q = UOp.placeholder((8,), dtypes.float32, slot=4, addrspace=AddrSpace.REG)
-  dot_init = UOp.group(_vector_reg(state_k, row).store(state_k.const_like(0), tag="vectorized"),
-                       _vector_reg(state_q, row).store(state_q.const_like(0), tag="vectorized"))
+  dot_init = UOp.group(_vector_reg(state_k, row).store(state_k.const_like(0)),
+                       _vector_reg(state_q, row).store(state_q.const_like(0)))
   col = UOp.range(chunks, 94)
   state_vec = _contiguous_vector_load(current.after(initialized_state, token)[row * dim + col * 8], 8)
   q_vec = _contiguous_vector_load(qf[token_base + col * 8], 8)
@@ -1399,8 +1411,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   current_values = _contiguous_vector_load(current.after(initialized_state, token)[update_base], 8)
   key_values = _contiguous_vector_load(kf[token_base + update * 8], 8)
   next_values = current_values * av + delta * key_values
-  updated_state = _contiguous_vector_ptr(current.after(dots), update_base, 8).store(
-    _vectorized_tree(next_values), tag="vectorized").end(update)
+  updated_state = _contiguous_vector_ptr(current.after(dots), update_base, 8).store(next_values).end(update)
   rows_done = UOp.group(saved_core, updated_state).end(row)
 
   norm_acc = UOp.placeholder((8,), dtypes.float32, slot=5, addrspace=AddrSpace.REG)
@@ -1416,8 +1427,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
 
   save_chunk = UOp.range(dim * dim // 8, 98)
   saved_values = _contiguous_vector_load(current.after(token_done)[save_chunk * 8], 8).cast(next_state.dtype)
-  saved_state = _contiguous_vector_ptr(nextf, bh * dim * dim + save_chunk * 8, 8).store(
-    _vectorized_tree(saved_values), tag="vectorized").end(save_chunk)
+  saved_state = _contiguous_vector_ptr(nextf, bh * dim * dim + save_chunk * 8, 8).store(saved_values).end(save_chunk)
   return saved_state.end(bh).sink(
     arg=KernelInfo(name=f"gated_delta_prefill_uop_{batch}_{heads}_{tokens}_{dim}_{state.dtype.name}",
                    opts_to_apply=())).rtag("cpu_parallel")
@@ -1446,8 +1456,8 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
   row = UOp.range(dim, 91)
   state_k = UOp.placeholder((8,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
   state_q = UOp.placeholder((8,), dtypes.float32, slot=3, addrspace=AddrSpace.REG)
-  initialized = UOp.group(_vector_reg(state_k, row).store(state_k.const_like(0), tag="vectorized"),
-                          _vector_reg(state_q, row).store(state_q.const_like(0), tag="vectorized"))
+  initialized = UOp.group(_vector_reg(state_k, row).store(state_k.const_like(0)),
+                          _vector_reg(state_q, row).store(state_q.const_like(0)))
   col = UOp.range(chunks, 92)
   state_vec = _contiguous_vector_load(statef[bh * dim * dim + row * dim + col * 8], 8).cast(dtypes.float32)
   q_vec = _contiguous_vector_load(qf[bh * dim + col * 8], 8)
@@ -1464,8 +1474,8 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
   state_base = bh * dim * dim + row * dim + update * 8
   state_values = _contiguous_vector_load(statef[state_base], 8).cast(dtypes.float32)
   key_values = _contiguous_vector_load(kf[bh * dim + update * 8], 8)
-  next_values = _vectorized_tree(state_values * av + delta * key_values).cast(next_state.dtype)
-  update_state = _contiguous_vector_ptr(nextf.after(dots), state_base, 8).store(next_values, tag="vectorized").end(update)
+  next_values = (state_values * av + delta * key_values).cast(next_state.dtype)
+  update_state = _contiguous_vector_ptr(nextf.after(dots), state_base, 8).store(next_values).end(update)
   rows_done = UOp.group(saved_core, update_state).end(row)
 
   if normalize:
@@ -1498,14 +1508,14 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
       norm_values = _contiguous_vector_load(norm_weight[quant_group * 32 + offset], 8).cast(dtypes.float32)
       gate_values = _contiguous_vector_load(gatef[base + offset], 8).cast(dtypes.float32)
       gate_sigmoid = UOp.stack(*(gate_values.index(i).sigmoid() for i in range(8)))
-      value_vecs.append(_vectorized_tree(source_values * scale * norm_values * gate_values * gate_sigmoid))
+      value_vecs.append(source_values * scale * norm_values * gate_values * gate_sigmoid)
     values = tuple(value_vecs[i // 8].index(i % 8) for i in range(32))
     amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in values))
     d = (amax / 127).maximum(1e-8)
     quant_stores = []
     for chunk_idx,value_vec in enumerate(value_vecs):
       quant_values = UOp.stack(*((value_vec.index(i) / d).round().maximum(-127).minimum(127).cast(dtypes.int8) for i in range(8)))
-      quant_stores.append(_contiguous_vector_ptr(quantf, base + chunk_idx * 8, 8).store(quant_values, tag="vectorized"))
+      quant_stores.append(_contiguous_vector_ptr(quantf, base + chunk_idx * 8, 8).store(quant_values))
     stores = UOp.group(scalef[bh * (dim // 32) + quant_group].store(d), *quant_stores).end(quant_group)
     name = f"gated_delta_q8_uop_{batch}_{heads}_{dim}_{state.dtype.name}"
   return stores.end(bh).sink(arg=KernelInfo(name=name, opts_to_apply=())).rtag("cpu_parallel")
@@ -1611,8 +1621,8 @@ def _gdn_qkv_uop(q:UOp, k:UOp, v:UOp, conv:UOp, k_heads:int, v_heads:int, dim:in
 
   qsum = UOp.placeholder((8,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   ksum = UOp.placeholder((8,), dtypes.float32, slot=1, addrspace=AddrSpace.REG)
-  initialized = UOp.group(_vector_reg(qsum, job).store(qsum.const_like(0), tag="vectorized"),
-                          _vector_reg(ksum, job).store(ksum.const_like(0), tag="vectorized"))
+  initialized = UOp.group(_vector_reg(qsum, job).store(qsum.const_like(0)),
+                          _vector_reg(ksum, job).store(ksum.const_like(0)))
   chunk = UOp.range(dim // 8, 100)
   qvalue = _contiguous_vector_load(conv[qbase + chunk * 8], 8).cast(dtypes.float32)
   kvalue = _contiguous_vector_load(conv[kbase + chunk * 8], 8).cast(dtypes.float32)
@@ -1627,7 +1637,7 @@ def _gdn_qkv_uop(q:UOp, k:UOp, v:UOp, conv:UOp, k_heads:int, v_heads:int, dim:in
   kvalues = _contiguous_vector_load(conv[kbase + out_chunk * 8], 8).cast(dtypes.float32) * kscale
   vvalues = _contiguous_vector_load(conv[vbase + out_chunk * 8], 8).cast(dtypes.float32)
   stores = UOp.group(*(
-    target[batch_idx, head, token, out_chunk * 8 + lane].store(_vectorized_tree(values).index(lane))
+    target[batch_idx, head, token, out_chunk * 8 + lane].store(values.index(lane))
     for target,values in ((q, qvalues), (k, kvalues), (v, vvalues)) for lane in range(8))).end(out_chunk)
   return stores.end(job, core).sink(
     arg=KernelInfo(name=f"gdn_qkv_uop_{batch}_{tokens}_{k_heads}_{v_heads}_{dim}", opts_to_apply=())).rtag("cpu_parallel")
@@ -1744,7 +1754,7 @@ def _f16_matvec_uop(out:UOp, x:UOp, weight:UOp) -> UOp:
   token_base = token_block * token_tile
   xf, wf, outf = x.flatten(), weight.flatten(), out.flatten()
   accs = tuple(UOp.placeholder((8,), dtypes.float32, slot=i, addrspace=AddrSpace.REG) for i in range(token_tile))
-  accs = tuple(acc.after(_vector_reg(acc, output_job, token_block).store(acc.const_like(0), tag="vectorized")) for acc in accs)
+  accs = tuple(acc.after(_vector_reg(acc, output_job, token_block).store(acc.const_like(0))) for acc in accs)
   chunk = UOp.range(in_features // 8, 92)
   weights = _load_f16x8_ptr(wf[output * in_features + chunk * 8])
   updates = []
@@ -1752,9 +1762,8 @@ def _f16_matvec_uop(out:UOp, x:UOp, weight:UOp) -> UOp:
     xbase = (token_base + token) * in_features + chunk * 8
     values = _load_f16x8_ptr(xf[xbase]) if x.dtype == dtypes.float16 else \
       UOp.stack(*(xf[xbase + lane].load() for lane in range(8)))
-    previous = _vector_reg(acc, chunk).load(tag="vectorized")
-    updates.append(_vector_reg(acc, chunk).store(
-      (previous + (values * weights).rtag("vectorized")).rtag("vectorized"), tag="vectorized"))
+    previous = _vector_reg(acc, chunk).load()
+    updates.append(_vector_reg(acc, chunk).store(previous + values * weights))
   done = UOp.group(*updates).end(chunk)
   stores = [outf[(token_base + token) * out_features + output].store(
     sum((acc.after(done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0)).cast(out.dtype))
