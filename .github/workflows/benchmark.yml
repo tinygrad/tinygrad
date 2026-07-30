@@ -424,9 +424,9 @@ jobs:
     - name: openpilot compile3 0.11.2 supercombo (from pickle)
       run: BENCHMARK_LOG=openpilot_0_11_2_supercombo_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
     - name: IR3 openpilot compile3 0.11.2 supercombo
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
+      run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=41 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
     - name: openpilot compile3 0.11.2 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/2ed88a1dff26c96076f1226ff1fa364ea68a7134
+      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
