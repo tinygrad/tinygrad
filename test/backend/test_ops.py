@@ -758,6 +758,7 @@ class TestOps(unittest.TestCase):
     for base in ([1, 2, 3], [-1, -2, -3]):
       for exponent in ([2, 3, 4], [-2, -3, -4]):
         _test(base, exponent)
+    helper_test_op(None, lambda x: (-2)**x, vals=[[-2, -1, 0, 1, 2, 3]], forward_only=True)
     # NOTE: torch 0 ** -1 is 0
     _test([0, 0, 0], [0, 1, 2])
 

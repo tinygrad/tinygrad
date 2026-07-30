@@ -547,7 +547,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
-    if not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
+    if not reverse and not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
       raise RuntimeError("base needs to be float")
     return base.alu(Ops.POW, exponent)
 
