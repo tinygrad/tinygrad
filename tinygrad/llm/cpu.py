@@ -105,7 +105,7 @@ def _q8_quantize_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
   stores = [scale[token, group].store(d)] + \
            [quant[token, group, i].store((value / d).round().maximum(-127).minimum(127).cast(dtypes.int8))
             for i,value in enumerate(values)]
-  return UOp.group(*stores).end(job, core).sink(arg=KernelInfo(name="q8_quantize_cpu", opts_to_apply=())).rtag("parallel")
+  return UOp.group(*stores).end(job, core).sink(arg=KernelInfo(name="q8_quantize_cpu", optimize=False, parallel=True))
 
 def q8_quantize(x:Tensor, in_features:int) -> tuple[Tensor, Tensor]:
   tokens, xc = int(x.numel()) // in_features, x.reshape(-1).contiguous()
@@ -173,7 +173,7 @@ def _q8_silu_quantize_kernel(quant:UOp, scale:UOp, gate:UOp, up:UOp, in_features
            [quant[token, group, lane].store((value / d).round().maximum(-127).minimum(127).cast(dtypes.int8))
             for lane,value in enumerate(values)]
   return UOp.group(*stores).end(job, core).sink(
-    arg=KernelInfo(name="q8_silu_quantize_cpu", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name="q8_silu_quantize_cpu", optimize=False, parallel=True))
 
 def q8_silu_quantize(gate:Tensor, up:Tensor, in_features:int) -> tuple[Tensor, Tensor]:
   assert gate.shape == up.shape
@@ -208,7 +208,7 @@ def _q8k_quantize_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
     d.ne(0).where((x[token * in_features + block * 256 + qchunk * 8 + lane].load().cast(dtypes.float32) / d).round(),
                    UOp.const(dtypes.float32, 0)).maximum(-127).minimum(127).cast(dtypes.int8)) for lane in range(8)]
   return UOp.group(scale_store, UOp.group(*quant_stores).end(qchunk)).end(job, core).sink(
-    arg=KernelInfo(name="q8k_quantize_cpu", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name="q8k_quantize_cpu", optimize=False, parallel=True))
 
 def q8k_quantize(x:Tensor, in_features:int) -> tuple[Tensor, Tensor]:
   tokens, xc = int(x.numel()) // in_features, x.reshape(-1).contiguous()
@@ -439,7 +439,7 @@ def _cpu_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
   result = sum((acc.after(accumulated).index(i) for i in range(8)), UOp.const(dtypes.float32, 0)) if vectorized else \
     acc.after(accumulated).index(0)
   return out[route, output].store(result.cast(out.dtype)).end(job, core).sink(
-    arg=KernelInfo(name=f"expert_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"expert_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", optimize=False, parallel=True))
 
 def uop_expert(layer:ExpertWeights, sel:Tensor, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
   assert layer.ggml_type in (14, 21, 23)
@@ -483,7 +483,7 @@ def _cpu_expert_weighted_uop(out:UOp, raw:UOp, probs:UOp, sel:UOp, xq:UOp, xd:UO
   accumulated = total.after(local_route).store(total.after(local_route) + route_value * probs[route].load()).end(local_route)
   return out[input_idx, output].store(total.after(accumulated)[0].load()).end(job, core).sink(
     arg=KernelInfo(name=f"expert_weighted_uop_cpu_{ggml_type}_{inputs}_{routes_per_input}_{out_features}_{in_features}",
-                   opts_to_apply=())).rtag("parallel")
+                   optimize=False, parallel=True))
 
 @functools.cache
 def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next_route:UOp, unique:UOp,
@@ -556,7 +556,7 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
   return out[input_store, output_base + store_lane].store(totals.after(accumulated)[store_lane, input_store].load()).end(
     output_store, job, core).sink(
     arg=KernelInfo(name=f"expert_weighted_grouped_uop_cpu_23_{inputs}_{routes_per_input}_{out_features}_{in_features}",
-                   opts_to_apply=(), estimates=Estimates(routes * out_features * in_features * 2))).rtag("parallel")
+                   optimize=False, parallel=True, estimates=Estimates(routes * out_features * in_features * 2)))
 
 def uop_expert_weighted_sum(layer:ExpertWeights, sel:Tensor, x:Tensor, probs:Tensor,
                             route_links:tuple[Tensor, Tensor, Tensor, Tensor]|None=None) -> Tensor:
@@ -623,7 +623,7 @@ def _cpu_expert_silu_uop(out:UOp, raw0:UOp, raw1:UOp, sel:UOp, xq:UOp, xd:UOp, l
   else:
     gate, up = acc0.after(accumulated).index(0), acc1.after(accumulated).index(0)
   return out[route, output].store((gate * gate.sigmoid() * up).cast(out.dtype)).end(job, core).sink(
-    arg=KernelInfo(name=f"expert_silu_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"expert_silu_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", optimize=False, parallel=True))
 
 @functools.cache
 def _expert_route_links_uop(head:UOp, next_route:UOp, unique:UOp, unique_count:UOp, sel:UOp, num_experts:int) -> UOp:
@@ -737,7 +737,7 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
   routes_done = cursor.after(saved)[0].store(final_next.cast(dtypes.int32)).end(final_loop, final_next < matched_count)
   return routes_done.end(job, core).sink(
     arg=KernelInfo(name=f"expert_silu_grouped_local_uop_cpu_{routes}_{out_features}_{in_features}",
-                   opts_to_apply=(), estimates=Estimates(next_route.shape[0] * out_features * in_features * 8))).rtag("parallel")
+                   optimize=False, parallel=True, estimates=Estimates(next_route.shape[0] * out_features * in_features * 8)))
 
 def uop_expert_silu(first:ExpertWeights, second:ExpertWeights, sel:Tensor, x:Tensor,
                     route_links:tuple[Tensor, Tensor, Tensor, Tensor]|None=None) -> Tensor:
@@ -843,7 +843,7 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
   su = sum((sacc1.after(sdone).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
   stores.append(shidden[shared_output].store(sg * sg.sigmoid() * su).end(shared_job))
   return UOp.group(*stores).end(core).sink(
-    arg=KernelInfo(name=f"moe_stage1_uop_{routes}_{dim}_{hidden}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"moe_stage1_uop_{routes}_{dim}_{hidden}", optimize=False, parallel=True))
 
 @functools.cache
 def _moe_stage2_uop(out:UOp, rdown:UOp, sdown:UOp, sel:UOp, probs:UOp, rhq:UOp, rhd:UOp,
@@ -893,7 +893,7 @@ def _moe_stage2_uop(out:UOp, rdown:UOp, sdown:UOp, sel:UOp, probs:UOp, rhq:UOp, 
       _load_f16(sdown, scale_base) * shd[0, sgroup], sgroup).end(sgroup)
   shared = sum((sacc.after(shared_done).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
   return out[output].store(total.after(shared_done)[0].load() + shared * shared_scale[0].load()).end(job, core).sink(
-    arg=KernelInfo(name=f"moe_stage2_uop_{down_type}_{routes}_{dim}_{hidden}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"moe_stage2_uop_{down_type}_{routes}_{dim}_{hidden}", optimize=False, parallel=True))
 
 def uop_moe_ffn(block:FFNBlock, x:Tensor, probs:Tensor, sel:Tensor) -> Tensor:
   routes, dim, hidden = int(sel.numel()), block.config.dim, block.config.hidden_dim
@@ -968,7 +968,7 @@ def _q8_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_featur
                                          UOp.const(dtypes.float32, 0)).cast(out.dtype)) for acc,token in zip(accs, tokens)]
   return UOp.group(*stores).end(job, core).sink(
     arg=KernelInfo(name=f"linear_q8_cpu_{out_features}_{in_features}{'_repacked' if repacked else ''}",
-                   opts_to_apply=())).rtag("parallel")
+                   optimize=False, parallel=True))
 
 @functools.cache
 def _q6_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int) -> UOp:
@@ -993,7 +993,7 @@ def _q6_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_featur
   done = UOp.group(*updates).end(block)
   stores = [out[token, output].store(sum((acc.after(done).index(i) for i in range(8)),
                                          UOp.const(dtypes.float32, 0)).cast(out.dtype)) for acc,token in zip(accs, tokens)]
-  return UOp.group(*stores).end(job, core).sink(arg=KernelInfo(name="linear_q6_cpu", opts_to_apply=())).rtag("parallel")
+  return UOp.group(*stores).end(job, core).sink(arg=KernelInfo(name="linear_q6_cpu", optimize=False, parallel=True))
 
 def uop_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in (8, 14)
@@ -1050,7 +1050,7 @@ def _q8_linear_pair_uop(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UOp,
     projection_stores.append(out[0, output].store(sum((acc.after(done).index(i) for i in range(8)),
                                                        UOp.const(dtypes.float32, 0)).cast(out.dtype)).end(job))
   return UOp.group(*projection_stores).end(core).sink(
-    arg=KernelInfo(name=f"linear_pair_q8_cpu_{out_features0}_{out_features1}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"linear_pair_q8_cpu_{out_features0}_{out_features1}_{in_features}", optimize=False, parallel=True))
 
 def uop_q8_linear_pair(first:Linear, second:Linear, x:Tensor) -> tuple[Tensor, Tensor]:
   assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features and int(x.numel()) == first.in_features
@@ -1110,7 +1110,7 @@ def _q8_gdn_projections_uop(out0:UOp, out1:UOp, out2:UOp, raw0:UOp, raw1:UOp, xq
   stores.append(out2[f16_output].store(sum((f16_acc.after(f16_done).index(i) for i in range(8)),
                                            UOp.const(dtypes.float32, 0)).cast(out2.dtype)).end(f16_job))
   return UOp.group(*stores).end(core).sink(
-    arg=KernelInfo(name=f"q8_gdn_projections_uop_{out_features0}_{out_features1}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"q8_gdn_projections_uop_{out_features0}_{out_features1}_{in_features}", optimize=False, parallel=True))
 
 def uop_q8_gdn_projections(first:Linear, second:Linear, f16_weight:Tensor, x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   xc = x.reshape(-1).contiguous()
@@ -1176,7 +1176,7 @@ def _iq3_repack_uop(out:UOp, raw:UOp, grid:UOp, rows:int, blocks_per_row:int, me
   data_value = (code(packed_pos) | (code(packed_pos + 16) << 4)).cast(dtypes.uint8)
   value = data_valid.where(data_value, meta_valid.where(meta_value, UOp.const(dtypes.uint8, 0)))
   return out[idx].store(value).end(job, core).sink(
-    arg=KernelInfo(name=f"cpu_uop_iq3_repack_{rows}_{blocks_per_row}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"cpu_uop_iq3_repack_{rows}_{blocks_per_row}", optimize=False, parallel=True))
 
 def iq3_repack(raw:Tensor, rows:int, in_features:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common
@@ -1197,7 +1197,7 @@ def _q8_repack_uop(out:UOp, raw:UOp, rows:int, groups:int) -> UOp:
   group = is_scale.where(within // 2, (within - groups * 2) // 32)
   byte = is_scale.where(within % 2, (within - groups * 2) % 32 + 2)
   return out[idx].store(raw[row * row_size + group * 34 + byte].load()).end(job, core).sink(
-    arg=KernelInfo(name=f"cpu_uop_q8_repack_{rows}_{groups}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"cpu_uop_q8_repack_{rows}_{groups}", optimize=False, parallel=True))
 
 def q8_repack(raw:Tensor, rows:int, in_features:int) -> Tensor:
   assert raw.dtype == dtypes.uint8 and in_features % 32 == 0 and int(raw.numel()) == rows * (in_features // 32) * 34
@@ -1257,7 +1257,7 @@ def _attention_decode_uop(out:UOp, q:UOp, cache:UOp, valid_len:UOp) -> UOp:
 
   output = UOp.range(dim, 93)
   return outf[bh * dim + output].store(numerator.after(update)[output].load() / row_sum.after(update)[0].load()).end(output, bh).sink(
-    arg=KernelInfo(name=f"attention_decode_uop_{batch}_{heads}_{kv_heads}_{dim}_{cache_len}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"attention_decode_uop_{batch}_{heads}_{kv_heads}_{dim}_{cache_len}", optimize=False, parallel=True))
 
 @functools.cache
 def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> UOp:
@@ -1328,7 +1328,7 @@ def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> U
     stores.append(_contiguous_vector_ptr(outf, query * dim + output * 8, 8).store(value))
   return UOp.group(*stores).end(output, job, core).sink(
     arg=KernelInfo(name=f"attention_prefill_online_uop_{batch}_{heads}_{tokens}_{kv_heads}_{dim}_{cache_len}",
-                   opts_to_apply=())).rtag("parallel")
+                   optimize=False, parallel=True))
 
 def uop_attention_prefill(q:Tensor, cache:Tensor, start_pos:int|UOp) -> Tensor:
   batch, heads, tokens, head_dim = q.shape
@@ -1430,7 +1430,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   saved_state = _contiguous_vector_ptr(nextf, bh * dim * dim + save_chunk * 8, 8).store(saved_values).end(save_chunk)
   return saved_state.end(bh).sink(
     arg=KernelInfo(name=f"gated_delta_prefill_uop_{batch}_{heads}_{tokens}_{dim}_{state.dtype.name}",
-                   opts_to_apply=())).rtag("parallel")
+                   optimize=False, parallel=True))
 
 @functools.cache
 def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp,
@@ -1518,7 +1518,7 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
       quant_stores.append(_contiguous_vector_ptr(quantf, base + chunk_idx * 8, 8).store(quant_values))
     stores = UOp.group(scalef[bh * (dim // 32) + quant_group].store(d), *quant_stores).end(quant_group)
     name = f"gated_delta_q8_uop_{batch}_{heads}_{dim}_{state.dtype.name}"
-  return stores.end(bh).sink(arg=KernelInfo(name=name, opts_to_apply=())).rtag("parallel")
+  return stores.end(bh).sink(arg=KernelInfo(name=name, optimize=False, parallel=True))
 
 def gated_delta_q8(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, gate:Tensor,
                    norm_weight:Tensor, norm_eps:float=0.0, inplace:bool=False) -> tuple[Tensor, Tensor, Tensor]:
@@ -1598,7 +1598,7 @@ def _causal_conv_silu_uop(out:UOp, state:UOp, x:UOp, weight:UOp, kernel_size:int
   result = total / (1.0 + _finite_exp2(total * (-1 / math.log(2))))
   stores = UOp.group(*(out[batch_idx, token, channel + lane].store(result.index(lane)) for lane in range(8)))
   return stores.end(job, core).sink(
-    arg=KernelInfo(name=f"causal_conv_silu_uop_{batch}_{tokens}_{channels}_{kernel_size}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"causal_conv_silu_uop_{batch}_{tokens}_{channels}_{kernel_size}", optimize=False, parallel=True))
 
 def gdn_qkv(conv:Tensor, k_heads:int, v_heads:int, dim:int) -> tuple[Tensor, Tensor, Tensor]:
   batch, tokens, channels = conv.shape
@@ -1640,7 +1640,7 @@ def _gdn_qkv_uop(q:UOp, k:UOp, v:UOp, conv:UOp, k_heads:int, v_heads:int, dim:in
     target[batch_idx, head, token, out_chunk * 8 + lane].store(values.index(lane))
     for target,values in ((q, qvalues), (k, kvalues), (v, vvalues)) for lane in range(8))).end(out_chunk)
   return stores.end(job, core).sink(
-    arg=KernelInfo(name=f"gdn_qkv_uop_{batch}_{tokens}_{k_heads}_{v_heads}_{dim}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"gdn_qkv_uop_{batch}_{tokens}_{k_heads}_{v_heads}_{dim}", optimize=False, parallel=True))
 
 def silu_mul_kernel(out:UOp, gate:UOp, up:UOp) -> UOp:
   elements = _concrete_int(out.shape[0])
@@ -1648,7 +1648,7 @@ def silu_mul_kernel(out:UOp, gate:UOp, up:UOp) -> UOp:
     core, job, idx = _parallel_work(elements)
     value = gate[idx].load()
     return out[idx].store(value * value.sigmoid() * up[idx].load()).end(job, core).sink(
-      arg=KernelInfo(name=f"cpu_silu_mul_{elements}", opts_to_apply=())).rtag("parallel")
+      arg=KernelInfo(name=f"cpu_silu_mul_{elements}", optimize=False, parallel=True))
   idx = UOp.range(elements, 0, axis_type=AxisType.WEAK)
   value = gate[idx].load()
   return out[idx].store(value * value.sigmoid() * up[idx].load()).end(idx).sink(
@@ -1660,7 +1660,7 @@ def silu_kernel(out:UOp, x:UOp) -> UOp:
     core, job, idx = _parallel_work(elements)
     value = x[idx].load()
     return out[idx].store(value * value.sigmoid()).end(job, core).sink(
-      arg=KernelInfo(name=f"cpu_silu_{elements}", opts_to_apply=())).rtag("parallel")
+      arg=KernelInfo(name=f"cpu_silu_{elements}", optimize=False, parallel=True))
   idx = UOp.range(elements, 0, axis_type=AxisType.WEAK)
   value = x[idx].load()
   return out[idx].store(value * value.sigmoid()).end(idx).sink(arg=KernelInfo(name=f"cpu_silu_{elements}", opts_to_apply=()))
@@ -1717,7 +1717,7 @@ def _cpu_topk_uop(out:UOp, sel:UOp, x:UOp, k:int, bias:UOp|None=None, normalize:
                exps, UOp.const(dtypes.float32, 0))
   stores = UOp.group(out[row, rank].store(value.cast(out.dtype)), sel[row, rank].store(selected_index.cast(dtypes.int32)))
   return stores.end(rank, job, core).sink(
-    arg=KernelInfo(name=f"cpu_uop_{'biased_' if bias is not None else ''}topk_{outer}_{k}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"cpu_uop_{'biased_' if bias is not None else ''}topk_{outer}_{k}", optimize=False, parallel=True))
 
 def uop_biased_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, Tensor]:
   outer = int(x.numel()) // 256
@@ -1769,7 +1769,7 @@ def _f16_matvec_uop(out:UOp, x:UOp, weight:UOp) -> UOp:
     sum((acc.after(done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0)).cast(out.dtype))
             for token,acc in enumerate(accs)]
   return UOp.group(*stores).end(token_block, output_job, core).sink(
-    arg=KernelInfo(name=f"f16_matvec_uop_{tokens}_{out_features}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"f16_matvec_uop_{tokens}_{out_features}_{in_features}", optimize=False, parallel=True))
 
 def uop_f16_matvec(x:Tensor, weight:Tensor) -> Tensor:
   assert weight.dtype == dtypes.float16 and len(weight.shape) == 2 and int(x.numel()) % weight.shape[1] == 0
@@ -1832,7 +1832,7 @@ def _rmsnorm_f16_linear_uop(normalized:UOp, out:UOp, x:UOp, norm_weight:UOp, wei
   linear_done = linear_acc.after(linear_chunk).store(linear_acc.after(linear_chunk) + products).end(linear_chunk)
   value = sum((linear_acc.after(linear_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
   return outf[output].store(value).end(output_job, core).sink(
-    arg=KernelInfo(name=f"rmsnorm_f16_linear_uop_{out_features}_{dim}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"rmsnorm_f16_linear_uop_{out_features}_{dim}", optimize=False, parallel=True))
 
 def q8_batched_pair(first:Linear, second:Linear, x:Tensor) -> tuple[Tensor, Tensor]:
   assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features == x.shape[-1]
@@ -1909,7 +1909,7 @@ def _q6_argmax_uop(values:UOp, indices:UOp, raw:UOp, xq:UOp, xd:UOp, out_feature
                        best_idx[0].store(take.where(row.cast(dtypes.int32), best_idx.after(block_done)[0].load()))).end(row_job)
   return UOp.group(values[core].store(best.after(selected)[0].load()),
                    indices[core].store(best_idx.after(selected)[0].load())).end(core).sink(
-    arg=KernelInfo(name=f"q6_argmax_uop_{out_features}_{in_features}", opts_to_apply=())).rtag("parallel")
+    arg=KernelInfo(name=f"q6_argmax_uop_{out_features}_{in_features}", optimize=False, parallel=True))
 
 def expert_weighted_sum(layer:ExpertWeights, sel:Tensor, x:Tensor, probs:Tensor) -> Tensor:
   return uop_expert_weighted_sum(layer, sel, x, probs)

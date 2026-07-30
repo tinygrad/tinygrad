@@ -1191,6 +1191,8 @@ class KernelInfo:
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
   beam: int = 0
+  optimize: bool = True
+  parallel: bool = False
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -1243,7 +1245,7 @@ class ProgramInfo:
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
                        tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))),
-                       target, sink.tag == "parallel")
+                       target, sink.arg.parallel if isinstance(sink.arg, KernelInfo) else False)
 
 @dataclass(frozen=True)
 class CallInfo:

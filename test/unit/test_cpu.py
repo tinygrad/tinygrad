@@ -6,7 +6,7 @@ from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.codegen import to_program
 from tinygrad.runtime.ops_cpu import RING_SLOTS
-from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.ops import AxisType, KernelInfo
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
@@ -32,6 +32,15 @@ class TestCPU(unittest.TestCase):
     queue.submit(dev)
     signal.wait(count, timeout=10000)
     self.assertEqual(signal.value, count)
+
+  def test_parallel_launch(self):
+    def fill(out:UOp) -> UOp:
+      idx = UOp.range(67, 0, AxisType.GLOBAL)
+      return out[idx].store(idx).end(idx).sink(arg=KernelInfo(name="parallel_launch", optimize=False, parallel=True))
+    probe = Tensor.custom_kernel(Tensor.empty(67, device="CPU"), fxn=fill)[0]
+    self.assertTrue(to_program(probe.schedule_linear().src[-1].src[0], Device["CPU"].renderer).arg.parallel)
+    out = Tensor.custom_kernel(Tensor.empty(67, device="CPU"), fxn=fill)[0]
+    self.assertEqual(out.tolist(), list(range(67)))
 
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]

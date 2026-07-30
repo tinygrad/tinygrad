@@ -489,7 +489,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
-    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None and ast.arg.optimize)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):

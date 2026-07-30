@@ -109,7 +109,8 @@ def parallel_dispatch_prog():
   group_count = UOp.param(2, dtypes.uint64, (1,), volatile=True)
   ring_addr = UOp.param(3, dtypes.uint64, (1,), volatile=True)
   completed = UOp.param(4, dtypes.uint64, (PARALLEL_WORKERS,), volatile=True)
-  count = UOp.param(5, dtypes.int, (), vmin_vmax=(1, PARALLEL_PARTICIPANTS), name="count", addrspace=AddrSpace.ALU)
+  count = UOp.param(5, dtypes.int, (), vmin_vmax=(1, 2**31-1), name="count", addrspace=AddrSpace.ALU)
+  workers = count.minimum(PARALLEL_PARTICIPANTS) - 1
   post_fn, sems = UOp.param(6, dtypes.uint64, (1,)), UOp.param(7, dtypes.uint64, (PARALLEL_WORKERS,))
   address = UOp(Ops.CUSTOM, dtypes.uint64, (commands.index(0),), arg="(unsigned long){0}")
   publish = UOp.group(ring_addr[0].store(address), group_count[0].store(count.cast(dtypes.uint64)))
@@ -118,13 +119,13 @@ def parallel_dispatch_prog():
   signal = generation[0].store(next_generation)
   if WIN: wake = signal
   else:
-    wake_worker = UOp.range(count - 1, 3)
+    wake_worker = UOp.range(workers, 3)
     wake = post_fn.after(signal)[0].load().call(sems[wake_worker].load(), ret_dtype=dtypes.void).end(wake_worker)
   work = UOp.range((count + PARALLEL_PARTICIPANTS - 1) // PARALLEL_PARTICIPANTS, 2)
   command = work * PARALLEL_PARTICIPANTS
   entry = [commands.after(wake).index(command * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   own_done = entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(work)
-  worker = UOp.range(count - 1, 0)
+  worker = UOp.range(workers, 0)
   wait = UOp.loop(1)
   done = completed.after(own_done, wait).index(worker).load()
   return done.end(wait, done < next_generation).end(worker).sink(arg=KernelInfo("parallel_dispatch_prog"), tag=1)
