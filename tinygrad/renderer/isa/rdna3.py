@@ -6,6 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
+from tinygrad.renderer.amd.elf import assemble_linear
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 import itertools
 from dataclasses import dataclass, field
@@ -21,12 +22,10 @@ insdefs = [
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
   (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
   (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "lo_u32", "lo_u16"], False), # TODO: mul i16?
-  (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
-  (Ops.SIN, "v_sin", ["f32_e32"], False),
   (Ops.EXP2, "v_exp", ["f16_e32", "f32_e32"], False),
+  (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.MAX, "v_max", ["f16_e32", "f32_e32", "u16", "i16", "u32_e32", "i32_e32"], False),
   (Ops.TRUNC, "v_trunc", ["f16_e32", "f32_e32", "f64_e32"], False),
   (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "u64", "i32", "i64", "u16", "i16"], True),
   (Ops.CMPNE, "v_cmp", ["neq_f16", "neq_f32", "neq_f64", "ne_u32", "ne_u64", "ne_i32", "ne_i64", "ne_i16", "ne_u16"], True),
@@ -47,8 +46,11 @@ def _build_ins_table(srcs):
 
 OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
+V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
+V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 
 # ---- helpers ----
+lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
@@ -69,7 +71,6 @@ KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
-lane_ctr = itertools.count()
 
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
 flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
@@ -179,18 +180,22 @@ def store(ctx, idx:UOp, val:UOp):
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
   return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(ctx,val),))
 
+# TODO: cleanup + make load copy zero cost?
 def gated_load(idx:UOp, alt:UOp, gate:UOp):
   buf = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]
   n = alt.max_numel()
   dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
   out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
-  return out.store(idx.load(), gate).after(out.store(alt))
+  thru = out.load()
+  gated = out.store(idx.load(), gate).after(out.store(alt))
+  return thru.after(gated)
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
   _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
   scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
-  ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][x.src[0].dtype]
+  dt = x.src[0].dtype if x.src[0].op is not Ops.AFTER else x.src[0].src[0].dtype
+  ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][dt]
   if scmp and x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(ctx, x)
@@ -266,8 +271,6 @@ def idiv(ctx, x:UOp):
   return (q ^ sign) + -sign if signed else q
 
 # TODO: move special cases out of function into PM
-_lshl = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
-_lshr = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 def alu(ctx, x:UOp):
   dpreciz = x.dtype.itemsize == 8
   if dpreciz and x.op is Ops.ADD: return arith64(ctx, x, add=True)
@@ -281,10 +284,10 @@ def alu(ctx, x:UOp):
   elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32, RDNA3Ops.v_xor_b16)
 
   if x.op is Ops.SHL:
-    ins = _lshl[max(2, x.dtype.itemsize)]
+    ins = V_LSHL[max(2, x.dtype.itemsize)]
   elif x.op is Ops.SHR:
     if x.dtype is dtypes.int32: ins = RDNA3Ops.v_ashrrev_i32_e32 # TODO: handle 64 bit
-    else: ins = _lshr[max(2,x.dtype.itemsize)]
+    else: ins = V_LSHR[max(2,x.dtype.itemsize)]
 
   if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
   elif x.op in OP_INS:
@@ -363,7 +366,7 @@ def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=nam
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
-  bnd, mask = x.src[:2]
+  bnd, mask = x.src[0], x.src[-1]
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
   ctx.loop_label[acc] = range_str(x)
   ctx.exec_mask[acc] = mask
@@ -475,9 +478,11 @@ isel_matcher = PatternMatcher([
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
   (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
-    lambda ctx,x,bnd: x.replace(src=(vmov(bnd), UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS))) + x.src[1:])),
+    lambda ctx,x,bnd: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS)),))
+    if x.src[-1].op is not Ops.INS else None),
   # add exec mask edge to src
-  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[1])) if len(rng.src) > 1 else None), 
+  (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
+    lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None), 
   # --- fused alu ---
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
@@ -524,8 +529,6 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
-
-  print("encoding", opc, rdefs(x), [(u.op, u.arg, rdefs(u)) for u in oprs])
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
@@ -618,6 +621,4 @@ class RDNA3Renderer(ISARenderer):
 
     lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
       u.replace(arg=RDNA3Ops.SOPP(u.arg.op, (targets[u.tag] - upc[u]) // 4)) for u in nuops]))
-
-    from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch, scratch_size=0)

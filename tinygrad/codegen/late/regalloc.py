@@ -53,8 +53,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc, ndefs, before, after = [], [], [], []
   i = next(ctx.idx)
 
-  print(x.op, x.arg)
-  for s in x.src: # handle spills?
+  for s in x.src:
     if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
     else: nsrc.append(s)
 
@@ -67,35 +66,54 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.LOAD, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
+
+def gbuf(idx:UOp):
+  buf = idx.src[0]
+  while buf.op is Ops.AFTER: buf = buf.src[0]
+  return buf
 
 @dataclass(frozen=True)
 class RegSlot:
   buf: UOp
   index: int
 
+  def __repr__(self): return f"RegSlot({self.buf.arg}, {self.index})"
   @staticmethod
   def get(idx:UOp):
-    buf = idx.src[0]
-    while buf.op is not Ops.BUFFER: buf = buf.src[0]
-    return RegSlot(buf, idx.src[1].arg)
+    buf = gbuf(idx)
+    if idx.op is Ops.INDEX: return (RegSlot(buf, idx.src[1].arg),)
+    else: return tuple([RegSlot(buf, i) for i in range(idx.src[-1].arg)])
 
+# this should happen pre-linearize
 class Mem2RegContext:
   def __init__(self, ren:ISARenderer):
     self.ren, self.ridx = ren, itertools.count()
     self.home: dict[RegSlot, VRegister] = {}
 
-  def vr(self, u:UOp) -> VRegister:
-    return self.home.setdefault(RegSlot.get(u.src[0]), self.ren.mem2reg_alloc(f"mvr{next(self.ridx)}", u))
+  def vrs(self, u:UOp) -> tuple[VRegister]:
+    return tuple(self.home.setdefault(slot, self.ren.mem2reg_alloc(f"mvr{next(self.ridx)}", u)) for slot in RegSlot.get(u.src[0]))
+
+def promos(ctx, x:UOp, idx:UOp, val:UOp):
+  if idx.op is Ops.SHRINK:
+    lanes = [val.index(i) for i in range(idx.src[-1].arg)]
+    copies = [ctx.ren.copy(l, vr) for l,vr in zip(lanes, ctx.vrs(x))]
+    return UOp.group(*copies), lanes + copies
+  else: return (nx := ctx.ren.copy(val, ctx.vrs(x)[0])), [nx]
 
 pm_mem2reg_rewrite = PatternMatcher([
+  # each index into shrink load gets its own transparent copy
+  # maintains single vreg and index passthrough semantics clean for regalloc
+  (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: 
+    ((nx := ld.replace(tag=(ld.tag[idx.src[1].arg],))), [nx])
+    if (ld := gbuf(idx)).op is Ops.LOAD else None),
   # regspace LOAD is just an empty register carrier
-  (UPat(Ops.LOAD, name="x"), lambda ctx,x: ((nx := x.replace(src=(), tag=(ctx.vr(x),))), [nx]) \
-    if x.src[0].addrspace is AddrSpace.REG and x.tag is None else None),
+  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: \
+    ((nx := x.replace(src=(), tag=ctx.vrs(x))), [nx] if idx.op is Ops.INDEX else []) if x.tag is None else None),
   # reg store is copy, should handle copying directly from memory?
   # ex. store((global buffer).index(0), (reg buffer).index(1))
-  # should perform a single load directly into reg buffer
+  # TODO!!!: should perform a single load directly into reg buffer
   (UPat.var("idx").store(UPat.var("val"), name="x"), lambda ctx,idx,val,x: \
-    ((nx := ctx.ren.copy(val, ctx.vr(x))), [nx]) if idx.addrspace is AddrSpace.REG else None),
+    promos(ctx, x,idx,val) if idx.addrspace is AddrSpace.REG else None),
 ])
