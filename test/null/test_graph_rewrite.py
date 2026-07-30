@@ -332,6 +332,13 @@ class TestRebuildRederivesDtype(unittest.TestCase):
     self.assertIs(graph_rewrite(x+x, pm).dtype, dtypes.weakfloat)
     self.assertIs(graph_rewrite(x+x, pm, walk=True).dtype, dtypes.weakfloat)
 
+  def test_rebuild_keeps_dtype_on_ins(self):
+    # machine IR: a typed Ops.INS states its dtype at the producer (post-isel, outside spec_program) —
+    # a rebuild over rewritten srcs must keep it, never wipe it to void
+    ins = UOp(Ops.INS, dtypes.float, (UOp.const(None, 1.0).cast(dtypes.float),))
+    pm = PatternMatcher([(UPat(Ops.CAST, src=(UPat.cvar("c"),)), lambda c: c)])
+    self.assertIs(graph_rewrite(ins, pm).dtype, dtypes.float)
+
   def test_rebuild_keeps_dtype_on_invalid_src(self):
     # Invalid is dtype-agnostic poison: a src becoming Invalid never invalidates the stored dtype.
     # the explicit dtype IS the subject: the renderer-lowered shift keeps src[0]'s dtype with a uint

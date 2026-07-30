@@ -125,7 +125,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PYLITERAL:
-      return dtypes.void
+      # machine/opaque IR: the node's dtype is stated by its producer, derivation has no claim (a rebuild keeps it)
+      return None
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
