@@ -196,7 +196,6 @@ def sched_hcq_batches(l:UOp) -> UOp:
     if (devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is not None: batch.append((call, to_tuple(devs)))
     else: srcs, batch = srcs + _finalize_batch(batch) + [call], []
   return l.replace(src=tuple(srcs + _finalize_batch(batch)))
-pm_sched_hcq_batches = PatternMatcher([(UPat(Ops.LINEAR, name="l"), sched_hcq_batches)])
 
 # *****************
 # 3. merge into queues
@@ -228,7 +227,10 @@ def merge_queues(linear:UOp) -> UOp:
       new_rec = [call]
     opened_qs[(info.device, info.queue)] = new_rec
   return linear.replace(src=tuple(new_src + [_merged_hcq_call(c) for c in opened_qs.values()]))
-pm_merge_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), merge_queues)])
+
+def schedule_and_merge(ctx:dict[UOp, UOp], linear:UOp) -> UOp:
+  return merge_queues(sched_hcq_batches(linear).substitute(ctx, walk=True, enter_calls=True))
+pm_schedule_and_merge = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_and_merge)])
 
 # *****************
 # 4.2. hcq lowering: ops to ir
@@ -299,7 +301,8 @@ def rm_rt_uops(call:UOp) -> UOp|None:
   reads, fills = reads | {k:v for r,_ in tables for k,v in r.items()}, [f for _,fs in tables for f in fs]
   return call.replace(src=(call.src[0].substitute(reads), *call.src[1:], *fills),
                       arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
-pm_rm_rt_uops = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_uops)])
+pm_rm_rt_uops = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_uops)])
 
 # *****************
 
@@ -319,8 +322,10 @@ def replace_params(call:UOp) -> UOp|None:
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
-  return call.replace(src=(body.substitute(sub), *c_args, *refhold), arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
-pm_replace_params = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
+  return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
+                      arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
+pm_replace_params = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
 # *****************
 
@@ -357,36 +362,34 @@ pm_pack_placeholders = PatternMatcher([
 # *****************
 # 8. callify hcq programs
 
-pm_callify_hcq = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),), name="cf"),
-  lambda cf: cf.replace(src=(to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer),)))])
+def callify_hcq(call:UOp, cf:UOp) -> UOp:
+  prg = to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
+  return call.replace(src=(cf.replace(src=(prg,), arg="hcq"), *call.src[1:]))
+pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
+  UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
-  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, enter_calls=True, name="replace buffer")
+  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, name="replace buffer")
 
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
     # prep
     linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
-    linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
+    linear = graph_rewrite(linear, pm_insert_copy_staging+pm_flatten_linear, name="insert copy staging")
 
     # schedule
-    linear = graph_rewrite(linear, pm_sched_hcq_batches, walk=True, name="schedule hcq batches")
-    linear = linear.substitute({s: p for p, s in back_map.items()}, walk=True, enter_calls=True)
-    linear = graph_rewrite(linear, pm_merge_queues, walk=True, name="merge queues")
+    linear = graph_rewrite(linear, pm_schedule_and_merge, ctx={s:p for p,s in back_map.items()}, walk=True, name="schedule and merge hcq")
 
     # lowering to hcq ir
-    linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
-    linear = graph_rewrite(linear, pm_pack_placeholders, walk=True, name="pack placeholders")
+    linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
 
-    # pie
-    linear = graph_rewrite(linear, pm_split_patches, ctx=jit, walk=True, name="split rt/lt patches")
-    linear = graph_rewrite(linear, pm_early_simplify + symbolic, bottom_up=False, name="simplify packed placeholders", enter_calls=True)
-    linear = graph_rewrite(linear, pm_rm_rt_uops, walk=True, name="replace rt uops")
-    linear = graph_rewrite(linear, pm_replace_params, walk=True, name="replace with args")
+    # patches
+    linear = graph_rewrite(linear, pm_split_patches+pm_early_simplify+symbolic, ctx=jit, bottom_up=False, name="simplify patches", enter_calls=True)
 
     # and compile it
+    linear = graph_rewrite(linear, pm_replace_params, bpm=pm_rm_rt_uops, name="replace rt uops and params")
     final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
 
   return final_linear
@@ -444,25 +447,21 @@ pm_resolve_patches = PatternMatcher([
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])
 
-linked_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
-linked_linear_cache:dict[tuple[bytes, bool], UOp] = {}
-
-def linked_buf_key(a:UOp): return a.key, to_tuple(a.device)
-pm_linked_bufs = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: linked_buf_cache.get(linked_buf_key(a)))])
+def link_buf_key(a:UOp): return a.key, to_tuple(a.device)
+link_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+link_linear_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @track_rewrites(lambda _,jit,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, jit=False, cache=True) -> UOp:
-  if (linked:=linked_linear_cache.get(linear_key:=(linear.key, jit))) is not None: return linked
+  if (linked:=link_linear_cache.get(linear_key:=(linear.key, jit))) is not None: return linked
 
-  cacheable = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
-               if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
-  hits = {a.src[0]:linked_buf_cache[key] for a in cacheable.values() if (key:=linked_buf_key(a)) in linked_buf_cache}
-  linear = graph_rewrite(linear, pm_linked_bufs, name="reuse linked bufs").substitute(hits, walk=True)
-  linear = graph_rewrite(linear, pm_bufferize, ctx=cache, bottom_up=True, walk=True, name="bufferize placeholders")
-  linear = graph_rewrite(linear, pm_resolve_patches + symbolic, bottom_up=False, name="simplify patches")
-  linear = graph_rewrite(linear, pm_assert_no_afters, name="assert no afters")
-  for (j,i),a in cacheable.items(): linked_buf_cache.setdefault(linked_buf_key(a), linear.src[j].src[i])
-  if cache: linked_linear_cache[linear_key] = linear
+  bufs = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
+          if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
+  linear = linear.substitute({x:link_buf_cache[k] for a in bufs.values() if (k:=link_buf_key(a)) in link_buf_cache for x in (a, a.src[0])}, walk=True)
+  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
+                         name="resolve patches")
+  for (j,i),a in bufs.items(): link_buf_cache.setdefault(link_buf_key(a), linear.src[j].src[i])
+  if cache: link_linear_cache[linear_key] = linear
   return linear
 
 # *****************
