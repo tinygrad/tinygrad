@@ -210,7 +210,10 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
-class TestHalfDType(TestDType): DTYPE = dtypes.half
+class TestHalfDType(TestDType):
+  DTYPE = dtypes.half
+  def test_float32_to_float16_cast_inf(self):
+    _test_op(lambda: Tensor([65536.0, 65504.0, 1.0, 0.0], dtype=dtypes.float32).cast(dtypes.half), dtypes.half, [float('inf'), 65504.0, 1.0, 0.0])
 
 class TestEmulatedHalf(TestHalfDType):
   @classmethod
