@@ -587,7 +587,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp.const(dtype or self.dtype, b).broadcast(self.max_numel())
   def ufix(self, x):
     if isinstance(x, UOp): return x
-    return UOp.const(least_upper_dtype(self.dtype, dtypes.from_py(x)), x)
+    return UOp.const(least_upper_dtype(self.dtype, dtypes.from_py(x)).weak(), x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -1768,20 +1768,30 @@ pm_lower_weak = PatternMatcher([
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
-def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
-  if ctx is None: ctx = {}
+def lower_weak_srcs(ctx:tuple[dict[UOp, UOp], bool]|None, u:UOp) -> UOp|None:
+  cache, fallback = ctx if ctx is not None else ({}, False)
+  if (u.dtype in dtypes.weaks and not fallback) or not any(s.dtype in dtypes.weaks for s in u.src): return None
   def lower(s:UOp) -> UOp:
-    if (r:=ctx.get(s)) is None:
+    if (r:=cache.get(s)) is None:
       r = graph_rewrite(s, pm_lower_weak)
       # the consumer absorbs the cast on its own edge
-      ctx[s] = r = r.src[0] if r.op is Ops.CAST and r.dtype in dtypes.weaks else r
+      cache[s] = r = r.src[0] if r.op is Ops.CAST and r.dtype in dtypes.weaks else r
     return r
+  operand_lub = u.op in GroupOp.Binary|{Ops.WHERE}
+  demand = u.src[0].dtype.scalar() if u.op is Ops.STORE else least_upper_dtype(*(s.dtype for s in u.src)) if operand_lub else None
+  if fallback and demand in dtypes.weaks:
+    demand = least_upper_dtype(*(select_dtype(s) if s.op is Ops.CONST and s.dtype in dtypes.weaks else strong_dtype(s.dtype)
+                                 for s in u.src))
+  if (fallback or demand is not None and demand not in dtypes.weaks) and \
+     any(s.op is Ops.CONST and s.dtype in dtypes.weaks for s in u.src):
+    src = tuple(UOp.const(demand if demand is not None else select_dtype(s), s.arg)
+                if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in u.src)
+    u = u.replace(dtype=None, src=src)
   # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
   ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
-  return None if ret is u else ret
+  return ret
 pm_lower_index_dtype = PatternMatcher([
-  (UPat(GroupOp.All, name="u"),
-   lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
+  (UPat(GroupOp.All, name="u"), lower_weak_srcs),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
   # TODO: more generic
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),

@@ -1022,7 +1022,9 @@ class TestSymbolic(unittest.TestCase):
 
     # the vars are now scalar PARAMs
     pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<2).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
+    # the comparison literal has committed to the PARAM width during lowering
+    c2 = UOp.const(None, 2).cast(dtypes.int).simplify()
+    self.assertEqual(rewritten_uop, (pvar['s']<c2).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6

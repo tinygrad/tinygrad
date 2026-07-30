@@ -1,10 +1,13 @@
 import unittest, itertools
+from unittest.mock import patch
 
-from tinygrad.codegen.late.coalesce import indexing_simplify
-from tinygrad.dtype import dtypes
+from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
+from tinygrad.codegen.late.coalesce import indexing_simplify, image_valid_dims
+from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.helpers import Context, Target
+from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
-from tinygrad.helpers import Context
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
 
@@ -196,6 +199,26 @@ class TestValidIdxSimplification(unittest.TestCase):
       "(r0<((r1*4)+r2))")
 
 class TestImageSimplification(unittest.TestCase):
+  def test_osx_multirow_image_alignment(self):
+    with patch("tinygrad.codegen.late.coalesce.OSX", True):
+      dims = image_valid_dims(dtypes.half, 32*1088*4, "IMAGE_PITCH_ALIGNMENT=64")
+    self.assertNotIn((32, 1088), dims)
+    self.assertTrue(all(h == 1 or w % 256 == 0 for h,w in dims))
+
+  def test_half_image_param_decomposes_atomically(self):
+    # Image access is intentionally float even when its backing storage is half.
+    with Context(SPEC=1):
+      buf = UOp.param(0, dtypes.half, (1, 64, 4))
+      idx = buf.index(UOp.const(None, 0), UOp.const(None, 0), dtype=dtypes.float)
+      load = UOp(Ops.LOAD, dtypes.float, (idx,))
+      acc = UOp.param(1, dtypes.float, (), addrspace=AddrSpace.ALU)
+      ren = OpenCLRenderer(Target(device="CL", arch="IMAGE_PITCH_ALIGNMENT=64"))
+      out = graph_rewrite((acc+load).sink(), pm_dtype_decomps, ctx=(set(), ren))
+    param = next(u for u in out.toposort() if u.op is Ops.PARAM and u.arg.slot == 0)
+    image_idx, image_load, add = (next(u for u in out.toposort() if u.op is op) for op in (Ops.INDEX, Ops.LOAD, Ops.ADD))
+    self.assertEqual((param.dtype, param.arg.dtype), (dtypes.ushort, dtypes.ushort))
+    self.assertEqual((image_idx.dtype, image_load.dtype, add.dtype), (dtypes.float,)*3)
+
   def check(self, load, svalid, sidx0, sidx1):
     load = simplify_image_idx(load.sink()).src[0]
     off = load.src[0]

@@ -426,21 +426,21 @@ class TestVizIntegration(unittest.TestCase):
       def default_test(root): return graph_rewrite(root, sym)
       tracked_test = track_rewrites()(default_test)
       c = UOp.const(dtypes.int, 1)
-      default_test(c+1) # goes to the default group
+      default_test(c1:=c+1) # goes to the default group
       tracked_test(c)   # all rewrites after this go inside the second group.
-      default_test(c+2)
+      default_test(c2:=c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
     graph = next(viz.get_details(0, 0))["graph"]
-    self.assertEqual(list(graph), [id(c), id(c+1)])
+    self.assertEqual(list(graph), [id(c), id(c1.src[1]), id(c1)])
     self.assertTrue(graph[id(c)]["exclude"])
-    self.assertFalse(graph[id(c+1)]["exclude"])
+    self.assertFalse(graph[id(c1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
     graph = next(viz.get_details(1, 1))["graph"]
-    self.assertEqual(list(graph), [id(c), id(c.const_like(2)), id(c+2)])
+    self.assertEqual(list(graph), [id(c), id(c2.src[1]), id(c2)])
     self.assertTrue(graph[id(c)]["exclude"])
-    self.assertTrue(graph[id(c.const_like(2))]["exclude"])
-    self.assertFalse(graph[id(c+2)]["exclude"])
+    self.assertTrue(graph[id(c2.src[1])]["exclude"])
+    self.assertFalse(graph[id(c2)]["exclude"])
 
   def test_recurse(self):
     with save_viz() as viz:

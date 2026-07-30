@@ -1,6 +1,6 @@
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate
-from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
+from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC, is_image_shape
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, ParamArg
 from tinygrad.renderer import Renderer
@@ -163,6 +163,9 @@ pm_long_decomp = PatternMatcher([
 
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp = PatternMatcher([
+  (UPat(Ops.PARAM, name="buf").index(UPat(), UPat(), dtype=dtypes.float, name="x"), lambda ctx,buf,x:
+   x.replace(src=(buf.replace(dtype=f2f_dt[ctx[0]], arg=replace(buf.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]), *x.src[1:]))
+   if buf.dtype == ctx[0] and is_image_shape(buf._shape) else None),
   (UPat((*GroupOp.Defines, Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
    x.replace(dtype=f2f_dt[ctx[0]], arg=replace(x.arg, dtype=f2f_dt[ctx[0]]) if isinstance(x.arg, ParamArg) else x.arg, tag=ctx[0])
    if x.dtype == ctx[0] and (x.op is not Ops.INDEX or x.src[0].op not in {Ops.LOAD, Ops.STACK}) else None),

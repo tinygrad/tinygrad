@@ -66,6 +66,7 @@ class DType(metaclass=DTypeMetaClass):
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}"
   def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt) < (o.priority, o.bitsize, o.name, o.fmt)
   def scalar(self) -> DType: return self
+  def weak(self) -> DType: return dtypes.weakfloat if dtypes.is_float(self) else dtypes.weakint if dtypes.is_int(self) else self
   @functools.cached_property
   def min(self):
     if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.bitsize-1)

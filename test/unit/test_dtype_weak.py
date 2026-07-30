@@ -3,7 +3,7 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
 
@@ -43,13 +43,27 @@ class TestWeakPromotion(unittest.TestCase):
     r = Tensor([2], dtype=dtypes.uint8, device="CPU").copysign(Tensor([1], dtype=dtypes.uint32, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
 
-  def test_uop_scalar_const_unchanged(self):
-    for dtype, value in ((dtypes.weakint, 1), (dtypes.int32, 1), (dtypes.float32, 0.5)):
+  def test_uop_scalar_const_lifts_kind(self):
+    for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
+      (dtypes.int32, 1, dtypes.int32, dtypes.weakint), (dtypes.int32, 0.5, dtypes.weakfloat, dtypes.weakfloat),
+      (dtypes.float32, 1, dtypes.float32, dtypes.weakfloat)):
       out = UOp.variable("x", 0.0 if dtype == dtypes.float32 else 0, 10.0 if dtype == dtypes.float32 else 10, dtype) + value
-      self.assertEqual((out.dtype, out.src[1].dtype), (dtype, dtype))
+      self.assertEqual((out.dtype, out.src[1].op, out.src[1].dtype), (out_dtype, Ops.CONST, const_dtype))
+    x, c = UOp.variable("x", 0, 10, dtypes.int8), UOp.const(None, 1)
+    self.assertIs((x+c).src[1], c)
+    self.assertIs((c+x).src[0], c)
 
-  @unittest.expectedFailure  # TODO: a weak const defers to its consumer (JAX): these dtypes change once python scalars are weak consts
-  def test_changed_rows(self):
+  def test_store_leaf_demands_destination_dtype(self):
+    dst = UOp.param(0, dtypes.bfloat16, (1,)).index(0)
+    store = dst.store(UOp.const(None, 5.0))
+    out = graph_rewrite(store, pm_lower_index_dtype, ctx=({}, False))
+    self.assertEqual(out.src[1].dtype, dtypes.bfloat16)
+
+  def test_post_decomp_fallback_unifies_operand_widths(self):
+    out = graph_rewrite(UOp.const(None, True).where(4503599627370495, 0), pm_lower_index_dtype, ctx=({}, True))
+    self.assertEqual((out.dtype, out.src[1].dtype, out.src[2].dtype), (dtypes.long, dtypes.long, dtypes.long))
+
+  def test_weak_scalar_rows(self):
     t_i8, t_f16, t_bf16 = Tensor([1], dtype=dtypes.int8), Tensor([1], dtype=dtypes.float16), Tensor([1], dtype=dtypes.bfloat16)
     t_bool, t_u16 = Tensor([True]), Tensor([1], dtype=dtypes.uint16)
     self.assertEqual((t_i8 + 0.5).dtype, dtypes.weakfloat)
@@ -58,8 +72,8 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(((t_bool + 1) + t_i8).dtype, dtypes.int8)
     self.assertEqual(((t_bool + 1) + t_u16).dtype, dtypes.uint16)
     self.assertEqual((Tensor(3) + t_i8).dtype, dtypes.int8)
-    # zeros/ones are full with a python fill value, so they are weak too (jnp.zeros pins float32; deliberate divergence)
-    self.assertEqual((Tensor.zeros(3) + t_f16).dtype, dtypes.float16)
+    # unbuffered zeros/ones are full with a Python fill value, so they are weak (buffered creation commits storage)
+    self.assertEqual((Tensor.zeros(3, buffer=False) + t_f16).dtype, dtypes.float16)
 
   def test_unchanged_rows(self):
     t_i8, t_f16, t_f32 = Tensor([1], dtype=dtypes.int8), Tensor([1], dtype=dtypes.float16), Tensor([1], dtype=dtypes.float32)

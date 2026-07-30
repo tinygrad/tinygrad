@@ -21,7 +21,11 @@ class ElementwiseMixin(CreationMixin):
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
+    out_dtype = least_upper_dtype(x.dtype, y.dtype)
+    weak_out_dtype = out_dtype.weak()
+    # Weak constant operands keep only the lub's kind; other operands cast to the lub.
+    return (x.cast(weak_out_dtype if x.dtype in dtypes.weaks and x._uop.base.op is Ops.CONST else out_dtype),
+            y.cast(weak_out_dtype if y.dtype in dtypes.weaks and y._uop.base.op is Ops.CONST else out_dtype))
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)

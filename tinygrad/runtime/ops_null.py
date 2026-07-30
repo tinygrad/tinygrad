@@ -1,4 +1,4 @@
-import inspect, math
+import inspect
 from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent, Program, TinyELF
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
@@ -41,7 +41,7 @@ class NullGraph(MultiGraphRunner):
         descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", count:=event_count.get(device, 0)))
         event_count[device] = count+1
       # pack events evenly per device
-      dur, sigs, ents = max(1, math.ceil((perf_counter_us()-st)/max(event_count.values()))), [], []
+      dur, sigs, ents = 1, [], []  # synthetic 1us per event: NULL profiles are deterministic, never host-load-dependent
       for i,(device,name,count) in enumerate(descs):
         sigs += [st+count*dur, st+(count+1)*dur]
         ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1))

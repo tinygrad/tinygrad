@@ -347,7 +347,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx=({}, False), name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -373,6 +373,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
+  sink = graph_rewrite(sink, pm_lower_index_dtype, ctx=({}, True), name="lower post-decomp weak consts")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")

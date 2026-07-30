@@ -61,11 +61,13 @@ indexing_simplify = PatternMatcher([
 # get list of (height, width) that do not require pitch padding
 def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   if (ALIGN:=next((int(p.split('=')[1]) for p in arch.split(',') if p.startswith("IMAGE_PITCH_ALIGNMENT=")), 0)) == 0: return []
+  ROW_ALIGN = 256 if OSX else ALIGN
   MAXW, pxls = 16384, size // 4
   if base not in (dtypes.half, dtypes.float) or size > 4*MAXW*MAXW: return []
   # height=1 images just need to abide by alignment requirements in bytes, not pixels!
-  if size % (ALIGN * 4) != 0: return [] if (base.itemsize * size) % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
-  return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
+  if size % (ROW_ALIGN * 4) != 0: return [] if (base.itemsize * size) % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
+  return [(pxls//ROW_ALIGN//k, ROW_ALIGN*k) for k in
+          range(ceildiv(pxls//ROW_ALIGN, MAXW), min(pxls//ROW_ALIGN, MAXW//ROW_ALIGN)+1) if (pxls//ROW_ALIGN)%k == 0]
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   shapes, ren = ctx

@@ -69,10 +69,12 @@ class CLProgram(Program['CLDevice']):
                                     (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))
     if wait:
       assert event is not None
-      check(cl.clWaitForEvents(1, event))
-      check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_START, 8, ctypes.byref(start := ctypes.c_uint64()), None))
-      check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_END, 8, ctypes.byref(end := ctypes.c_uint64()), None))
-      return float(end.value-start.value) * OSX_TIMING_RATIO * 1e-9
+      try:
+        check(cl.clWaitForEvents(1, event))
+        check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_START, 8, ctypes.byref(start := ctypes.c_uint64()), None))
+        check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_END, 8, ctypes.byref(end := ctypes.c_uint64()), None))
+        return float(end.value-start.value) * OSX_TIMING_RATIO * 1e-9
+      finally: check(cl.clReleaseEvent(event))
     return None
 
 class CLAllocator(LRUAllocator['CLDevice']):

@@ -4,7 +4,7 @@ from tinygrad import Device
 from tinygrad.device import Buffer, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import Target
-from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler, cl
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLCompileCache(unittest.TestCase):
@@ -15,6 +15,14 @@ class TestCLCompileCache(unittest.TestCase):
     device.runtime(obj)
     with patch.object(CLCompiler, 'compile', side_effect=RuntimeError("compile should not be called on cache hit")):
       device.runtime(obj)
+
+  def test_wait_releases_event(self):
+    device = Device[Device.DEFAULT]
+    obj = TinyELF(b"__kernel void event_test() {}", "event_test", Target("CL"), ())
+    prg = device.runtime(obj)
+    with patch.object(cl, "clReleaseEvent", wraps=cl.clReleaseEvent) as release:
+      prg(wait=True)
+      release.assert_called_once()
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
