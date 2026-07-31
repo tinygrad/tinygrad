@@ -137,8 +137,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
+    # stores that alias (same buf+idx+valid from multiple store sites, e.g. a double-buffered LDS
+    # slot written in a prologue and a loop body) can't be merged: merging would drop one write.
+    # keep those scalar and only coalesce the unique ones.
+    keys = [k for k in sorted(offsets.keys()) if op is Ops.LOAD or len(offsets[k]) == 1]
     # do the grouping
-    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
+    grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(keys), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(None, full_grp[0])
@@ -148,10 +152,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         offset = offset.valid(valid) if valid is not None else offset
         idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(None, len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
-          datas = []
-          for i,g in enumerate(grp):
-            assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
-            datas.append(offsets[g][0].src[1])
+          datas = [offsets[g][0].src[1] for g in grp]
           store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:

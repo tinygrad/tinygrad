@@ -59,9 +59,13 @@ pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
+SPLITTABLE_TYPES = {AxisType.WEAK, AxisType.REDUCE, AxisType.LOOP}
+
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
-  # ranges that aren't looped over can't be split
-  if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
+  # ranges that aren't looped over can't be split. ranges with hardware meaning are never split
+  # (LOCAL/WARP/THREAD/GLOBAL/GROUP_REDUCE/DEVICE map to launch dims; UPCAST/UNROLL are vector
+  # widths): splitting them scrambles the logical<->hardware mapping of hand-written kernels.
+  if r not in ctx and r.arg[-1] in SPLITTABLE_TYPES \
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:

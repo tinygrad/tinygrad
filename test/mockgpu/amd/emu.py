@@ -372,11 +372,33 @@ def _write_val(bits: int, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
   return _write_64bit(val, wfn, reg_or_addr, is_mem, *args) if bits == 64 else [wfn(reg_or_addr, _to_u32(val), *args)]
 
 def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, data_bits: int = 32) -> list[UOp]:
-  """Conditional memory store with sub-word support. Returns list of store UOps."""
+  """Conditional memory store with sub-word and unaligned support. Returns list of store UOps.
+
+  FLAT/GLOBAL accesses on AMD hardware are allowed to be unaligned, so a 32-bit store at a
+  byte offset of 1-3 spans two words (handled in 64-bit domain to keep shifts in range)."""
   adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
+  if data_bits > 32:   # wider stores decompose into dwords; each dword handles its own alignment
+    ws = val.cast(dtypes.uint64) if data_bits > 64 else val
+    return [s for i in range(data_bits // 32)
+            for s in _mem_store(mem, addr + UOp.const(adt, i * 4), ws >> UOp.const(ws.dtype, 32 * i) if i else ws, active, addr_bits, 32)]
   word_addr = addr >> UOp.const(adt, 2)
   idx = mem.index(word_addr.valid(active))
-  if data_bits == 32: return [idx.store(active.where(_to_u32(val), idx))]
+  if data_bits == 32:
+    byte_off = (addr & UOp.const(adt, 3)).cast(dtypes.uint32)
+    is_unaligned = byte_off.ne(UOp.const(dtypes.uint32, 0))
+    if addr.divides(4) is not None: return [idx.store(active.where(_to_u32(val), idx))]
+    shift = byte_off * UOp.const(dtypes.uint32, 8)
+    val64 = _to_u32(val).cast(dtypes.uint64)
+    # word0 keeps its low byte_off*8 bits, gets val's low bits shifted in; word1 gets the rest
+    low_keep = (UOp.const(dtypes.uint32, 1) << shift) - UOp.const(dtypes.uint32, 1)
+    lo_bits = ((val64 << shift.cast(dtypes.uint64)) & UOp.const(dtypes.uint64, 0xFFFFFFFF)).cast(dtypes.uint32)
+    new_word0 = (idx & low_keep) | lo_bits
+    store0 = idx.store(active.where(is_unaligned.where(new_word0, _to_u32(val)), idx))
+    idx1 = mem.index((word_addr + UOp.const(adt, 1)).cast(dtypes.int64).valid(active & is_unaligned))
+    spill = (val64 >> (UOp.const(dtypes.uint64, 32) - shift.cast(dtypes.uint64))).cast(dtypes.uint32)
+    keep = UOp.const(dtypes.uint32, 0xFFFFFFFF) << shift
+    new_word1 = (idx1 & keep) | spill
+    return [store0, idx1.store((active & is_unaligned).where(new_word1, idx1))]
   # Sub-word store: read-modify-write with mask
   byte_pos = addr.cast(dtypes.uint32) & _c(3)
   byte_shift = byte_pos * _c(8)
@@ -2114,6 +2136,8 @@ def _decode_at(pc: int, arch: str):
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
+_inst_hist: dict = {}
+
 class WaveState:
   __slots__ = ('vgpr_buf', 'sgpr_buf', 'accvgpr_buf', '_vgpr_mv', '_sgpr_mv', 'n_lanes', 'wave_size')
 
@@ -2209,7 +2233,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * wave_size, dtypes.uint8).ensure_allocated() if scratch_size else None
+  ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
+  # NOTE: scratch (private/spill) memory is per-wavefront; buffers are allocated in the wave loop below
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:
@@ -2227,6 +2252,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
     return program[pc]
 
+  if os.getenv("EMU_TRACE_INST") or os.getenv("EMU_WATCH_PC") is not None:
+    print(f"[emu-dispatch] gx={gx} gy={gy} gz={gz} lx={lx} ly={ly} lz={lz} scratch={scratch_size}", flush=True)
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
@@ -2237,18 +2264,27 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         for gidx in range(gx):
           # Initialize all wavefronts for this workgroup
           waves: list[tuple[WaveState, list]] = []
+          wave_scratch_bufs: list[Buffer] = []   # keep alive for the dispatch
           for wave_start in range(0, total_threads, wave_size):
             st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data,
                             wave_size)
+            # each wavefront owns its private (spill) scratch segment: on real HW the ring is indexed by
+            # (wave_id, lane), and scratch addresses here are lane*stride within the wave's segment.
+            if scratch_size:
+              wave_scratch_bufs.append(Buffer('CPU', scratch_size * wave_size, dtypes.uint8).ensure_allocated())
+              ctypes.memset(wave_scratch_bufs[-1]._buf.va_addr, 0, scratch_size * wave_size)
             c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
                       ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                      ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0),
+                      ctypes.c_uint64(wave_scratch_bufs[-1]._buf.va_addr if scratch_size else 0),
                       ctypes.c_uint64(st.accvgpr_buf._buf.va_addr)]
             waves.append((st, c_bufs))
 
           # Execute wavefronts with barrier synchronization
           # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
           done = [False] * len(waves)
+          _exec_dumped: set = set()
+          _trace_on = bool(os.getenv("EMU_TRACE_INST")) and total_threads >= int(os.getenv("EMU_TRACE_MIN_THREADS", "1"))
+          if _trace_on: _inst_hist.clear()
           for total_inst in range(10_000_000):
             if all(done): break
             for wi, (st, c_bufs) in enumerate(waves):
@@ -2259,9 +2295,23 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 if pc == ENDPGM_PC:
                   done[wi] = True
                   if tracing: sqtt_finish(wi)
+                  if os.getenv("EMU_EXEC_DUMP") and wi not in _exec_dumped:
+                    _exec_dumped.add(wi)
+                    print(f"[exec-dump] gid=({gidx},{gidy},{gidz}) wave{wi} "
+                          f"exec_lo={st._read_sgpr(EXEC_LO.offset):08x} exec_hi={st._read_sgpr(EXEC_LO.offset+1):08x}")
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
+                if _trace_on:
+                  key = (gidx, gidy, gidz, wi)
+                  _inst_hist.setdefault(key, []).append((pc - lib, type(inst).__name__, getattr(inst, 'op', None) and inst.op.name))
+                wpc, wwave = os.getenv("EMU_WATCH_PC"), int(os.getenv("EMU_WATCH_WAVE", "0"))
+                if wpc is not None and (int(wpc) < 0 or (pc - lib) == int(wpc)) and wi == wwave and gidx == gidy == gidz == 0:
+                  if int(wpc) < 0 and total_inst < 800: print(f"[watch-stream] pc={pc-lib} {inst!r}", flush=True)
+                  for rv in os.getenv("EMU_WATCH_VGPR", "").split(","):
+                    if rv: print(f"[watch pc={pc-lib}] wave{wi} {rv}:", [st._read_vgpr(int(rv[1:]), l) for l in range(8)], flush=True)
+                  for rv in os.getenv("EMU_WATCH_SGPR", "").split(","):
+                    if rv: print(f"[watch pc={pc-lib}] wave{wi} {rv}:", [st._read_sgpr(int(rv[1:]))], flush=True)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
@@ -2284,6 +2334,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           else: raise RuntimeError("exceeded 10M total scheduling rounds")
           tracing = False  # only trace the first workgroup
 
+          if _trace_on:
+            import pickle
+            tag = os.environ["EMU_TRACE_INST"]
+            with open(f"/tmp/emu_trace_{tag}.pkl", "wb") as f: pickle.dump(dict(_inst_hist), f)
+            os.environ.pop("EMU_TRACE_INST", None)   # only dump for the first matching dispatch
           # Reset LDS for next workgroup
           if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
 

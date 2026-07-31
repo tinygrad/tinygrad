@@ -248,6 +248,24 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
 
+  def test_coalesce_aliased_stores(self):
+    from tinygrad.codegen.late.coalesce import memory_coalescing
+    from tinygrad import Device
+    # two distinct stores to the same INDEX (e.g. a double-buffered LDS slot written in a
+    # prologue and a loop body) can't be merged: merging would drop one write
+    lbuf = UOp.placeholder((64,), dtypes.half, 0, AddrSpace.LOCAL)
+    r = UOp.range(4, 0, AxisType.LOOP)
+    gbuf = UOp.placeholder((64,), dtypes.half, 1, AddrSpace.GLOBAL)
+    s_a = lbuf.index(r*2).store(gbuf.index(r*2).load())
+    s_b = lbuf.index(r*2).store(gbuf.index(r*2+64).load())   # aliases s_a
+    s_c = lbuf.index(r*2+1).store(gbuf.index(r*2+32).load()) # adjacent, unique -> coalesceable with nothing
+    out = memory_coalescing(UOp.sink(s_a, s_b, s_c).end(r), Device["NULL"].renderer)
+    stores = [u for u in out.toposort() if u.op is Ops.STORE]
+    # both aliased stores survive (both datas preserved), nothing merged across them
+    self.assertEqual(len([u for u in stores if u.src[0].src[1] is not None and u.src[0].op is Ops.INDEX]), 3)
+    datas = sorted([u.src[1] for u in stores], key=str)
+    self.assertEqual(len(datas), 3)
+
   def test_devectorize_derives_lane_dtype(self):
     from tinygrad.codegen import do_devectorize
     # an Invalid lane derives bool while the value lane derives float: the lane rebuild must derive, not inherit

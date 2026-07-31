@@ -22,29 +22,31 @@ Pipelining status: STAGES=2 gives the kittens-shaped double-buffered pipeline (2
 like gemm_bf16.cpp, copies overlap the previous pair's mma's), written with FA/gemm_fragment
 conventions: LDS buffers are (2, tile) placeholders indexed by symbolic parity (ko % 2),
 which sidesteps static slot choice, fill iterations, predication and duplicate static stores.
-It is validated on the CDNA4 emulator for even K/64 >= 4 with a SINGLE workgroup
-(bit-close to stages=1 across amt in {4, 6, 8, 10, 14, 16}).
+Validated on the CDNA4 emulator for all tile counts (amt = K//64 in {1..32}, odd/even),
+single- AND multi-workgroup (bit-close to stages=1 / to hippkittens at rounding level).
 
-Known remaining bugs (as of the origin/master merge):
-  - MULTI-WORKGROUP launches miscompute the pipeline (all workgroups hit the
-    "accumulator reads the pre-loop value" failure, while a single workgroup with the
-    identical instruction stream computes correctly). Not yet root-caused; suspicious areas:
-    per-WG scheduling of the pipeline's explicit barrier+prefetch interleave in the mock
-    emulator, or grid-shape-dependent codegen of the parity/prologue copy.
-  - Odd or small tile counts (amt < 4 or odd amt) vary by run (looks like a copy/read race
-    in the prefetch's clamped tail writes) and currently fall back to stages=1.
-See the gating logic in hk_bf16_gemm_kernel for what currently selects the pipeline.
+Bug hunt notes (all fixed on this branch; they were entangled for a long time):
+  1. The double-buffered pipeline REGISTER-SPILLS (255+ VGPRs vs 166 for stages=1), and the
+     mock emulator aliased the spill (scratch) segment of ALL waves of a workgroup onto one
+     64-lane region. On real HW each wavefront owns a per-lane segment of the scratch ring
+     (indexed by (wave_id, lane)); waves trampled each other's spilled accumulators, giving
+     the "only the last wave's output survives" signature. emu.py now allocates per-wave
+     scratch buffers.
+  2. The remaining "shape-dependent" corruption (NaNs, mispositioned values in contiguous
+     copies feeding the GEMM) came from tinygrad's devectorizer fusing adjacent bf16 stores
+     into 32-bit stores with UNALIGNED (2-byte) granularity: legal on AMD FLAT/GLOBAL (the
+     hardware splits them), but the emulator floored misaligned addresses to the word below.
+     _mem_store now handles unaligned 32-bit (and wider) accesses byte-exactly.
+  3. memory_coalescing (late/coalesce.py) assumed a single static store per (buffer, index)
+     ("attempting multiple stores"); aliased stores (a double-buffered LDS slot written in a
+     prologue AND a loop body) are now simply kept scalar instead of asserting/merging.
+  4. pm_split_ranges may only split ranges WITHOUT hardware meaning (WEAK/REDUCE/LOOP);
+     splitting LOCAL/WARP/THREAD/GLOBAL/GROUP_REDUCE/UPCAST ranges scrambles the
+     logical<->hardware mapping of hand-written kernels such as this one.
 
-Known blockers found along the way (as of this branch):
-  1. pm_split_ranges refactors AxisType.LOCAL ranges against index expressions, scrambling
-     the logical<->hardware lane mapping WMMA fragments are written against -> use UOp.special.
-  2. memory_coalescing (late/coalesce.py) assumes a single static store per (buffer, index):
-     a double-buffered LDS slot written by prologue *and* in-loop copies asserts
-     "attempting multiple stores". That blocks the stages=2 pipeline below unless DMC=1
-     (which also drops adjacent-store vectorization on the copy-out side).
-  3. RDNA4 (gfx12) uses 8-element accumulator fragments, so the 8x4 tile grid needs
-     256 fp32 acc registers per thread -> guaranteed spills (0.85 TF vs 96 TF default on
-     gfx1201). The kernel is right-sized for CDNA4 (fragsz 4 -> 128 acc regs).
+  RDNA4 (gfx12) uses 8-element accumulator fragments, so the 8x4 tile grid needs
+  256 fp32 acc registers per thread -> guaranteed spills (0.85 TF vs 96 TF default on
+  gfx1201). The kernel is right-sized for CDNA4 (fragsz 4 -> 128 acc regs).
 
 Lane layouts (RDNA4 verified with probing on gfx1201 hardware; CDNA from the mfma docs):
   CDNA (64 thr/warp, 16x16x32):  A/B frag: tile-row = l%16, k = (l//16)*8+i (i in 0..7)
@@ -57,8 +59,8 @@ every fragment 8 contiguous halves (one 16B chunk) on both archs; the copy path 
 same permutation.
 
 NOTE: thread ids come from UOp.special (like mi350x_uop_matmul.py), not an AxisType.LOCAL
-RANGE: pm_split_ranges refactors LOCAL ranges after index expressions and scrambles the
-logical<->hardware lane mapping the WMMA fragments are written against.
+RANGE. (pm_split_ranges now only splits WEAK/REDUCE/LOOP ranges, so LOCAL ranges would
+survive too, but UOp.special is the sanctioned way to tag hardware lane ids.)
 NOTE 2: WMMA operand/accumulator fragments must carry the fragment length in their UOp shape.
 NOTE 3: swizzled addresses are written in provably-contiguous "base + vector-offset" form,
 otherwise the devectorizer emits scalar ds_read_u16/ds_write_b16.
@@ -182,11 +184,7 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
 
   # ---- K loop ----
   amt = cdiv(K, K_STEP)
-  # stages=2 pipeline is validated on the CDNA4 emulator for K % 128 == 0, amt >= 4, and a
-  # single workgroup (amt in {4, 6, 8, 10, 14, 16} sweep-verified bit-close to stages=1).
-  # Multi-workgroup launches currently miscompute the pipeline (see DIAGNOSIS in the docstring).
-  multi_wg = (M // BLOCK_M) * (N // BLOCK_N) > 1
-  _stages = stages if (K % (2*K_STEP) == 0 and amt >= 4 and not multi_wg) else 1
+  _stages = stages
   if _stages == 1:
     ko = UOp.range(amt, 600, AxisType.LOOP)
     A_l, B_l = load_stage(0, ko, 100, barrier=True)
@@ -215,6 +213,11 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
     # conventions): slot ko%2 holds k-tile ko; compute of tile ko overlaps the prefetch
     # copy of tile ko+1 into the other slot. No fill iteration, no predication, one static
     # store per slot scope, add_war_barrier protects each hand-off.
+    # NOTE: this requires pm_split_ranges to split the ko LOOP range at the (ko % 2)
+    # boundary (ko -> 2 inner iterations with static parity per body). Without the split
+    # the parity stays symbolic, the LDS swizzle decomposition masks it with (x & 8191)<<2
+    # style chains, the devectorizer scalarizes all fragment reads/copies
+    # (DS_READ_U16/DS_WRITE_B16 -> mis-addressed + 2 mfma's lost) and the kernel misfires.
     ko = UOp.range(amt, 600, AxisType.LOOP)
     pr, pn = ko % 2, (ko+1) % 2                      # slot of the tile being computed / being prefetched
     kt_next = UOp.minimum(ko+1, amt-1)               # clamped tail prefetch (its data is unused)
@@ -268,7 +271,7 @@ if __name__ == "__main__":
       A = Tensor(An, dtype=dtypes.bfloat16).contiguous()
       B = Tensor(Bn, dtype=dtypes.bfloat16).contiguous()             # (K,N) for asm_gemm
       c_hkc = asm_gemm(A, B).realize().float().numpy()               # real HipKittens hk_bf16_gemm
-      c_hkt = hk_bf16_gemm_tiny(A, B.T.contiguous()).realize().float().numpy()
+      c_hkt = hk_bf16_gemm_tiny(A, B.T.contiguous(), stages=getenv("STAGES", 2)).realize().float().numpy()
       ref64 = A.float().numpy().astype(np.float64) @ B.float().numpy()
       tag = "ident" if identity else "rand "
       print(f"({M},{N},{K}) {tag}: tiny-vs-kittens {np.abs(c_hkt-c_hkc).max():9.6f}  "
