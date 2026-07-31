@@ -55,7 +55,7 @@ def grouped_mx_wgrad(g:Tensor, xg:Tensor, expert_off:Tensor, n_experts:int) -> T
   dname = (g.device[0] if isinstance(g.device, tuple) else g.device).split(":")[0]
   is_multi = isinstance(g.device, tuple)
   inv = Tensor.invalids(1, n_experts * N, K, dtype=dtypes.bfloat16, device=g.device)
-  out = Tensor(inv.uop.multi(0), device=g.device) if is_multi else inv
+  out = Tensor(inv.uop.unshard(0), device=g.device) if is_multi else inv
   out = Tensor.custom_kernel(out, gT, xT, g_si, x_si, expert_off,
                              fxn=functools.partial(custom_hk_grouped_mxfp8_wgrad, dname=dname, n_experts=n_experts))[0]
   out = out.sum(0) if is_multi else out.squeeze(0)
@@ -103,7 +103,7 @@ def grouped_mx_gemm(x:Tensor, w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor)
   if isinstance(x.device, tuple) and (row_axis := x.uop.axis) is not None:
     ndev = len(x.device)
     out = Tensor(Tensor.invalids(*(s // ndev if i == row_axis else s for i, s in enumerate(out_shape)),
-                                 dtype=dtypes.bfloat16, device=x.device).uop.multi(row_axis), device=x.device)
+                                 dtype=dtypes.bfloat16, device=x.device).uop.unshard(row_axis), device=x.device)
   else:
     out = Tensor.invalids(*out_shape, dtype=dtypes.bfloat16, device=x.device)
   return Tensor.custom_kernel(out, x_q, w_q, x_si, w_si, xe_in, w_e8, expert_off,

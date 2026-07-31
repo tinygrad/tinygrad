@@ -9,8 +9,7 @@ from extra.lr_scheduler import OneCycleLR
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 
 # override tinygrad defaults
-dtypes.default_float = dtypes.half
-Context(FUSE_OPTIM=1).__enter__()
+Context(DEFAULT_FLOAT=dtypes.half, FUSE_OPTIM=1).__enter__()
 
 # from https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 batchsize = getenv("BS", 1024)

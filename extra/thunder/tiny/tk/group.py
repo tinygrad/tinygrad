@@ -224,7 +224,7 @@ class Group:
 
       # store to shared memory
       red_local_store = red_local[self.laneid].store(red_reg[0])
-      red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
+      red_local = red_local.after(red_local_store).reshape(red_local.shape)
 
       # reduce from shared memory
       for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
@@ -258,7 +258,7 @@ class Group:
 
       # store to shared memory
       red_local_store = red_local[self.laneid].store(red_reg[0])
-      red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
+      red_local = red_local.after(red_local_store).reshape(red_local.shape)
 
       # reduce from shared memory
       for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
@@ -342,7 +342,7 @@ class Group:
           if src.dtype != dst.dtype:
             src_load = src_load.cast(dst.dtype)
           dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
-          dst_store = dst_store.end(height, width, outer, inner).barrier()
+          dst_store = dst_store.end(height, width, outer, inner)
     elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])

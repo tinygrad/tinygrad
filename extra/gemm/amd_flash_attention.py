@@ -84,16 +84,16 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
     q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
     k[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
-  qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
-  Q_lds = Q_lds.after(qk_load_barrier)
-  KV_lds_k = KV_lds.after(qk_load_barrier)
+  # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+  Q_lds = Q_lds.after(UOp.group(Q_store, K_store))
+  KV_lds_k = KV_lds.after(UOp.group(Q_store, K_store))
 
   # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
   S_reg = S_reg.after(S_reg.after(n_tile).store(S_reg.const_like(0)))
   k_qk = UOp.range(D // WMMA_K, 101, AxisType.REDUCE)
-  tm1 = UOp.range(TM // WMMA_ACC, 200, AxisType.LOOP)
-  tn1 = UOp.range(TN, 201, AxisType.LOOP)
+  tm1 = UOp.range(TM // WMMA_ACC, 200)
+  tn1 = UOp.range(TN, 201)
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
@@ -110,7 +110,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
   # warp reduce max (in-place)
-  ri_w = UOp.range(TM, 270, AxisType.LOOP)
+  ri_w = UOp.range(TM, 270)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce_max(m_ij[ri_w], lane)).end(ri_w))
 
   # compute P = exp(S - m_ij) in S_reg
@@ -120,7 +120,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
   p_local = p_local.after(p_local.store(p_local.after(rp2) + S_reg[:, rp2]).end(rp2))
-  ri_ws = UOp.range(TM, 295, AxisType.LOOP)
+  ri_ws = UOp.range(TM, 295)
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
   # write P = exp(S - m_ij) to P_lds (reuses slot 0, Q no longer needed)
@@ -130,11 +130,11 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   P_store = P_write[tid].store(S_reg.cast(dtypes.half))
 
   # -- online softmax correction --
-  ri4 = UOp.range(TM, 330, AxisType.LOOP)
+  ri4 = UOp.range(TM, 330)
   m_new_val = m_i[ri4].maximum(m_ij[ri4])
   alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
   beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
-  rj4 = UOp.range(TD, 331, AxisType.LOOP)
+  rj4 = UOp.range(TD, 331)
   correction = UOp.group(
     acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
     l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
@@ -147,21 +147,21 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   # load V into KV_lds (must wait for QK WMMA to finish reading K from KV_lds)
   V_store = KV_lds.after(qk_done).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
     v[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
-  pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
-  P_lds = P_lds.after(pv_barrier)
-  KV_lds_v = KV_lds.after(pv_barrier)
+  # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+  P_lds = P_lds.after(UOp.group(P_store, V_store))
+  KV_lds_v = KV_lds.after(UOp.group(P_store, V_store))
 
   # -- acc += P @ V via WMMA --
   k_pv = UOp.range(BLOCK_N // WMMA_K, 400, AxisType.REDUCE)
-  tm2 = UOp.range(TM // WMMA_ACC, 401, AxisType.LOOP)
-  tn2 = UOp.range(TD, 402, AxisType.LOOP)
+  tm2 = UOp.range(TM // WMMA_ACC, 401)
+  tn2 = UOp.range(TD, 402)
   acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
   v_frag = KV_lds_v.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
   pv = UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), *WMMA_ARG)
 
   # end KV tile loop
-  n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).barrier().end(n_tile)
+  n_tile_end = acc_frag.store(pv).end(tm2, tn2).end(k_pv).end(n_tile)
   acc = acc.after(n_tile_end)
   l_i = l_i.after(n_tile_end)
   m_i = m_i.after(n_tile_end)

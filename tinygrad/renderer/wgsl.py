@@ -6,16 +6,18 @@ from tinygrad.helpers import strip_parens
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
 def sign_extend(val:UOp, sext_am:int):
-  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(dtypes.uint32, 0xffffffff) << sext_am, UOp.const(dtypes.uint32, 0)) \
+  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff, dtypes.uint32) << sext_am, UOp.const(0, dtypes.uint32)) \
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
 def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
   elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
+  # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
+  if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
   idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
-  buf = UOp.load(idx, *((UOp.const(dtypes.uint32, 0), gate) if gate is not None else ()), dtype=dtypes.uint32)
+  buf = UOp.load(idx, *((UOp.const(0, dtypes.uint32), gate) if gate is not None else ()), dtype=dtypes.uint32)
   return UOp.store(idx, (buf & wmask) | new_v, *((gate,) if gate is not None else ()))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))

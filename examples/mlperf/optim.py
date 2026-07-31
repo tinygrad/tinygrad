@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.nn.optim import Optimizer
+from tinygrad.nn.optim import Optimizer, OptimizerGroup
 from tinygrad.helpers import FUSE_OPTIM, getenv
 from tinygrad.uop.ops import UOp, Ops
 
@@ -43,7 +43,7 @@ class GradAccClipAdamW(Optimizer):
 
   def _zero_shard(self, t:Tensor) -> Tensor:
     if not self.zero or (t.shape[0] % len(self.device)) != 0: return t
-    return Tensor(t.uop._shard(0, len(self.device)).multi(0)).clone()
+    return Tensor(t.uop._shard(0, len(self.device)).unshard(0)).clone()
 
   def _zero_gather(self, t:Tensor) -> Tensor:
     if not isinstance(t.device, tuple) or t.uop.axis != 0: return t
@@ -121,3 +121,21 @@ class GradAccClipAdamW(Optimizer):
       return ret.shard_like(t) if offloaded else ret
     out = new_w.cast(t.dtype)
     return out.shard_like(t) if offloaded else out
+
+class GradAccClipAdamWGroup(OptimizerGroup):
+  def fstep(self, grads:list[Tensor], grad_norm:Tensor|None=None):
+    offset = 0
+    to_realize = []
+    for o in self.optimizers:
+      n = len(o.params)
+      to_realize += o.fschedule_step(grads[offset:offset+n])
+      offset += n
+    Tensor.realize(*to_realize, *([grad_norm] if grad_norm is not None else []))
+  @property
+  def lr(self): return self.optimizers[0].lr
+  @property
+  def device(self): return self.optimizers[0].device
+  @property
+  def master_params(self):
+    mp = [mp for o in self.optimizers for mp in (o.master_params or [])]
+    return mp if mp else None

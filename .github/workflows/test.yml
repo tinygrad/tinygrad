@@ -167,6 +167,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
+        python-version: '3.11'
         deps: testing_unit
         llvm: 'true'
         amd: 'true'
@@ -176,13 +177,14 @@ jobs:
       run: |
         DEV=NULL python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
         DEV=NULL VIZ=1 python3 -m pytest -n=auto test/null/test_viz.py
+        DEBUG=7 python -m tinygrad.viz.cli --json | jq empty
     # TODO: too slow
     # - name: Run SDXL on NULL backend
     #   run: DEV=NULL DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
     - name: Run Clip tests for SD MLPerf on NULL backend
       run: DEV=NULL python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     - name: Run AMD emulated BERT training on NULL backend
-      run: DEV=NULL::gfx1201 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+      run: DEV=NULL::gfx1201 NULL_ALLOW_COPYOUT=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: DEV=NULL python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
@@ -199,6 +201,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
+        python-version: '3.11'
         pydeps: "pre-commit"
         deps: testing_unit
         llvm: 'true'
@@ -350,6 +353,8 @@ jobs:
         run: DEV=NULL NULL_ALLOW_COPYOUT=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
       - name: Test llama 3 training
         run: DEV=NULL NULL_ALLOW_COPYOUT=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
+      - name: Test gpt-oss training
+        run: DEV=NULL NULL_ALLOW_COPYOUT=1 SAMPLES=32 BS=2 SEQLEN=128 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 MXFP8=1 VOCAB_SIZE=32000 LAYERS=2 EXPERTS=4 MODEL=gptoss PYTHONPATH=. python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -478,7 +483,7 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install llvm-21 llvm-21-tools cloc
+          sudo apt-get install -y llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
@@ -628,7 +633,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
-    runs-on: &macos macos-26
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -677,7 +682,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: MacOS (DEV=METAL) (${{ matrix.group }})
-    runs-on: *macos
+    runs-on: macos-26
     timeout-minutes: 20
     env:
       DEV: METAL
@@ -709,7 +714,7 @@ jobs:
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
-    runs-on: *macos
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code

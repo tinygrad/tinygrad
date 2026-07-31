@@ -5,7 +5,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
+from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -144,7 +144,6 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  supports_float4 = True
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
@@ -203,7 +202,7 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = (NUM_CPU_THREADS.value, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
@@ -226,7 +225,6 @@ llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 # weakints will break SPEC verification
 def _idx(i:int) -> UOp: return UOp.const(dtypes.int16, i)
 class AMDLLVMRenderer(LLVMRenderer):
-  has_local = True
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
@@ -296,7 +294,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
           src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
           if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
-          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(_idx(j//2)) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
+          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(_idx(j//2)) if j%2 == 0 else UOp.const(0.0, x.src[2].dtype)
             for j in range(x.max_numel()*2)))),
           arg=(*x.arg[:4], None)).index(_idx(i*2))
           for i in range(x.max_numel()))) if x.max_numel() == 8 else None),

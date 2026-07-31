@@ -93,7 +93,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
   def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
 
-  a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  a = [_take(UOp.const(0, dtypes.uint32), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
@@ -200,7 +200,7 @@ def xexp2(d:UOp) -> UOp:
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   q = rintk(x)
   # s = d - round(d)
-  s = x - q.cast(x.dtype)
+  s = x - q
   # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
   if d.dtype == dtypes.float64:
     u = polyN(s, [0.4434359082926529454e-9, 0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5, 0.1525273353517584730e-4,

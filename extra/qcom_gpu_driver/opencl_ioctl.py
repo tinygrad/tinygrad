@@ -4,7 +4,7 @@ from hexdump import hexdump
 from copy import deepcopy
 import pathlib, sys
 from tinygrad.helpers import to_mv, getenv
-from tinygrad.runtime.autogen import adreno
+from tinygrad.runtime.autogen import mesa
 sys.path.append(pathlib.Path(__file__).parent.parent.parent.as_posix())
 
 IOCTL = getenv("IOCTL", 0)
@@ -23,7 +23,7 @@ for child in xml.getroot():
 CAPTURED_STATE = {}
 
 REGS = {}
-for k, v in adreno.__dict__.items():
+for k, v in mesa.__dict__.items():
   if k.startswith("REG_") and isinstance(v, int) and v > 1024: REGS[v] = k
 
 from extra.qcom_gpu_driver import msm_kgsl
@@ -42,7 +42,7 @@ def get_struct(argp, stype):
 
 def format_struct(s):
   sdats = []
-  for field_name, *_ in s._real_fields_:
+  for field_name, *_ in s._fields_:
     if field_name in {"__pad", "PADDING_0"}: continue
     dat = getattr(s, field_name)
     if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
@@ -96,9 +96,9 @@ def parse_cmd_buf(dat):
         CAPTURED_STATE['LOAD_FRAGS'].append((state_block, state_type, num_unit, dst_off))
 
         if state_block == SB6_CS_SHADER:
-          from extra.disassemblers.adreno import disasm_raw
+          from tinygrad.runtime.support.compiler_mesa import disas_adreno
           if state_type == ST6_SHADER and IOCTL > 3:
-            disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
+            disas_adreno(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
           if state_type == ST6_CONSTANTS:
             x = get_mem(((vals[2] << 32) | vals[1]), num_unit*4)
             CAPTURED_STATE['constants'] = x[:]
@@ -142,7 +142,7 @@ def parse_cmd_buf(dat):
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
       if IOCTL > 0: print(f"{ptr:3X} -- typ 4: {size=:3d}, {reg_name}", hprint(vals))
       for vi,v in enumerate(vals): CAPTURED_STATE[offset+vi] = v
-      if offset == adreno.REG_A6XX_SP_CS_CONFIG:
+      if offset == mesa.REG_A6XX_SP_CS_CONFIG:
         val = vals[0]
         if IOCTL > 0:
           print(f"\tBINDLESS_TEX={(val >> 0) & 0b1}")
@@ -215,79 +215,3 @@ def install_hook(c_function, python_function):
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 install_hook(libc.ioctl, ioctl)
-
-def before_launch():
-  global CAPTURED_STATE
-  CAPTURED_STATE.clear()
-def collect_last_launch_state():
-  global CAPTURED_STATE
-  return deepcopy(CAPTURED_STATE)
-def compare_launch_state(state, good_state):
-  cmp = [
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NTEX__MASK),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NSAMP__MASK),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NIBO__MASK),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_ENABLED),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_TEX),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_SAMP),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_IBO),
-    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_UBO),
-
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__MASK),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__MASK),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__MASK),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__MASK),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_THREADMODE__MASK),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_EARLYPREAMBLE),
-    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_MERGEDREGS),
-
-    (adreno.REG_A6XX_SP_CS_PVT_MEM_PARAM, adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK),
-    (adreno.REG_A6XX_SP_CS_PVT_MEM_PARAM, adreno.A6XX_SP_CS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK),
-
-    (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5),
-    (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6),
-
-    (adreno.REG_A6XX_SP_CS_BRANCH_COND, 0xffffffff),
-
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM__MASK),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__MASK),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__MASK),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__MASK),
-
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_1, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_2, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_3, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_4, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_5, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_6, 0xffffffff),
-
-    (adreno.REG_A6XX_HLSQ_CS_CNTL_0, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_CNTL_1, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_X, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Y, 0xffffffff),
-    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Z, 0xffffffff),
-  ]
-
-  for x,m in cmp:
-    print(f"Field {REGS[x]}, mask: 0x{m:X} cmp: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}")
-    if state.get(x, 0) & m != good_state.get(x, 0) & m:
-      return False, f"Field {REGS[x]}, mask: 0x{m:X} mismatch: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}"
-
-  for n in ['descriptors', 'ibos']:
-    if n not in good_state: continue
-    mv1, mv2 = state.get(n), good_state.get(n)
-
-    if len(mv1) != len(mv2): return False, f"{n}: len mismatch {len(mv1)} != {len(mv2)}"
-    mv1 = memoryview(bytearray(mv1)).cast('I')
-    mv2 = memoryview(bytearray(mv2)).cast('I')
-    for i in range(len(mv2)):
-      if i % 8 == 5 or i % 8 == 4: continue # addresses
-      if mv1[i]!=mv2[i]: return False, f"{n}: content mismatch {i} {mv1[i]} {mv2[i]}"
-
-  for n in ['samplers']:
-    if n not in good_state: continue
-    mv1, mv2 = state.get(n), good_state.get(n)
-    if len(mv1) != len(mv2): return False, f"{n}: len mismatch {len(mv1)} != {len(mv2)}"
-    if any(mv1[i]!=mv2[i] for i in range(len(mv1))): return False, f"{n}: content mismatch"
-
-  return True, "PASS"

@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
@@ -21,8 +21,12 @@ class ElementwiseMixin(CreationMixin):
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    if x.dtype == y.dtype: return x, y
-    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
+    out_dtype = least_upper_dtype(x.dtype, y.dtype)
+    # keep weak CONST weak, might lift weakint -> weakfloat
+    def promote(t):
+      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.arg, weak_dtype(out_dtype)))
+      return t.cast(out_dtype)
+    return promote(x), promote(y)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
@@ -240,7 +244,7 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
-      if a.dtype not in dtypes.weaks: a = a.cast(dtypes.default_float)
+      a = a.cast(dtypes.default_float)
     d = a * b.reciprocal()
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
@@ -391,6 +395,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
+    # ~ is width-dependent: min(a,b) == ~max(~a,~b) only holds at a common width, so a weak operand commits at its sibling's
+    t, x = t.cast(dt:=least_upper_dtype(t.dtype, x.dtype)), x.cast(dt)
     return t._inverse().maximum(x._inverse())._inverse()
 
   def copysign(self, other: Self | ConstType) -> Self:

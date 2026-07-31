@@ -60,8 +60,8 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
   def test_alu_deviceless_const(self):
     s = Tensor([1.0, 2, 3, 4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
-    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0))).numpy(), [2, 3, 4, 5])
-    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
+    np.testing.assert_equal((s + Tensor(UOp.const(1.0, dtypes.float))).numpy(), [2, 3, 4, 5])
+    np.testing.assert_equal((s + Tensor(UOp.const(1.0, dtypes.float)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
 
   def test_add_rank_expand_shard(self):
     # a sharded src keeps its own rank under implicit broadcast, its shard axis right-aligns into the output
@@ -126,6 +126,28 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor([1, 2, 3, 4]).reshape(2, 2)
     with Context(RING=use_ring):
       np.testing.assert_equal(t.shard(devices_2, axis=axis).sum().item(), 10)
+
+  def test_allreduce_cast_half(self, assign=False, kernel_count=8):
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    a_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    b_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    a = a_src.shard(devices, axis=0).realize()
+    b = b_src.shard(devices, axis=0).realize()
+    # assigning creates a copy of the output before allreduce
+    if assign:
+      tst = Tensor.empty_like(b)
+      tst.assign(a + b)
+    else:
+      tst = a + b
+    tst = tst.float().sum(0)
+    GlobalCounters.reset()
+    with Context(ALLREDUCE_CAST=1, RING=0, ALL2ALL=0):
+      tst.realize()
+    kernel_count = GlobalCounters.kernel_count
+    np.testing.assert_allclose(tst.numpy(), (a_src.numpy()+b_src.numpy()).sum(0))
+    self.assertEqual(kernel_count, kernel_count)
+
+  def test_allreduce_cast_half_assign(self): self.test_allreduce_cast_half(assign=True, kernel_count=10)
 
   def test_multiple_to_single_device(self):
     kernel_counts = {}
@@ -575,7 +597,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8))).contiguous()
       a.schedule_linear()
