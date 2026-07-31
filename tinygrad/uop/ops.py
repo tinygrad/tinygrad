@@ -582,7 +582,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    return UOp.const(b, dtype or self.dtype, shape=self._shape)
+    ret = UOp.const(b, dtype or self.dtype)
+    return ret._mop(Ops.EXPAND, arg=self._shape) if self._shape and ret._shape != self._shape else ret
   def vconst_like(self, b:ConstLike, dtype:DType|None=None):
     # for use after movement ops have been removed
     return UOp.const(b, dtype or self.dtype).broadcast(self.max_numel())
@@ -608,16 +609,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
-  def const(b:ConstLike, dtype:DType|None=None, shape:tuple[sint, ...]|None=None):
+  def const(b:ConstLike, dtype:DType|None=None):
     if dtype is None: dtype = dtypes.from_py(b)
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
-    if isinstance(b, tuple):
-      stk = [UOp.const(c, dtype) for c in b]
-      ret = UOp.stack(*stk)
-    else:
-      ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
-    return ret._mop(Ops.EXPAND, arg=shape) if shape is not None and shape != () and ret.shape != shape else ret
+    if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
+    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)

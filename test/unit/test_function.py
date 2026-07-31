@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
 class TestFunction(unittest.TestCase):
@@ -593,7 +593,7 @@ class TestFunctionTuple(unittest.TestCase):
     state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
     @function(precompile=True, allow_implicit=True)
     def f(a:Tensor):
-      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(Invalid, dtypes.float32, shape=(2,))))
+      after = state.uop.after(state.uop.shrink(((0, 2),)).store(Invalid))
       return Tensor(after).contiguous() + a
     out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
     np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
