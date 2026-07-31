@@ -79,6 +79,15 @@ def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
   w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
 
+def _pad_to_mult(t:Tensor, axis:int, mult:int=256) -> Tensor:
+  if (r := (-t.shape[axis]) % mult) == 0: return t
+  pads = [(0, 0)] * t.ndim
+  pads[axis] = (0, r)
+  return t.pad(tuple(pads))
+
+def _pad_cols(t:Tensor) -> Tensor: return _pad_to_mult(t, -1)
+def _pad_rows(t:Tensor) -> Tensor: return _pad_to_mult(t, -2)
+
 def swiglu(x:Tensor, limit:float=7.0, alpha:float=1.702) -> Tensor:
   x_glu, x_linear = x[..., ::2], x[..., 1::2]
   x_glu = x_glu.clamp(max_=limit)
@@ -115,9 +124,9 @@ class GPTOSS:
     self.ffn_norm = Tensor.ones(n_layers, dim).contiguous()
     self.gate = Tensor.normal(n_layers, n_experts, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.gate_bias = Tensor.zeros(n_layers, n_experts, dtype=dtypes.bfloat16).contiguous()
-    self.w_gate_up, self.w_gate_up_scale = self._quant_weight(n_layers, n_experts, intermediate_size * 2, dim)
+    self.w_gate_up, self.w_gate_up_scale = self._quant_weight(n_layers, n_experts, intermediate_size * 2, dim, moe=True)
     self.w_gate_up_bias = Tensor.zeros(n_layers, n_experts, intermediate_size * 2, dtype=dtypes.bfloat16).contiguous()
-    self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std)
+    self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std, moe=True)
     self.w_down_bias = Tensor.zeros(n_layers, n_experts, dim, dtype=dtypes.bfloat16).contiguous()
 
     # output
@@ -127,10 +136,15 @@ class GPTOSS:
     self.output = Tensor.normal(vocab_size, dim, mean=0.0, std=INIT_STD, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(head_dim, max_context * 2, rope_theta).contiguous().is_param_(False)
 
-  def _quant_weight(self, *shape:int, std:float=INIT_STD):
-    w = Tensor.zeros(*shape) if getenv("ZEROS") else Tensor.normal(*shape, mean=0.0, std=std)
-    w_q, w_e8, _ = quantize_mxfp8(w)
-    return w_q, w_e8.is_param_(False)
+  def _quant_weight(self, *shape:int, std:float=INIT_STD, moe:bool=False):
+    def _one(*s:int):
+      w = Tensor.zeros(*s) if getenv("ZEROS") else Tensor.normal(*s, mean=0.0, std=std)
+      w_q, w_e8, _ = quantize_mxfp8(_pad_cols(_pad_rows(w)) if moe else w)
+      return w_q, w_e8.is_param_(False)
+    if moe:
+      qs = [_one(*shape[1:]) for _ in range(shape[0])]
+      return [q[0] for q in qs], [q[1] for q in qs]
+    return _one(*shape)
 
   def _attn_mask(self, seqlen:int, dtype) -> Tensor:
     i, j = Tensor.arange(seqlen).reshape(seqlen, 1), Tensor.arange(seqlen).reshape(1, seqlen)
