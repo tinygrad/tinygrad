@@ -432,14 +432,14 @@ class TestVizIntegration(unittest.TestCase):
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
     graph = next(viz.get_details(0, 0))["graph"]
-    self.assertEqual(list(graph), [id(c), id(c+1)])
+    self.assertEqual(list(graph), [id(c), id((c+1).src[1]), id(c+1)])
     self.assertTrue(graph[id(c)]["exclude"])
     self.assertFalse(graph[id(c+1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
     graph = next(viz.get_details(1, 1))["graph"]
-    self.assertEqual(list(graph), [id(c), id(c.const_like(2)), id(c+2)])
+    self.assertEqual(list(graph), [id(c), id((c+2).src[1]), id(c+2)])
     self.assertTrue(graph[id(c)]["exclude"])
-    self.assertTrue(graph[id(c.const_like(2))]["exclude"])
+    self.assertTrue(graph[id((c+2).src[1])]["exclude"])
     self.assertFalse(graph[id(c+2)]["exclude"])
 
   def test_recurse(self):

@@ -1,55 +1,25 @@
 """
 tilelang-style matmul_relu written with tinygrad UOp APIs.
 
-Demonstrates that tilelang's T.alloc_fragment is expressible with existing
-tinygrad primitives: a per-thread REG buffer, wrapped in one Ops.UNSHARD per
-sharded axis over the LOCAL thread-grid ranges to form the full logical tile.
-Here the 64 threads are an 8x8 grid and each thread owns an 8x8 sub-tile --
-the 2-D fragment layout tilelang infers. The kernel is written against the
-full-tile UNSHARD view, and multi_pm (the same pass that lowers multi-device
-UNSHARDs) resolves it into per-thread shard code.
-
 Reference tilelang kernel:
-
-    @tilelang.jit
-    def matmul_relu(A, B, block_M=64, block_N=64, block_K=64,
-                    dtype=T.float16, accum_dtype=T.float32):
-        M, N, K = T.const('M, N, K')
-        C = T.empty([M, N], dtype)
-        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
-            A_shared = T.alloc_shared((block_M, block_K), dtype)
-            B_shared = T.alloc_shared((block_K, block_N), dtype)
-            C_local  = T.alloc_fragment((block_M, block_N), accum_dtype)
-            T.clear(C_local)
-            for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
-                T.copy(A[by * block_M, ko * block_K], A_shared)
-                T.copy(B[ko * block_K, bx * block_N], B_shared)
-                T.gemm(A_shared, B_shared, C_local)
-            for i, j in T.Parallel(block_M, block_N):
-                C_local[i, j] = T.max(C_local[i, j], 0)
-            T.copy(C_local, C[by * block_M, bx * block_N])
-        return C
-
-API mapping (tilelang -> tinygrad UOps, idioms from test/backend/test_custom_kernel.py):
-
-    T.Kernel(gx, gy, threads=T)    -> AxisType.GLOBAL ranges (blocks) + AxisType.LOCAL ranges (thread grid)
-    T.alloc_shared(shape, dtype)   -> UOp.placeholder(shape, dtype, slot, AddrSpace.LOCAL)
-    T.alloc_fragment(shape, dt)    -> per-thread REG placeholder, wrapped in one Ops.UNSHARD per sharded axis over
-                                      the AxisType.LOCAL ranges: fragment.unshard((axis_y, axis_x), (ty, tx)).
-                                      The full logical tile is the shard with each sharded axis multiplied by its
-                                      range size, exactly like device sharding, but the sharding axes are thread
-                                      axes carried by the RANGE metadata instead of a device tuple. C_local[i, j]
-                                      with [i, j] in this thread's shard is INDEX on the UNSHARD, which multi_pm
-                                      resolves into INDEX on the per-thread REG shard, axis by axis.
-    T.copy(gmem_slice, smem)       -> smem[thread_idx].set(gmem_slice[thread_idx], end=copy_rng). set returns the
-                                      smem tile AFTER the copy; the implicit-barrier pass turns the store->load
-                                      dependency of the loop that consumes it into a workgroup barrier
-    T.gemm (no WMMA)               -> C_local[..].set(C_local.after(k)[..] + a_shared[..] * b_shared[..], end=k)
-                                      with k a loop-carried LOOP range (codegen builds the register accumulator
-                                      from this self-referential store automatically)
-    T.copy(fragment, gmem)         -> gmem.index(gidx).store(C_local[..]).end(all_ranges)
-    UNSHARD lowering               -> multi_pm in codegen (full_rewrite_to_sink): INDEX/AFTER/STORE ops on the
-                                      full-tile view become per-thread shard ops, no UNSHARD survives into the program.
+  @tilelang.jit
+  def matmul_relu(A, B, block_M=64, block_N=64, block_K=64,
+                  dtype=T.float16, accum_dtype=T.float32):
+    M, N, K = T.const('M, N, K')
+    C = T.empty([M, N], dtype)
+    with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
+      A_shared = T.alloc_shared((block_M, block_K), dtype)
+      B_shared = T.alloc_shared((block_K, block_N), dtype)
+      C_local  = T.alloc_fragment((block_M, block_N), accum_dtype)
+      T.clear(C_local)
+      for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
+        T.copy(A[by * block_M, ko * block_K], A_shared)
+        T.copy(B[ko * block_K, bx * block_N], B_shared)
+        T.gemm(A_shared, B_shared, C_local)
+      for i, j in T.Parallel(block_M, block_N):
+        C_local[i, j] = T.max(C_local[i, j], 0)
+      T.copy(C_local, C[by * block_M, bx * block_N])
+    return C
 """
 
 from tinygrad.dtype import dtypes, AddrSpace, DType
@@ -61,25 +31,17 @@ from tinygrad.tensor import Tensor
 # tilelang builtins, expressed with tinygrad UOp APIs
 # ---------------------------------------------------------------------------
 
-def alloc_shared(shape:tuple[int, ...], dtype:DType) -> UOp:
+def alloc_shared(shape:tuple[int, ...], dtype:DType, slot:int) -> UOp:
   """T.alloc_shared: one LOCAL buffer shared by all threads in the block."""
-  return UOp.placeholder(tuple(shape), dtype, next(UOp.unique_num), AddrSpace.LOCAL)
+  return UOp.placeholder(tuple(shape), dtype, slot, AddrSpace.LOCAL)
 
-def alloc_fragment(shape:tuple[int, ...], dtype:DType, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
-  """T.alloc_fragment: per-thread REG fragment + UNSHARD over the LOCAL thread grid.
-
-  Each thread privately owns shape[axis]//threads elements along every sharded
-  axis in a REG buffer. The UNSHARDs over the LOCAL thread ranges present the
-  full logical tile: full_shape = shard_shape with each sharded axis multiplied
-  by its range size. This is exactly how UNSHARD carries a DEVICE axis today,
-  except the sharding axes are thread axes carried by the RANGE metadata.
-  """
+def alloc_fragment(shape:tuple[int, ...], dtype:DType, slot:int, axes:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
+  """T.alloc_fragment: per-thread REG fragment + UNSHARD over the LOCAL thread grid."""
   assert len(axes) == len(rngs)
   assert all(tnum.op is Ops.RANGE and tnum.arg[-1] is AxisType.LOCAL for tnum in rngs), "fragments shard over LOCAL ranges"
-  assert all(shape[a] % (int(rng.vmax)+1) == 0 for a, rng in zip(axes, rngs))
   by_axis = dict(zip(axes, rngs))
   shard_shape = tuple(s // (int(by_axis[i].vmax)+1) if i in by_axis else s for i, s in enumerate(shape))
-  fragment = UOp.placeholder(shard_shape, dtype, next(UOp.unique_num), AddrSpace.REG)
+  fragment = UOp.placeholder(shard_shape, dtype, slot, AddrSpace.REG)
   return fragment.unshard(axes, rngs)
 
 # ---------------------------------------------------------------------------
@@ -106,64 +68,45 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   # with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=128) as (bx, by):
   bx = UOp.range(cdiv(N, BLOCK_N), 0, AxisType.GLOBAL)
   by = UOp.range(cdiv(M, BLOCK_M), 1, AxisType.GLOBAL)
-  # tx (N, 16) is the fast/inner LOCAL axis so a warp covers 16 cols x 2 rows --
-  # matching tilelang's (tidx>>4, tidx&15) warp composition. This keeps the 8 A_shared
-  # reads in a warp on only 2 row-groups (broadcast across 16 cols) instead of 8 rows
-  # (8-way bank conflict), since A_shared[row*512 + ...] all map to the same bank when 8
-  # distinct rows land in one warp.
+
+  # 16*8 threads = 128 threads
   tx = UOp.range(TX, 2, AxisType.LOCAL)
   ty = UOp.range(TY, 3, AxisType.LOCAL)
 
-  # A_shared = T.alloc_shared((BLOCK_M, BLOCK_K), dtype)
-  # B_shared = T.alloc_shared((BLOCK_K, BLOCK_N), dtype)
-  A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype)
-  B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype)
+  # shared + fragment (regs)
+  A_shared = alloc_shared((BLOCK_M, BLOCK_K), a.dtype, 0)
+  B_shared = alloc_shared((BLOCK_K, BLOCK_N), b.dtype, 1)
+  C_local = alloc_fragment((TM, TY, TX, TN), dtypes.float32, 0, (1, 2), (ty, tx))
 
-  # C_local = T.alloc_fragment((BLOCK_M, BLOCK_N), accum_dtype) -- an 8x4 REG tile per thread of the 8x16 grid
-  C_local = alloc_fragment((BLOCK_M, BLOCK_N), dtypes.float32, (0, 1), (ty, tx))
-
-  # T.clear(C_local) -- each thread zeroes its own fragment sub-tile
-  ic, jc = UOp.range(TM, 4, AxisType.LOOP), UOp.range(TN, 5, AxisType.UPCAST)
-  C_loc = C_local[ic*TM + ty, tx*TN + jc].set(0.0, end=(ic, jc))
+  # zero out the regs to start. this is expanded by the devectorizer
+  C_local = C_local.after(C_local.store(0.0))
 
   # for ko in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
-  # (num_stages pipelining is async copy + multi-buffering; this is the synchronous single-buffer version)
   ko = UOp.range(cdiv(K, BLOCK_K), 6, AxisType.LOOP)
 
-  # T.copy(A[by * BLOCK_M, ko * BLOCK_K], A_shared) -- each thread copies its own 8x4 sub-tile.
-  # Row index is iar*TM + ty (strided by TM across ty), matching tilelang's layout: thread ty owns
-  # rows {ty, ty+8, ..., ty+56} not {ty*8, ..., ty*8+7}.
-  iar, ka = UOp.range(TM, 7, AxisType.LOOP), UOp.range(TN, 8, AxisType.UPCAST)
-  A_store = A_shared[iar*TM + ty, tx*TN + ka].store(a[by*BLOCK_M + iar*TM + ty, ko*BLOCK_K + tx*TN + ka]).end(iar, ka)
+  # index the outer matrices
+  a = a.rearrange("(m bm) (k bk) -> m k bm bk", bm=BLOCK_M, bk=BLOCK_K)[by, ko]
+  b = b.rearrange("(k bk) (n bn) -> k n bk bn", bk=BLOCK_K, bn=BLOCK_N)[ko, bx]
+  c = c.rearrange("(m bm) (n bn) -> m n bm bn", bm=BLOCK_M, bn=BLOCK_N)[by, bx]
 
-  # T.copy(B[ko * BLOCK_K, bx * BLOCK_N], B_shared)
-  kb, ibr = UOp.range(TM, 9, AxisType.LOOP), UOp.range(TN, 10, AxisType.UPCAST)
-  B_store = B_shared[kb*TM + ty, tx*TN + ibr].store(b[ko*BLOCK_K + kb*TM + ty, bx*BLOCK_N + tx*TN + ibr]).end(kb, ibr)
+  # T.copy: A_shared <- a, B_shared <- b
+  def with_threads(x:UOp): return x.rearrange("(tm ty) (tx tn) -> ty tx tm tn", tm=TM, tn=TN)[ty, tx]
+  A_shared = A_shared.after(with_threads(A_shared).store(with_threads(a)))
+  B_shared = B_shared.after(with_threads(B_shared).store(with_threads(b)))
 
-  # get the shared after the stores (single barrier)
-  A_shared = A_shared.after(A_store, B_store)
-  B_shared = B_shared.after(A_store, B_store)
-
-  # T.gemm(A_shared, B_shared, C_local), no WMMA -- per-thread accumulate over its fragment sub-tile.
-  # identical to custom_gemm: a self-referential store over the loop-carried kk range,
-  # which codegen turns into a register accumulator
-  # kk is the outer compute loop (axis 11) so that for each kk we read all 8 A rows and reuse
-  # the B[kk] read across them -- matching tilelang's ko > kk > row > col access order exactly.
-  kk, ir = UOp.range(BLOCK_K, 11, AxisType.LOOP), UOp.range(TM, 12, AxisType.LOOP)
+  # T.gemm(A_shared, B_shared, C_local), no WMMA
+  kk = UOp.range(BLOCK_K, 11, AxisType.LOOP)
+  ir = UOp.range(TM, 12, AxisType.LOOP)
   jj = UOp.range(TN, 13, AxisType.UPCAST)
-  acc = C_loc.after(kk)[ir*TM + ty, tx*TN + jj] + A_shared[ir*TM + ty, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
+  acc = C_local.after(kk)[ir, ty, tx, jj] + A_shared[ir*TM + ty, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them
-  C_loc = C_loc[ir*TM + ty, tx*TN + jj].set(acc, end=(kk, ir, jj, ko))
+  C_local = C_local[ir, ty, tx, jj].set(acc, end=(kk, ir, jj, ko))
 
-  # for i, j in T.Parallel(BLOCK_M, BLOCK_N): C_local[i, j] = T.max(C_local[i, j], 0)
-  # T.copy(C_local, C[by * BLOCK_M, bx * BLOCK_N]) -- per-thread store of the fragment shard (relu fused into it)
-  # LOOP: these loops are the per-thread output layout; convert_loop_to_global must not globalize them
-  ie, je = UOp.range(TM, 14, AxisType.LOOP), UOp.range(TN, 15, AxisType.UPCAST)
-  c_st = c[by*BLOCK_M + ie*TM + ty, bx*BLOCK_N + tx*TN + je].store(C_loc[ie*TM + ty, tx*TN + je].relu().cast(c.dtype))
+  # c <- C_local (with relu and cast): every thread stores its shard's sub-view of the output tile
+  c_st = c.reshape(C_local.shape).store(C_local.relu().cast(c.dtype))
 
-  # all open ranges are closed at the final store (ko was closed above).
-  # the fragment UNSHARDs go to codegen as is: multi_pm there resolves the full-tile view into per-thread shard code
-  return c_st.end(je, ie, tx, ty, bx, by).sink(arg=KernelInfo(name="matmul_relu", opts_to_apply=()))
+  # close the locals and globals
+  return c_st.end(tx, ty, bx, by).sink(arg=KernelInfo(name="matmul_relu", opts_to_apply=()))
 
 # ---------------------------------------------------------------------------
 # python wrapper: same signature as the tilelang function
@@ -188,7 +131,8 @@ if __name__ == "__main__":
   b = Tensor.randn(K, N, dtype=dtype_in).contiguous()
   ref = (a @ b).relu().realize()
 
-  out = matmul_relu(a, b).realize()
+  for _ in range(10):
+    out = matmul_relu(a, b).realize()
 
   import numpy as np
   np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=1e-1, rtol=1e-2)

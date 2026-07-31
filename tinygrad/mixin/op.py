@@ -703,6 +703,28 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
+  def softmin(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the softmin function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmin is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmin().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmin(axis=0).numpy())
+    ```
+    """
+    return (-self).softmax(axis, dtype)
+
   def cat(self, *args:Self, dim:int=0) -> Self:
     """
     Concatenates self with other tensors in `args` along an axis specified by `dim`.
