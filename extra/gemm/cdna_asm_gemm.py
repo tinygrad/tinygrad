@@ -1,8 +1,7 @@
 import atexit, functools, math, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, shape_to_shape_arg
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG, ceildiv
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
@@ -114,10 +113,10 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 @functools.cache
 def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, tile_m:int, tile_n:int) -> UOp:
   from extra.gemm.gemm_mxfp4 import build_kernel
-  M, half_k = A.shape[0]*A.shape[1], A.shape[2]
-  N, half_k_b = B.shape
+  M, half_k = math.prod(A.shape[:-1]), A.shape[-1]
+  N, half_k_b = math.prod(B.shape[:-1]), B.shape[-1]
   K = half_k * 2
-  assert half_k == half_k_b and C.shape == (*A.shape[:-1], N)
+  assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
   threads = UOp.special(256, "lidx0")
   groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
   lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
@@ -138,31 +137,23 @@ def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   packed = mx_pack(e8) if len(batch) == 1 and scale_K % 4 == 0 else None
   return x_clamped.cast(FP8_DTYPE), e8, packed
 
-def _mxfp4_local_last(x:Tensor, fxn) -> Tensor:
-  param = x.as_param(0)
-  inner = Tensor(param.uop.replace(src=(shape_to_shape_arg(param.uop.shard_shape),), arg=replace(param.uop.arg, axis=None)))
-  out = fxn(inner)
-  return Tensor(UOp.maketuple(out.uop).call(x.uop).gettuple(0).unshard(out.ndim-1), device=x.device)
-
-def _mxfp4_shuffle_weight_impl(x:Tensor) -> Tensor:
+def _mxfp4_shuffle_weight(x:Tensor) -> Tensor:
   # shuffle_weight(x, layout=(16, 16)) on the packed uint8 buffer.
+  if x.ndim == 3:
+    ndev, rows, half_k = x.shape
+    return x.reshape(ndev, rows//16, 16, half_k//32, 2, 16).permute(0, 1, 3, 4, 2, 5).reshape(ndev, rows, half_k).contiguous()
   rows, half_k = x.shape
   return x.reshape(rows//16, 16, half_k//32, 2, 16).permute(0, 2, 3, 1, 4).reshape(rows, half_k).contiguous()
 
-def _mxfp4_shuffle_weight(x:Tensor) -> Tensor:
-  return _mxfp4_local_last(x, _mxfp4_shuffle_weight_impl) if isinstance(x.device, tuple) and x.uop.axis == x.ndim-1 \
-    else _mxfp4_shuffle_weight_impl(x)
-
-def _mxfp4_shuffle_scales_impl(x:Tensor) -> Tensor:
+def _mxfp4_shuffle_scales(x:Tensor) -> Tensor:
   # e8m0_shuffle: each 256x8 scale tile is arranged for the raw MFMA scale loads.
+  if x.ndim == 3:
+    ndev, rows, scale_k = x.shape
+    return x.reshape(ndev, rows//32, 2, 16, scale_k//8, 2, 4).permute(0, 1, 4, 6, 3, 5, 2).reshape(ndev, rows, scale_k).contiguous()
   rows, scale_k = x.shape
   return x.reshape(rows//32, 2, 16, scale_k//8, 2, 4).permute(0, 3, 5, 2, 4, 1).reshape(rows, scale_k).contiguous()
 
-def _mxfp4_shuffle_scales(x:Tensor) -> Tensor:
-  return _mxfp4_local_last(x, _mxfp4_shuffle_scales_impl) if isinstance(x.device, tuple) and x.uop.axis == x.ndim-1 \
-    else _mxfp4_shuffle_scales_impl(x)
-
-def _quantize_mxfp4_impl(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+def quantize_mxfp4(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # OCP MXFP4: 1x32 blocks, E2M1 values packed low-nibble first, and E8M0 scales.
   *batch, K = x.shape
   rows = math.prod(batch)
@@ -183,15 +174,12 @@ def _quantize_mxfp4_impl(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   code = code | ((scaled < 0).cast(dtypes.uint8) << 3)
   code = code.reshape(*batch, K)
   packed = code[..., 0::2] | (code[..., 1::2] << 4)
+  if isinstance(x.device, tuple) and x.uop.axis == x.ndim-2 and x.shape[x.uop.axis] == len(x.device):
+    axis = x.uop.axis
+    order = (axis, *range(axis), *range(axis+1, e8.ndim))
+    e8_local = e8.permute(order)
+    return packed, e8, _mxfp4_shuffle_scales(e8_local.reshape(e8_local.shape[0], -1, K//32))
   return packed, e8, _mxfp4_shuffle_scales(e8.reshape(rows, K//32))
-
-def quantize_mxfp4(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
-  if not isinstance(x.device, tuple) or x.uop.axis != x.ndim-1: return _quantize_mxfp4_impl(x)
-  param = x.as_param(0)
-  inner = Tensor(param.uop.replace(src=(shape_to_shape_arg(param.uop.shard_shape),), arg=replace(param.uop.arg, axis=None)))
-  outputs = _quantize_mxfp4_impl(inner)
-  call = UOp.maketuple(*(t.uop for t in outputs)).call(x.uop)
-  return tuple(Tensor(call.gettuple(i).unshard(t.ndim-1), device=x.device) for i,t in enumerate(outputs))  # type: ignore
 
 def mx_pack(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
@@ -470,10 +458,16 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     if mxfp4:
       tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
       fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
-      a_q, _, scale_a = quantize_mxfp4(a if k_sharded else a.reshape(batch*M, K))
       w = b.T
-      b_q, _, scale_b = quantize_mxfp4(w)
-      a_q, b_q = a_q.reshape(batch, M, -1).contiguous(), _mxfp4_shuffle_weight(b_q)
+      if k_sharded:
+        ndev = len(a.device)
+        a_q, _, scale_a = quantize_mxfp4(a.reshape(batch, M, ndev, K))
+        b_q, _, scale_b = quantize_mxfp4(w.reshape(w.shape[0], ndev, K))
+        b_q = _mxfp4_shuffle_weight(b_q.permute(1, 0, 2))
+      else:
+        a_q, _, scale_a = quantize_mxfp4(a.reshape(batch*M, K))
+        b_q, _, scale_b = quantize_mxfp4(w)
+        a_q, b_q = a_q.reshape(batch, M, K//2).contiguous(), _mxfp4_shuffle_weight(b_q)
       out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
       # mxfp8 1x32 block scaling
