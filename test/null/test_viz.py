@@ -253,7 +253,7 @@ class TestViz(unittest.TestCase):
 
   def test_const_reshape_expand_folded(self):
     # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
-    c = UOp.const(1.0, dtypes.float, shape=(3,4))  # creates CONST->EXPAND chain
+    c = UOp.const(1.0, dtypes.float).expand((3,4))  # creates CONST->EXPAND chain
     a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
