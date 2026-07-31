@@ -277,7 +277,10 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
     self.compiler, self.tensor_cores, self.is_cdna = AMDLLVMCompiler(target.arch), tc.get_amd(target.arch), HIPRenderer.is_cdna(target.arch)
-    self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna, rdna4))])
+    self.string_rewrite += PatternMatcher([
+      (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna: 
+        render_wmma_amd(ctx, wmma, cdna, rdna4))
+    ])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
