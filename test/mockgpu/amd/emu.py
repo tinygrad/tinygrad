@@ -1654,7 +1654,8 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if 'WMMA' in op_name: return _compile_wmma(inst, ctx)
-  if 'MFMA' in op_name and any(f'{s}X{s}X' in op_name for s in ('4', '16', '32')) and isinstance(inst, (irc.VOP3P, irc.VOP3PX2)): return _compile_mfma(inst, ctx)
+  if 'MFMA' in op_name and any(f'{s}X{s}X' in op_name for s in ('4', '16', '32')) and isinstance(inst, (irc.VOP3P, irc.VOP3PX2)):
+    return _compile_mfma(inst, ctx)
 
   # ACCVGPR_WRITE/READ/MOV: copies between VGPR and ACCVGPR register files
   # Detect by checking operand types for ACCVGPR involvement

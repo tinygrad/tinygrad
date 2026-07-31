@@ -47,8 +47,8 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
     # scaled mfma call require E8M0 scale args, byte = 0x7F = 127, scale = 2^(127 - 127) = 1.0
     if scaled:
       _fmt = { dtypes.fp8e5m2:1, dtypes.fp8e4m3:0 }
-      # A/B already bitcasted at this point..., check wmma arg?
-      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"]) # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
+      # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
+      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"]) 
     else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
 
     scale = "scale." if scaled else ""
@@ -297,7 +297,8 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
           src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
           if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
-          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(UOp.const(j//2, dtypes.int16)) if j%2 == 0 else UOp.const(0.0, x.src[2].dtype)
+          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(UOp.const(j//2, dtypes.int16))
+            if j%2 == 0 else UOp.const(0.0, x.src[2].dtype)
             for j in range(x.max_numel()*2)))),
           arg=(*x.arg[:4], None)).index(UOp.const(i*2, dtypes.int16))
           for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
