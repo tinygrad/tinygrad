@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops, factor_arg, local_factor
 from tinygrad.renderer.ptx import PTXRenderer
 
 # **** kernels ****
@@ -511,7 +511,7 @@ class TestUnshardIndex(unittest.TestCase):
       j = UOp.range(8, 2, AxisType.LOOP)
       # 8x8 fragment, 8 threads -> 64x8 full tile, strided layout on the row axis
       frag = UOp(Ops.UNSHARD, src=(UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG),
-                                   UOp.factor_arg((UOp.local_factor(8), ty)), UOp.local_factor(8)))
+                                   factor_arg((local_factor(8), ty)), local_factor(8)))
       assert frag.shape == (64, 8)
       return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
     out = self._run(kernel, (64, 8))

@@ -1,8 +1,7 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape
-from tinygrad.uop.ops import sint, ssimplify, sint_to_uop
+from tinygrad.uop.ops import sint, ssimplify, sint_to_uop, local_factor, factor_arg
 
-def factor_span(f:UOp) -> sint: return UOp.factor_span(f)
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -58,20 +57,17 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 # requires the idx's digits to symbolically cancel exactly, no vmin/vmax range analysis.
 
 def is_owner(f:UOp) -> bool: return len(f.ranges) > 0
-def owners_of(fs:tuple[UOp, ...]) -> list[UOp]: return [f for f in fs if is_owner(f)]
-def local_span(fs:tuple[UOp, ...]) -> sint: return prod([factor_span(f) for f in fs if not is_owner(f)])
-def full_span(fs:tuple[UOp, ...]) -> sint: return prod([factor_span(f) for f in fs])
 
 def layout_weights(fs:tuple[UOp, ...]) -> tuple[sint, ...]:
   ws = [1]
-  for f in reversed(fs[1:]): ws.append(ssimplify(ws[-1]*factor_span(f)))
+  for f in reversed(fs[1:]): ws.append(ssimplify(ws[-1]*f.factor_span()))
   return tuple(reversed(ws))
 
 def _is_zero(x:UOp) -> bool: return (sx := sint_to_uop(x).ssimplify()) == 0 or (isinstance(sx, UOp) and sx.op is Ops.CONST and int(sx.arg) == 0)
 
 def _check_unshard(val:UOp, args:tuple[UOp, ...]) -> None:
   # invariant: one factor arg per axis, and the LOCAL factor spans of every axis multiply to the shard's dims
-  assert len(args) == len(val.shape) and all(prod([factor_span(f) for f in (a.src if a.op is Ops.STACK else (a,)) if not is_owner(f)]) == s
+  assert len(args) == len(val.shape) and all(prod([f.factor_span() for f in (a.src if a.op is Ops.STACK else (a,)) if not is_owner(f)]) == s
                                              for a, s in zip(args, val.shape)), f"UNSHARD layout {args} does not match shard shape {val.shape}"
 
 def _unshard_with(val:UOp, multi:UOp, axes:tuple[int, ...]|None=None) -> UOp:
@@ -87,11 +83,11 @@ def is_contig(multi:UOp) -> bool:
 def normalize_factors(fs:tuple[UOp, ...]|list[UOp]) -> list[UOp]:
   out:list[UOp] = []
   for f in fs:
-    if not is_owner(f) and int(factor_span(f)) == 1: continue  # span-1 locals carry no information
+    if not is_owner(f) and int(f.factor_span()) == 1: continue  # span-1 locals carry no information
     if out and not is_owner(out[-1]) and not is_owner(f):
-      out[-1] = UOp.local_factor(int(factor_span(out[-1])) * int(factor_span(f)))  # merge adjacent locals
+      out[-1] = local_factor(int(out[-1].factor_span()) * int(f.factor_span()))  # merge adjacent locals
     else: out.append(f)
-  return out or [UOp.local_factor(1)]
+  return out or [local_factor(1)]
 
 def resolve_axis_index(idx:UOp, fs:tuple[UOp, ...]) -> UOp|None:
   """resolve the logical index idx on an axis with factor list fs into this shard's local index expression,
@@ -103,10 +99,10 @@ def resolve_axis_index(idx:UOp, fs:tuple[UOp, ...]) -> UOp|None:
   to cancel like-terms for arbitrary interleavings."""
   digits:list[tuple[UOp, sint]] = []
   for f, w in zip(fs, layout_weights(fs)):
-    digit = (idx // w) % factor_span(f)
+    digit = (idx // w) % f.factor_span()
     if is_owner(f):
       if not _is_zero(digit - f): return None
-    else: digits.append((digit, factor_span(f)))
+    else: digits.append((digit, f.factor_span()))
   local = UOp.const(dtypes.weakint, 0)
   for d, k in digits: local = (local * k + d).ssimplify()
   return local
@@ -115,7 +111,7 @@ def index_multi(root:UOp, multi:UOp):
   idxs:list[UOp] = []
   for ax, idx in enumerate(root.src[1:]):
     fs = multi.factors[ax]
-    if not owners_of(fs): idxs.append(idx)  # no owners on this axis: the shard index is the full index
+    if not any(is_owner(f) for f in fs): idxs.append(idx)  # no owners on this axis: the shard index is the full index
     elif (local := resolve_axis_index(idx, fs)) is None:
       raise RuntimeError(f"index_multi: cannot shard index {idx} for UNSHARD axis {ax} with factors {fs}")
     else: idxs.append(local)
@@ -127,7 +123,7 @@ def factor_subview(full:UOp, multi:UOp, reshape_to:tuple[sint, ...]|None=None) -
   new_shape, marg = [], []
   for fs in multi.factors:
     for f in fs:
-      k = factor_span(f)
+      k = f.factor_span()
       new_shape.append(k)
       marg.append((f, f+1) if is_owner(f) else (0, k))
   view = full.reshape(tuple(new_shape)).shrink(tuple(marg))
@@ -193,8 +189,8 @@ def alu_multi(root:UOp):
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
-  reduced = [f for ax in range(num_axes) for f in owners_of(multi.factors[ax])]
-  remaining = tuple(ax for ax in range(num_axes, len(multi.factors)) if owners_of(multi.factors[ax]))
+  reduced = [f for ax in range(num_axes) for f in multi.factors[ax] if is_owner(f)]
+  remaining = tuple(ax for ax in range(num_axes, len(multi.factors)) if any(is_owner(f) for f in multi.factors[ax]))
   local = multi.src[0]._rop(op, tuple(range(num_axes)))
   if reduced:
     assert not remaining, f"partial allreduce not supported for multi-axis sharding {multi.sharding}"
@@ -210,14 +206,14 @@ def reshape_layout(multi:UOp, new_shape:tuple[sint, ...]) -> list[list[UOp]]:
   """the factor algebra of a reshape: reshape never reorders, it splits and merges the ordered factor lists of
   multi onto the new axes (owner factors split as e//div, e%div, local factors split by size)."""
   # span-1 local factors carry no items and no information, they evaporate on reshape
-  factors = [f for fs in multi.factors for f in fs if is_owner(f) or int(factor_span(f)) != 1]
+  factors = [f for fs in multi.factors for f in fs if is_owner(f) or int(f.factor_span()) != 1]
   new_factors:list[list[UOp]] = []
   fi = 0
   for n in new_shape:
     need, axf = int(n), []
     while need != 1:
       if fi >= len(factors): raise RuntimeError(f"reshape {multi.shape} -> {new_shape} moved items between shards")
-      f, k = factors[fi], int(factor_span(factors[fi]))
+      f, k = factors[fi], int(factors[fi].factor_span())
       if need % k == 0:
         axf.append(f)
         fi += 1
@@ -225,8 +221,8 @@ def reshape_layout(multi:UOp, new_shape:tuple[sint, ...]) -> list[list[UOp]]:
       # owner factors split as e//div (span need) for this axis and e%div (span div) for the next
       elif k % need == 0:
         div = k // need
-        axf.append(UOp.local_factor(need) if not is_owner(f) else f // div)
-        factors[fi] = UOp.local_factor(div) if not is_owner(f) else f % div
+        axf.append(local_factor(need) if not is_owner(f) else f // div)
+        factors[fi] = local_factor(div) if not is_owner(f) else f % div
         need = 1
       else: raise RuntimeError(f"reshape {multi.shape} -> {new_shape} moved items between shards")
     new_factors.append(normalize_factors(axf))
@@ -235,24 +231,24 @@ def reshape_layout(multi:UOp, new_shape:tuple[sint, ...]) -> list[list[UOp]]:
 
 def reshaped_shard_shape(multi:UOp, new_shape:tuple[sint, ...]) -> tuple[sint, ...]:
   """the shard shape of RESHAPE(multi, new_shape): the per-axis products of the new local spans."""
-  return tuple(prod([factor_span(f) for f in fs if not is_owner(f)]) for fs in reshape_layout(multi, new_shape))
+  return tuple(prod([f.factor_span() for f in fs if not is_owner(f)]) for fs in reshape_layout(multi, new_shape))
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg):
     raise RuntimeError("reshape must maintain prod(shape)")
   shard = multi.src[0].reshape(reshaped_shard_shape(multi, new_shape))
-  new_args = [UOp.factor_arg(fs) for fs in reshape_layout(multi, new_shape)]
+  new_args = [factor_arg(fs) for fs in reshape_layout(multi, new_shape)]
   if tuple(new_args) == tuple(multi.src[1:]) and shard is multi.src[0]: return multi
   return UOp(Ops.UNSHARD, src=(shard, *new_args))
 
 def expand_multi(root:UOp, multi:UOp):
-  new_args = [UOp.factor_arg((UOp.local_factor(int(s)),)) for s in root.marg] + list(multi.src[1:])
+  new_args = [factor_arg((local_factor(int(s)),)) for s in root.marg] + list(multi.src[1:])
   return UOp(Ops.UNSHARD, src=(multi.src[0]._mop(Ops.EXPAND, arg=root.marg), *new_args))
 
 def pad_multi(root:UOp, multi:UOp):
   local_pad, new_args = [], []
   for ax, fs in enumerate(multi.factors):
-    if owners_of(fs):
+    if any(is_owner(f) for f in fs):
       assert root.marg[ax] == (0, multi.shape[ax]), f"padding not supported for {root.marg=}"
       local_pad.append((0, multi.src[0].shape[ax]))
       new_args.append(multi.src[1+ax])
@@ -260,7 +256,7 @@ def pad_multi(root:UOp, multi:UOp):
       # PAD marg is (offset, padded size): the local factor's span tracks the padded shard dim
       assert len(fs) == 1, f"cannot pad a multi-local axis {fs=}"
       local_pad.append(root.marg[ax])
-      new_args.append(UOp.factor_arg((UOp.local_factor(root.marg[ax][1]),)))
+      new_args.append(factor_arg((local_factor(root.marg[ax][1]),)))
   return UOp(Ops.UNSHARD, src=(multi.src[0]._mop(Ops.PAD, tuple(local_pad)), *new_args))
 
 def permute_multi(root:UOp, multi:UOp):
@@ -272,17 +268,17 @@ def shrink_multi(root:UOp, multi:UOp):
   # owner factor of the axis is more major than every local factor, i.e. the JAX-style [owners..., locals...] form)
   local_marg, new_args = [], []
   for ax, (fs, (s, l)) in enumerate(zip(multi.factors, root.marg)):
-    span, lspan = full_span(fs), local_span(fs)
+    span, lspan = multi.shape[ax], multi.shard_shape[ax]
     if _is_zero(sint_to_uop(s)) and sint_to_uop(l).ssimplify() == span:
       local_marg.append((0, lspan))
       new_args.append(fs)  # full axis: keep the layout
       continue
-    own = owners_of(fs)
+    own = [f for f in fs if is_owner(f)]
     if not own:
       # unsharded axis: the interval maps straight onto the shard's local span, and the local factor shrinks with it
       assert len(fs) == 1, f"cannot partially shrink a multi-local axis {fs=}"
       local_marg.append((s, l))
-      new_args.append((UOp.local_factor(l),))
+      new_args.append((local_factor(l),))
       continue
     if own and all(not is_owner(f) for f in fs[len(own):]) and _is_zero(sint_to_uop(s) - sum(f*w for f, w in zip(own, layout_weights(fs)))) \
        and sint_to_uop(l).ssimplify() == lspan:
@@ -296,15 +292,15 @@ def shrink_multi(root:UOp, multi:UOp):
     count = int(own[0].vmax)+1
     part_bounds = tuple((i*lspan, lspan) for i in range(count))
     if (s, l) not in part_bounds: raise RuntimeError(f"shrinking not supported for {fs=} with {s=} {l=}")
-    non_shard_shrink = tuple((0, local_span(f2)) if i == ax else t for i, (f2, t) in enumerate(zip(multi.factors, root.marg)))
+    non_shard_shrink = tuple((0, multi.shard_shape[i]) if i == ax else t for i, t in enumerate(root.marg))
     return multi.src[0].copy_to_device(multi.device, arg=part_bounds.index((s, l)))._mop(Ops.SHRINK, non_shard_shrink)
   val = multi.src[0]._mop(Ops.SHRINK, tuple(local_marg))
   if all(tuple(f) == tuple(arg) for f, arg in zip(new_args, multi.factors)): return val
-  return UOp(Ops.UNSHARD, src=(val, *[UOp.factor_arg(normalize_factors(fs)) for fs in new_args]))
+  return UOp(Ops.UNSHARD, src=(val, *[factor_arg(normalize_factors(fs)) for fs in new_args]))
 
 def flip_multi(root:UOp, multi:UOp):
   for ax, fs in enumerate(multi.factors):
-    if owners_of(fs) and root.marg[ax]: raise RuntimeError(f"flipping not supported on sharded axis {ax}")
+    if any(is_owner(f) for f in fs) and root.marg[ax]: raise RuntimeError(f"flipping not supported on sharded axis {ax}")
   return _unshard_with(multi.src[0].flip([i for i,x in enumerate(root.marg) if x]), multi)
 
 def stack_multi(root:UOp):
@@ -314,7 +310,7 @@ def stack_multi(root:UOp):
   target = multis[0]
   if all(m.op is Ops.UNSHARD and m.shape == target.shape and tuple(m.src[1:]) == tuple(target.src[1:]) for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
-    return UOp(Ops.UNSHARD, src=(UOp(Ops.STACK, src=tuple(srcs)), UOp.local_factor(len(srcs)), *target.src[1:]))
+    return UOp(Ops.UNSHARD, src=(UOp(Ops.STACK, src=tuple(srcs)), local_factor(len(srcs)), *target.src[1:]))
   # mismatched layouts: reshard everything to the last sharded axis (device-multi only)
   assert root.sharding, "STACK on UNSHARD must be sharded"
   axis = root.sharding[-1][0]

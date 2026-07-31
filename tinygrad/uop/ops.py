@@ -441,7 +441,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.UNSHARD: return tuple(prod([self.factor_span(f) for f in fs]) for fs in self.factors)
+        case Ops.UNSHARD: return tuple(prod([f.factor_span() for f in fs]) for fs in self.factors)
         case Ops.REDUCE:
           num_axes = self.arg[1]
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
@@ -475,11 +475,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
-    # NOTE: for multi-axis sharded values this divides the LAST sharded axis, matching the legacy .axis semantics
     sharding = self.sharding
     if not isinstance(self.device, tuple) or not len(sharding): return self.shape
-    ax, f = sharding[-1]
-    return tuple(x//(int(f.vmax)+1) if i == ax else x for i,x in enumerate(self.shape))
+    owner_count = [1] * len(self.shape)
+    for ax, f in sharding: owner_count[ax] *= int(f.vmax)+1
+    return tuple(x//owner_count[i] if owner_count[i] != 1 else x for i,x in enumerate(self.shape))
 
   @property
   def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
@@ -670,22 +670,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** multi-device helpers ***
 
-  @staticmethod
-  def factor_arg(factors:tuple[UOp, ...]|list[UOp]) -> UOp:
-    """build the per-axis factor arg of an UNSHARD: a bare UOp for a single factor, a STACK for several (major -> minor)."""
-    if len(factors) == 1: return factors[0]
-    return UOp(Ops.STACK, src=tuple(factors))
-
-  @staticmethod
-  def local_factor(size:sint) -> UOp:
-    """a LOCAL factor of an UNSHARD axis: a plain value whose span IS the value (a const or any int expr)."""
-    return sint_to_uop(size)
-
-  @staticmethod
-  def factor_span(f:UOp) -> sint:
+  def factor_span(self) -> sint:
     """the span of an UNSHARD factor: LOCAL factors (plain values) carry their span directly, OWNER factors
     (containing RANGEs) span their coordinate domain vmax+1 (a RANGE's own span)."""
-    return ssimplify(f) if len(f.ranges) == 0 else ssimplify(int(f.vmax)+1)
+    return ssimplify(self) if len(self.ranges) == 0 else ssimplify(int(self.vmax)+1)
 
   @functools.cached_property
   def factors(self) -> tuple[tuple[UOp, ...], ...]:
@@ -713,9 +701,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     by_axis = dict(zip(axis, device_range))
     factors:list[UOp] = []
     for i, s in enumerate(self.shape):
-      if i in by_axis: fs:tuple[UOp, ...] = (by_axis[i],) if int(s) == 1 else (by_axis[i], UOp.local_factor(s))
-      else: fs = (UOp.local_factor(s),)
-      factors.append(UOp.factor_arg(fs))
+      if i in by_axis: fs:tuple[UOp, ...] = (by_axis[i],) if int(s) == 1 else (by_axis[i], local_factor(s))
+      else: fs = (local_factor(s),)
+      factors.append(factor_arg(fs))
     return UOp(Ops.UNSHARD, src=(self, *factors))
 
   @functools.cached_property
@@ -855,10 +843,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return uop
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
-    # NOTE: like shard_shape, a multi-axis sharded value falls back to its LAST sharded axis here
-    axis = self.sharding[-1][0] if isinstance(device, tuple) and len(self.sharding) else None
-    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=strong_dtype(self.dtype) if dtype is None else dtype, device=device)
-    return ret.unshard(axis) if axis is not None else ret
+    sharding = self.sharding
+    if not isinstance(device, tuple) or not len(sharding):
+      return UOp.empty(self.shape, dtype=strong_dtype(self.dtype) if dtype is None else dtype, device=device)
+    axes = tuple(dedup([ax for ax, _ in sharding]))
+    rngs = tuple(next(f for a, f in sharding if a == ax) for ax in axes)
+    ret = UOp.empty(self.shard_shape, dtype=strong_dtype(self.dtype) if dtype is None else dtype, device=device)
+    return ret.unshard(axes, rngs)
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(device)
@@ -1788,6 +1779,16 @@ def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x)
+
+def local_factor(size:sint) -> UOp:
+  """a LOCAL factor of an UNSHARD axis: a plain value whose span IS the value (a const or any int expr)."""
+  return sint_to_uop(size)
+
+def factor_arg(factors:tuple[UOp, ...]|list[UOp]) -> UOp:
+  """build the per-axis factor arg of an UNSHARD: a bare UOp for a single factor, a STACK for several (major -> minor)."""
+  if len(factors) == 1: return factors[0]
+  return UOp(Ops.STACK, src=tuple(factors))
+
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 def select_dtype(u:UOp):

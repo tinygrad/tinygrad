@@ -1,10 +1,10 @@
 import unittest
 from tinygrad.uop.ops import UOp, AxisType, Ops, graph_rewrite
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.schedule.multi import multi_pm, factor_span, is_owner, resolve_axis_index
+from tinygrad.schedule.multi import multi_pm, is_owner, resolve_axis_index
 
 def rng(n, i, at=AxisType.LOCAL): return UOp.range(n, i, at)
-def nodes(fs): return [('o' if is_owner(f) else 'l', int(factor_span(f))) for f in fs]
+def nodes(fs): return [('o' if is_owner(f) else 'l', int(f.factor_span())) for f in fs]
 
 class TestFactorLayout(unittest.TestCase):
   """The factor-list algebra of UNSHARD: every axis carries an ordered factor list (owner factors with RANGEs,
@@ -80,8 +80,8 @@ class TestFactorLayout(unittest.TestCase):
     self.assertEqual(out.shape, (2, 2))
     f0, f1 = out.factors[0][0], out.factors[1][0]
     self.assertTrue(is_owner(f0) and is_owner(f1))
-    self.assertEqual(int(factor_span(f0)), 2)
-    self.assertEqual(int(factor_span(f1)), 2)
+    self.assertEqual(int(f0.factor_span()), 2)
+    self.assertEqual(int(f1.factor_span()), 2)
     # the split coordinates are exactly the logical indices this shard owns: both resolve to local 0
     self.assertEqual(resolve_axis_index(f0, out.factors[0]).ssimplify(), UOp.const(None, 0).ssimplify())
     self.assertEqual(resolve_axis_index(f1, out.factors[1]).ssimplify(), UOp.const(None, 0).ssimplify())

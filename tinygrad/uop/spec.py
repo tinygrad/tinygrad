@@ -45,10 +45,6 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # ***** new specs *****
 def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.arg is Invalid  # Invalid matches any dtype
-
-
-# ***** multi helpers *****
-
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
