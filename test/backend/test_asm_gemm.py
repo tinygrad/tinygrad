@@ -181,17 +181,9 @@ class TestAiterMXFP4(unittest.TestCase):
     scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
     scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
     aiter_mxfp4_gemm(a, b, scale_a, scale_b).realize()
-  def test_packed_abi_and_layouts(self):
-    import numpy as np, struct
-    from extra.gemm.aiter_mxfp4 import aiter_mxfp4_kernargs, shuffle_mxfp4_scales, shuffle_mxfp4_weight
-    args = aiter_mxfp4_kernargs(256, 256, 256)
-    self.assertEqual(len(args), 384)
-    self.assertEqual(tuple(struct.unpack_from("<Q", args, off)[0] for off in (0, 16, 32, 48, 272, 288)), (0, 0, 0, 0, 0, 0))
-    self.assertEqual(tuple(struct.unpack_from("<f", args, off)[0] for off in (64, 80)), (1.0, 0.0))
-    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (96, 112, 128, 144, 160, 176, 192, 208)),
-                     (256, 1, 256, 1, 256, 1, 256, 1))
-    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (224, 240, 256)), (256, 256, 256))
-    self.assertEqual(tuple(struct.unpack_from("<I", args, off)[0] for off in (304, 336)), (8, 8))
+  def test_layouts(self):
+    import numpy as np
+    from extra.gemm.aiter_mxfp4 import shuffle_mxfp4_scales, shuffle_mxfp4_weight
     weight = np.arange(16 * 32, dtype=np.uint16).astype(np.uint8).reshape(16, 32)
     expected_weight = weight.reshape(1, 16, 1, 2, 16).transpose(0, 2, 3, 1, 4).reshape(16, 32)
     np.testing.assert_array_equal(shuffle_mxfp4_weight(Tensor(weight, device="CPU")).numpy(), expected_weight)

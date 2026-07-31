@@ -318,7 +318,6 @@ class TinyELF:
   target: Target
   # tuple of (name, slot, dtype, shape)
   signature: tuple[tuple[str|None, int, DType, tuple], ...]
-  aux: tuple = ()
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:

@@ -1,48 +1,29 @@
-import ctypes, functools, pathlib
+import functools, pathlib
 from dataclasses import replace
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import ceildiv
 from tinygrad.renderer import Estimates
+from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.uop.ops import KernelInfo, Ops, ProgramInfo, UOp
-class _AiterMXFP4Args(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [
-    ("ptr_D", ctypes.c_void_p), ("_p0", ctypes.c_uint32 * 2),
-    ("ptr_C", ctypes.c_void_p), ("_p1", ctypes.c_uint32 * 2),
-    ("ptr_A", ctypes.c_void_p), ("_p2", ctypes.c_uint32 * 2),
-    ("ptr_B", ctypes.c_void_p), ("_p3", ctypes.c_uint32 * 2),
-    ("alpha", ctypes.c_float), ("_p4", ctypes.c_uint32 * 3),
-    ("beta", ctypes.c_float), ("_p5", ctypes.c_uint32 * 3),
-    ("stride_D0", ctypes.c_uint32), ("_p6", ctypes.c_uint32 * 3),
-    ("stride_D1", ctypes.c_uint32), ("_p7", ctypes.c_uint32 * 3),
-    ("stride_C0", ctypes.c_uint32), ("_p8", ctypes.c_uint32 * 3),
-    ("stride_C1", ctypes.c_uint32), ("_p9", ctypes.c_uint32 * 3),
-    ("stride_A0", ctypes.c_uint32), ("_p10", ctypes.c_uint32 * 3),
-    ("stride_A1", ctypes.c_uint32), ("_p11", ctypes.c_uint32 * 3),
-    ("stride_B0", ctypes.c_uint32), ("_p12", ctypes.c_uint32 * 3),
-    ("stride_B1", ctypes.c_uint32), ("_p13", ctypes.c_uint32 * 3),
-    ("M", ctypes.c_uint32), ("_p14", ctypes.c_uint32 * 3),
-    ("N", ctypes.c_uint32), ("_p15", ctypes.c_uint32 * 3),
-    ("K", ctypes.c_uint32), ("_p16", ctypes.c_uint32 * 3),
-    ("ptr_ScaleA", ctypes.c_void_p), ("_p17", ctypes.c_uint32 * 2),
-    ("ptr_ScaleB", ctypes.c_void_p), ("_p18", ctypes.c_uint32 * 2),
-    ("stride_ScaleA0", ctypes.c_uint32), ("_p19", ctypes.c_uint32 * 3),
-    ("stride_ScaleA1", ctypes.c_uint32), ("_p20", ctypes.c_uint32 * 3),
-    ("stride_ScaleB0", ctypes.c_uint32), ("_p21", ctypes.c_uint32 * 3),
-    ("stride_ScaleB1", ctypes.c_uint32), ("_p22", ctypes.c_uint32 * 3),
-    ("log2_k_split", ctypes.c_int32), ("_p23", ctypes.c_uint32 * 3),
-  ]
-assert ctypes.sizeof(_AiterMXFP4Args) == 384
-_AITER_MXFP4_BUFFER_OFFSETS = tuple(getattr(_AiterMXFP4Args, name).offset for name in ("ptr_D", "ptr_A", "ptr_B", "ptr_ScaleA", "ptr_ScaleB"))
-def aiter_mxfp4_kernargs(M:int, N:int, K:int) -> bytes:
-  return bytes(_AiterMXFP4Args(alpha=1.0, beta=0.0, stride_D0=N, stride_D1=1, stride_C0=N, stride_C1=1,
-                              stride_A0=K, stride_A1=1, stride_B0=K, stride_B1=1, M=M, N=N, K=K,
-                              stride_ScaleA0=K//32, stride_ScaleA1=1, stride_ScaleB0=K//32, stride_ScaleB1=1, log2_k_split=0))
-def _aiter_mxfp4_program_info(sink:UOp, M:int, N:int, K:int, tile_m:int, tile_n:int) -> ProgramInfo:
+def _normalize_mfma_scale_encoding(lib:bytes, tile:tuple[int, int]) -> bytes:
+  exceptions = {(128, 512):((16, 0x2000), (80, 0x4000), (82, 0x4000), (88, 0x2000), (306, 0)),
+                (192, 256):((63, 0x4000), (65, 0x4000), (67, 0x4000), (68, 0x4000), (69, 0x4000), (71, 0x4000), (72, 0x4000),
+                            (75, 0x4000), (76, 0x4000), (77, 0x4000), (79, 0x4000), (80, 0x4000), (85, 0x2000), (90, 0x2000), (211, 0)),
+                (256, 256):((58, 0x4000), (72, 0x4000), (76, 0x4000), (80, 0x4000), (82, 0x4000), (84, 0x4000), (88, 0x4000),
+                            (90, 0x2000), (93, 0x2000), (123, 0), (124, 0), (189, 0), (190, 0))}
+  masks = dict(exceptions[tile])
+  out, hits = bytearray(lib), 0
+  text = next(x for x in elf_loader(lib)[1] if x.name == ".text").header
+  for off in range(text.sh_offset, text.sh_offset+text.sh_size-15, 4):
+    w0, w2 = int.from_bytes(out[off:off+4], "little"), int.from_bytes(out[off+8:off+12], "little")
+    if w0 & 0xffff0000 == 0xd3ac0000 and w2 & 0xffff0000 == 0xd3ad0000:
+      out[off:off+4], hits = (w0 | masks.get(hits, 0x6000)).to_bytes(4, "little"), hits+1
+  assert hits == {(128, 512):512, (192, 256):384, (256, 256):512}[tile]
+  return bytes(out)
+def _aiter_mxfp4_program_info(sink:UOp, M:int, N:int, tile_m:int, tile_n:int) -> ProgramInfo:
   info = ProgramInfo.from_sink(sink)
   return replace(info, global_size=(ceildiv(N, tile_n), ceildiv(M, tile_m), 1), local_size=(256, 1, 1),
-                 outs=(info.globals[0],), ins=info.globals[1:],
-                 aux=("packed", aiter_mxfp4_kernargs(M, N, K), _AITER_MXFP4_BUFFER_OFFSETS))
+                 outs=(info.globals[0],), ins=info.globals[1:])
 @functools.cache
 def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:int, tile_n:int) -> UOp:
   M, half_k = A.shape
@@ -54,10 +35,13 @@ def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:in
   sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, threads, groups_x, groups_y,
                   arg=KernelInfo(f"aiter_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
   root = pathlib.Path(__file__).parent/"amd"/"aiter_f4"
-  src = (root/"aiter_mxfp4.s").read_text().replace(".set AITER_MXFP4_TILE, 0", f".set AITER_MXFP4_TILE, {tile_m}{tile_n}")
-  info = replace(_aiter_mxfp4_program_info(sink, M, N, K, tile_m, tile_n), target=Device[C.device].renderer.target)
+  src = (root/"aiter_mxfp4.s").read_text()
+  for name, value in (("TILE", tile_m*1000+tile_n), ("M", M), ("N", N), ("K", K), ("SCALE_K", K//32)):
+    src = src.replace(f".set AITER_MXFP4_{name}, 0", f".set AITER_MXFP4_{name}, {value}")
+  info = replace(_aiter_mxfp4_program_info(sink, M, N, tile_m, tile_n), target=Device[C.device].renderer.target)
+  lib = _normalize_mfma_scale_encoding(Device[C.device].compiler.compile_cached(src), (tile_m, tile_n))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=Device[C.device].compiler.compile_cached(src))),
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
              arg=info)
 def shuffle_mxfp4_weight(x:Tensor) -> Tensor:
   assert x.ndim == 2 and x.dtype == dtypes.uint8
