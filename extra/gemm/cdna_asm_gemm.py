@@ -164,7 +164,6 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
   # fp4 encoded as packed uint8
   # TODO: add fp4 dtype?
-  # TODO: add fp4 dtype?
   if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE, dtypes.uint8}: return todo(f"only bfloat16/float16/fp8/fp4, got {a.dtype}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
