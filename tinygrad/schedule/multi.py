@@ -84,14 +84,16 @@ def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
   if not multis: return None
   sharding = multis[0].sharding
+  target = multis[0]
   def can_handle(m:UOp) -> bool:
-    # same sharding (peel the UNSHARD), or a whole unsharded same-shape value (takes its per-shard sub-view), or a broadcast scalar
+    # same sharding (peel the UNSHARD), or a whole unsharded value of the full tile shape (takes its per-shard
+    # sub-view), or a broadcast scalar
     if m.sharding: return m.sharding == sharding
-    return m.shape == () or tuple(m.shape) == tuple(root.shape)
+    return m.shape == () or tuple(m.shape) == tuple(target.shape)
   if all(can_handle(m) for m in root.src):
     # every src either has the target sharding or is whole on every shard: run the alu per-shard
-    srcs = [m.src[0] if m.op is Ops.UNSHARD else m if m.shape == () else shard_subview(m, multis[0]) for m in root.src]
-    return srcs[0].alu(root.op, *srcs[1:]).unshard(multis[0].arg, multis[0].src[1:])
+    srcs = [m.src[0] if m.op is Ops.UNSHARD else m if m.shape == () else shard_subview(m, target) for m in root.src]
+    return srcs[0].alu(root.op, *srcs[1:]).unshard(target.arg, target.src[1:])
   # resharding: single-axis fallback via shard_srcs
   axis = root.axis
   assert axis is not None
