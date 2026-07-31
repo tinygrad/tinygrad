@@ -48,7 +48,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
     if scaled:
       _fmt = { dtypes.fp8e5m2:1, dtypes.fp8e4m3:0 }
       # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
-      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"]) 
+      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"])
     else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
 
     scale = "scale." if scaled else ""
