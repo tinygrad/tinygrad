@@ -40,6 +40,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.uint64, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}ul"),
   (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}u"),
   (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.arg else "0"),
+  (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda ctx,x: f"{x.arg}"),
   # consts are rendered to larger type and casted
   (UPat(Ops.CONST, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.arg}f')})"),
   (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.arg}u')})"),

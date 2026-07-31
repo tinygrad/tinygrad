@@ -1798,6 +1798,11 @@ pm_commit_weak = PatternMatcher([
   # demand from the destination: a STORE's weak value commits at the destination's dtype
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
    lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
+  # an index into MEMORY commits at the address width; a REG/ALU lane selector is widthless and stays bare
+  (UPat((Ops.INDEX, Ops.SHRINK), name="u"), lambda u: u.replace(src=(u.src[0],)+tuple(
+    UOp.const(select_dtype(s), s.arg) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in u.src[1:]))
+   if u.src[0].addrspace not in (AddrSpace.REG, AddrSpace.ALU) and
+      any(s.op is Ops.CONST and s.dtype in dtypes.weaks for s in u.src[1:]) else None),
 ])
 
 # push cast to weak src

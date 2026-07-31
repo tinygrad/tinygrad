@@ -201,8 +201,18 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # index and weak dtypes are not allowed in programs
-  (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  # a weak CONST is a legal leaf; every other weak program node is forbidden
+  (UPat(GroupOp.All, dtypes.weaks, name="x"), lambda x: x.op is Ops.CONST),
+
+  # widthless CONST slots: REG/ALU lane selectors and buffer sizes read the value, never a width
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(Ops.CONST, dtypes.weakint)), allow_any_len=True, name="x"),
+   lambda x,buf: x.dtype not in dtypes.weaks and buf.addrspace in (AddrSpace.REG, AddrSpace.ALU)
+   and all(s.dtype not in dtypes.weaks for s in x.src[2:])),
+  # a PARAM's size srcs are widthless: bare weak CONST is legal there, any other weak src is not
+  (UPat(Ops.PARAM, name="x"), lambda x: False if any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in x.src) else None),
+
+  # all remaining operand slots are data: a bare weak CONST is not a data value
+  (UPat(GroupOp.All-{Ops.PARAM}, name="x"), lambda x: False if any(s.dtype in dtypes.weaks for s in x.src) else None),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),

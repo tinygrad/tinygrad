@@ -361,8 +361,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
+  # lower weak before the dtype decomps: their input needs widths
+  sink = graph_rewrite(sink, symbolic_simple+pm_commit_weak+pm_cast_weak, name="commit weak for decomps")
+
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
@@ -371,8 +374,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_commit_weak+pm_cast_weak+pm_decomp+extra_matcher+pm_split_ends
+  # lower weak before extra_matcher: renderer rules match concrete const dtypes (fp8 compares)
+  sink = graph_rewrite(sink, symbolic_simple+pm_commit_weak+pm_cast_weak, name="commit weak")
+
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
+
+  # cleanup the weak minted inside pm_final_rewrite (pm_decomp rerun + extra_matcher)
+  sink = graph_rewrite(sink, symbolic_simple+pm_commit_weak+pm_cast_weak, name="commit weak leftovers")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")

@@ -191,7 +191,8 @@ class NIRRenderer(Renderer):
     ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
+      # a bare weak CONST is a widthless value (a lane selector, a size): it has no immediate, its consumers read the arg
+      if u.op in {Ops.NOOP, Ops.GROUP} or u.dtype in dtypes.weaks or (u.op is Ops.STACK and len(u.src) == 0): pass
       elif u.op in {Ops.INDEX, Ops.SHRINK}:
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
         if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].arg)
