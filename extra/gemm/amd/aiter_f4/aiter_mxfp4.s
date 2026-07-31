@@ -1,7 +1,6 @@
 .text
 // AITER gfx950 MXFP4 GEMM kernels, recovered from the public AITER code objects.
 // Set AITER_MXFP4_TILE to 128512, 192256, or 256256 before assembling.
-// Older LLVM clears two unused scaled-MFMA op_sel bits; the loader normalizes them to the reference encoding.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .amdhsa_code_object_version 6
 .set AITER_MXFP4_TILE, 0
