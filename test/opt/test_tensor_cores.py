@@ -94,7 +94,8 @@ class TestTensorCores(unittest.TestCase):
       if Device.DEFAULT == "CPU" and DEV.renderer == "LLVM":
         assert "0x201000" in prg.src[2].arg
       elif Device.DEFAULT == "AMD" and DEV.renderer == "LLVM":
-        assert "@llvm.amdgcn.wmma" in prg.src[2].arg
+        # RDNA emits wmma intrinsics, CDNA emits mfma intrinsics
+        assert ("@llvm.amdgcn.wmma" in prg.src[2].arg) or ("@llvm.amdgcn.mfma" in prg.src[2].arg)
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
       else:
@@ -174,7 +175,9 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
-    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
+    # skip fp8 tcs: the unoptimized ALU baseline quantizes products to fp8 (JAX promotion), which legitimately
+    # differs from the MFMA path (f32 accumulation), so the baseline-vs-TC numerical gate can't hold for fp8.
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
@@ -188,7 +191,7 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
-    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
+    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
@@ -204,7 +207,7 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all STORE children are outside the loop
-    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
+    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     opts = [Opt(OptOps.UNROLL, 0, 4)]
