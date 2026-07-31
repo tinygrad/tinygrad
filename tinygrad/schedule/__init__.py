@@ -82,7 +82,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
-from tinygrad.helpers import CAPTURING
+from tinygrad.helpers import CAPTURING, diskcache_get, diskcache_put, getenv
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
 
@@ -110,14 +110,19 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
-  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+  disk_scache = bool(getenv("DISK_SCACHE", 0))
+  sc_ret = schedule_cache.get(cache_key, None) if SCACHE else None
+  if sc_ret is None and SCACHE and disk_scache: sc_ret = diskcache_get("schedule", {"key":cache_key})
+  if sc_ret is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[cache_key] = linear
+    if SCACHE:
+      schedule_cache[cache_key] = linear
+      if disk_scache: diskcache_put("schedule", {"key":cache_key}, linear)
   else:
     # schedule cache hit
-    linear = sc_ret
+    schedule_cache[cache_key] = linear = sc_ret
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue

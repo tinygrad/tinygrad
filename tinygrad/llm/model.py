@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.llm.kernels import amd as llm_amd, cpu as llm_cpu, generic as llm_generic
 from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load
 from tinygrad.uop.ops import resolve, Ops
@@ -55,7 +56,13 @@ class Linear(nn.Linear):
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2).to(device)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).to(device).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return freqs.cos().cat(freqs.sin(), dim=-1).clone(device)
+  table = freqs.cos().cat(freqs.sin(), dim=-1)
+  if device is not None and str(device).startswith("AMD") and end > 8192:
+    size = table.numel()
+    assert isinstance(size, int)
+    storage = Buffer(str(device), size, table.dtype, options=BufferSpec(host=True))
+    return Tensor(UOp.from_buffer(storage).reshape(table.shape)).assign(table).realize()
+  return table.clone(device)
 
 class ExpertWeights:
   """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
@@ -325,6 +332,7 @@ class FFNBlock:
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
+    self.kv_cache_host = False
     assert config.v_head_dim == config.head_dim, "TransformerBlock requires v_head_dim == head_dim"
 
     # --- attention projections (all linear, bias-free) ------------------
@@ -361,11 +369,21 @@ class TransformerBlock(FFNBlock):
     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    assigned_kv = Tensor(self.cache_kv.uop.after(
-      self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(self.cache_kv.dtype).uop)))
+    stacked_kv = Tensor.stack(k, v)
+    if self.cache_kv.dtype == dtypes.int8:
+      scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
+      packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
+      stores = (self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop),
+                self.cache_kv_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop))
+      assigned_kv, assigned_scale = Tensor(self.cache_kv.uop.after(*stores)), Tensor(self.cache_kv_scale.uop.after(*stores))
+    else:
+      assigned_kv = Tensor(self.cache_kv.uop.after(
+        self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(stacked_kv.cast(self.cache_kv.dtype).uop)))
+      assigned_scale = None
     cache_len = start_pos + T if kv_len is None else kv_len
-    k = assigned_kv[0, :, :, 0:cache_len, :]
-    v = assigned_kv[1, :, :, 0:cache_len, :]
+    k, v = assigned_kv[0, :, :, 0:cache_len, :], assigned_kv[1, :, :, 0:cache_len, :]
+    if assigned_scale is not None:
+      k, v = k.float() * assigned_scale[0, :, :, 0:cache_len, None], v.float() * assigned_scale[1, :, :, 0:cache_len, None]
 
     #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
     #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
@@ -377,7 +395,7 @@ class TransformerBlock(FFNBlock):
     if flash_decode:
       decode_len = kv_len if isinstance(kv_len, int) else self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
-      attn = llm_amd.amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
+      attn = llm_amd.amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len, assigned_scale)
     elif llm_cpu.SUPPORTED and self.attn_k.ggml_type == self.attn_v.ggml_type == 8 and resolve(T == 1) and \
          kv_len is not None and str(x.device).startswith("CPU"):
       attn = llm_cpu.attention_decode(q.float(), assigned_kv, start_pos)
@@ -388,7 +406,7 @@ class TransformerBlock(FFNBlock):
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
       valid = valid_len.unbind()[0] if isinstance(valid_len, UOp) else valid_len
       valid_kv_len, key_limit = start + T, start + valid if valid is not None else None
-      attn = llm_amd.flash_attention_causal_cached(q.half(), assigned_kv, valid_kv_len, key_limit)
+      attn = llm_amd.flash_attention_causal_cached(q.half(), assigned_kv, valid_kv_len, key_limit, assigned_scale)
     else:
       mask:Tensor|None
       if kv_len is not None:
@@ -406,8 +424,20 @@ class TransformerBlock(FFNBlock):
       # TODO: how is the dtype of this determined?
       # Decode uses fixed-size KV buckets. Unwritten entries must be zero: masking happens after QK, so values left
       # uninitialized by Tensor.empty can inject NaNs before the mask is applied.
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context+192, self.config.head_dim,
-                                   dtype="float16", device=x.device).contiguous()
+      cache_dtype = dtypes.int8 if self.config.max_context > 8192 and str(x.device).startswith("AMD") else dtypes.float16
+      cache_shape = (2, x.shape[0], self.config.n_kv_heads, self.config.max_context+192, self.config.head_dim)
+      if self.kv_cache_host and str(x.device).startswith("AMD"):
+        cache_size = 1
+        for dim in cache_shape:
+          assert isinstance(dim, int)
+          cache_size *= dim
+        storage = Buffer(str(x.device), cache_size, cache_dtype, options=BufferSpec(host=True))
+        self.cache_kv = Tensor(UOp.from_buffer(storage).reshape(cache_shape))
+        self.cache_kv.assign(self.cache_kv.const_like(0)).realize()
+      else: self.cache_kv = Tensor.zeros(*cache_shape, dtype=cache_dtype, device=x.device).contiguous()
+      if cache_dtype == dtypes.int8:
+        self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context+192,
+                                           dtype=dtypes.float16, device=x.device).contiguous()
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context+192, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -641,6 +671,10 @@ class Transformer:
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
     self.blk:list[FFNBlock] = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
+    if config.max_context > 8192:
+      # A full Q8 cache for 262k Qwen leaves no graph workspace on a 24 GB card. Keep two fixed layers host-mapped;
+      # this avoids runtime cache growth while leaving the other attention layers resident in VRAM.
+      for block in [block for block in self.blk if isinstance(block, TransformerBlock)][-2:]: block.kv_cache_host = True
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
@@ -681,10 +715,10 @@ class Transformer:
                valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
     jit_kwargs = {"valid_len":valid_len}
     if resolve(tokens.shape[1] == 1):
-      pos = start_pos.unbind()[1] if isinstance(start_pos, UOp) else start_pos
       if self.has_recurrent_block:
-        key = llm_cpu.recurrent_decode_bucket(pos, self.max_context, str(self.token_embd.weight.device))
+        key = self.max_context
       else:
+        pos = start_pos.unbind()[1] if isinstance(start_pos, UOp) else start_pos
         min_bucket = max(1, getenv("DECODE_BUCKET", 256))
         kv_len = key = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
       rollout_jits = self.sample_rollout_jits if sample else self.rollout_jits
@@ -893,17 +927,18 @@ class Transformer:
         # reuse initialization buffers instead of the persistent recurrent/KV state.
         x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=device)
         for block in self.blk: block._init_state(x)
-        states = [getattr(block, name) for block in self.blk for name in ("cache_kv", "freqs_cis", "conv_state", "recurrent_state")
+        states = [getattr(block, name) for block in self.blk
+                  for name in ("cache_kv", "cache_kv_scale", "freqs_cis", "conv_state", "recurrent_state")
                   if hasattr(block, name)]
         Tensor.realize(*states)
         self._init_state_checkpoints()
         self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
         self.recurrent_prefill_jits[(warm_len, False, False)] = self.prefill_jit
         self.recurrent_prefill_jits[(warm_len, True, False)] = self.flash_prefill_jit
-        short_decode_len = min(8192, self.max_context)
-        self.rollout_jits[short_decode_len] = TinyJit(
-          functools.partial(self.forward_recurrent_decode, decode_len=short_decode_len, sample=False))
-        self.rollout_jits[short_decode_len].cnt = 1
+        decode_len = self.max_context
+        self.rollout_jits[decode_len] = TinyJit(
+          functools.partial(self.forward_recurrent_decode, decode_len=decode_len, sample=False))
+        self.rollout_jits[decode_len].cnt = 1
         self._warming_up = True
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
         prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 16 if str(device).startswith("CPU") else 128)
@@ -967,7 +1002,7 @@ class Transformer:
       remaining = len(tokens) - start_pos
       recurrent_prefill = self.has_recurrent_block and start_pos < prompt_len
       can_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and chunk_size % 64 == 0 and \
-                  (recurrent_prefill if self.has_recurrent_block else start_pos > 0 and remaining >= chunk_size)
+                  (recurrent_prefill if self.has_recurrent_block else start_pos > 0)
       if can_flash:
         device = str(self.token_embd.weight.device)
         can_flash = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
@@ -985,7 +1020,7 @@ class Transformer:
         assert t is not None
         inp = t[:, sp:sp+nt]
       else: inp = out
-      valid_len = v_toks.bind(actual_nt) if recurrent_prefill else None
+      valid_len = v_toks.bind(actual_nt) if recurrent_prefill or use_flash and actual_nt < chunk_size else None
       # Save once immediately before a short final chunk. This is the nearest globally aligned state that can be
       # reused without changing flash-attention's numerical tile layout.
       if not self._warming_up and recurrent_prefill and remaining < chunk_size and start_pos % chunk_size == 0:
@@ -995,7 +1030,7 @@ class Transformer:
       elif temperature > 0: result = self(inp, sp, temp, sample=True)
       else: result = self(inp, sp, temp)
       out = result.realize()
-      start_pos += actual_nt if self.has_recurrent_block else nt if isinstance(nt, int) else nt.val
+      start_pos += actual_nt if valid_len is not None else nt if isinstance(nt, int) else nt.val
       # Generated tool calls are reconstructed by clients and are not guaranteed token-identical on the next request.
       # Keep the reusable checkpoint at the stable prompt boundary instead of overwriting it inside generated output.
       if not self._warming_up and self.has_recurrent_block and start_pos == prompt_len and start_pos % chunk_size == 0:

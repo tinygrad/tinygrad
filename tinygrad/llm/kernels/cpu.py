@@ -1072,12 +1072,6 @@ def uop_q8_gdn_norm_projections(first:Linear, second:Linear, f16_weight:Tensor, 
   return (outputs[0].reshape(*shape, first.out_features), outputs[1].reshape(*shape, second.out_features),
           outputs[2].reshape(*shape, f16_weight.shape[0]))
 
-def recurrent_decode_bucket(pos:int, max_context:int, device:str) -> int:
-  short_decode_len = min(8192, max_context)
-  # Fused CPU decode receives the full KV cache and applies start_pos itself, so one graph covers every position.
-  # The short key is only a JIT cache identifier on CPU; it does not window or truncate attention.
-  return short_decode_len if device.startswith("CPU") or pos < short_decode_len else max_context
-
 def _iq3_repack_uop(out:UOp, raw:UOp, grid:UOp, rows:int, blocks_per_row:int, meta_size:int) -> UOp:
   raw_row_size, row_size = blocks_per_row * 110, meta_size + blocks_per_row * 128
   core, job, idx = _parallel_work(rows * row_size)

@@ -7,7 +7,7 @@ from tinygrad.llm.kernels.cpu import (attention_decode, attention_prefill, causa
                               expert_weighted_sum, f16_linear,
                               f16_matvec, gated_delta, gated_delta_prefill, gated_delta_q8, gdn_qkv, iq3_repack, moe_ffn, q6_argmax, q8_batched_pair,
                               q8_gdn_norm_projections, q8_gdn_projections, q8_linear_pair, q8_repack, q8_silu_linear,
-                              recurrent_decode_bucket, rmsnorm, rmsnorm_f16_linear, shared_gate,
+                              rmsnorm, rmsnorm_f16_linear, shared_gate,
                               silu, silu_mul, uop_attention_prefill, uop_f16_matvec, uop_linear, uop_moe_ffn, uop_q8_linear_pair,
                               uop_q8_prequant_linear, uop_expert_silu_weighted, weighted_sum)
 from tinygrad.llm.kernels.cpu import _dot_bytes_ptr, _dot_nibbles_ptr
@@ -44,7 +44,8 @@ class TestLLMQuantAMD(unittest.TestCase):
   def test_packed_linear_offset_matches_reference(self):
     rng = np.random.default_rng(32)
     for ggml_type,in_features in ((8, 256), (12, 256), (13, 256), (14, 256), (23, 256)):
-      for tokens in ((1, 16, 32) if ggml_type == 23 else (1, 16) if ggml_type in (12, 13, 14) else (1,)):
+      for tokens in ((1, 16, 32, 64, 128) if ggml_type == 23 else (1, 16, 128) if ggml_type in (12, 13) else
+                     (1, 16) if ggml_type == 14 else (1,)):
         raw, out_features = random_packed(rng, ggml_type, 64 * in_features), 64
         weight = ggml_data_to_tensor(Tensor(raw), out_features * in_features, ggml_type).numpy().reshape(out_features, in_features)
         storage = Tensor(np.concatenate((np.zeros(68, dtype=np.uint8), raw)), dtype=dtypes.uint8, device="AMD").realize()
@@ -179,12 +180,6 @@ class TestLLMQuantCPU(unittest.TestCase):
     np.testing.assert_allclose(uop_attention_prefill(tq, tcache, start_pos).numpy(), expected, rtol=2e-5, atol=2e-5)
     np.testing.assert_allclose(uop_attention_prefill(tq[:, :, :4], tcache, start_pos).numpy(), expected[:, :, :4],
                                rtol=2e-5, atol=2e-5)
-
-  def test_recurrent_decode_bucket(self):
-    self.assertEqual(recurrent_decode_bucket(1024, 262144, "CPU"), 8192)
-    self.assertEqual(recurrent_decode_bucket(8192, 262144, "CPU"), 8192)
-    self.assertEqual(recurrent_decode_bucket(90000, 262144, "CPU"), 8192)
-    self.assertEqual(recurrent_decode_bucket(90000, 262144, "AMD"), 262144)
 
   def test_gated_delta_matches_reference(self):
     rng = np.random.default_rng(4)
