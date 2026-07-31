@@ -96,13 +96,11 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
 
 # ---- operand legalization wrappers ----
 def _vop3(ctx, x:UOp):
-  assert x.op is Ops.INS, f"should only legalize INS ops: {x.op}"
   lits = [s for s in x.src if s.op is Ops.CONST]
   return x if len(lits) <= 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
 rev_op_order = { RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
 def _vop2(ctx, x:UOp):
-  assert x.op is Ops.INS, f"should only legalize INS ops: {x.op}"
   if x.arg in rev_op_order: x = x.replace(src=x.src[2::-1] + x.src[2:])
   if not is_const(x.src[1]): return x # TODO: should check positive vgpr, sgpr cant be used in vrsc1
   rest = x.src[2:] if len(x.src) > 2 else ()
@@ -111,7 +109,6 @@ def _vop2(ctx, x:UOp):
   return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
 
 # TODO: allocate vgpr / sgpr based on op group (x.arg.func)
-# NOTE: should almost never need to manually call ctx.vreg, control flow allocations should also be handled here?
 def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   if x.op is Ops.LOAD and x.src[0].addrspace is not AddrSpace.REG: return None
@@ -204,9 +201,6 @@ def cmp(ctx, x:UOp):
   return x if scmp else _vop3(ctx, x)
 
 def arith64(ctx, x:UOp, add:bool):
-  if dtypes.is_float(x.dtype):
-    assert add
-    return x.ins(RDNA3Ops.v_add_f64)
   a, b = x.src
   ins_lo = RDNA3Ops.v_add_co_u32 if add else RDNA3Ops.v_sub_co_u32
   ins_hi = RDNA3Ops.v_add_co_ci_u32 if add else RDNA3Ops.v_sub_co_ci_u32
@@ -301,7 +295,8 @@ def int_to_int64(y:UOp, tdt:DType):
     nbits = y.dtype.itemsize*8
     hi = getsign(vmov(y), nbits)
     # extend sign to upper part of low
-    lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(~((1 << nbits) - 1)))))) # TODO: cleanup manual constr.
+    # TODO: cleanup this slop + manual constr
+    lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(~((1 << nbits) - 1)))))) 
   else: lo, hi = vmov(y), vmov(const(0))
   return multireg(lo, hi, dtype=tdt)
 
@@ -334,7 +329,6 @@ def long2double(x:UOp):
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(32, dtypes.int16)))
   return UOp(Ops.ADD, dtype=dtypes.float64, src=(lo,hi))
 
-# casting between long/ulong and floats is more complicated, may belong in isel?
 def const64(x:UOp):
   v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
@@ -472,6 +466,7 @@ isel_matcher = PatternMatcher([
     lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # --- double precis bit alu ---
   (UPat(Ops.MUL, dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: mul64(ctx,x)),
+  (UPat(Ops.ADD, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_add_f64)),
   (UPat((Ops.ADD, Ops.SUB), dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: arith64(ctx, x, x.op == Ops.ADD)),
   # --- general alu ---
   (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
