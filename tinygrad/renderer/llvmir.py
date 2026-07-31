@@ -51,8 +51,10 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
       args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"]) # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
     else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
 
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{"scale." if scaled else ""}{dt_map[wmma.src[-1].dtype]}" + \
-           f".{N}x{M}x{K}{dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"}(" + ", ".join(args) + ")"
+    scale = "scale." if scaled else ""
+    dt_in = dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"
+    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{scale}{dt_map[wmma.src[-1].dtype]}" + \
+           f".{N}x{M}x{K}{dt_in}(" + ", ".join(args) + ")"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
