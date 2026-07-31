@@ -31,11 +31,13 @@ def shuffle_mxfp4_weight(x:Tensor) -> Tensor:
   N, half_k = x.shape
   assert N % 16 == 0 and half_k % 32 == 0
   return x.reshape(N // 16, 16, half_k // 32, 2, 16).permute(0, 2, 3, 1, 4).contiguous().reshape(N, half_k)
+
 def shuffle_mxfp4_scales(x:Tensor) -> Tensor:
   assert x.ndim == 2 and x.dtype == dtypes.uint8
   rows, scale_k = x.shape
   assert rows % 32 == 0 and scale_k % 8 == 0
   return x.reshape(rows // 32, 2, 16, scale_k // 8, 2, 4).permute(0, 3, 5, 2, 4, 1).contiguous().reshape(rows, scale_k)
+
 def aiter_mxfp4_gemm(a:Tensor, b:Tensor, scale_a:Tensor, scale_b:Tensor, tile_m:int=256, tile_n:int=256) -> Tensor:
   assert (tile_m, tile_n) in ((256, 256), (192, 256), (128, 512))
   assert a.ndim == b.ndim == 2 and a.dtype == b.dtype == dtypes.uint8
