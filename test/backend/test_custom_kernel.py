@@ -341,7 +341,7 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_partial_invalid_store_keeps_uncovered_reads(self):
     x = Tensor([10., 20., 30., 40.])
-    after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float, Invalid, shape=(2,))))
+    after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(Invalid, shape=(2,))))
     self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
 
   def test_multi_after_invalid_store_dep_removed(self):

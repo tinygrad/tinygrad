@@ -399,8 +399,8 @@ class TestDTypeALU(unittest.TestCase):
     if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
-  @unittest.expectedFailure
   def test_unsafe_cast_float_to_int_failure(self):
+    # no longer a failure: a cast of a const does not fold, so the const path rounds exactly like the buffer-backed one
     val = float(dtypes.int32.max - 1)
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)

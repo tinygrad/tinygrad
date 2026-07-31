@@ -541,9 +541,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     reduced = squares.sum(axis=axis, keepdim=keepdim)
-    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
+    # the count and the correction are both widthless numbers: they resolve to one before anything states a width
     # TODO: remove relu?
-    return reduced.div(denominator.relu())
+    den = (reduced.ufix(n) - correction).relu()  # type: ignore[arg-type]
+    return reduced.div(den._wrap_uop(den._uop.simplify()) if den.dtype in dtypes.weaks else den)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """

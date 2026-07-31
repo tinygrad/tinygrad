@@ -1,17 +1,23 @@
 from typing import TYPE_CHECKING, Callable, Self
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype, weak_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import sint, UOp
+  from tinygrad.uop.ops import sint, UOp, ConstLike
+
+# a user entry point states its dtype as the cast (the pair): the value carries the dtype's KIND, the CAST carries its width
+def const_uop(dtype:DType, b:'ConstLike', shape:'tuple[sint, ...]|None'=None) -> 'UOp':
+  from tinygrad.uop.ops import UOp
+  return b.cast(dtype) if isinstance(b, UOp) else UOp.const(weak_dtype(dtype).const(b), shape=shape).cast(dtype)
 
 class CreationMixin(DTypeMixin, MovementMixin):
+  # the subclasses state their own signature: Tensor.const(dtype, b) mints the pair, UOp.const(b) the bare CONST
   @staticmethod
-  def const(dtype, b): raise NotImplementedError
+  def const(*args, **kwargs): raise NotImplementedError
 
-  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
+  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(const_uop(self.dtype, b, self._uop._shape))
 
   def _multi_like(self, fxn:'Callable[[tuple[sint, ...], str|None], Self]') -> Self:
     from tinygrad.uop.ops import UOp
@@ -78,7 +84,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
-    val = cls.const(dt, fill_value)
+    val = cls._wrap_uop(const_uop(dt, fill_value))
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     if not buffer: return val
     ret = val.empty_like(dt if dtype is not None else None, device)

@@ -25,14 +25,14 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
   is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
   assert d>0, "Sign should have been taken out of divisor"
   vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
-  if vmin > -d and vmax < d: return x.const_like(0)
+  if vmin > -d and vmax < d: return UOp.const(0)
   m,s = magicgu(max(vmax, abs(vmin)), d)
   if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   # use explicit Ops.CDIV (trunc) since the recursion assumes trunc semantics throughout
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
+    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, UOp.const(largest_factor_of_two_in_d)),
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # the next integer width that holds x*m
@@ -69,7 +69,7 @@ def floormod_to_mod(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin > 0) or (a.vmax <= 0 and b.vmax < 0): return a.alu(Ops.CMOD, b)
   r = a.alu(Ops.CMOD, b)
   # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
-  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
+  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, UOp.const(0))
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
@@ -98,7 +98,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     # signed CDIV (trunc) by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
     pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
-      lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
+      lambda x,c: (x+(UOp.const(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
         if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not disable_fast_idiv:
       # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
@@ -125,9 +125,10 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
     # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first
-    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.arg), c))]
+    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'),
+      lambda x,n,c: x.alu(Ops.MULACC, UOp.const(1<<n.arg).cast(x.dtype), c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
-    pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
+    pat += [(UPat.var("x").reciprocal(), lambda x: UOp.const(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(None, 1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
   return PatternMatcher(pat)

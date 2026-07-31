@@ -18,7 +18,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:UOp.const(0)}), X.split_uop(Ops.ADD), idx)
       if testidx.index(0).vmax < 0 or testidx.index(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
@@ -141,12 +141,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(None, full_grp[0])
+        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(None, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):

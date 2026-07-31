@@ -171,6 +171,9 @@ class LLVMRenderer(Renderer):
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
+      # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to
+      elif u.op is Ops.CAST and u.is_const:
+        r[u] = lconst(u.dtype.const(u.src[0].arg), u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
@@ -274,7 +277,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
           src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
           if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
-          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
+          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(0.0).cast(x.src[2].dtype)
             for j in range(x.max_numel()*2)))),
           arg=(*x.arg[:4], None)).index(i*2)
           for i in range(x.max_numel()))) if x.max_numel() == 8 else None),

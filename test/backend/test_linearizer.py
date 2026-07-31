@@ -252,7 +252,7 @@ class TestLinearizer(unittest.TestCase):
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
-          assert u.src[1].op is Ops.CONST
+          assert u.src[1].is_const  # the acc init is a data constant: the pair CAST(float, CONST(0.0))
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range

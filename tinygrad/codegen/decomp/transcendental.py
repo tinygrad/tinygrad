@@ -22,7 +22,7 @@ def shl(x:UOp|int, y:UOp|int) -> UOp: return x * (2**(y.simplify().arg) if isins
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
   out_dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
-  return (d + (d<0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(out_dtype)
+  return (d + (d<0.0).where(UOp.const(-0.5), UOp.const(0.5))).cast(out_dtype)
 
 def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
@@ -88,12 +88,12 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
     """an = two_over_pi_f[i+offset]"""
     if count+offset < len(two_over_pi_f) - 1:
-      an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
+      an = i.ne(count).where(_take(an, offset, count=count+1), UOp.const(two_over_pi_f[count+offset]).cast(an.dtype))
     return an
   def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
   def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
 
-  a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  a = [_take(UOp.const(0).cast(dtypes.uint32), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
@@ -159,11 +159,11 @@ def _ifand(q:UOp, n:int): return (q & n).ne(0)
 
 def sin_poly_small(d:UOp, q:UOp) -> UOp:
   r = sin_poly(d)
-  return r * _ifand(q, 1).where(r.const_like(-1), r.const_like(1))
+  return r * _ifand(q, 1).where(UOp.const(-1), UOp.const(1))
 
 def sin_poly_large(d:UOp, q:UOp) -> UOp:
-  r = sin_poly(d + _ifand(q, 1).where(d.const_like(math.pi / 2), d.const_like(0)))
-  return r * _ifand(q, 2).where(r.const_like(-1), r.const_like(1))
+  r = sin_poly(d + _ifand(q, 1).where(UOp.const(math.pi / 2), UOp.const(0)))
+  return r * _ifand(q, 2).where(UOp.const(-1), UOp.const(1))
 
 # *** toplevel functions for xsin/xlog2/xexp2 ***
 
@@ -175,9 +175,9 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   """
   assert d.dtype in TRANSCENDENTAL_DTYPES
   # mask +-inf/nan as zero
-  x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
+  x = _lazy_map_numbers(d, (zero:=UOp.const(0.0)), zero, zero, d)
   # x_sign = sign(x)
-  x_sign = x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
+  x_sign = x.ne(0).where((x<0).where(UOp.const(-1), UOp.const(1)), UOp.const(0))
   x_abs = x * x_sign
   r, q = (cody_waite_reduction if fast else payne_hanek_reduction)(x_abs)
   if fast: result = sin_poly_small(r, q)
@@ -188,7 +188,7 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   # adjusts the sign for abs(x)
   result = result * x_sign
   # sin(Inf) = NaN, sin(-Inf) = NaN, sin(NaN) = NaN
-  return _lazy_map_numbers(d, d.const_like(math.nan), d.const_like(math.nan), d.const_like(math.nan), result)
+  return _lazy_map_numbers(d, (nan:=UOp.const(math.nan)), nan, nan, result)
 
 def xexp2(d:UOp) -> UOp:
   """
@@ -197,7 +197,7 @@ def xexp2(d:UOp) -> UOp:
   """
   assert d.dtype in TRANSCENDENTAL_DTYPES
   # mask +=inf/nan as zero.
-  x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
+  x = _lazy_map_numbers(d, (zero:=UOp.const(0.0)), zero, zero, d)
   q = rintk(x)
   # s = d - round(d)
   s = x - q
@@ -210,11 +210,11 @@ def xexp2(d:UOp) -> UOp:
   u = ldexp2k(u, q) # u*2^q
   upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[d.dtype]
   # Replace x >= upper with +inf
-  u = (d >= upper).where(d.const_like(math.inf), u)
+  u = (d >= upper).where(UOp.const(math.inf), u)
   # Replace x < lower with zero.
-  u = (d<lower).where(d.const_like(0.0), u)
+  u = (d<lower).where(UOp.const(0.0), u)
   # exp2(NaN) = NaN
-  return d.ne(d).where(d.const_like(math.nan), u)
+  return d.ne(d).where(UOp.const(math.nan), u)
 
 def xlog2(d:UOp) -> UOp:
   """
@@ -224,7 +224,7 @@ def xlog2(d:UOp) -> UOp:
   assert d.dtype in TRANSCENDENTAL_DTYPES
   # float16 uses 2^10 for denormal scaling (2^64 overflows), float32/64 use 2^64
   denormal_exp = 10 if d.dtype == dtypes.float16 else 64
-  FLT_MIN = d.const_like({dtypes.float16: 6.1e-5, dtypes.float32: 1e-4, dtypes.float64: 1e-4}[d.dtype])
+  FLT_MIN = UOp.const({dtypes.float16: 6.1e-5, dtypes.float32: 1e-4, dtypes.float64: 1e-4}[d.dtype])
   is_denormal = d<FLT_MIN
   a = is_denormal.where(d * (2.0 ** denormal_exp), d)
 
@@ -244,15 +244,15 @@ def xlog2(d:UOp) -> UOp:
     r = t * (x * x2) + e + x * 2.8853900432586669922 + (x * 3.2734474483568488616e-08 if d.dtype == dtypes.float32 else 0)
 
   # log2(Inf) = Inf
-  r = d.ne(math.inf).where(r, r.const_like(math.inf))
+  r = d.ne(math.inf).where(r, UOp.const(math.inf))
   # log2(0) = -Inf (handle both +0.0 and -0.0)
-  r = d.ne(0.0).where(r, r.const_like(-math.inf))
+  r = d.ne(0.0).where(r, UOp.const(-math.inf))
   # log2(x) = NaN for x < 0
-  r = (d<-0.0).where(r.const_like(math.nan), r)
+  r = (d<-0.0).where(UOp.const(math.nan), r)
   # log2(NaN) = NaN
-  r = d.ne(d).where(r.const_like(math.nan), r)
+  r = d.ne(d).where(UOp.const(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  return d.reciprocal().ne(-math.inf).where(r, UOp.const(-math.inf))
 
 def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
@@ -260,9 +260,9 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   # negative base: nan for non-integer exponent, negate for odd integer exponent
   non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
   is_odd = (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool)
-  neg_base = non_int.where(ret.const_like(math.nan), is_odd.where(-ret, ret))
+  neg_base = non_int.where(UOp.const(math.nan), is_odd.where(-ret, ret))
   # fix 0 ** 0 = 1
-  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), (base < 0).where(neg_base, ret))
+  return (base.eq(0) & exponent.eq(0)).where(UOp.const(1), (base < 0).where(neg_base, ret))
 
 @functools.cache
 def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:
@@ -273,5 +273,6 @@ def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) 
               (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
                 lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # rewrite SQRT to xpow 0.5
-  if Ops.SQRT not in ops or force_transcendental: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
+  if Ops.SQRT not in ops or force_transcendental:
+    pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, UOp.const(0.5).cast(d.dtype))))
   return PatternMatcher(pat)

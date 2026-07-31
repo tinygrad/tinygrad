@@ -7,6 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike
+from tinygrad.mixin.creation import const_uop
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -70,12 +71,12 @@ class Tensor(RandMixin):
     self.is_param:bool = True
 
     # create a UOp from the different types of inputs
-    if data is None:
-      data = UOp.const(_dtype, 0.0)
-    elif isinstance(data, get_args(ConstType)):
-      data = UOp.const(_dtype, data)
+    if data is None: data = 0.0
+    if isinstance(data, get_args(ConstType)):
+      # a python scalar with no stated dtype is a bare weak CONST, a stated dtype makes it the pair
+      data = UOp.const(data) if _dtype is None else const_uop(_dtype, data)
     elif is_numpy_ndarray(data) and data.shape == ():
-      data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
+      data = const_uop(_dtype or _from_np_dtype(data.dtype), data.item())
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes):
@@ -120,7 +121,7 @@ class Tensor(RandMixin):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> Tensor: return cls(u)
   @staticmethod
-  def const(dtype:DType, b:ConstLike) -> Tensor: return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstLike) -> Tensor: return Tensor(const_uop(dtype, b))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
@@ -516,7 +517,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
+    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s).cast(dtypes.int) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

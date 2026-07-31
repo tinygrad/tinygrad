@@ -109,7 +109,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     ((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0),
   ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
     ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
-     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
+     (lower.maximum(0) if lower is not None else UOp.const(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
   (invalid_gate.reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda cond,x,i,r: cond.where(x.reduce(*r.src[1:], arg=Ops.ADD), i) if no_range(cond) else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -142,6 +142,8 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if not no_range(sink): return None
     u = sink.substitute({v:k for k,v in replaces.items()})
+    # a fold that dropped the declared width weakened the result: restore it (the demand-cast marker)
+    if u.dtype in dtypes.weaks and collapse_fxn.dtype not in dtypes.weaks: u = u.cast(collapse_fxn.dtype)
   return u
 
 def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
