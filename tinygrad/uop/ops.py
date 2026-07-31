@@ -140,8 +140,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return src[2].dtype
     case Ops.GETTUPLE:
       # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-      in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
-      return in_tuple.src[arg].dtype
+      return src[0].get_arg(arg).dtype
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
@@ -302,7 +301,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION | Ops.START | Ops.BLOCKEND:
         return None
 
       # INS shape is always scalar, vector width is in the instruction encoding
@@ -320,9 +319,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       case Ops.GETTUPLE:
         # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-        assert in_tuple.op is Ops.TUPLE
-        inner_shape = in_tuple.src[self.arg]._shape
+        inner_shape = self.src[0].get_arg(self.arg)._shape
         if inner_shape is None: return None
         # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
         if self.src[0].op is Ops.FUNCTION:
@@ -625,6 +622,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert dtypes.is_int(self.dtype), "Can only call get_valid on index dtype"
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
+  # returns the i'th block argument
+  def get_arg(self, i:int) -> UOp:
+    assert self.op in GroupOp.ControlFlow | {Ops.FUNCTION, Ops.TUPLE}
+    if self.op is Ops.FUNCTION: return self.src[0].src[i]
+    if self.op is Ops.END: return self.src[3+i]
+    # NOTE: this returns the arg on the true branch
+    if self.op is Ops.ENDIF: return self.src[0].get_arg(i)
+    if self.op in (Ops.RANGE, Ops.BLOCKEND): return self.src[1+i]
+    return self.src[i]
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
     if isinstance(arg, Ops): arg = (arg, 0)
@@ -659,9 +665,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
     # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
-    if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
+    if self.op is Ops.GETTUPLE: return self.src[0].get_arg(self.arg).axis
     if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None

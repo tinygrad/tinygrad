@@ -78,7 +78,7 @@ spec_shared = PatternMatcher([
 
   # RANGE can be in the big graph now
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
-    rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+    isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
@@ -203,7 +203,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.All, (dtypes.index, dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.GETTUPLE)), UPat(), UPat(Ops.CONST))), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -214,9 +214,13 @@ spec_program = PatternMatcher([
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
-  # if has a <gate, index_for_dedup>
-  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
-  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+  # control flow
+  (UPat(Ops.IF, dtypes.bool, (UPat(GroupOp.ControlFlow), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.ENDIF, dtypes.void, (UPat(Ops.BLOCKEND),), allow_any_len=True), lambda: True),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.RANGE, Ops.ENDIF, Ops.START)),)), lambda: True),
+  (UPat(Ops.BLOCKEND), lambda: True),
+  (UPat(Ops.END), lambda: True),
+  (UPat(Ops.START), lambda: True),
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),

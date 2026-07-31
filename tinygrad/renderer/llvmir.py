@@ -67,13 +67,6 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.arg}" if buf.addrspace == AddrSpace.ALU else None),
 
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
-   lambda ctx,x,idx,alt,mask:
-   f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
-   f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
-   f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
    f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
@@ -95,26 +88,19 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
-  # range
-  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
-   f"  br label %loop_entry_{range_str(r)}\n"
-   f"loop_entry_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_latch_{range_str(r)}:\n"
-   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
-   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
-   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
-   f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
-   f"loop_body_{range_str(r)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
-   f"  br label %loop_footer_{range_str(r)}\n"
-   f"loop_footer_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_exit_{range_str(r)}:"),
-
-  # if
-  (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
-  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+  # control flow
+  (UPat(Ops.START, name="x"), lambda ctx,x: ctx._render_fn(x)),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"  br label %{ctx[x]}\n{ctx[x]}:"),
+  (UPat(Ops.END, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[2]]} label %{ctx[x.src[1]]}, label %{ctx[x]}\n{ctx[x]}:"),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[1]]}, label %if_then_{ctx[x][1:]}, label %if_else_{ctx[x][1:]}"),
+  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"if_end_{ctx[x][1:]}:"),
+  (UPat(Ops.SINK), lambda: "  ret void\n}"),
+  # phi
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.ENDIF, src=(UPat.var("a"), UPat.var("b"))),), name="x"), lambda ctx,a,b,x:
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ {ctx[a.src[1+x.arg]]}, %if_then_{a.src[0][1:]} ], [ {ctx[b.src[1+x.arg]]}, %if_else_{b.src[0][1:]} ]"),
+  # loop phi, here the second input comes from the loop backedge
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.RANGE, name="a"),), name="x"), lambda ctx,a,x:
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ {ctx[a.src[1+x.arg]]}, %{ctx[a.src[0]]} ], [ {ctx.backedge[a].src[2+x.arg]}, %{ctx[a]} ]"),
 
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
@@ -126,36 +112,48 @@ class LLVMRenderer(Renderer):
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
+  def __getitem__(self, key): return self.r[key]  # hacky helper
+  def _render_fn(self, x:UOp):
     # NOTE: CPUAllocator promises 0x20 alignment
-    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
-      name for name,u in args])
-    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    args = ", ".join([f"{ldt(s.dtype, ptr=s.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if s.addrspace == AddrSpace.GLOBAL else ''} {self[s]}" for s in x.src])
+    return "\n".join((self.prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{x.arg}({args}) #0", "{", f"{self[x]}:"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
-    r: dict[UOp, str] = {}
-    args: list[tuple[str, UOp]] = []
+    self.prefix = prefix
+    self.r: dict[UOp, str] = {}
+    r = self.r
     kernel: list[str] = []
-    vc = -1
+    vc = 0
+    b_id = 0
+
+    # get the loop backedges
+    self.backedge: dict[UOp, UOp] = {}
+    for u in uops:
+      if u.op is Ops.END: self.backedge[u.src[1]] = u
 
     local_args: list[str] = []
-    name = "test"
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP}: continue
-      if u.op is Ops.AFTER:
-        r[u] = r[u.src[0]]
-        continue
-      if u.op is Ops.SINK:
-        if u.arg is not None: name = u.arg.function_name
-        continue
-      if u.op is Ops.PARAM:
-        r[u] = f"%data{u.arg.slot}"
-        args.append((r[u], u))
+      if u.op is Ops.AFTER: r[u] = r[u.src[0]]
+      elif u.op is Ops.GETTUPLE and u.src[0].op is Ops.START: r[u] = r[u.src[0].src[u.arg]]
+      # control flow
+      if u.op in GroupOp.ControlFlow:
+        if u.op is Ops.START: r[u] = f"bb{b_id}.entry"
+        if u.op is Ops.RANGE: r[u] = f"bb{b_id}.loop.body"
+        if u.op is Ops.END: r[u] = f"bb{b_id}.loop.exit"
+        if u.op is Ops.BLOCKEND and u.arg == 0: r[u] = f"bb{b_id}.if.then"
+        if u.op is Ops.BLOCKEND and u.arg == 1: r[u] = f"bb{b_id}.if.else"
+        if u.op is Ops.ENDIF: r[u] = f"bb{b_id}.if.end"
+
+      elif u.op is Ops.START: r[u] = "entry"
+      elif u.op is Ops.RANGE: r[u] = f"loop_body_{range_str(u)}"
+      elif u.op is Ops.END: r[u] = f"loop_exit_{range_str(u.src[1])}"
+      #elif u.op is Ops.IF: r[u] = 
+      elif u.op is Ops.ENDIF: r[u] = f"if_end_{r[u.src[0]][1:]}"
+      elif u.op is Ops.PARAM: r[u] = f"%data{u.arg.slot}"
       elif u.op is Ops.BUFFER:
-        r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
+        r[u] = f"%local_{str(u.arg.slot)}"
         size = u.max_numel()
-        if u.addrspace == AddrSpace.REG:
-          kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}]")
-        elif self.has_local:
+        if self.has_local:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
@@ -166,15 +164,15 @@ class LLVMRenderer(Renderer):
       else:
         # if it's an assign target, it's already preallocated
         if u not in r:
-          vc += 1
           r[u] = f"%v{vc}"
+          vc += 1
 
         # do the rendering of the llvm ir code
-        l: str|None = self.string_rewrite.rewrite(u, ctx=r)
+        l: str|None = self.string_rewrite.rewrite(u, ctx=self)
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
+    return tuple(local_args), "\n".join(kernel)
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False

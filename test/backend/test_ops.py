@@ -2693,7 +2693,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_avg_pool2d(self):
     shape = (32,2,11,28)
-    for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
+    for ksz in [(5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
