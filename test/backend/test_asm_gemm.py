@@ -149,6 +149,7 @@ class TestAsmGEMM(unittest.TestCase):
   def test_unsupported_n(self):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
+
 # AITER gfx950 packed E2M1 GEMM
 class TestAiterMXFP4(unittest.TestCase):
   def test_empty(self):
@@ -161,7 +162,9 @@ class TestAiterMXFP4(unittest.TestCase):
     scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
     scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
     aiter_mxfp4_gemm(a, b, scale_a, scale_b).realize()
+
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
+
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
 class TestGemmLlama(unittest.TestCase):
   dtype = FP8_DTYPE
