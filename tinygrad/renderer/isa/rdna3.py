@@ -300,16 +300,14 @@ def int_to_int64(y:UOp, tdt:DType):
   else: lo, hi = vmov(y), vmov(const(0))
   return multireg(lo, hi, dtype=tdt)
 
+# NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
-  # NOTE: use v_bfe instead of hand rolled masking
   if y.dtype.itemsize == x.dtype.itemsize: return y  # same size noop
   if x.dtype.itemsize > y.dtype.itemsize:
-    if x.dtype.itemsize == 8: return int_to_int64(y, x.dtype)
-    if y.dtype.itemsize == 1: return y.bitcast(x.dtype)
     if x.dtype.itemsize == 2: return (y & const(0xFFFF)).bitcast(x.dtype)
     return (y & const(0xFFFFFFFF, y.dtype)).bitcast(x.dtype)
   if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
-    if x.dtype.itemsize == 2: return (y & const(0xFFFF, y.dtype)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(0xFFFF)).bitcast(x.dtype)
     return (y & const(0xFF, y.dtype)).bitcast(x.dtype)
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
@@ -419,6 +417,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"),
     lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
   # -- int -> int casts ---
+  (UPat.var("y", dtypes.int8s+dtypes.int16s+dtypes.int32s).cast(dtypes.int64s, name="x"), lambda y,x: int_to_int64(y, x.dtype)),
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
     lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), intcast),
@@ -505,6 +504,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.ENDIF, src=(UPat.var("mif"),)), lambda mif: ((nx := restoreexec(mif)), [nx])),
 ])
 
+# NOTE: hacky fixes, find cleaner way to conform to isa
 def encode(ctx, x:UOp):
   import tinygrad.renderer.amd.dsl as dsl
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
@@ -516,7 +516,6 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
@@ -537,21 +536,13 @@ def encode(ctx, x:UOp):
     if group in [RDNA3Ops.VOP3, RDNA3Ops.VOP3P]: oprs = oprs[:3]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
-  elif group is RDNA3Ops.VOPD:
-    y = x.src[0]
-    kw = dict(opy=y.arg.args[0], vdstx=_fuse(rdefs(x)), vdsty=_fuse(rdefs(y)), srcx0=_immorreg(x.src[1]), srcy0=_immorreg(y.src[0]))
-    dual_binary = { RDNA3Ops.v_dual_mul_f32, RDNA3Ops.v_dual_add_f32 }
-    if x.arg in dual_binary: kw["vsrcx1"] = _immorreg(x.src[2])
-    if y.arg in dual_binary: kw["vsrcy1"] = _immorreg(y.src[1])
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
-
-  ret = enc(**kw) if kw is not None else enc(*args)
-  return x.replace(arg=ret)
+  return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
 
 class CntType(Enum):
   DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
 
-  def get(u:UOp) -> CntType|None:
+  def get(u:UOp):
     if u.arg.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }:
       return CntType.STORE_CNT if u.dtype is dtypes.void else CntType.LOAD_CNT
     if u.arg.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
