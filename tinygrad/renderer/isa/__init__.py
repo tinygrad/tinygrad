@@ -29,11 +29,12 @@ def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (Register,VRegister)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
-class IselContext:
+class PreRegallocContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    self.buf_slots: dict[UOp, int] = {} # find better, more arch independent way?
+    self.lock: UOp|None = None
+    self.clobbered: set[UOp] = set()
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
@@ -42,17 +43,13 @@ class IselContext:
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
-@dataclass
-class PreRegAllocContext:
-  lock: UOp|None = None
-  clobbered: set[UOp] = field(default_factory=set)
-
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
+  mem2reg_alloc = None
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
