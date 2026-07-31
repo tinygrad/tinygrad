@@ -1361,8 +1361,8 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     sel0, sel1 = int(inst.opsel) & 3, int(inst.opsel_hi) & 3
     def _scale_exp(off: UOp, sel: int, lane: UOp) -> UOp:
       sv = ctx.rsrc_dyn(off, lane, 32)
-      byte = (sv >> UOp.const(dtypes.uint32, sel * 8)) & UOp.const(dtypes.uint32, 0xFF)
-      return byte.cast(dtypes.int32) - UOp.const(dtypes.int32, 127)
+      byte = (sv >> UOp.const(sel * 8, dtypes.uint32)) & UOp.const(0xFF, dtypes.uint32)
+      return byte.cast(dtypes.int32) - UOp.const(127, dtypes.int32)
     # combined A*B scale for this lane: 2^(ea-127) * 2^(eb-127)
     def scale_factor(lane: UOp) -> UOp:
       return UOp.exp2((_scale_exp(scale0_off, sel0, lane) + _scale_exp(scale1_off, sel1, lane)).cast(dtypes.float32))
@@ -1440,7 +1440,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     elif is_f32_src:
       return raw  # already uint32 (f32 bit pattern)
     elif is_fp8:
-      return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(dtypes.uint32, sub_idx * 8)).bitcast(dtypes.uint32)
+      return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(sub_idx * 8, dtypes.uint32)).bitcast(dtypes.uint32)
     elif is_bf16:
       # bf16→f32 bits: just shift left by 16 (bf16 is upper 16 bits of f32)
       return ((raw >> UOp.const(sub_idx * 16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)) << UOp.const(16, dtypes.uint32)
@@ -1511,7 +1511,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, lane: UOp) -> UOp:
     """acc += sum_k A[a_row+k] * B[b_row+k]. For scaled MFMA, only the dot product is scaled: D = dot*scale + C."""
     def prod(k: int) -> UOp:
-      return tmp2.index(a_row + UOp.const(dtypes.int, k)).bitcast(acc_dt) * tmp2.index(b_row + UOp.const(dtypes.int, k)).bitcast(acc_dt)
+      return tmp2.index(a_row + UOp.const(k, dtypes.int)).bitcast(acc_dt) * tmp2.index(b_row + UOp.const(k, dtypes.int)).bitcast(acc_dt)
     if not scaled:
       for k in range(K): acc = acc + prod(k)
       return acc
@@ -1549,7 +1549,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
       else: acc_v = acc_v.bitcast(dtypes.float32)
       acc = src2_is_vgpr.where(acc_v, acc_scalar)
 
-      acc = _dot_accum(acc, m_base * UOp.const(dtypes.int, K), b_off + n_idx * UOp.const(dtypes.int, K), compute_lane)
+      acc = _dot_accum(acc, m_base * UOp.const(dtypes.int, K), b_off + n_idx * UOp.const(K, dtypes.int), compute_lane)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
@@ -1570,14 +1570,14 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
 
       if M == 4:
         # 4x4: each group is independent. A/B indexed per-group.
-        m_base = c_grp * UOp.const(dtypes.int, M * K) + UOp.const(dtypes.int, out_reg * K)
-        b_base = b_off + c_grp * UOp.const(dtypes.int, N * K) + n_idx * UOp.const(dtypes.int, K)
+        m_base = c_grp * UOp.const(M * K, dtypes.int) + UOp.const(out_reg * K, dtypes.int)
+        b_base = b_off + c_grp * UOp.const(N * K, dtypes.int) + n_idx * UOp.const(K, dtypes.int)
       else:
         # 16x16: K is split across groups. Shared MxK/NxK arrays.
-        m_base = c_grp * UOp.const(dtypes.int, out_per_lane) + UOp.const(dtypes.int, out_reg)
-        b_base = b_off + n_idx * UOp.const(dtypes.int, K)
+        m_base = c_grp * UOp.const(out_per_lane, dtypes.int) + UOp.const(out_reg, dtypes.int)
+        b_base = b_off + n_idx * UOp.const(K, dtypes.int)
 
-      acc = _dot_accum(acc, m_base if M == 4 else m_base * UOp.const(dtypes.int, K), b_base, compute_lane)
+      acc = _dot_accum(acc, m_base if M == 4 else m_base * UOp.const(K, dtypes.int), b_base, compute_lane)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
@@ -1604,9 +1604,9 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   sz = 8 if "8" in op_name else 16
   # read matrix from VGPRs → flat f32/i32 array[row*16+k]
   def gval(src, lane, vgpr, ridx):
-    v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(dtypes.int, lane))
-    pkd = v >> UOp.const(dtypes.uint32, ridx * sz) if ridx > 0 else v
-    pkd = pkd & UOp.const(dtypes.uint32, (1 << sz) - 1)
+    v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(lane, dtypes.int))
+    pkd = v >> UOp.const(ridx * sz, dtypes.uint32) if ridx > 0 else v
+    pkd = pkd & UOp.const((1 << sz) - 1, dtypes.uint32)
     if "F" in output_type: return cvt(pkd)
     return (pkd << _c(24, dtypes.uint)).bitcast(dtypes.int32) >> _c(24, dtypes.int32) # sign extend
 
@@ -1644,7 +1644,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
                 for m in range(16) for n in range(16)]
   else: # f32/i32
     out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0])).bitcast(out_dt)
+    mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int)).bitcast(out_dt)
              for m in range(16) for n in range(16)]
     mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
     stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int), mat_d[m*16+n].bitcast(dtypes.uint32), exec_mask)
