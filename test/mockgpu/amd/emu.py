@@ -1351,6 +1351,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
 
   scaled = isinstance(inst, irc.VOP3PX2)
   if scaled:
+    assert isinstance(inst, irc.VOP3PX2)
     # F8F6F4 input formats: 0=FP8(E4M3), 1=BF8(E5M2). FP6/FP4 (2-4) not emulated.
     src0_fmt, src1_fmt = int(inst.cbsz), int(inst.blgp)
     if src0_fmt > 1 or src1_fmt > 1: raise RuntimeError(f"unsupported scaled MFMA formats cbsz={src0_fmt} blgp={src1_fmt}")
@@ -1424,6 +1425,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
 
   # Per-operand fp8 format ("fp8"=E4M3, "bf8"=E5M2) for A and B
   if 'F8F6F4' in op_name:
+    assert isinstance(inst, (irc.VOP3P_MFMA, irc.VOP3PX2))
     _fmts = {0: "fp8", 1: "bf8"}
     a_fmt, b_fmt = _fmts.get(int(inst.cbsz), "fp8"), _fmts.get(int(inst.blgp), "fp8")
   elif is_fp8:
@@ -1549,7 +1551,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
       else: acc_v = acc_v.bitcast(dtypes.float32)
       acc = src2_is_vgpr.where(acc_v, acc_scalar)
 
-      acc = _dot_accum(acc, m_base * UOp.const(dtypes.int, K), b_off + n_idx * UOp.const(K, dtypes.int), compute_lane)
+      acc = _dot_accum(acc, m_base * UOp.const(K, dtypes.int), b_off + n_idx * UOp.const(K, dtypes.int), compute_lane)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
@@ -1653,7 +1655,9 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
 
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
-  if 'WMMA' in op_name: return _compile_wmma(inst, ctx)
+  if 'WMMA' in op_name:
+    assert not isinstance(inst, irc.VOP3PX2)
+    return _compile_wmma(inst, ctx)
   if 'MFMA' in op_name and any(f'{s}X{s}X' in op_name for s in ('4', '16', '32')) and isinstance(inst, (irc.VOP3P, irc.VOP3PX2)):
     return _compile_mfma(inst, ctx)
 
