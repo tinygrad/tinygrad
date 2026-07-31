@@ -16,7 +16,8 @@ from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quanti
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
-INIT_STD = 0.008
+INIT_STD = 0.02
+ASM_GEMM = getenv("ASM_GEMM", 1)
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
   # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
@@ -59,6 +60,21 @@ def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
 
 def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
   l_shape = x.shape[:-1]
+  if ASM_GEMM:
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
+    x2, K, N = x.reshape(-1, x.shape[-1]), x.shape[-1], w_q.shape[0]
+    wq, ws = w_q, w_scale
+    if (pad := (-K) % 256):
+      x2 = x2.pad(((0, 0), (0, pad)))
+      wq = wq.pad(((0, 0), (0, pad)))
+      ws = ws.pad(((0, 0), (0, pad // 32)), value=127).cast(dtypes.uint8)
+    if (npad := (-N) % 256):
+      wq = wq.pad(((0, npad), (0, 0)))
+      ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
+    x_q, x_e8, x_si = quantize_mxfp8(x2)
+    if x_si is not None and can_use_asm_gemm(x_q, wq.T):
+      out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(ws), ws), mx_w_stored=True)
+      return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
   x_phys = quant_dequant_mx(x.reshape(-1, x.shape[-1])).reshape(*l_shape, x.shape[-1])
   w_phys = dequant_weight(w_q, w_scale)
   return (x_phys @ w_phys.T).cast(dtypes.bfloat16)
