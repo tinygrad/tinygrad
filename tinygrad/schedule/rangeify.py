@@ -553,13 +553,41 @@ pm_copy_to_store = PatternMatcher([
 
 # **** simple rangeify ****
 
-def this_is_rangeify(ctx, x:UOp):
+from tinygrad.helpers import all_same
+from tinygrad.uop.ops import _broadcast_shape
+
+def expand_broadcast(x:UOp):
+  shapes = [u._shape for u in x.src]
+  if any(s is None for s in shapes) or all_same(shapes): return None
+  shape = _broadcast_shape(*shapes)
+  return x.replace(src=tuple([u.expand(shape) for u in x.src]))
+
+pm_expand_broadcast = PatternMatcher([
+  # expand broadcasts first
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
+])
+
+def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp):
+  # TODO: is AxisType.REDUCE a real thing?
+  rngs = [UOp.range(s, next(ctx), AxisType.REDUCE) for s in inp.shape[:red.arg[1]]]
+  return inp.index(*rngs, *idx.src[1:]).reduce(*rngs, arg=(red.arg[0], 0))
+
+def rangeify_on_store(ctx, x:UOp):
   if x.shape == (): return None
   rngs = [UOp.range(s, next(ctx)) for s in x.shape]
   return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
 
-pm_simple_rangeify = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), this_is_rangeify),
+pm_simple_rangeify = pm_mops+PatternMatcher([
+  # INDEX without src is nothing (TODO: this should be in mop_cleanup)
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # handle movement ops on INDEX
+  (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
+  # pass index through elementwise
+  (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
+   lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+  # reduce/store are what creates ranges
+  (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red").index(name="idx", allow_any_len=True), rangeify_on_reduce),
+  (UPat(Ops.STORE, name="x"), rangeify_on_store),
 ])
 
 @profile_matches
@@ -572,6 +600,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
 
   # convert movement ops to ranges
   #tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
   tsink = graph_rewrite(tsink, pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
