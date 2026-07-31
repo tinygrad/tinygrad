@@ -25,6 +25,7 @@ FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
 SPLIT_W13 = getenv("SPLIT_W13", 0)
 COLUMNWISE_WEIGHT_SCALE = getenv("COLUMNWISE_WEIGHT_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
+MXFP4 = getenv("MXFP4", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -43,6 +44,11 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T),)
+    return (x @ w.T,)
+  if MXFP4:
+    assert x is not None, "MXFP4 matmul requires an unquantized input"
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
+    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True),)
     return (x @ w.T,)
   assert w_inv_scale is not None, "fp8 matmul requires w_inv_scale (weights must be stored in fp8 with per-tensor scale)"
   if MXFP8:
@@ -79,7 +85,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor,
                          next_amax_x:Tensor, grad_amax_state:Tensor, next_grad_amax_state:Tensor):
-  if FUSED_ADD_NORM_MUL_QUANTIZE:
+  if FUSED_ADD_NORM_MUL_QUANTIZE and not MXFP4:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_rmsnorm_mul_quantize_fp8
     x_fp8, x_normed, rrms = fused_rmsnorm_mul_quantize_fp8(x, norm, amax_x, eps, FP8_DTYPE, next_amax_x)
     out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, amax_x=amax_x,
@@ -92,7 +98,7 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
 
 def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor,
                              next_amax_x:Tensor, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None):
-  if FUSED_ADD_NORM_MUL_QUANTIZE:
+  if FUSED_ADD_NORM_MUL_QUANTIZE and not MXFP4:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8
     x_fp8, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, norm, amax_x, eps, FP8_DTYPE, next_amax_x)
     out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, amax_x=amax_x,
@@ -108,7 +114,7 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
                              amax_x2:Tensor, next_amax_x2:Tensor,
                              grad_amax_xw13:Tensor, next_grad_amax_xw13:Tensor,
                              grad_amax_xout:Tensor, next_grad_amax_xout:Tensor):
-  if FUSED_SILU_W13:
+  if FUSED_SILU_W13 and not MXFP4:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13,
                                                  next_grad_amax_state=next_grad_amax_xw13, amax_out=next_amax_x2)
@@ -179,6 +185,9 @@ class FlatTransformer:
       from extra.gemm.cdna_asm_gemm import quantize_mxfp8
       w_q, w_e8, _ = quantize_mxfp8(w.reshape(self.n_layers * out_features, in_features))
       return w_q.reshape(self.n_layers, out_features, in_features), w_e8.reshape(self.n_layers, out_features, in_features // 32)
+    if MXFP4:
+      # FP4 is produced dynamically so optimizer updates always start from the current BF16 weight.
+      return w.cast(dtypes.bfloat16), Tensor.ones(self.n_layers)
     amax = (w.abs().max(axis=2) if COLUMNWISE_WEIGHT_SCALE else w.abs().flatten(1).max(1)).detach()
     scale = FP8_MAX / (amax + 1e-8)
     inv_scale = (amax + 1e-8) / FP8_MAX
