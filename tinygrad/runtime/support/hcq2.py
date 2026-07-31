@@ -52,13 +52,13 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   return buf.index(r).store(data.index(r).load()).end(r)
 
 def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
-  blob, patches = b'', []
+  blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
     if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
-    blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
+    blob.extend(struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   writable = cmdbuf.after(dep) if dep is not None else cmdbuf
-  return cmdbuf.after(make_binary_patch(writable, blob), *((make_patches(writable, patches),) if patches else ()))
+  return cmdbuf.after(make_binary_patch(writable, bytes(blob)), *((make_patches(writable, patches),) if patches else ()))
 
 def make_signal(devs, queue="COMPUTE:0", sentinel=False):
   return UOp.placeholder((1,), dtypes.uint64, 0, device=devs, volatile=True).rtag("sentinel_signal" if sentinel else f"{queue}_timeline_signal")
