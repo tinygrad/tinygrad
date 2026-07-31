@@ -529,8 +529,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert isinstance(vmin, expected_type), f"vmin is wrong dtype {type(vmin)} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
-  def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return float(self._eval(dtypes.floats, float))
+  def __int__(self): return self._eval(dtypes.ints+(dtypes.weakint,), int)
+  def __float__(self): return float(self._eval(dtypes.floats+(dtypes.weakfloat,), float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
