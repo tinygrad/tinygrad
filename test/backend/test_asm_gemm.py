@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
-from extra.gemm.gemm_mxfp4 import mxfp4_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
