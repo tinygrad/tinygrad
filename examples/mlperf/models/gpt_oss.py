@@ -19,7 +19,7 @@ from extra.gemm.moe_routing import route, dispatch, combine
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
 INIT_STD = 0.02
-ASM_GEMM = getenv("ASM_GEMM", 1)
+ASM_GEMM = getenv("ASM_GEMM", 0)
 
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
