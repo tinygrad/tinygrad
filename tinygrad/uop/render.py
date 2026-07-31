@@ -1,4 +1,4 @@
-from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.dtype import AddrSpace, dtypes, least_upper_dtype, weak_dtype
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
 from tinygrad.helpers import strip_parens
@@ -37,7 +37,8 @@ renderer = PatternMatcher([
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
+  # a typed constant is the pair CAST(dt, CONST(weak v)): it reads as the value it commits to
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: str(x.dtype.const(x.src[0].arg)) if x.is_const else f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
   (UPat(Ops.RECIPROCAL, name="x"), lambda ctx,x: f"(1/{ctx[x.src[0]]})"),
@@ -54,12 +55,13 @@ renderer = PatternMatcher([
 ])
 
 renderer_infer = PatternMatcher([
+  # sym_infer evaluates python: a CAST is the value conversion at the target's KIND (a Variable is a deferred python int)
+  (UPat(Ops.CAST, name="x"),
+   lambda ctx,x: f"{'float' if dtypes.is_float(x.dtype) else 'bool' if x.dtype is dtypes.bool else 'int'}({ctx[x.src[0]]})"),
   (UPat(Ops.CMOD, name="x"), lambda ctx,x: f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.CDIV, name="x"), lambda ctx,x: f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.FLOORMOD, name="x"), lambda ctx,x: f"floormod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.FLOORDIV, name="x"), lambda ctx,x: f"floordiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
-  (UPat(Ops.CAST, name="x"),
-    lambda ctx,x: f"{'float' if dtypes.is_float(x.dtype) else 'bool' if x.dtype is dtypes.bool else 'int'}({ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast({ctx[x.src[0]]}, {x.src[0].dtype!r}, {x.dtype!r})"),
 ]) + renderer
 
@@ -76,12 +78,19 @@ def render_marg(ctx,x:UOp):
     pieces = [f"({ctx[a[0]] if isinstance(a[0], UOp) else str(a[0])}, {ctx[a[1]] if isinstance(a[1], UOp) else str(a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
+def quotes_operands(x:UOp) -> bool:
+  # a python operator re-promotes: every src casts to the operand lub, except a bare weak CONST, which follows the lub's KIND.
+  # it quotes x only where that promotion is the identity — otherwise x renders via .alu(), which promotes nothing
+  lub = least_upper_dtype(*[s.dtype for s in x.src])
+  return all(s.dtype == lub or (s.op is Ops.CONST and s.dtype == weak_dtype(lub)) for s in x.src)
+
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
          Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.arg}, {x.dtype})"),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.arg})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"),
-  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].arg}, {repr(x.arg)}, dtype={x.dtype})"),
+  (UPat(Ops.SPECIAL, src=(UPat(name="c"),), name="x"),
+   lambda x,c: f"UOp.special({c.ssimplify()}, {repr(x.arg)}, dtype={x.dtype})" if c.is_const else None),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
@@ -89,8 +98,8 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}._rop({r.arg[0]}, {tuple(range(r.arg[1]))})" if r.arg[1] else None),
   # NOTE: range has srcs sometimes after control flow
-  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    "UOp.range("+', '.join([str(c.arg)] + [repr(y) for y in x.arg])+
+  (UPat(Ops.RANGE, src=(UPat(name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c: None if not c.is_const else
+    "UOp.range("+', '.join([str(c.ssimplify())] + [repr(y) for y in x.arg])+
       (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+(', dtype='+str(x.dtype) if x.dtype is not dtypes.weakint else '')+")"),
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
@@ -105,7 +114,8 @@ pm_pyrender_extra = PatternMatcher([
   # `.where` re-promotes its operands, so render WHERE via .alu() too
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.WHERE, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
-    strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),
+    strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})") if quotes_operands(x) else
+    f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
   (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),

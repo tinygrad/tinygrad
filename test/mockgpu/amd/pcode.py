@@ -7,7 +7,7 @@ from tinygrad.codegen.decomp.dtype import f2f
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
 
-def _const(dt, v): return UOp.const(v, dt)
+def _const(dt, v): return UOp(Ops.CONST, dt, arg=dt.const(v))
 def _u32(v): return _const(dtypes.uint32, v)
 def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
@@ -866,8 +866,8 @@ class Parser:
         idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
         safe_idx_hi = is_unaligned.where(idx_hi_native, idx_native)
         hi = mindex(safe_idx_hi)
-        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32, dtypes.uint64))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32), val)
+        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32).cast(dtypes.uint64))
+        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8).cast(dtypes.uint64))).cast(dtypes.uint32), val)
     return _cast_to(val, dt)
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:

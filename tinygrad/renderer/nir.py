@@ -104,6 +104,9 @@ def njump(b:mesa.nir_builder, typ, tgt=None, cond=None, else_tgt=None): return m
 
 def if_phi(b:mesa.nir_builder, cond, then_fn, else_fn): return mesa.nir_if_phi(b, *nif(b, cond, then_fn, else_fn)).contents
 
+# INDEX/SHRINK rooted at a PARAM/BUFFER is a memory access; rooted at anything else it picks a lane of a register value
+def is_mem(buf:UOp) -> bool: return buf.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}
+
 def nidx(b:mesa.nir_builder, buf, off, space, itemsize, gate=None) -> mesa.nir_def:
   @nir_instr(nc=1, bs=32, modes=lambda buf: buf.data.mode, type=lambda buf: mesa.glsl_get_array_element(buf.type))
   def reg(b, buf):
@@ -135,15 +138,19 @@ class NIRRenderer(Renderer):
     # OpConvertFToU is undefined if Result Type is not wide enough, cast through int32
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
-    # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
+    # a memory index commits at the width the access needs: 64 bit for pointer arithmetic, 32 bit for a deref array index.
+    # NOTE: this doesn't apply to image indexing cause it's 1-D, and a lane selector on a register value stays widthless
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
+      src=(buf, off.cast(dtypes.int if buf.addrspace is AddrSpace.REG else dtypes.long))+x.src[2:])
+      if is_mem(buf) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
      lambda x,buf,idx_y,idx_x: x.replace(src=(buf, idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)))),
   ])
 
   def_rewrite = PatternMatcher([
+    # a typed constant is the pair CAST(dt, CONST(weak v)): the immediate's fmt comes from the dtype it commits to
+    (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtype=dtypes.weaks),)), lambda ctx,x: nimm(ctx.b, x.const_value, x.dtype)),
     (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
@@ -191,10 +198,11 @@ class NIRRenderer(Renderer):
     ranges: list[mesa.nir_def|None] = []
 
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.STACK and len(u.src) == 0): pass
+      # a widthless node is read by value and gets no def: a bare weak CONST (a size, a lane selector) or a PARAM's multi-dim shape STACK
+      if u.op in {Ops.NOOP, Ops.GROUP} or u.dtype in dtypes.weaks or (u.op is Ops.STACK and len(u.src) == 0): pass
       elif u.op in {Ops.INDEX, Ops.SHRINK}:
         # INDEX on a register value picks the element, memory INDEX is handled in the LOAD/STORE patterns
-        if u.src[0].op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER}: self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].arg)
+        if not is_mem(u.src[0]): self.r[u] = nchannel(self.b, self.r[u.src[0]], u.src[1].arg)
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:

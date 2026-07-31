@@ -7,7 +7,7 @@ from tinygrad.schedule.allreduce import handle_allreduce
 # ***** multi rewrite MSELECT/MSTACK *****
 
 def _apply_shrink(marg, s:UOp, i:int) -> UOp:
-  new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
+  new_arg = [tuple([x.substitute({drng[0]:UOp.const(i)}) if isinstance(x, UOp) and
                     (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in marg]
   return s._mop(Ops.SHRINK, tuple(new_arg))
 
@@ -22,7 +22,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 
 def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
-  if (sx:=x.simplify()).device is None and sx.base.op is Ops.CONST: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
+  if (sx:=x.simplify()).device is None and sx.base.is_const: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
   return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
 
 replace_allreduce = PatternMatcher([
@@ -219,7 +219,7 @@ def index_multi(root:UOp, multi:UOp):
 
 def _shard_idx(rng:UOp, dev_idx:int) -> int:
   drngs = [r for r in rng.ranges if r.arg[-1] is AxisType.DEVICE]
-  return 0 if not drngs else int(rng.substitute({drngs[0]: drngs[0].const_like(dev_idx)}).ssimplify())
+  return 0 if not drngs else int(rng.substitute({drngs[0]: UOp.const(dev_idx)}).ssimplify())
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
   sharding = multi.sharding

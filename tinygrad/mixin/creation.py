@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Callable, Self
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype, weak_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -11,7 +11,14 @@ class CreationMixin(DTypeMixin, MovementMixin):
   @staticmethod
   def const(b, dtype=None): raise NotImplementedError
 
-  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
+  # a constant of self's dtype is the pair, carried at self's shape: the value has the dtype's KIND, the CAST its width
+  def const_like(self, b: ConstType) -> Self:
+    from tinygrad.uop.ops import bare_like
+    return self._wrap_uop(bare_like(self._uop, weak_dtype(self.dtype).const(b)).cast(self.dtype))
+
+  def _simplify_weak(self) -> Self:
+    # a widthless intermediate resolves to its bare CONST here, so its consumer promotes a CONST (rule 2), not a cast over one
+    return self._wrap_uop(self._uop.simplify()) if self.dtype in dtypes.weaks else self
 
   def _multi_like(self, fxn:'Callable[[tuple[sint, ...], str|None], Self]') -> Self:
     from tinygrad.uop.ops import UOp

@@ -98,8 +98,8 @@ def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   for x in arg:
     if isinstance(x, UOp) and not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
   if len(arg) == 0: return UOp(Ops.STACK)
-  elif len(arg) == 1: return UOp.const(arg[0], dtypes.weakint)
-  else: return UOp(Ops.STACK, src=tuple(UOp.const(x) if isinstance(x, int) else x for x in arg))
+  elif len(arg) == 1: return UOp.const(arg[0])
+  else: return UOp(Ops.STACK, src=tuple(UOp.const(x) for x in arg))
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
@@ -147,7 +147,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       if len(src) == 0: return dtypes.void
       return promo_dtype(src)
     case Ops.BIND:
-      assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
+      # the PARAM declares the width, the bound value is a widthless number (a Variable is a deferred python int)
+      assert weak_dtype(src[0].dtype) == weak_dtype(src[1].dtype), f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
       return src[0].dtype
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
@@ -196,7 +197,7 @@ class UOpMetaClass(type):
     # an INDEX presents its access dtype, which a still-weak source matches up to weakness
     if SPEC == 2 and op is not Ops.CONST and \
        not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
-       not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
+       not (op in (Ops.INDEX, Ops.SPECIAL) and weak_dtype(expected_dtype) == weak_dtype(dtype)):
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -521,7 +522,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
       return graph_rewrite(self, symbolic, name="simplify")
-  def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
+  # a constant reads back by value in either honest form: the pair's value is the one it commits to
+  def ssimplify(self) -> UOp|ConstType:
+    if (ret:=self.simplify()).op is Ops.CONST: return ret.arg
+    return ret.const_value if ret.is_const and ret.src[0].arg is not Invalid else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = (simple_self:=self.simplify())._min_max
@@ -529,8 +533,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert isinstance(vmin, expected_type), f"vmin is wrong dtype {type(vmin)} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
-  def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return float(self._eval(dtypes.floats, float))
+  # a widthless value reads as its python kind: weakint IS an int, weakfloat IS a float
+  def __int__(self): return self._eval(dtypes.ints+(dtypes.weakint,), int)
+  def __float__(self): return float(self._eval(dtypes.floats+(dtypes.weakfloat,), float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
@@ -562,7 +567,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
   def index(self, *srcs:UOp|int|None, **kwargs):
-    new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
+    new_srcs: list[UOp] = [UOp.const(x) for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
     return UOp(Ops.INDEX, src=(self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
@@ -583,21 +588,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _uop(self) -> UOp: return self
   @classmethod
   def _wrap_uop(cls, u:UOp) -> UOp: return u
-  def const_like(self, b:ConstLike, dtype:DType|None=None):
-    ret = UOp.const(b, dtype or self.dtype)
-    return ret._mop(Ops.EXPAND, arg=self._shape) if self._shape and ret._shape != self._shape else ret
-  def vconst_like(self, b:ConstLike, dtype:DType|None=None):
-    # for use after movement ops have been removed
-    return UOp.const(b, dtype or self.dtype).broadcast(self.max_numel())
-  def ufix(self, x):
-    if isinstance(x, UOp): return x
-    return UOp.const(x)
+  def ufix(self, x): return UOp.const(x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
-    srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
+    srcs = (self, UOp.const(src)) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, src=srcs, **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
@@ -607,23 +604,33 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
-    return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
+    return UOp.stack(*[self.substitute(dict(zip(rngs, [UOp.const(i) for i in idx])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
+  @property
+  def is_const(self) -> bool:
+    # a constant value in either honest form: the bare CONST or the typed pair CAST(dt, CONST(weak v))
+    return self.op is Ops.CONST or (self.op is Ops.CAST and self.src[0].op is Ops.CONST and self.src[0].dtype in dtypes.weaks)
+  @property
+  def const_value(self) -> ConstType:
+    # the value a committed constant commits to: the pair states its width on the CAST, so the value converts at the CAST's kind
+    return self.dtype.const(self.src[0].arg) if self.op is Ops.CAST else self.arg
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
-    if dtype is None: dtype = dtypes.from_py(b)
-    if isinstance(b, UOp): return b.cast(dtype)
+    # a stated dtype is the pair CAST(dt, CONST(v)): the value carries the dtype's KIND, the CAST carries its width
+    if dtype is not None: return (b if isinstance(b, UOp) else UOp.const(weak_dtype(dtype).const(b))).cast(dtype)
+    if isinstance(b, UOp): return b
     # NOTE: it always has to be STACK now, even if they are all the same
-    if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
-    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
+    if isinstance(b, tuple): return UOp.stack(*[UOp.const(c) for c in b])
+    # the dtype IS the python kind; dtype.const canonicalizes the value (nan, ConstFloat -0.0)
+    return UOp(Ops.CONST, dt:=dtypes.from_py(b), arg=dt.const(b), src=())
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
   def loop(axis_id:int, *arg): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.WEAK)+arg)
   @staticmethod
-  def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
+  def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, dtype, src=(sint_to_uop(end),), arg=name)
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tc_upcast_axes=None):
     # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
@@ -641,7 +648,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def invalid(): return UOp.const(Invalid)
   def valid(self, cond):
-    return cond.where(self, self.const_like(Invalid))
+    return cond.where(self, bare_like(self, Invalid))
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
@@ -790,8 +797,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STACK:
         # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
-        dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        return UOp(Ops.STACK, dtype, tuple(u.cast(dtype) for u in srcs))
+        return UOp(Ops.STACK, src=tuple(u.cast(dtype_from_uop(Ops.STACK, srcs, None)) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
@@ -978,7 +984,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU, f"op is {self.op}, need PARAM"
-    uval = self.const_like(val) if isinstance(val, int) else val
+    uval = UOp.const(val) if isinstance(val, int) else val
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return UOp(Ops.BIND, src=(self, uval))
@@ -1007,7 +1013,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
-    if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
+    if self.op is Ops.CONST: return UOp.const(self.arg//v) if self.arg%v == 0 else None
     if self.op is Ops.STACK:
       srcs = tuple(s.divides(v) for s in self.src)
       return None if any(s is None for s in srcs) else UOp(Ops.STACK, src=cast(tuple[UOp, ...], srcs))
@@ -1023,16 +1029,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def gcd(*uops: UOp) -> UOp:
     terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in uops])
     count = functools.reduce(operator.and_, [collections.Counter(term.split_uop(Ops.MUL)) for term in terms])
-    return math.prod([*count.elements(), terms[0].const_like(math.gcd(*factors))])  # put the const at the top
+    return math.prod([*count.elements(), UOp.const(math.gcd(*factors))])  # put the const at the top
   def divide_exact(self, v:UOp) -> UOp|None:
-    if self is v: return self.const_like(1)
+    if self is v: return UOp.const(1)
     if v.op is Ops.CONST: return self.divides(v.arg)
     if self.op is Ops.ADD: return None if (s0:=self.src[0].divide_exact(v)) is None or (s1:=self.src[1].divide_exact(v)) is None else s0+s1
     if self.op is Ops.MUL:
       (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
       new_count = collections.Counter(fac.split_uop(Ops.MUL))
       new_count.subtract(div_fac.split_uop(Ops.MUL))
-      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=self.const_like(const//div_const))
+      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=UOp.const(const//div_const))
     return None # generic None if we aren't sure
   @property
   def vmin(self) -> PyConst: return self._min_max[0]
@@ -1087,11 +1093,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
+      # the pair CAST(dt, CONST(weak v)) is a constant: its bounds are the value it commits to, at dt's kind
+      if self.is_const and self.src[0].arg is not Invalid: return (v:=cast(PyConst, self.const_value)), v
       # a cast to unsigned keeps exact bounds when the source fits
       # TODO: can do more based on new dtype window
       if dtypes.is_unsigned(self.dtype) and 0 <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0]._min_max
       if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
-        return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+        lo, hi = max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+        # float to int truncates toward zero, which is monotonic: the clamped bounds carry over as ints
+        return (int(lo), int(hi)) if dtypes.is_float(self.src[0].dtype) and not dtypes.is_float(self.dtype) else (lo, hi)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property
@@ -1747,75 +1757,125 @@ def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
      all(a.dtype is b.dtype or b.base.arg is Invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
-def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
+def bare_like(x:UOp, b:ConstLike) -> UOp:
+  # a value rule's mint: a bare const carried at x's shape — no width (rule 1), the shape rides as an EXPAND
+  ret = UOp.const(b)
+  return ret._mop(Ops.EXPAND, arg=x._shape) if x._shape and ret._shape != x._shape else ret
+
+def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x).cast(dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
+# ***** ending weakness in codegen: two demands, and the width a value takes when neither states one *****
+# select_dtype is that width: the kind's default, widened to long when the node's own bounds overflow int32.
+# INDEX-POSITION demand (lower_weak_srcs): an index needs a width but no width in particular, so its subtree takes its own,
+#   bottom-up. It runs in a rewrite closed on the consumer's edge because demand is OPERAND-scoped: UOps are interned, so a
+#   node committed in the open pass is committed for every consumer at once, and the machine width it then carries joins the
+#   promotion lattice there — lub(ulong, weakint) is ulong, lub(ulong, int) is weakfloat.
+# OPERAND demand (commit_weak_srcs and below): the siblings, the STORE destination or a concrete CAST state a width and
+#   every weak src takes it. A bare weak CONST rides bare until THE BOUNDARY, where the same rules pair it.
 def select_dtype(u:UOp):
   if u.dtype is dtypes.weakfloat: return dtypes.default_float
   return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
 def lower_weak_node(u:UOp) -> UOp|None:
+  # give the node a width: absorb the weak CAST markers on its srcs, commit the bare weak CONSTs there, restate u's own weak dtype as a cast
   start, src = (1 if u.op is Ops.WHERE else 0), tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
-  if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
-  dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
-                    else unwrap(dtype_from_uop(u.op, src, u.arg)))
-  return u.replace(dtype=None, src=src[:start]+tuple(s.cast(dt) for s in src[start:])).cast(u.dtype)
+  weak = [s for s in src[start:] if s.dtype in dtypes.weaks]
+  # a weak non-CONST src has an edge of its own: it resolves there first
+  if any(s.op is not Ops.CONST for s in weak): return None
+  # nothing to do: no marker was absorbed and no weak CONST sits under a weak node
+  if src == u.src and (u.dtype not in dtypes.weaks or not weak): return None
+  # a value even long cannot hold has no kind default: the node stays weak for an outer demand (a concrete CAST) to commit
+  if u.dtype is dtypes.weakint and u.overflows(dtypes.long): return None
+  dt = least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary else unwrap(dtype_from_uop(u.op, src, u.arg))
+  # a still-weak result has no width of its own: it takes the node's bounds width (the kind default, widened)
+  dt = strong_dtype(least_upper_dtype(dt, select_dtype(u)) if dt in dtypes.weaks else dt)
+  # a bare weak CONST rides through as itself whenever a sibling already carries the width: this is a mid-pipeline commit,
+  # and the value rules below it (MUL->SHL, fast_idiv) must still see a CONST. only the boundary pairs a const
+  ride = any(s.op is not Ops.CONST for s in src[start:])
+  return u.replace(dtype=None, src=src[:start]+tuple(s if ride and s.op is Ops.CONST else s.cast(dt) for s in src[start:])).cast(u.dtype)
 pm_lower_weak = PatternMatcher([
-  (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype)),
   # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.
   # a SINGLE weak cast is never rewritten here, each consumer absorbs it on its own edge (see lower_weak_srcs)
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
    lambda u,x: x.cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
-  # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
-  (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
+  # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition.
+  # a RANGE commits at its index role and its size src commits with it: a loop bound is a machine operand.
+  # a SPECIAL commits only its own dtype: its size is launch metadata no instruction reads, so it stays a bare CONST
+  (UPat(Ops.SPECIAL, dtype=dtypes.weaks, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype)),
+  (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK}, name="u"), lower_weak_node),
   (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
-def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
-  if ctx is None: ctx = {}
+def lower_weak_srcs(u:UOp) -> UOp|None:
+  # pm_commit_weak runs first and takes every consumer that states a width; this is the demand of the ones that don't —
+  # an index position, a comparison — answered on this edge alone
+  if u.dtype in dtypes.weaks or not any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in u.src): return None
   def lower(s:UOp) -> UOp:
-    if (r:=ctx.get(s)) is None:
-      r = graph_rewrite(s, pm_lower_weak)
-      # the consumer absorbs the cast on its own edge
-      ctx[s] = r = r.src[0] if r.op is Ops.CAST and r.dtype in dtypes.weaks else r
-    return r
+    # the consumer absorbs the cast on its own edge
+    return r.src[0] if (r:=graph_rewrite(s, pm_lower_weak)).op is Ops.CAST and r.dtype in dtypes.weaks else r
   # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
   ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
   return None if ret is u else ret
 
-def commit_weak(s:UOp, dt:DType) -> UOp:
-  # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
-  return UOp.const(s.arg, dt) if s.op is Ops.CONST else s.cast(dt)
-
-def commit_weak_srcs(u:UOp) -> UOp|None:
-  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
+# a weak src commits by taking the demand as a cast: on a bare weak CONST that cast IS the pair CAST(dt, CONST(v)), the typed constant
+def commit_weak_srcs(u:UOp, consts:bool=True) -> UOp|None:
+  demanding = [s.dtype in dtypes.weaks and (consts or s.op is not Ops.CONST) for s in u.src]
+  if not any(demanding): return None
+  # a single weak CAST is the consumers' marker: the width it carries joins the lattice through it
+  if (dt:=least_upper_dtype(*(s.src[0].dtype if s.op is Ops.CAST and s.dtype in dtypes.weaks else s.dtype for s in u.src))) in dtypes.weaks:
+    return None
+  # with every src weak, no operand states a width: what a marker carries is where its value came FROM, a floor and not a
+  # demand. a floor that cannot hold one of the bare CONSTs is left to the index path, which widens from the node's bounds
+  if all(s.dtype in dtypes.weaks for s in u.src) and any(s.op is Ops.CONST and s.overflows(dt) for s in u.src): return None
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
+  return u.replace(dtype=None, src=tuple(s.cast(dt) if d else s for s,d in zip(u.src, demanding)))
 
-# runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
+def commit_index_consts(u:UOp) -> UOp|None:
+  # an index into MEMORY commits at the address width; a REG/ALU lane selector and a SHRINK's size are widthless and stay bare
+  if u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU): return None
+  end = 2 if u.op is Ops.SHRINK else len(u.src)
+  src = tuple(s.cast(select_dtype(s)) if 0 < i < end and s.op is Ops.CONST and s.dtype in dtypes.weaks else s for i,s in enumerate(u.src))
+  return u.replace(src=src) if src != u.src else None
+
+# rides index lowering and the decomps: width demand from the siblings; a bare weak CONST stays bare here —
+# the value rules below these passes must keep seeing it (a pair would blind every const-sensitive rewrite)
 pm_commit_weak = PatternMatcher([
-  (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
-  # demand from the destination: a STORE's weak value commits at the destination's dtype
+  (UPat(GroupOp.Broadcastable, name="u"), lambda u: commit_weak_srcs(u, consts=False)),
+  # demand from the destination: a STORE's weak value commits at the destination's dtype (weakness ends where storage begins)
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
-   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
+   lambda u: u.replace(src=(u.src[0], u.src[1].cast(u.src[0].dtype), *u.src[2:]))),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="u"), commit_index_consts),
 ])
 
-# push cast to weak src
+# THE BOUNDARY: the same demand one pass after the last value rule, and now the bare weak CONSTs commit too, as the pair.
+# a STACK joins here: its lanes are its operands, so the sibling lub is their width
+pm_pair_weak = pm_commit_weak+PatternMatcher([
+  (UPat(GroupOp.Broadcastable|{Ops.STACK}, name="u"), commit_weak_srcs),
+  # a value at the SINK has no consumer to demand a width: select_dtype is the no-demand fallback
+  (UPat(Ops.SINK, name="u"), lambda u: u.replace(src=tuple(s.cast(select_dtype(s)) if s.dtype in dtypes.weaks else s for s in u.src))
+   if any(s.dtype in dtypes.weaks for s in u.src) else None),
+])
+
+# COMPOSITIONAL demand: a concrete CAST states the width for what lowering left weak (both branches of a gate-mask WHERE,
+# where the sibling lub punts). a STACK's srcs are its lanes, so the width they take is the scalar one
 pm_cast_weak = PatternMatcher([
-  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.Broadcastable, dtype=dtypes.weaks, name="u"),)),
-   lambda c,u: u.replace(dtype=None, src=tuple(commit_weak(s, c.dtype) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
+  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.Broadcastable|{Ops.STACK}, dtype=dtypes.weaks, name="u"),)),
+   lambda c,u: u.replace(dtype=None, src=tuple(s.cast(c.dtype.scalar()) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
    if c.dtype not in dtypes.weaks else None),
 ])
 
+# index lowering. pm_cast_weak comes last: a CAST's weak src is lower_weak_srcs' first, at its own widths; only what that
+# leaves — a subtree of bare weak CONSTs — takes the cast's width
 pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
-  (UPat(GroupOp.All, name="u"),
-   lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
+  # PARAM/BUFFER are excluded: their only src is the shape, a widthless size slot that is read by value
+  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER}, name="u"), lower_weak_srcs),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
   # TODO: more generic
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
         allow_any_len=True, name="u"),
    lambda u,buf,gate,idx: u.replace(src=(buf, idx.cast(dtypes.int).valid(gate))+u.src[2:]) if buf.max_numel()-1 <= dtypes.int32.max else None),
-])
+])+pm_cast_weak
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])

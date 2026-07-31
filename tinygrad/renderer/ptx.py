@@ -78,9 +78,15 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
 
+def render_const(ctx:"PTXRenderer", x:UOp) -> str:
+  # the register class comes from the dtype the constant commits to: its own for a bare CONST, the CAST's for the pair
+  if x.dtype == dtypes.bool: return f"setp.ne.s16 {ctx.r[x]}, {render_val(x.const_value, x.dtype)}, 0;"
+  return f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.const_value, x.dtype)};"
+
 string_rewrite = PatternMatcher([
-  (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
-  (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
+  # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to
+  (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtype=dtypes.weaks),)), render_const),
+  (UPat.cvar("x"), render_const),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
@@ -186,7 +192,8 @@ class PTXRenderer(Renderer):
 
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP}: continue
+      # a bare weak CONST is a widthless value (a size, a lane selector): it gets no register, its consumers read the arg
+      if u.op in {Ops.NOOP, Ops.GROUP} or (u.op is Ops.CONST and u.dtype in dtypes.weaks): continue
       if u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
         continue
@@ -218,6 +225,7 @@ class PTXRenderer(Renderer):
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
+      if u.is_const: prefix = "const"  # both const forms name the same register class
       if u.op is Ops.RANGE and u.dtype == dtypes.void: prefix = None  # loop headers don't have a register
       if prefix: r[u] = ssa(prefix, u, dtype)
 

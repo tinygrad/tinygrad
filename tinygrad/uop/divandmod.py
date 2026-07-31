@@ -1,5 +1,5 @@
 import functools, itertools, math
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, bare_like
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import unwrap
 
@@ -10,9 +10,10 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
-  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
+  if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else bare_like(xdiv, xdiv.vmin)
   # PARAM // c is irreducible
-  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.arg == 0: return d.const_like(0) if d.op is Ops.FLOORMOD else None
+  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.arg == 0:
+    return bare_like(d, 0) if d.op is Ops.FLOORMOD else None
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -63,8 +64,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
           results.append((len(newxs.backward_slice), newxs // (c // div)))
         elif x.vmin >= 0 and newxs.vmin >= 0:
           b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
-          if const % div: b_parts.append(x.const_like(const % div))
-          b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
+          if const % div: b_parts.append(bare_like(x, const % div))
+          b = UOp.usum(*b_parts) if b_parts else bare_like(x, 0)
           if 0 <= b.vmin and b.vmax < div:
             results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
     if results: return min(results, key=lambda r: r[0])[1]
@@ -87,11 +88,11 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
     elif y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
       rem.append(u.divides(c)*(c%y.arg))
-      quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.FLOORDIV else u.const_like(0))
+      quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.FLOORDIV else bare_like(u, 0))
     else: rem.append(u)
 
   if not quo: return None
-  new_x = sum(rem)+x.const_like(0)
+  new_x = sum(rem)+bare_like(x, 0)
   if new_x.vmin<0: return None
   return new_x%y if d.op is Ops.FLOORMOD else new_x//y+sum(quo)
 

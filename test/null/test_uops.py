@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, bare_like, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
@@ -37,34 +37,35 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
     self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
-    # an explicit (strong) const dtype is legal until the field is removed
-    self.assertEqual(UOp.const(3, dtypes.int32).dtype, dtypes.int32)
+    # a typed constant is the pair: the width lives on the CAST
+    self.assertEqual(UOp.const(3).cast(dtypes.int32).dtype, dtypes.int32)
 
   def test_weak_dtype_rejected_by_program_spec(self):
-    for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
-      with self.assertRaises(RuntimeError): type_verify(UOp.const(value, weak).sink(), spec_program)
-      type_verify(UOp.const(value, concrete).sink(), spec_program)
+    for concrete, value in ((dtypes.int32, 1), (dtypes.float32, 1.0)):
+      # a bare weak CONST is not a data value, the pair CAST(dt, CONST(v)) is
+      with self.assertRaises(RuntimeError): type_verify(UOp.const(value).sink(), spec_program)
+      type_verify(UOp.const(value).cast(concrete).sink(), spec_program)
 
   def test_invalid_dtype_and_consumers(self):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
-    self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
+    self.assertIs(UOp.const(Invalid), invalid)
     self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
       if u.arg is Invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
-    invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
+    invalid, value = UOp.invalid(), UOp.const(1.0).cast(dtypes.float32)
     for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
               UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
     gate, value = UOp.param(0, dtypes.bool, ()), UOp.param(1, dtypes.float, ())
-    self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
+    self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0.0).cast(dtypes.float))
     type_verify(out.sink(), spec_program)
 
   def test_remove_invalid_stack_lanes(self):
-    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1, dtypes.half), UOp.invalid()))
+    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1.0).cast(dtypes.half), UOp.invalid()))
     out = graph_rewrite(stack, pm_remove_invalid)
-    self.assertEqual(out.src, (UOp.const(1, dtypes.half), UOp.const(0, dtypes.half)))
+    self.assertEqual(out.src, (UOp.const(1.0).cast(dtypes.half), UOp.const(0.0).cast(dtypes.half)))
     type_verify(out.sink(), spec_program)
 
 class TestLowerIndexDtype(unittest.TestCase):
@@ -75,16 +76,19 @@ class TestLowerIndexDtype(unittest.TestCase):
     i = UOp.variable("i", 0, 2**28)
     shrink = UOp(Ops.SHRINK, src=(buf, (i*24).valid(i < 2**28), UOp.const(4)))
     lowered = graph_rewrite(shrink.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
     sh = next(u for u in lowered.backward_slice_with_self if u.op is Ops.SHRINK)
+    # every non-const node resolves here; a bare weak CONST rides on its sibling's width until the boundary
+    self.assertTrue(all(u.dtype != dtypes.weakint for u in sh.src[1].backward_slice_with_self if u.op is not Ops.CONST),
+                    "lowering must resolve all weakint")
     self.assertEqual(sh.src[1].dtype, dtypes.long)
 
-  def test_reg_buffer_size_lowers(self):
+  def test_reg_buffer_size_stays_widthless(self):
+    # a BUFFER's size is a widthless slot: index lowering resolves the index domain and leaves the size a bare weak CONST
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
     self.assertEqual(reg.src[0].dtype, dtypes.weakint)
     lowered = graph_rewrite(reg.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
-    self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
+    size = next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0]
+    self.assertEqual((size.op, size.dtype, size.arg), (Ops.CONST, dtypes.weakint, 4))
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
@@ -321,10 +325,9 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(Ops.CAST, [x.op for x in uops if not x.is_const])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
@@ -379,8 +382,8 @@ class TestUOpMethod(unittest.TestCase):
   def test_cmp_self_folding_multidim(self):
     for shape in ((), (3,), (2, 3), (2, 3, 4)):
       x = Tensor.empty(*shape, dtype=dtypes.int).uop
-      self.assertIs((x < x).simplify(), x.const_like(False, dtypes.bool))
-      self.assertIs((x != x).simplify(), x.const_like(False, dtypes.bool))
+      self.assertIs((x < x).simplify(), bare_like(x, False))
+      self.assertIs((x != x).simplify(), bare_like(x, False))
 
   def test_replace(self):
     x = UOp.param(0, dtypes.int, (1,))

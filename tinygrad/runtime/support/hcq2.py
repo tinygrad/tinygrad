@@ -419,8 +419,8 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.arg))
-      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.arg*buf.dtype.itemsize):bo+len(data)] = data
+      data, bo = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.const_value)), cast(int, off.const_value)*buf.dtype.itemsize
+      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[bo:bo+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:

@@ -236,8 +236,8 @@ class TestViz(unittest.TestCase):
   def test_const_node_visibility(self):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
-      z = UOp.const(0, a.dtype)
-      y = UOp.const(math.pi, dtypes.float)
+      z = UOp.const(0)
+      y = UOp.const(math.pi)
       alu = a*z
       ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
     lst = viz.list_items()

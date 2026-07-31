@@ -3,7 +3,7 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_pair_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
@@ -12,14 +12,14 @@ from tinygrad.engine.jit import JitError
 class TestWeakPromotion(unittest.TestCase):
   def test_rand_requires_concrete(self):
     with self.assertRaises(ValueError): Tensor.rand(2, dtype=dtypes.weakfloat)
-    with self.assertRaises(ValueError): Tensor.const(1.0).rand_like()
-    with self.assertRaises(ValueError): Tensor.const(1.0).randn_like()
+    with self.assertRaises(ValueError): Tensor.const(1.0, dtypes.weakfloat).rand_like()
+    with self.assertRaises(ValueError): Tensor.const(1.0, dtypes.weakfloat).randn_like()
 
   def test_reduce_strips_weakness(self):
     for weak, value, strong in ((dtypes.weakint, 1, dtypes.default_int), (dtypes.weakfloat, 1.0, dtypes.default_float)):
       t = Tensor.const(value, weak).expand(3)
       for out in (t.sum(), t.max(), t.prod(), t.cumsum(0), t.cummax(0)[0]): self.assertEqual(out.dtype, strong)
-    self.assertEqual((Tensor.const(1.0).expand(3).sum() + Tensor([1], dtype=dtypes.float16)).dtype, dtypes.float32)
+    self.assertEqual((Tensor.const(1.0, dtypes.weakfloat).expand(3).sum() + Tensor([1], dtype=dtypes.float16)).dtype, dtypes.float32)
 
   def test_materialize_at_default_dtype(self):
     for weak, value, strong in ((dtypes.weakfloat, 0.5, dtypes.default_float),):
@@ -33,7 +33,7 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual(t.contiguous().dtype, weak)
 
   def test_assign_into_weak_commits(self):
-    t = Tensor.const(0.5)
+    t = Tensor.const(0.5, dtypes.weakfloat)
     t.assign(Tensor(1.0, dtype=dtypes.default_float))
     self.assertEqual((t.dtype, t.item()), (dtypes.default_float, 1.0))
 
@@ -54,7 +54,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((y._uop.base.op, y.dtype, x.dtype), (Ops.CONST, dtypes.weakint, dtypes.int8))
     x, y = Tensor([1], dtype=dtypes.int8)._broadcasted(0.5)
     self.assertEqual((y._uop.base.op, y.dtype, x.dtype), (Ops.CONST, dtypes.weakfloat, dtypes.weakfloat))
-    x, y = Tensor.const(1).reshape(1)._broadcasted(Tensor([1.0], dtype=dtypes.float32))
+    x, y = Tensor.const(1, dtypes.weakint).reshape(1)._broadcasted(Tensor([1.0], dtype=dtypes.float32))
     self.assertEqual((x._uop.base.op, x._uop.base.arg, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
 
@@ -83,20 +83,39 @@ class TestWeakPromotion(unittest.TestCase):
       dst = UOp.param(0, dtypes.bfloat16, (1,)).index(UOp.const(0).cast(dtypes.int32))
       gate = UOp.const(True)
       out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_lower_index_dtype, ctx={})
-    # a bare weak CONST commits directly: the pass runs without symbolic, so a CAST here would survive it
-    self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0, dtypes.bfloat16), gate))
+    # the destination demand commits the value as the pair CAST(dt, CONST(v))
+    self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0).cast(dtypes.bfloat16), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
     weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
     self.assertIs(graph_rewrite(weak_lub, pm_lower_index_dtype, ctx={}), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
+    # mid-pipeline the bare CONST branch stays bare (value rules must see it); THE BOUNDARY commits it as the pair
     where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_lower_index_dtype, ctx={})
-    self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.float16))
+    self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.weakfloat))
+    paired = graph_rewrite(where, pm_pair_weak)
+    self.assertEqual(paired.src[2], UOp.const(1.0).cast(dtypes.float16))
+
+  def test_index_widens_past_a_narrow_marker(self):
+    # a uchar value used as an index carries a width its own stride overflows: that width is where the value came from,
+    # not a demand, so the index math takes its own (a uint8 label times a big class stride, the dice_ce_loss shape)
+    buf, big = UOp.param(0, dtypes.uchar, (4096,)), UOp.param(1, dtypes.float, (1<<24,))
+    idx = buf.index(UOp.const(0)).load().cast(dtypes.weakint) * UOp.const(2097152)
+    self.assertEqual(graph_rewrite(big.index(idx), pm_lower_index_dtype, ctx={}).src[1].dtype, dtypes.int)
+
+  def test_cast_of_const_crossing_kinds_folds(self):
+    # a conversion of a constant is a constant: the value moves to the target's KIND, the CAST keeps stating the width
+    self.assertEqual(graph_rewrite(UOp.const(3.7).cast(dtypes.int), symbolic_simple), UOp.const(3).cast(dtypes.int))
+    self.assertEqual(graph_rewrite(UOp.const(3).cast(dtypes.float32), symbolic_simple), UOp.const(3.0).cast(dtypes.float32))
+    # through a pair, only where its own width cannot change the conversion
+    pair = UOp.const(float(dtypes.int32.max-1)).cast(dtypes.float32)
+    self.assertIs(graph_rewrite(pair.cast(dtypes.int), symbolic_simple).src[0], pair)
+    self.assertEqual(graph_rewrite(UOp.const(3.7).cast(dtypes.float32).cast(dtypes.int), symbolic_simple), UOp.const(3).cast(dtypes.int))
 
   def test_weak_shift_lhs_commits_the_node(self):
     # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
-    shl = graph_rewrite(UOp.const(0xFFFF) << UOp.variable("x", 0, 16, dtypes.uint), symbolic_simple+pm_commit_weak)
-    self.assertEqual((shl.dtype, shl.src[0]), (dtypes.uint, UOp.const(0xFFFF, dtypes.uint)))
+    shl = graph_rewrite(UOp.const(0xFFFF) << UOp.variable("x", 0, 16, dtypes.uint), symbolic_simple+pm_pair_weak)
+    self.assertEqual((shl.dtype, shl.src[0]), (dtypes.uint, UOp.const(0xFFFF).cast(dtypes.uint)))
 
   @unittest.expectedFailure  # TODO: a weak const defers to its consumer (JAX): these dtypes change once python scalars are weak consts
   def test_changed_rows(self):
@@ -127,19 +146,21 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(weak.dot(Tensor([1, 1], dtype=dtypes.int8)).dtype, dtypes.int8)
 
   def test_weak_int_binop(self):
+    # a width the scenario needs is stated as the pair
+    def pconst(dt, v): return UOp.const(v).cast(dt)
     v = UOp.variable("i", 0, 10, dtypes.weakint)
     self.assertEqual((v << 1).dtype, dtypes.weakint)
-    self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(1, dtypes.int8), UOp.const(1, dtypes.uint32)), None), dtypes.int8)
-    self.assertEqual(UOp.const(1).alu(Ops.SHL, UOp.const(1, dtypes.uint)).dtype, dtypes.weakint)
+    self.assertEqual(dtype_from_uop(Ops.SHL, (pconst(dtypes.int8, 1), pconst(dtypes.uint32, 1)), None), dtypes.int8)
+    self.assertEqual(UOp.const(1).alu(Ops.SHL, pconst(dtypes.uint, 1)).dtype, dtypes.weakint)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
-    with self.assertRaises(RuntimeError): Tensor.const(1.0) << Tensor.const(1.0)
-    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64))
+    with self.assertRaises(RuntimeError): Tensor.const(1.0, dtypes.weakfloat) << Tensor.const(1.0, dtypes.weakfloat)
+    with self.assertRaises(RuntimeError): pconst(dtypes.int32, 1).alu(Ops.SHL, pconst(dtypes.float64, 1.0))
     for op in (Ops.SHL, Ops.SHR):
       with self.assertRaises(RuntimeError):
-        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32))
+        pconst(dtypes.float32, 1.0).alu(op, pconst(dtypes.int32, 1))
     # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
-      f32, wf = UOp.const(1.0, dtypes.float32), UOp.const(1.0)
+      f32, wf = pconst(dtypes.float32, 1.0), UOp.const(1.0)
       for bad in (f32.alu(Ops.AND, f32), UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
         with self.assertRaises(RuntimeError): type_verify([bad], spec_shared)
 
@@ -178,7 +199,7 @@ class TestWeakPromotion(unittest.TestCase):
 class TestWeakStorageBoundary(unittest.TestCase):
   # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises
   def test_weak_source(self):
-    w05 = Tensor.const(0.5).reshape(1)
+    w05 = Tensor.const(0.5, dtypes.weakfloat).reshape(1)
     dst = Tensor.zeros(2, dtype=dtypes.int8, device="CPU").contiguous().realize()
     with self.assertRaises(RuntimeError): dst.assign(w05.expand(2))                   # weakfloat into int does not defer
     with self.assertRaises(RuntimeError): dst[0:1] = w05
@@ -215,7 +236,7 @@ class TestWeakMaterializationEntries(unittest.TestCase):
   def test_weak_is_virtual(self):
     # NOTE: int64 lub uint64 is weakfloat, so this is device-ful weak from promotion, never from a cast to weak
     devful = Tensor([1], dtype=dtypes.int64, device="CPU") + Tensor([1], dtype=dtypes.uint64, device="CPU")
-    for t in (Tensor.const(0.5), devful):
+    for t in (Tensor.const(0.5, dtypes.weakfloat), devful):
       self.assertTrue(t.uop.is_virtual)
       # realize is a no-op, so a weak input can never become the real buffer TinyJit needs
       with self.assertRaises(JitError): TinyJit(lambda x: (x+1).realize())(t)

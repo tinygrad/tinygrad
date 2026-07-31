@@ -541,9 +541,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     reduced = squares.sum(axis=axis, keepdim=keepdim)
-    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
     # TODO: remove relu?
-    return reduced.div(denominator.relu())
+    den = (reduced.ufix(n) - correction).relu()  # type: ignore[arg-type]
+    return reduced.div(den._simplify_weak())
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
@@ -1411,10 +1411,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = self
     for dim in range(dims):
       ret = ret.transpose(0, dim)
-      ret = sum(type(self).const(tuple(float(m[k]) for m in mat), ret.dtype).reshape((len(mat),)+(1,)*(ret.ndim-1)) * ret[k]
-                for k in range(len(mat[0])))
-      assert not isinstance(ret, int), "sum over empty winograd matrix"
-      ret = ret.transpose(0, dim)
+      terms = [type(self).const(tuple(float(m[k]) for m in mat), ret.dtype).reshape((len(mat),)+(1,)*(ret.ndim-1)) * ret[k]
+               for k in range(len(mat[0]))]
+      ret = sum(terms[1:], start=terms[0]).transpose(0, dim)
     return ret
 
   # TODO: winograd can be a rewrite rule like split_reduceop

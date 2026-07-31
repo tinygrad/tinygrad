@@ -58,7 +58,7 @@ class IndexingContext:
 def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if x.op not in GroupOp.Broadcastable: return rngs
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
-  return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
+  return tuple(UOp.const(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -101,7 +101,7 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
-  return valid.where(bx.src[0], UOp.const(0, x.dtype))
+  return valid.where(bx.src[0], UOp.const(False if x.dtype.scalar() is dtypes.bool else 0))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None

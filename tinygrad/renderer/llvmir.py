@@ -4,7 +4,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
-from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
+from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, strong_dtype, AddrSpace
 from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
@@ -17,6 +17,8 @@ def ldt(dt:DType, count=1, ptr=False):
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
 def lconst(x, dtype:DType):
+  # a bare weak const is a widthless value: it is read by value, and the slot it lands in states the type
+  if dtype in dtypes.weaks: return x
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
     if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -62,9 +64,10 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
 base_rewrite = PatternMatcher([
-  # memory load/store
+  # memory load/store. a widthless index (a bare weak const) takes the default index width from this slot
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, "
+   f"{ldt(strong_dtype(x.src[1].dtype))} {ctx[x.src[1]]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), lambda ctx,buf,idx,x:
    f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.arg}" if buf.addrspace == AddrSpace.ALU else None),
@@ -171,6 +174,9 @@ class LLVMRenderer(Renderer):
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
+      # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to
+      elif u.op is Ops.CAST and u.is_const:
+        r[u] = lconst(u.const_value, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:

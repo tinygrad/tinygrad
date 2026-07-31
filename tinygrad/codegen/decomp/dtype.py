@@ -1,3 +1,4 @@
+from typing import cast
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
@@ -130,6 +131,12 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
+# a constant reaches the split in either honest form: the word is cut out of the value it commits to
+def split_const_word(x:UOp) -> UOp|None:
+  if x.tag is None: return None
+  v = cast(int, x.const_value)  # the split only runs on the long dtypes
+  return UOp.const(truncate[x.tag[1]]((v >> 32) if x.tag[0] == 1 else (v & 0xFFFFFFFF)), x.tag[1])
+
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
@@ -143,6 +150,7 @@ pm_long_decomp = PatternMatcher([
    split_l2i(x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
    split_l2i(Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat(Ops.CONST, dtype=dtypes.weaks),), name="x"), split_const_word),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
    split_l2i(x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
@@ -157,8 +165,7 @@ pm_long_decomp = PatternMatcher([
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
-  (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF)), x.tag[1]))
+  (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), split_const_word)
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

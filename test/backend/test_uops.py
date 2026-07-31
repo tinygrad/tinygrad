@@ -19,6 +19,7 @@ def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
+  # a data constant at a width is the pair CAST(dt, CONST(v))
   if op is Ops.CONST: uops.append(UOp.const(arg).cast(dtype))
   elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype, shape=(1,)))
   else: uops.append(UOp(op, dtype, tuple(src), arg))
