@@ -54,8 +54,8 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
 def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
   blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
-    if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
-    blob.extend(struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0))
+    if s.op is not Ops.CONST: patches.append((len(blob), s))
+    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   writable = cmdbuf.after(dep) if dep is not None else cmdbuf
   return cmdbuf.after(make_binary_patch(writable, bytes(blob)), *((make_patches(writable, patches),) if patches else ()))
