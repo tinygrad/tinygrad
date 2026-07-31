@@ -236,59 +236,41 @@ def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
 
 def _mulhi(a:UOp, b:UOp, signed:bool) -> UOp:
   return _aluhint(UOp(Ops.MUL, dtypes.uint32, src=(a, b)), RDNA3Ops.v_mul_hi_i32 if signed else RDNA3Ops.v_mul_hi_u32)
-# NOTE: UOp's - constructs x + y*-1 with a weak -1 (see neg()/sub() in elementwise mixin), use explicit SUBs here:
-# this runs post-decomp so nothing repairs them, and the weak consts break isel vreg sizing (weakint.itemsize is 100)
+# use explicit SUBs (not x + y*-1): this runs post-decomp so nothing repairs the weak -1, and weak consts break isel vreg sizing
 def _sub(x:UOp, y:UOp) -> UOp: return UOp(Ops.SUB, x.dtype, src=(x, y))
-
-# Unsigned 32-bit division via float reciprocal + Newton-Raphson refinement, in the style of LLVM's AMDGPU idiv expansion.
-# rcp_f32(b) scaled by 2^32 gives a fixed-point reciprocal m ~ 2^32/b within a few ulps (on either side), and each signed
-# integer NR step squares the error while truncation biases m downward, so after two steps and a -1 m is at most a few
-# below the true 2^32/b. Then q = mulhi(a, m) never overshoots and errs only a few low, so the exact remainder a - q*b is
-# in [0, a few * b) and a few fixed conditional bumps finish the job. All f32/int32 ALU: no slow f64 math.
-def udiv32(a:UOp, b:UOp):
-  u32, one, zero = dtypes.uint32, const(1, dtypes.uint32), const(0, dtypes.uint32)
-  m = (b.cast(dtypes.float32).reciprocal() * const(float(2**32), dtypes.float32)).cast(u32) # ~2^32/b, rtz + clamped
-  for _ in range(2): m = m + _mulhi(m, _sub(zero, b * m), signed=True)   # integer NR: m += mulhi_i(m, 2^32 - b*m)
-  q = _mulhi(a, _sub(m, one), signed=False)                              # m forced low: q never overshoots, errs a few low
-  if_small = b < const(3, u32)  # b in {1, 2}: m >= 2^31 breaks signed mulhi; b==1 -> a, b==2 -> a>>1, b==0 -> garbage
-  q = if_small.where(UOp(Ops.SHR, u32, src=(a, _sub(b, one))), q)
-  r = _sub(a, q * b)
-  for _ in range(3):                                                     # q is at most 3 below the true quotient
-    over = (r < b).logical_not()
-    q, r = q + over.where(one, zero), _sub(r, over.where(b, zero))
-  return q
 
 def idiv(ctx, x:UOp):
   signed = not dtypes.is_unsigned(x.dtype)
   dt = dtypes.uint32 if x.dtype.itemsize <= 4 else dtypes.uint64
   a, b = x.src[0].cast(dt), x.src[1].cast(dt)
-  if signed:
-    nbits = x.dtype.itemsize*8
-    sa, sb = getsign(a, nbits), getsign(b, nbits)
-    a, b = (a + sa) ^ sa, (b + sb) ^ sb
-    sign = sa ^ sb
-  if dt is dtypes.uint32: q = udiv32(a, b)
+  if signed:  # take abs values, remember result sign (getsign yields 0 or -1)
+    sa, sb = getsign(a, x.dtype.itemsize*8), getsign(b, x.dtype.itemsize*8)
+    a, b, sign = (a + sa) ^ sa, (b + sb) ^ sb, sa ^ sb
+  if dt is dtypes.uint32:
+    # unsigned 32-bit: f32 reciprocal -> fixed-point m ~ 2^32/b; two signed-int NR steps bias m low, so q = mulhi(a, m-1)
+    # never overshoots (errs a few low) and the exact remainder a - q*b is closed with a few conditional bumps. no f64.
+    u32, one, zero = dtypes.uint32, const(1, dtypes.uint32), const(0, dtypes.uint32)
+    m = (b.cast(dtypes.float32).reciprocal() * const(float(2**32), dtypes.float32)).cast(u32)
+    for _ in range(2): m = m + _mulhi(m, _sub(zero, b * m), signed=True)   # m += mulhi_i(m, 2^32 - b*m)
+    q = _mulhi(a, _sub(m, one), signed=False)
+    q = (b < const(3, u32)).where(UOp(Ops.SHR, u32, src=(a, _sub(b, one))), q)  # b in {1,2}: m>=2^31 breaks signed mulhi
+    r = _sub(a, q * b)
+    for _ in range(3):                                                     # q is at most 3 low; bump while remainder >= b
+      over = (r < b).logical_not()
+      q, r = q + over.where(one, zero), _sub(r, over.where(b, zero))
   else:
-    # 64 bit: reciprocal + Newton-Raphson in fp64 (~2^53 accuracy), quotient estimate within 1, rtne + integer fixups
-    # https://arxiv.org/pdf/2207.08420
-    bs = b.cast(dtypes.float)
+    # 64-bit: fp64 reciprocal + Newton-Raphson (~2^53), quotient within 1, rtne + integer fixups. https://arxiv.org/pdf/2207.08420
     ad, bd = a.cast(dtypes.double), b.cast(dtypes.double)
-    invbd0 = bs.reciprocal().cast(dtypes.double)
+    invbd0 = b.cast(dtypes.float).reciprocal().cast(dtypes.double)
     invbd = (bd * (invbd0 * const(-1.0, dtypes.double)) + const(1.0, dtypes.double)) * invbd0 + invbd0
-    qd = ad * invbd
-    q1 = _aluhint(qd.trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtype=dtypes.uint64) # todo: this is hacky, not trunc
-    r1 = UOp(Ops.SUB, dtypes.int64, src=(a.cast(dtypes.int64), b.cast(dtypes.int64) * q1.cast(dtypes.int64)))
-    q3d = r1.cast(dtypes.double) * invbd
-    q3 = _aluhint(q3d.trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtypes.int64)
-    r3 = UOp(Ops.SUB, dtypes.int64, src=(r1, b.cast(dtypes.int64) * q3))
-    q2 = (r3 < const(0, dtypes.int64)).where(UOp(Ops.SUB, dtypes.int64, src=(q3, const(1, dtypes.int64))), q3)
-    q0 = q1 + q2.cast(dtypes.uint64)
-    is_big = b.cast(dtypes.int64) < const(0, dtypes.int64) # b >= 2^63
-    is_one = b <= const(1, dtypes.uint64)
-    if_big = (a >= b).cast(dtypes.uint64)
-    special = is_big.where(if_big, a)
-    q = (is_one | is_big).where(special, q0)
-  if signed: q = _sub(q ^ sign, sign)
+    q1 = _aluhint((ad * invbd).trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtypes.uint64)  # todo: hacky, not really trunc
+    r1 = _sub(a.cast(dtypes.int64), b.cast(dtypes.int64) * q1.cast(dtypes.int64))
+    q3 = _aluhint((r1.cast(dtypes.double) * invbd).trunc(), RDNA3Ops.v_rndne_f64_e32).cast(dtypes.int64)
+    r3 = _sub(r1, b.cast(dtypes.int64) * q3)
+    q0 = q1 + (r3 < const(0, dtypes.int64)).where(_sub(q3, const(1, dtypes.int64)), q3).cast(dtypes.uint64)
+    is_big, is_one = b.cast(dtypes.int64) < const(0, dtypes.int64), b <= const(1, dtypes.uint64)  # b >= 2^63 | b <= 1
+    q = (is_one | is_big).where(is_big.where((a >= b).cast(dtypes.uint64), a), q0)
+  if signed: q = _sub(q ^ sign, sign)  # (q ^ sign) - sign negates q iff sign is all-ones
   return q if q.dtype == x.dtype else q.cast(x.dtype)
 
 def alu(ctx, x:UOp):
