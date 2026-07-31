@@ -156,7 +156,7 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
       return dst[st_half_base(r, perm_col(cb*CPV), K_STEP) + j].store(src[base_row + r, kt*K_STEP + cb*CPV + j])
     return UOp.group(*[one(ir) for ir in range(NIT)]).end(j)
 
-  def compute(acc:UOp, A_l:UOp, B_l:UOp, afters:tuple[UOp, ...], pred:UOp|None=None) -> UOp:
+  def compute(acc:UOp, A_l:UOp, B_l:UOp, afters:tuple[UOp, ...], pred:UOp|None=None, aoff:UOp=None, boff:UOp=None) -> UOp:
     """One K_STEP=64 iteration: (K_STEP//TC_K) k-chunks unrolled, (MT x NT) mma each, like the kittens main loop.
 
     pred (optional): a loop-range condition; accumulator stores are predicated on it so the
@@ -171,8 +171,11 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
     # in the permuted layout every fragment is 8 contiguous halves starting at an 8-aligned col
     for kk in range(K_STEP//TC_K):
       cc = kk*(TC_K//FRAG_IN) + (lane // 16)   # fragment chunk col (8 halves)
-      a_frags = [A_l[st_half_base(arow + mt*16, cc*8, K_STEP) + ja].contract(ja) for mt in range(MT)]
-      b_frags = [B_l[st_half_base(brow + nt*16, cc*8, K_STEP) + jb].contract(jb) for nt in range(NT)]
+      oa, ob = (aoff, boff) if aoff is not None else (None, None)
+      a_frags = [A_l[st_half_base(arow + mt*16, cc*8, K_STEP) + ja].contract(ja) if oa is None else
+                 A_l[oa + st_half_base(arow + mt*16, cc*8, K_STEP) + ja].contract(ja) for mt in range(MT)]
+      b_frags = [B_l[st_half_base(brow + nt*16, cc*8, K_STEP) + jb].contract(jb) if ob is None else
+                 B_l[ob + st_half_base(brow + nt*16, cc*8, K_STEP) + jb].contract(jb) for nt in range(NT)]
       for mt in range(MT):
         for nt in range(NT):
           cur = acc_k[mt, nt]
@@ -194,20 +197,22 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
     # Double-buffered pipeline on FA/gemm_fragment conventions: each LDS buffer is a
     # (2, tile) placeholder indexed by symbolic parity (ko % 2) -- no static slot choice,
     # no duplicate static stores (memory_coalescing-safe), no fill iteration, no predication.
-    def smem2(slot) -> UOp: return UOp.placeholder((2, BLOCK_M*K_STEP), dtypes.bfloat16, slot, AddrSpace.LOCAL)
+    def smem2(slot) -> UOp: return UOp.placeholder((2*BLOCK_M*K_STEP,), dtypes.bfloat16, slot, AddrSpace.LOCAL)
     A_l, B_l = smem2(0), smem2(1)
 
-    def copy_stage(dst:UOp, src:UOp, base_row:UOp, kt, slot:int) -> UOp:
-      """store one global tile into dst (a (tile,) LDS view, already parity-indexed)."""
+    TILE_ELEMS = BLOCK_M * K_STEP
+    def copy_stage(dst:UOp, slot_off:UOp, src:UOp, base_row:UOp, kt, slot:int) -> UOp:
+      """store one global tile into dst + slot_off (flat element offset -- slot_off = parity*TILE_ELEMS)."""
       j = UOp.range(CPV, slot, AxisType.UPCAST)
       ir = UOp.range(cdiv(OPS_PER_TILE, NUM_THREADS), slot+1, AxisType.LOOP)
       chunk = ir*NUM_THREADS + tid
       r, cc = chunk // OPR, chunk % OPR
-      return dst[st_half_base(r, perm_col(cc*CPV), K_STEP) + j].store(src[base_row + r, kt*K_STEP + cc*CPV + j]).end(ir, j)
+      return dst[slot_off + st_half_base(r, perm_col(cc*CPV), K_STEP) + j].store(src[base_row + r, kt*K_STEP + cc*CPV + j]).end(ir, j)
 
+    ZERO = UOp.const(dtypes.weakint, 0)
     # prologue: tile 0 into slot 0 of both buffers, barrier before first read
-    g0 = UOp.group(copy_stage(A_l[0], A, by*BLOCK_M, UOp.const(dtypes.weakint, 0), 100),
-                   copy_stage(B_l[0], B, bx*BLOCK_N, UOp.const(dtypes.weakint, 0), 110))
+    g0 = UOp.group(copy_stage(A_l, ZERO, A, by*BLOCK_M, ZERO, 100),
+                   copy_stage(B_l, ZERO, B, bx*BLOCK_N, ZERO, 110))
     bar0 = UOp.barrier(g0)
     # Double-buffered pipeline with symbolic-parity slot indexing (FA/gemm_fragment
     # conventions): slot ko%2 holds k-tile ko; compute of tile ko overlaps the prefetch
@@ -221,11 +226,22 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
     ko = UOp.range(amt, 600, AxisType.LOOP)
     pr, pn = ko % 2, (ko+1) % 2                      # slot of the tile being computed / being prefetched
     kt_next = UOp.minimum(ko+1, amt-1)               # clamped tail prefetch (its data is unused)
-    last = compute(acc, A_l[pr].after(bar0, ko), B_l[pr].after(bar0, ko), afters=(ko,))
-    ga = UOp.group(copy_stage(A_l[pn].after(last), A, by*BLOCK_M, kt_next, 130),
-                   copy_stage(B_l[pn].after(last), B, bx*BLOCK_N, kt_next, 140))
-    ko_end = UOp.group(last, ga).end(ko)
-    acc = acc.after(ko_end)
+    # the prefetch of the NEXT tile is ordered only against the iteration chain (not the
+    # compute's fragment stores), so it can be issued BEFORE the wmma's and overlap them:
+    # its write slot is the one compute read TWO iterations ago (slot (ko-1)%2 == (ko+1)%2),
+    # and the loop-end raw/war barrier covers the hand-off (write(ko) -> read(ko+1)).
+    # flat slot indexing (parity * TILE_ELEMS) keeps the swizzled fragment base in
+    # "chunk base + vector offset" form so the devectorizer keeps ds_read/ds_write_b128;
+    # A_l[pr][...] (leading-dim select on the (2, tile) view) scalarizes to ds_read_u16.
+    pa, pb = A_l.after(bar0, ko), B_l.after(bar0, ko)
+    ga = UOp.group(copy_stage(pa, pn*TILE_ELEMS, A, by*BLOCK_M, kt_next, 130),
+                   copy_stage(pb, pn*TILE_ELEMS, B, bx*BLOCK_N, kt_next, 140))
+    last = compute(acc, pa, pb, afters=(ko,), aoff=pr*TILE_ELEMS, boff=pr*TILE_ELEMS)
+    # one barrier per k-tile hand-off (like stages=1): covers write(ko)->read(ko+1), and
+    # read(ko)->write(ko+1) is safe because (ko+1)%2 slot was fully read at iteration ko-1
+    # which is closed by the ko-1 barrier. The prefetch rides IN FRONT of the wmma's and
+    # overlaps them; there is no barrier between the copy and the compute in an iteration.
+    acc = acc.after(UOp.group(last, ga).barrier().end(ko))
 
   # ---- epilogue: per-thread fragment stores, cast to bf16 (scalar per fragment element) ----
   mt, nt = UOp.range(MT, 801, AxisType.LOOP), UOp.range(NT, 802, AxisType.LOOP)
