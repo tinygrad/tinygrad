@@ -3,6 +3,11 @@ import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
+from tinygrad.dtype import ConstType, DType, dtypes, truncate
+
+# machine IR is outside spec_program: its constants are typed at the mint, never the semantic pair CAST(dt, CONST(v)).
+# committing a pair is the cast it stands for: a float rounds to the width it lands at, an int takes its value (out of range is UB)
+def machine_const(dt:DType, v:ConstType) -> UOp: return UOp(Ops.CONST, dt, arg=dt.const(truncate[dt](v) if dtypes.is_float(dt) else v))
 
 @dataclass(frozen=True)
 class Register:
