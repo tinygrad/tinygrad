@@ -3390,6 +3390,14 @@ class TestOpsUint8(unittest.TestCase):
   def test_cast_relu(self):
     helper_test_op([(2,3,64,64)], lambda x: x.relu().type(torch.uint8), lambda x: x.relu().cast('uint8'), forward_only=True)
 
+  def test_cast_narrow_then_widen(self):
+    # the narrowing cast has to drop the high bits before the int32 consumer reads it, without a store to round-trip through
+    vals = [[0, 1, 127, 128, 255, 256, 300, -1, -200]]
+    helper_test_op(None, lambda x: x.type(torch.uint8).type(torch.int32), lambda x: x.cast(dtypes.uint8).cast(dtypes.int32),
+                   forward_only=True, vals=vals)
+    helper_test_op(None, lambda x: x.type(torch.int8).type(torch.int32), lambda x: x.cast(dtypes.int8).cast(dtypes.int32),
+                   forward_only=True, vals=vals)
+
   def test_interpolate_bilinear(self):
     out_sz = (10, 10)
     helper_test_op([(2,3,64,64)],

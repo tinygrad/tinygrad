@@ -115,7 +115,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return a + (-b)
+    # `neg` on unsigned is the WRAPPED negation, `b + neg(b) == 2**bits`. subtraction is arithmetic, so negate by multiplication.
+    return a + b * (-1)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """

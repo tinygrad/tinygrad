@@ -4,7 +4,7 @@ from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
 from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_commit_weak
-from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.uop.symbolic import symbolic, symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
 
@@ -47,6 +47,13 @@ class TestWeakPromotion(unittest.TestCase):
   def test_minimum_commits_both_operands(self):
     r = Tensor(1).minimum(Tensor([2], dtype=dtypes.uint8, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint8, [1]))
+
+  def test_unsigned_sub_is_arithmetic(self):
+    # unsigned `neg` is the WRAPPED negation, so `a - b` must not go through it: folding it as `a + (2**bits - b)` leaves range
+    a, b = UOp.const(None, 5).cast(dtypes.uint8), UOp.const(None, 3).cast(dtypes.uint8)
+    self.assertEqual(graph_rewrite(a-b, symbolic_simple).arg, 2)
+    x = UOp.range(16, 0).cast(dtypes.uint64)
+    self.assertEqual(graph_rewrite((x+7)-x+1, symbolic).arg, 8)
 
   def test_broadcasted_keeps_const_weak(self):
     # a python scalar stays a bare weak CONST through _broadcasted, lifted only to the KIND of the lub
