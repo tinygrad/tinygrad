@@ -150,18 +150,19 @@ class TestAsmGEMM(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
 
-# AITER gfx950 packed E2M1 GEMM
-class TestAiterMXFP4(unittest.TestCase):
+class TestMXFP4(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("requires real amd machine")
+
   def test_empty(self):
-    if not Device.DEFAULT.startswith("AMD") or not is_cdna4() or DEV.interface.startswith("MOCK"):
-      self.skipTest("AITER MXFP4 requires a real gfx950 AMD device")
-    from extra.gemm.aiter_mxfp4 import aiter_mxfp4_gemm
+    from extra.gemm.gemm_mxfp4 import mxfp4_gemm
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
     a = Tensor.empty(M, K // 2, dtype=dtypes.uint8)
     b = Tensor.empty(N, K // 2, dtype=dtypes.uint8)
     scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
     scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
-    aiter_mxfp4_gemm(a, b, scale_a, scale_b).realize()
+    mxfp4_gemm(a, b, scale_a, scale_b).realize()
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 

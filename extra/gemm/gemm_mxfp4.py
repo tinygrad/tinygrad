@@ -7,7 +7,6 @@ from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import KernelInfo, Ops, UOp
 from tinygrad.runtime.autogen.amd.cdna.ins import *
 
-
 class Kernel:
   def __init__(self): self.instructions, self.labels, self.pos = [], {}, 0
   def label(self, name): self.labels[name] = self.pos
@@ -24,7 +23,7 @@ def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
   # select fp4 for both inputs, 0xD3AC is the load scale encoding and write to acc vgprs
   return v_mfma_scale_f32_16x16x128_f8f6f4(dst, a, b, dst, 0, 0, opsel, opsel_hi, 4, 1, 1, 0, 4, 0xD3AC, scale_a.offset, scale_b.offset)
 
-def aiter_mxfp4_instructions(M: int, N: int, K: int, tile_m: int, tile_n: int):
+def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
   scale_k, k = (K // 32, Kernel())
   if (tile_m, tile_n) == (128, 512):
     k.emit(s_and_b32(s[1], s[1], LIT, 65535))
@@ -4128,8 +4127,9 @@ def aiter_mxfp4_instructions(M: int, N: int, K: int, tile_m: int, tile_n: int):
   else:
     raise AssertionError(f'unsupported tile {(tile_m, tile_n)}')
   return k.finalize()
+
 @functools.cache
-def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:int, tile_n:int) -> UOp:
+def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:int, tile_n:int) -> UOp:
   M, half_k = A.shape
   N, half_k_b = B.shape
   K = half_k * 2
@@ -4138,9 +4138,10 @@ def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:in
   groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
   lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, lds, threads, groups_x, groups_y,
-                  arg=KernelInfo(f"aiter_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
-  insts = aiter_mxfp4_instructions(M, N, K, tile_m, tile_n)
+                  arg=KernelInfo(f"custom_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
+  insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
+
 def shuffle_mxfp4_weight(x:Tensor) -> Tensor:
   assert x.ndim == 2 and x.dtype == dtypes.uint8
   N, half_k = x.shape
@@ -4153,7 +4154,7 @@ def shuffle_mxfp4_scales(x:Tensor) -> Tensor:
   assert rows % 32 == 0 and scale_k % 8 == 0
   return x.reshape(rows // 32, 2, 16, scale_k // 8, 2, 4).permute(0, 3, 5, 2, 4, 1).contiguous().reshape(rows, scale_k)
 
-def aiter_mxfp4_gemm(a:Tensor, b:Tensor, scale_a:Tensor, scale_b:Tensor, tile_m:int=256, tile_n:int=256) -> Tensor:
+def mxfp4_gemm(a:Tensor, b:Tensor, scale_a:Tensor, scale_b:Tensor, tile_m:int=256, tile_n:int=256) -> Tensor:
   assert (tile_m, tile_n) in ((256, 256), (192, 256), (128, 512))
   assert a.ndim == b.ndim == 2 and a.dtype == b.dtype == dtypes.uint8
   M, half_k = a.shape
@@ -4164,5 +4165,5 @@ def aiter_mxfp4_gemm(a:Tensor, b:Tensor, scale_a:Tensor, scale_b:Tensor, tile_m:
   assert a.device == b.device == scale_a.device == scale_b.device and isinstance(a.device, str)
   assert Device[a.device].renderer.target.arch == "gfx950"
   out = Tensor.invalids(M, N, dtype=dtypes.bfloat16, device=a.device)
-  fxn = functools.partial(_custom_aiter_mxfp4, tile_m=tile_m, tile_n=tile_n)
+  fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
   return Tensor.custom_kernel(out, a, b, scale_a, scale_b, fxn=fxn)[0]
