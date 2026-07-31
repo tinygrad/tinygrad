@@ -1,8 +1,9 @@
 import atexit, functools, pathlib
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, all_same, DEBUG
+from tinygrad.helpers import getenv, all_same, DEBUG, ceildiv
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 
@@ -107,6 +108,23 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
+# ** MXFP4 GEMM custom kernel
+
+@functools.cache
+def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:int, tile_n:int) -> UOp:
+  from extra.gemm.gemm_mxfp4 import build_kernel
+  M, half_k = A.shape[0]*A.shape[1], A.shape[2]
+  N, half_k_b = B.shape
+  K = half_k * 2
+  assert half_k == half_k_b and C.shape == (*A.shape[:-1], N)
+  threads = UOp.special(256, "lidx0")
+  groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
+  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, lds, threads, groups_x, groups_y,
+                  arg=KernelInfo(f"custom_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
+  insts = build_kernel(M, N, K, tile_m, tile_n)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
+
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
   *batch, K = x.shape
@@ -144,7 +162,9 @@ atexit.register(_asm_gemm_report)
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
-  if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE}: return todo(f"only bfloat16/float16/fp8, got {a.dtype}")
+  # fp4 encoded as packed uint8
+  # TODO: add fp4 dtype?
+  if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE, dtypes.uint8}: return todo(f"only bfloat16/float16/fp8/fp4, got {a.dtype}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple):
@@ -243,7 +263,6 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
   out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_hk_bf16_atb_gemm, dname=dname))[0]
   if reduce_out: out = out.sum(0)
   return out.squeeze(0) if out.ndim == 3 else out
-
 
 # ** backward gemm, might use the asm gemm
 
@@ -348,6 +367,12 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
+  if (mxfp4:=a.dtype == dtypes.uint8):
+    assert mx_scales is not None and len(mx_scales) == 2
+    scale_a, scale_b = mx_scales
+    K = a.shape[-1] * 2
+    assert scale_a.shape == (*a.shape[:-1], K // 32) and scale_b.shape == (b.shape[1], K // 32)
+    assert scale_a.dtype == scale_b.dtype == dtypes.uint8 and a.device == b.device == scale_a.device == scale_b.device
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
   if unfold_batch:
@@ -355,7 +380,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
-  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE else a.dtype
+  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE or mxfp4 else a.dtype
 
   batch, M, K = a.shape
   N = b.shape[1]
@@ -378,7 +403,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    if mx:
+    if mxfp4:
+      tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
+      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
+      out = Tensor.custom_kernel(out, a, b.T, scale_a, scale_b, fxn=fxn)[0]
+    elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:
         a_si, a_e8, b_si, b_e8 = mx_scales

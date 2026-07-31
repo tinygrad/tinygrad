@@ -150,6 +150,19 @@ class TestAsmGEMM(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
 
+class TestMXFP4(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("requires real amd machine")
+
+  def test_empty(self):
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    a = Tensor.empty(M, K // 2, dtype=dtypes.uint8)
+    b = Tensor.empty(N, K // 2, dtype=dtypes.uint8)
+    scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
+    scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
+    asm_gemm(a, b.T, mx_scales=(scale_a, scale_b)).realize()
+
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
