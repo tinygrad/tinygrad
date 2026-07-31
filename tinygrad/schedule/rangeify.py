@@ -576,10 +576,12 @@ pm_expand_broadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
 ])
 
-def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp):
+def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp|None=None):
+  if red.arg[1] == 0: return None
+  if idx is None and len(red.shape) > 0: return None
   # TODO: is AxisType.REDUCE a real thing?
   rngs = [UOp.range(s, next(ctx), AxisType.REDUCE) for s in inp.shape[:red.arg[1]]]
-  return inp.index(*rngs, *idx.src[1:]).reduce(*rngs, arg=(red.arg[0], 0))
+  return inp.index(*rngs, *(idx.src[1:] if idx is not None else ())).reduce(*rngs, arg=(red.arg[0], 0))
 
 def rangeify_on_store(ctx, x:UOp):
   if x.shape == (): return None
@@ -596,6 +598,8 @@ def index_on_stack(stack:UOp, idx:UOp):
 pm_simple_rangeify = PatternMatcher([
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # reshape of a single element shaped value to scalar is an index
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
   (UPat(Ops.STACK, name="stack").index(name="idx", allow_any_len=True), index_on_stack),
@@ -604,6 +608,7 @@ pm_simple_rangeify = PatternMatcher([
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
   # reduce/store are what creates ranges
   (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red").index(name="idx", allow_any_len=True), rangeify_on_reduce),
+  (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red"), rangeify_on_reduce),
   (UPat(Ops.STORE, name="x"), rangeify_on_store),
 ])
 
