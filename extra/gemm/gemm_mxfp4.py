@@ -18,7 +18,8 @@ def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
   return v_mfma_scale_f32_16x16x128_f8f6f4(dst, a, b, dst, 0, 0, opsel, opsel_hi, 4, 1, 1, 0, 4, 0xD3AC, scale_a.offset, scale_b.offset)
 
 def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
-  scale_k, k = (K // 32, Kernel())
+  k = Kernel()
+  scale_k = K // 32
   if (tile_m, tile_n) == (128, 512):
     k.emit(s_and_b32(s[1], s[1], LIT, 65535))
     k.emit(s_mov_b32(s[47], s[2]))
