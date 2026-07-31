@@ -223,7 +223,7 @@ code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{c
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
 llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 # weakints will break SPEC verification
-def _idx(i:int) -> UOp: return UOp.const(dtypes.int16, i)
+def _idx(i:int) -> UOp: return UOp.const(i, dtypes.int16)
 class AMDLLVMRenderer(LLVMRenderer):
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
