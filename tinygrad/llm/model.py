@@ -497,36 +497,17 @@ def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int, softmax:bool=False) -> UOp:
             sel[outer, lane.valid(valid)].store(indices.after(ready)[src]))
   return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name=f"topk_256{'_softmax' if softmax else ''}", opts_to_apply=()))
 
-@functools.cache
-def _biased_sigmoid_topk_kernel(out:UOp, sel:UOp, x:UOp, bias:UOp, k:int, normalize:bool) -> UOp:
-  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
-  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
-  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
-  next_values = UOp.placeholder((256,), x.dtype, 2, addrspace=AddrSpace.LOCAL)
-  next_indices = UOp.placeholder((256,), dtypes.int32, 3, addrspace=AddrSpace.LOCAL)
-  score = x[outer, lane].sigmoid() + bias[lane]
-  ready = UOp.group(values.after(outer)[lane].store(score),
-                    indices.after(outer)[lane].store(lane.cast(dtypes.int32))).barrier()
-  _, indices, ready = _topk_256_sort(values, indices, next_values, next_indices, ready, lane)
-  valid = lane < k
-  index = indices.after(ready)[(256 - k + lane).valid(valid)]
-  prob = x[outer, index.cast(dtypes.weakint)].sigmoid()
-  if normalize:
-    prob = prob / sum((x[outer, indices.after(ready)[256-k+i].cast(dtypes.weakint)].sigmoid() for i in range(k)),
-                      UOp.const(x.dtype, 0))
-  stores = (out[outer, lane.valid(valid)].store(prob), sel[outer, lane.valid(valid)].store(index))
-  return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="biased_sigmoid_topk_256", opts_to_apply=()))
-
 def biased_sigmoid_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, Tensor]:
   assert x.shape[-1] == bias.shape[0] == 256
   outer = int(x.numel()) // 256
   if str(x.device).startswith("CPU") and outer <= 32 and x.dtype in (dtypes.float16, dtypes.float32) and \
      bias.dtype in (dtypes.float16, dtypes.float32):
     return llm_cpu.uop_biased_topk(x, bias, k, normalize)
-  values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
-  indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
-  return tuple(Tensor.custom_kernel(values, indices, x.contiguous(), bias.contiguous(),
-    fxn=lambda out,sel,x,bias:_biased_sigmoid_topk_kernel(out, sel, x, bias, k, normalize))[:2])  # type: ignore[return-value]
+  probs = x.sigmoid()
+  _, indices = pairwise_topk(probs + bias, k)
+  values = probs.gather(-1, indices)
+  if normalize: values = values / values.sum(axis=-1, keepdim=True)
+  return values.reshape(outer, k), indices.reshape(outer, k)
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]

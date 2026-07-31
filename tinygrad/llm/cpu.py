@@ -3,7 +3,7 @@ import functools, platform, math
 from typing import TYPE_CHECKING
 from tinygrad import Tensor, nn, UOp, getenv, dtypes
 from tinygrad.dtype import DType, AddrSpace
-from tinygrad.llm.gguf import _GGML_QUANT
+from tinygrad.llm.gguf import _GGML_QUANT, ggml_data_to_tensor
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo, AxisType
 if TYPE_CHECKING:
@@ -578,54 +578,6 @@ def uop_expert_weighted_sum(layer:ExpertWeights, sel:Tensor, x:Tensor, probs:Ten
   return out.reshape(*probs.shape[:-1], layer.out_features)
 
 @functools.cache
-def _cpu_expert_silu_uop(out:UOp, raw0:UOp, raw1:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
-                         out_features:int, in_features:int, ggml_type:int, routes_per_input:int, repacked:bool) -> UOp:
-  routes, groups = _concrete_int(out.shape[0]), in_features // 32
-  core, job, work = _parallel_work(routes * out_features)
-  route, output = work // out_features, work % out_features
-  expert, xidx = sel[route].load().cast(dtypes.weakint), route // routes_per_input
-  vectorized = ggml_type in (14, 23) or (ggml_type == 21 and repacked)
-  acc0 = UOp.placeholder((8 if vectorized else 1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  acc1 = UOp.placeholder((8 if vectorized else 1,), dtypes.float32, slot=1, addrspace=AddrSpace.REG)
-  initialized = UOp.group(*((_vector_reg(acc, job).store(acc.const_like(0)) if vectorized else
-                             acc.after(job).store(acc.const_like(0))) for acc in (acc0, acc1)))
-  if ggml_type == 23:
-    block = UOp.range(in_features // 256, 110)
-    parts0, scale0 = _cpu_iq4_block_parts(raw0, xq, expert, xidx, block, output, out_features, in_features)
-    parts1, scale1 = _cpu_iq4_block_parts(raw1, xq, expert, xidx, block, output, out_features, in_features)
-    value0, value1 = parts0.cast(dtypes.float32) * xd[xidx, block] * scale0, parts1.cast(dtypes.float32) * xd[xidx, block] * scale1
-    accumulated = UOp.group(_vector_acc_update(acc0, value0, initialized, block),
-                            _vector_acc_update(acc1, value1, initialized, block)).end(block)
-  elif ggml_type == 21 and repacked:
-    block = UOp.range(in_features // 256, 110)
-    parts0, scale0 = _cpu_iq3_repacked_block_parts(raw0, xq, expert, xidx, block, output, out_features, in_features)
-    parts1, scale1 = _cpu_iq3_repacked_block_parts(raw1, xq, expert, xidx, block, output, out_features, in_features)
-    value0, value1 = parts0.cast(dtypes.float32) * xd[xidx, block] * scale0, parts1.cast(dtypes.float32) * xd[xidx, block] * scale1
-    accumulated = UOp.group(_vector_acc_update(acc0, value0, initialized, block),
-                            _vector_acc_update(acc1, value1, initialized, block)).end(block)
-  elif ggml_type == 14:
-    block = UOp.range(in_features // 256, 110)
-    value0 = _cpu_q6_block_parts(raw0, xq, xd, expert, xidx, block, output, out_features, in_features)
-    value1 = _cpu_q6_block_parts(raw1, xq, xd, expert, xidx, block, output, out_features, in_features)
-    accumulated = UOp.group(_vector_acc_update(acc0, value0, initialized, block),
-                            _vector_acc_update(acc1, value1, initialized, block)).end(block)
-  else:
-    group = UOp.range(groups, 110)
-    value0 = _cpu_expert_group_dot(raw0, lut, xq, xd, expert, xidx, group, output,
-                                    out_features, in_features, ggml_type, repacked)
-    value1 = _cpu_expert_group_dot(raw1, lut, xq, xd, expert, xidx, group, output,
-                                    out_features, in_features, ggml_type, repacked)
-    accumulated = UOp.group(acc0.after(initialized, group).store(acc0.after(group) + value0),
-                            acc1.after(initialized, group).store(acc1.after(group) + value1)).end(group)
-  if vectorized:
-    gate = sum((acc0.after(accumulated).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-    up = sum((acc1.after(accumulated).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-  else:
-    gate, up = acc0.after(accumulated).index(0), acc1.after(accumulated).index(0)
-  return out[route, output].store((gate * gate.sigmoid() * up).cast(out.dtype)).end(job, core).sink(
-    arg=KernelInfo(name=f"expert_silu_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", optimize=False, parallel=True))
-
-@functools.cache
 def _expert_route_links_uop(head:UOp, next_route:UOp, unique:UOp, unique_count:UOp, sel:UOp, num_experts:int) -> UOp:
   routes = _concrete_int(next_route.shape[1])
   init = UOp.range(num_experts, 90)
@@ -746,7 +698,6 @@ def uop_expert_silu(first:ExpertWeights, second:ExpertWeights, sel:Tensor, x:Ten
   routes_per_input = routes // input_count
   xq, xd = q8k_quantize(x, first.in_features) if first.ggml_type in (21, 23) else q8_quantize(x, first.in_features)
   out = Tensor.empty(routes, first.out_features, dtype=x.dtype, device=x.device)
-  lut = _cpu_expert_lut(str(x.device), first.ggml_type)
   repacked = first.ggml_type == 21 and first.cpu_repacked is not None and second.cpu_repacked is not None
   raw0, raw1 = (first.cpu_repacked, second.cpu_repacked) if repacked else (first.weight, second.weight)
   assert raw0 is not None and raw1 is not None
@@ -758,9 +709,7 @@ def uop_expert_silu(first:ExpertWeights, second:ExpertWeights, sel:Tensor, x:Ten
         _cpu_expert_silu_grouped_uop(out, raw0, raw1, head, next_route, unique, count, xq, xd,
                                      first.num_experts, first.out_features, first.in_features, routes_per_input))[0]
   else:
-    out = Tensor.custom_kernel(out, raw0, raw1, flat_sel, xq, xd, lut, fxn=lambda out,raw0,raw1,sel,xq,xd,lut:
-      _cpu_expert_silu_uop(out, raw0, raw1, sel, xq, xd, lut, first.out_features, first.in_features,
-                           first.ggml_type, routes_per_input, repacked))[0]
+    return silu_mul(uop_expert(first, sel, x, (xq, xd)), uop_expert(second, sel, x, (xq, xd)))
   return out if len(sel.shape) == 1 else out.reshape(*sel.shape, first.out_features)
 
 def uop_expert_silu_weighted(first:ExpertWeights, second:ExpertWeights, down:ExpertWeights,
@@ -970,43 +919,21 @@ def _q8_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_featur
     arg=KernelInfo(name=f"linear_q8_cpu_{out_features}_{in_features}{'_repacked' if repacked else ''}",
                    optimize=False, parallel=True))
 
-@functools.cache
-def _q6_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int) -> UOp:
-  out_tokens = _concrete_int(out.shape[0])
-  token_tile = 4 if out_tokens % 4 == 0 else 1
-  token_blocks = out_tokens // token_tile
-  core, job, work = _parallel_work(token_blocks * out_features)
-  token_block, output = work // out_features, work % out_features
-  tokens, groups, output_size = tuple(token_block * token_tile + i for i in range(token_tile)), in_features // 32, in_features // 256 * 210
-  accs = tuple(UOp.placeholder((8,), dtypes.float32, slot=i, addrspace=AddrSpace.REG) for i in range(token_tile))
-  accs = tuple(_vector_acc_init(acc, job) for acc in accs)
-  block = UOp.range(groups // 8, 100)
-  base = output * output_size + block * 210
-  updates = []
-  for acc,token in zip(accs, tokens):
-    block_sum = UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8)))
-    for subgroup in range(8):
-      parts = _dot_q6_ptr(raw[base], xq[token, block * 8 + subgroup, 0], subgroup).cast(dtypes.float32)
-      scales = UOp.stack(*(raw[base + 192 + subgroup * 2 + j].load().bitcast(dtypes.int8).cast(dtypes.float32) for j in range(2)))
-      block_sum = block_sum + parts * UOp.stack(*(scales[j // 4] for j in range(8))) * xd[token, block * 8 + subgroup]
-    updates.append(_vector_acc_update(acc, block_sum * _load_f16(raw, base + 208), block))
-  done = UOp.group(*updates).end(block)
-  stores = [out[token, output].store(sum((acc.after(done).index(i) for i in range(8)),
-                                         UOp.const(dtypes.float32, 0)).cast(out.dtype)) for acc,token in zip(accs, tokens)]
-  return UOp.group(*stores).end(job, core).sink(arg=KernelInfo(name="linear_q6_cpu", optimize=False, parallel=True))
-
 def uop_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in (8, 14)
   tokens, xc = int(x.numel()) // layer.in_features, x.reshape(-1, layer.in_features).contiguous()
   xq, xd = q8_quantize(xc, layer.in_features)
+  if layer.ggml_type == 14:
+    weight = ggml_data_to_tensor(layer.weight, layer.out_features * layer.in_features, 14,
+                                 contiguous=False).reshape(layer.out_features, layer.in_features)
+    activation = (xq.cast(dtypes.float32) * xd.unsqueeze(-1)).reshape(tokens, layer.in_features)
+    return (activation @ weight.T).reshape(*x.shape[:-1], layer.out_features)
   out = Tensor.empty(tokens, layer.out_features, dtype=x.dtype, device=x.device)
-  kernel = _q8_linear_uop if layer.ggml_type == 8 else _q6_linear_uop
-  repacked = layer.ggml_type == 8 and tokens == 1 and layer.in_features % 256 == 0 and layer.cpu_repacked is not None
+  repacked = tokens == 1 and layer.in_features % 256 == 0 and layer.cpu_repacked is not None
   raw = layer.cpu_repacked if repacked else layer.weight
   assert raw is not None
   out = Tensor.custom_kernel(out, raw, xq, xd, fxn=lambda out,raw,xq,xd:
-    kernel(out, raw, xq, xd, layer.out_features, layer.in_features, repacked) if layer.ggml_type == 8 else
-    kernel(out, raw, xq, xd, layer.out_features, layer.in_features))[0]
+    _q8_linear_uop(out, raw, xq, xd, layer.out_features, layer.in_features, repacked))[0]
   return out.reshape(*x.shape[:-1], layer.out_features)
 
 def uop_q8_prequant_linear(layer:Linear, xq:Tensor, xd:Tensor, out_dtype:DType=dtypes.float16) -> Tensor:
