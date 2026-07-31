@@ -18,7 +18,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:UOp.const(0)}), X.split_uop(Ops.ADD), idx)
       if testidx.index(0).vmax < 0 or testidx.index(1).vmax < 0:
         drop_stmt.append(stmt)
         continue

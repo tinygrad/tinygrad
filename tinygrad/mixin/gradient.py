@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes, bare_like
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 
@@ -28,7 +28,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.base.op is Ops.CONST else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
+    g if g.base.is_const else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
@@ -49,15 +49,17 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.LOG2, name="ret"), lambda ctx, ret: (ctx / (ret.src[0] * math.log(2)),)),
   (UPat(Ops.EXP2, name="ret"), lambda ctx, ret: (ret * ctx * math.log(2),)),
   (UPat(Ops.SQRT, name="ret"), lambda ctx, ret: (ctx / (ret*2),)),
-  (UPat(Ops.TRUNC), lambda ctx: (ctx.const_like(0),)),
+  (UPat(Ops.TRUNC), lambda ctx: (bare_like(ctx, 0),)),
   (UPat((Ops.CMPLT, Ops.CMPNE)), lambda: (None, None)),
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
   (UPat(Ops.POW, name="ret", src=(UPat.var("b"), UPat.var("e"))), lambda ctx, ret, b, e:
-    (ctx * (b.eq(0)&e.eq(0)).where(e, e*b.pow(e-1)), ctx * b.eq(0).where((e<0).where(ret.const_like(-math.inf), 0), ret*b.log2()*math.log(2.0)))),
+    (ctx * (b.eq(0)&e.eq(0)).where(e, e*b.pow(e-1)),
+     ctx * b.eq(0).where((e<0).where(bare_like(ret, -math.inf), 0), ret*b.log2()*math.log(2.0)))),
   (UPat(Ops.MAX, src=(UPat.var("x"), UPat.var("y"))), lambda ctx, x, y:
     ((x>y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)), (x<y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
-  (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
+  (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, bare_like(ctx, 0)),
+                                                  ret.src[0].where(bare_like(ctx, 0), ctx))),
   (UPat(Ops.REDUCE, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),

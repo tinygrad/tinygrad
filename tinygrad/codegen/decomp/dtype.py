@@ -18,7 +18,7 @@ def reindex(idx:UOp, off:int, mul=2) -> UOp:
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
-  zero = UOp.const(0, dt)
+  zero = UOp.const(0).cast(dt)
   if len(uops) == 2: a0, a1 = uops
   elif len(uops) == 3: a0, a1, b0 = uops  # a shift's count is a single word
   elif len(uops) == 4: a0, a1, b0, b1 = uops
@@ -28,7 +28,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       # the high word is the sign extension; bool has no sign, test the already-cast low word instead (bool < 0 would promote to weakint)
       x, lo = uops[0], uops[0].cast(l2i_dt[dt])
       sign = lo if x.dtype is dtypes.bool else x
-      return lo, (sign < sign.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
+      return lo, (sign < UOp.const(0).cast(sign.dtype)).where(UOp.const(-1).cast(lo.dtype), UOp.const(0).cast(lo.dtype))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
       return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
     case Ops.CAST if dt in dtypes.floats:
@@ -57,10 +57,10 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         ua0, ua1, ub0, ub1 = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0.bitcast(dtypes.uint), b1.bitcast(dtypes.uint)
         a0, a1 = (a_neg:=a1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ua0, ua1))[0], ua0), a_neg.where(n[1], ua1)
         b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ub0, ub1))[0], ub0), b_neg.where(n[1], ub1)
-      q, r = (z:=UOp.const(0, dtypes.uint), z), (z, z)
+      q, r = (z:=UOp.const(0).cast(dtypes.uint), z), (z, z)
       for i in range(63, -1, -1):
-        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(1, dtypes.uint), z)
-        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(i, dtypes.uint), z)[0] & 1), r[1]
+        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(1).cast(dtypes.uint), z)
+        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(i).cast(dtypes.uint), z)[0] & 1), r[1]
         cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
         q = ((q[0] | shl(cond.cast(dtypes.uint), i % 32), q[1]) if i < 32 else (q[0], q[1] | shl(cond.cast(dtypes.uint), i % 32)))
@@ -117,8 +117,8 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   e, m = dtypes.finfo(dt)
   if dt in dtypes.fp8_fnuz: max_exp, max_man = (1 << e) - 1, (1 << m) - 1
   else: max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
-  mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
-  sat = mx if dt in dtypes.fp8s and sat else val.const_like(float('inf'))
+  mx = UOp.const(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m))).cast(val.dtype)
+  sat = mx if dt in dtypes.fp8s and sat else UOp.const(float('inf')).cast(val.dtype)
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
@@ -129,6 +129,11 @@ def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+
+def split_const_word(c:UOp, x:UOp) -> UOp|None:
+  if x.tag is None: return None
+  v = x.dtype.const(c.arg)
+  return UOp.const(truncate[x.tag[1]]((v >> 32) if x.tag[0] == 1 else (v & 0xFFFFFFFF))).cast(x.tag[1])
 
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp = PatternMatcher([
@@ -143,6 +148,8 @@ pm_long_decomp = PatternMatcher([
    split_l2i(x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
    split_l2i(Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  # a data constant reaches the split in its committed form, the pair: the word is cut out of the value it commits to
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat(Ops.CONST, dtype=dtypes.weaks, name='c'),), name="x"), split_const_word),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
    split_l2i(x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
@@ -158,7 +165,7 @@ pm_long_decomp = PatternMatcher([
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
   (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF)), x.tag[1]))
+   UOp.const(truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF))).cast(x.tag[1]))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

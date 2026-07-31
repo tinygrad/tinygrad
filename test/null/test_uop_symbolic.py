@@ -1016,12 +1016,14 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0, dtypes.int)), expr)).sink())
+    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     # the vars are now scalar PARAMs
     pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(2, dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
+    # the rendered graph is below the boundary: its typed constant is the pair CAST(int, CONST(2))
+    self.assertEqual(rewritten_uop,
+                     (pvar['s']<UOp.const(2).cast(dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6

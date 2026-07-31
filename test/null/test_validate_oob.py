@@ -142,7 +142,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf0 = UOp.param(0, dtypes.int, (16,))
       buf1 = UOp.param(1, dtypes.int, (64,))
-      shrink = UOp(Ops.SHRINK, src=(buf0, UOp.const(0, dtypes.int), UOp.const(4)))
+      shrink = UOp(Ops.SHRINK, src=(buf0, UOp.const(0).cast(dtypes.int), UOp.const(4)))
       ld0 = shrink.load(dtype=dtypes.int).index(0)
       to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])
 
@@ -187,7 +187,7 @@ class TestValidateOOB(unittest.TestCase):
       glbl0 = UOp.param(0, dtypes.int, (16,))
       mask = UOp.param(0, dtypes.bool, (16,))
       ridx = UOp.range(20, 0)
-      ld0 = UOp(Ops.LOAD, src=(glbl0.index(UOp.const(ridx<16&mask, ridx))))
+      ld0 = UOp(Ops.LOAD, src=(glbl0.index(ridx.valid(ridx<16&mask))))
       to_uops_list([ld0])
 
 if __name__ == "__main__":

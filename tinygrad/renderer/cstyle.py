@@ -21,6 +21,12 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
 
   # casting
+  # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to.
+  # a non-finite float at an int width is UB: render what the compiled cast computes (saturate, nan to 0)
+  (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="c"),)),
+   lambda ctx,x,c: ctx.string_rewrite.rewrite(UOp(Ops.CONST, x.dtype, arg=x.dtype.const(
+     (0 if math.isnan(c.arg) else x.dtype.max if c.arg > 0 else x.dtype.min) if isinstance(c.arg, float) and not math.isfinite(c.arg)
+     and dtypes.is_int(x.dtype) else c.arg)), ctx=ctx) if x.dtype not in dtypes.weaks else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
     if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
@@ -40,6 +46,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.uint64, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}ul"),
   (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}u"),
   (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.arg else "0"),
+  (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda ctx,x: f"{x.arg}"),
   # consts are rendered to larger type and casted
   (UPat(Ops.CONST, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.arg}f')})"),
   (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.arg}u')})"),
@@ -135,11 +142,15 @@ class CStyleLanguage(Renderer):
   infinity: str = "INFINITY"
   nan: str = "NAN"
   code_for_op: dict = {
-    Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIPROCAL: lambda x,dtype: f"(1/{x})", Ops.NEG: lambda x,dtype: f"-{x}",
+    Ops.SQRT: lambda x,dtype: f"sqrt({x})", Ops.RECIPROCAL: lambda x,dtype: f"(1/{x})",
+    # a negative-literal operand would glue onto the '-' as '--': parenthesize only then (identity elsewhere)
+    Ops.NEG: lambda x,dtype: f"-({x})" if x[0] == '-' else f"-{x}",
     Ops.EXP2: lambda x,dtype: f"exp2({x})", Ops.LOG2: lambda x,dtype: f"log2({x})", Ops.SIN: lambda x,dtype: f"sin({x})",
     Ops.TRUNC: lambda x,dtype: f"trunc({x})",
     Ops.AND: lambda a,b,dtype: f"({a}&{b})", Ops.XOR: lambda a,b,dtype: f"({a}^{b})", Ops.OR: lambda a,b,dtype: f"({a}|{b})",
-    Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
+    # a negative constant renders with a leading '-', which would glue onto SUB's operator and parse as '--'
+    Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-({b}))" if b[0] == '-' else f"({a}-{b})",
+    Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
     Ops.CMOD: lambda a,b,dtype: f"({a}%{b})", Ops.CDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a,b,dtype: f"({a}<{b})",
     Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})", Ops.CMPEQ: lambda a,b,dtype: f"({a}=={b})"}
@@ -211,7 +222,8 @@ class CStyleLanguage(Renderer):
     name = "test"
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP}: continue
-      if u.op == Ops.STACK and len(u.src) == 0: continue
+      # a widthless STACK is a PARAM's multi-dim shape and an empty one is its scalar shape: metadata read by value, never a value itself
+      if u.op is Ops.STACK and (len(u.src) == 0 or u.dtype in dtypes.weaks): continue
       if u.op is Ops.AFTER:
         r[u] = r[u.src[0]]
         continue
@@ -236,7 +248,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
-      if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
+      if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.is_const or u.op in {Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -522,7 +534,7 @@ class HIPRenderer(CStyleLanguage):
       lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),
     # bfloat16 constant casting
-    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(x.arg, dtypes.float))),
+    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(x.arg).cast(dtypes.float))),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:

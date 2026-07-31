@@ -3,7 +3,7 @@ from tinygrad import dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
-from test.helpers import full_rewrite
+from test.helpers import full_rewrite, const_value
 from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
@@ -15,13 +15,13 @@ def apply_rewrite(expr):
 def apply_rewrite_values(expr):
   srcs = full_rewrite(expr.sink()).src
   if len(srcs) == 1:
-    if srcs[0].op is Ops.CONST: return (srcs[0].arg,) if not isinstance(srcs[0].arg, tuple) else srcs[0].arg
-    if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
-  return tuple(s.arg for s in srcs)
+    if srcs[0].is_const: return (v,) if not isinstance(v:=const_value(srcs[0]), tuple) else v
+    if srcs[0].op is Ops.STACK: return tuple(const_value(s) for s in srcs[0].src)
+  return tuple(const_value(s) for s in srcs)
 
 def evaluate_uop(uop, variables):
-  if uop.op == Ops.CONST:
-    return uop.arg
+  if uop.is_const:
+    return const_value(uop)
   elif uop.op == Ops.PARAM and uop.arg.addrspace is AddrSpace.ALU:
     return variables[uop.expr]
   elif uop.op in GroupOp.ALU:
@@ -33,31 +33,31 @@ def evaluate_uop(uop, variables):
 class TestArithmeticSimplifications(unittest.TestCase):
   def test_full_graph_rewrite_division_by_zero(self):
     optimized_div_uop = apply_rewrite(UOp.const(10.0) / UOp.const(0.0))
-    self.assertEqual(optimized_div_uop.op, Ops.CONST)
-    self.assertTrue(math.isinf(optimized_div_uop.arg) or math.isnan(optimized_div_uop.arg))
+    self.assertTrue(optimized_div_uop.is_const)
+    self.assertTrue(math.isinf(const_value(optimized_div_uop)) or math.isnan(const_value(optimized_div_uop)))
 
   def test_full_graph_rewrite_redundant_operations(self):
     optimized_uop = apply_rewrite((UOp.const(10.0) + UOp.const(0.0)) * UOp.const(1.0))
-    self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 10.0)
+    self.assertTrue(optimized_uop.is_const)
+    self.assertEqual(const_value(optimized_uop), 10.0)
 
   def test_full_graph_rewrite_large_graph(self):
     prev_uop = UOp.const(0)
     for i in range(1, 101):
       prev_uop += UOp.const(i)
     optimized_uop = apply_rewrite(prev_uop)
-    self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, sum(range(1, 101)))
+    self.assertTrue(optimized_uop.is_const)
+    self.assertEqual(const_value(optimized_uop), sum(range(1, 101)))
 
   def test_full_graph_rewrite_division_by_one(self):
     optimized_uop = apply_rewrite(UOp.const(42.0) / UOp.const(1.0))
-    self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 42.0)
+    self.assertTrue(optimized_uop.is_const)
+    self.assertEqual(const_value(optimized_uop), 42.0)
 
   def test_full_graph_rewrite_modulo_by_one(self):
     optimized_uop = apply_rewrite(UOp.const(42) % UOp.const(1))
-    self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 0)
+    self.assertTrue(optimized_uop.is_const)
+    self.assertEqual(const_value(optimized_uop), 0)
 
 
 class TestFoldingAndReduction(unittest.TestCase):
@@ -68,7 +68,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     const3 = UOp.const(20)
     optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(Ops.ADD))
     expected_sum = 5 + 10 + 20
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(const_value(optimized_sink), expected_sum)
 
   @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_reduction_with_unused_range(self):
@@ -77,14 +77,14 @@ class TestFoldingAndReduction(unittest.TestCase):
     rng = UOp.range(10, idx=0)
     optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(const_value(optimized_sink), expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_range_reduction(self):
     simple_range = UOp.range(5, idx=0)
     optimized_sink = apply_rewrite(simple_range.reduce(Ops.ADD, simple_range))
     expected_sum = sum(range(5))
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(const_value(optimized_sink), expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_simple_reduction_folding(self):
@@ -92,7 +92,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     add_uop = simple_range + UOp.const(1)
     optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(const_value(optimized_sink), expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_nested_loop_collapse(self):
@@ -100,8 +100,8 @@ class TestFoldingAndReduction(unittest.TestCase):
     inner_range = UOp.range(4, 1)
     expr = (outer_range * 10) + inner_range
     optimized_reduce_uop = apply_rewrite(expr.reduce(Ops.ADD, outer_range, inner_range))
-    self.assertEqual(optimized_reduce_uop.op, Ops.CONST)
-    self.assertEqual(optimized_reduce_uop.arg, sum((i * 10) + j for i in range(8) for j in range(4)))
+    self.assertTrue(optimized_reduce_uop.is_const)
+    self.assertEqual(const_value(optimized_reduce_uop), sum((i * 10) + j for i in range(8) for j in range(4)))
 
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
@@ -109,22 +109,22 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     # index dtype because div-mod rules only work on index
     x_var_uop = UOp.variable('x', 0, 100).cast(dtypes.weakint)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
-    self.assertEqual(optimized_mod_uop.op, Ops.CONST)
-    self.assertEqual(optimized_mod_uop.arg, 2)
+    self.assertTrue(optimized_mod_uop.is_const)
+    self.assertEqual(const_value(optimized_mod_uop), 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     # index dtype because div-mod rules only work on index
     n_var_uop = UOp.variable('n', 1, 1000).cast(dtypes.weakint)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
-    self.assertEqual(optimized_div_uop.src[1].arg, 2)
+    self.assertEqual(const_value(optimized_div_uop.src[1]), 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
     # index dtype because div-mod rules only work on index
     k_var_uop = UOp.variable('k', 0, 50).cast(dtypes.weakint)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
-    self.assertEqual(optimized_div_uop.op, Ops.CONST)
-    self.assertEqual(optimized_div_uop.arg, 1)
+    self.assertTrue(optimized_div_uop.is_const)
+    self.assertEqual(const_value(optimized_div_uop), 1)
 
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, src=(
@@ -161,9 +161,9 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
     optimized_sink = full_rewrite(UOp.const(-1.0).log2().sink(UOp.const(0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
-    self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
-    self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
-                    f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.arg}")
+    self.assertTrue(math.isnan(const_value(optimized_log2_neg)), f"Expected NaN for log2(-1.0), got {const_value(optimized_log2_neg)}")
+    self.assertTrue(math.isinf(const_value(optimized_recip_zero)) and const_value(optimized_recip_zero) > 0,
+                    f"Expected +inf for reciprocal(0.0), got {const_value(optimized_recip_zero)}")
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
@@ -183,7 +183,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
     base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
+    self.assertEqual(const_value(apply_rewrite(base_vector.index(2))), 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
@@ -193,7 +193,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
     const_stack = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
+    self.assertEqual(const_value(apply_rewrite(const_stack.index(2))), 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements

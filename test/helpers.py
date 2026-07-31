@@ -17,6 +17,11 @@ from tinygrad.codegen.late.linearizer import linearize
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
 from tinygrad.runtime.ops_python import PythonRenderer
 
+def const_value(u:UOp):
+  # a typed constant is the pair CAST(dt, CONST(v)): the value is on the CONST, the width on the CAST
+  assert u.is_const, f"expected a constant, got {u.op}"
+  return u.src[0].arg if u.op is Ops.CAST else u.arg
+
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
   if ren is None: ren = Renderer(Target())
   if sink.arg is None: sink = sink.replace(arg=KernelInfo())

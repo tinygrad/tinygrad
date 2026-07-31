@@ -399,12 +399,14 @@ class TestDTypeALU(unittest.TestCase):
     if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
-  @unittest.expectedFailure
-  def test_unsafe_cast_float_to_int_failure(self):
-    val = float(dtypes.int32.max - 1)
+  def test_cast_float_to_int_rounds_like_buffer(self):
+    # a cast of a const does not fold, so the const path rounds through float32 exactly like the buffer-backed one.
+    # the value stays inside int32 on purpose: an overflowing float->int cast is device UB, and there the two paths may differ
+    val = float(2**24 + 1)  # not representable in float32, rounds to 2**24
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
     np.testing.assert_equal(t1.item(), t2.item())
+    np.testing.assert_equal(t2.item(), 2**24)
 
 if __name__ == '__main__':
   unittest.main()

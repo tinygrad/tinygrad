@@ -154,7 +154,7 @@ extra_matcher = PatternMatcher([
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
    lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
   # rewrite -x -> 0 - x
-  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
+  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(UOp.const(0).cast(x.dtype),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
   (UPat(Ops.CMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.CDIV, y)),
 ])
@@ -166,7 +166,7 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = scratch_buffer(addr.src[0].dtype.scalar(), x.max_numel(), next(ctx))
-  local_idx = local.index(UOp.const(0, dtypes.int32), dtype=dtypes.uint64)
+  local_idx = local.index(UOp.const(0).cast(dtypes.int32), dtype=dtypes.uint64)
   # the selected address is a 64bit value, the AFTER orders the load after the scratch store and carries the element dtype for the encoder
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local_idx)
   ptr = UOp(Ops.AFTER, addr.dtype, (sel, (local_idx if x.max_numel() == 1 else local).store(alt)))
@@ -174,7 +174,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype.scalar(), val.max_numel(), -1)
-  sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.const(0, dtypes.int32), dtype=dtypes.uint64))
+  sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.const(0).cast(dtypes.int32), dtype=dtypes.uint64))
   return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
@@ -195,7 +195,7 @@ pre_isel_matcher = PatternMatcher([
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   # NOTE: the 0 is int so the bool gate zero-extends and compares as int (a byte compare renders different kernels)
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(UOp.const(0, dtypes.int)).where(a,b) if m.op not in GroupOp.Comparison else None),
+   lambda m,a,b: m.ne(UOp.const(0).cast(dtypes.int)).where(a,b) if m.op not in GroupOp.Comparison else None),
 ])
 
 # ***** X86 registers *****
@@ -224,7 +224,8 @@ def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX 
 def lane(x:UOp, i:int) -> int: return s.src[1].arg if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, arg=X86Ops.DEFINE, tag=None if reg is None else (reg,))
-def imm(dt:DType, v:int) -> UOp: return UOp.const(truncate[dt](v), dt).rtag()
+# an immediate states the width of its instruction encoding
+def imm(dt:DType, v:int) -> UOp: return UOp.const(truncate[dt](v)).rtag().cast(dt)
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
   if c.dtype is dtypes.int64: return imm(dtypes.int32, c.arg) if not c.overflows(dtypes.int32) else None
@@ -370,7 +371,8 @@ isel_matcher = PatternMatcher([
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.floats), lambda x:
-   UOp.const(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, x.arg))[0], dt).bitcast(x.dtype) if not x.tag else None),
+   UOp.const(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, x.arg))[0]).cast(dt).bitcast(x.dtype)
+   if not x.tag else None),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.int8s+dtypes.int16s+dtypes.int32s+(dtypes.int64,)), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 else None),
@@ -380,7 +382,7 @@ isel_matcher = PatternMatcher([
    a.ins(X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   UOp(Ops.AND, src=(x.replace(dtype=y.dtype).bitcast(dt:=to_int(y.dtype)), UOp.const(1, dt))).f(Ops.NOOP, dtype=dtypes.bool)),
+   UOp(Ops.AND, src=(x.replace(dtype=y.dtype).bitcast(dt:=to_int(y.dtype)), UOp.const(1).cast(dt))).f(Ops.NOOP, dtype=dtypes.bool)),
   # conditional moves that use flags
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.CMOVL, src=(b, a, cmp(m)))),
@@ -591,7 +593,7 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.stack_size + x.tag), [nx])),
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=UOp.const(ctx.stack_size + x.tag).cast(x.dtype), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound

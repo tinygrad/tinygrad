@@ -3,7 +3,7 @@ import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import AxisType, pm_commit_weak, pm_cast_weak
+from tinygrad.uop.ops import AxisType, pm_commit_weak, pm_cast_weak, pm_pair_weak
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -84,7 +84,7 @@ def expand_wmma(ctx:dict[int, int], u:UOp):
 expander2 = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
-   lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
+   lambda ctx, r: UOp.stack(*[UOp.const(i).cast(r.dtype) for i in range(r.vmax+1)]) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
@@ -347,7 +347,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -361,8 +361,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
+  # lower weak before the dtype decomps: their input needs widths
+  sink = graph_rewrite(sink, symbolic_simple+pm_commit_weak+pm_cast_weak, name="commit weak for decomps")
+
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
@@ -371,8 +374,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_commit_weak+pm_cast_weak+pm_decomp+extra_matcher+pm_split_ends
+  # THE BOUNDARY: the one semantic->machine pass; every weak value commits, a bare CONST as the pair CAST(dt, CONST(v))
+  sink = graph_rewrite(sink, symbolic_simple+pm_pair_weak+pm_cast_weak, name="commit weak")
+
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
+
+  # cleanup the weak minted inside pm_final_rewrite (pm_decomp rerun + extra_matcher) — transitional closing commit
+  sink = graph_rewrite(sink, symbolic_simple+pm_pair_weak+pm_cast_weak, name="commit weak leftovers")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")

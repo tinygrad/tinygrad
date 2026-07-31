@@ -77,7 +77,7 @@ spec_shared = PatternMatcher([
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
-    matches_dtype(x, rng.dtype) and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+    (matches_dtype(x, rng.dtype) or x.dtype is dtypes.weakint) and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.arg is Invalid for y in x.src[1:]) or None),
   # END closes RANGEs
@@ -157,8 +157,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.FUNCTION, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
-  # SPECIAL is index before index lowering. custom_kernel currently has this
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
+  # SPECIAL is index before index lowering. custom_kernel currently has this. its size src is widthless: it stays a bare weak CONST
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"),
+   lambda s,x: (matches_dtype(x, s.dtype) or x.dtype is dtypes.weakint) and isinstance(s.arg, str)),
 
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
@@ -199,10 +200,32 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
 ])+spec_shared
 
+# a widthless value is read by value, never by width: a bare weak CONST, or the STACK of them a multi-dim shape is (an image's (h,w,4))
+def is_widthless(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
+
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # index and weak dtypes are not allowed in programs
-  (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  # a widthless value is a legal weak leaf; every other weak program node is forbidden
+  (UPat(GroupOp.All, dtypes.weaks, name="x"), lambda x: is_widthless(x)),
+
+  # widthless CONST slots: REG/ALU lane selectors and buffer sizes read the value, never a width
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(Ops.CONST, dtypes.weakint)), allow_any_len=True, name="x"),
+   lambda x,buf: x.dtype not in dtypes.weaks and buf.addrspace in (AddrSpace.REG, AddrSpace.ALU)
+   and all(s.dtype not in dtypes.weaks for s in x.src[2:])),
+  # a PARAM's/BUFFER's/RANGE's/SPECIAL's size srcs are widthless: a widthless weak value is legal there, any other weak src is not
+  (UPat((Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL), name="x"),
+   lambda x: False if any(s.dtype in dtypes.weaks and not is_widthless(s) for s in x.src) else None),
+
+  # a typed constant is the pair CAST(dt, CONST(weak v)): legal wherever data is
+  (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtypes.weaks),)), lambda x: True if x.dtype not in dtypes.weaks else None),
+
+  # a SHRINK's size src is widthless (the renderer reads the value): a bare weak CONST is legal there, weak is banned everywhere else
+  (UPat(Ops.SHRINK, name="x"), lambda x: False if x.src[1].dtype in dtypes.weaks
+   or any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in x.src) else None),
+
+  # all remaining operand slots are data: a bare weak CONST is not a data value
+  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER, Ops.SHRINK, Ops.RANGE, Ops.SPECIAL}, name="x"),
+   lambda x: False if any(s.dtype in dtypes.weaks for s in x.src) else None),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
@@ -220,8 +243,9 @@ spec_program = PatternMatcher([
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  # SPECIAL is int32 after index lowering
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
+  # SPECIAL is int32 after index lowering; its size src is widthless (a bare weak CONST reads by value)
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.int32, dtypes.weakint)),), name="s"),
+   lambda s,x: (matches_dtype(x, s.dtype) or (x.op is Ops.CONST and x.dtype is dtypes.weakint)) and isinstance(s.arg, str)),
 ])+spec_shared
 
 spec_hcq = PatternMatcher([

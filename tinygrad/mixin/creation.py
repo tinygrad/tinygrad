@@ -1,17 +1,29 @@
 from typing import TYPE_CHECKING, Callable, Self
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype, weak_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import sint, UOp
+  from tinygrad.uop.ops import sint, UOp, ConstLike
+
+# a user entry point states its dtype as the cast (the pair): the value carries the dtype's KIND, the CAST carries its width
+def const_uop(b:'ConstLike', dtype:DType, shape:'tuple[sint, ...]|None'=None) -> 'UOp':
+  from tinygrad.uop.ops import UOp, Ops
+  if isinstance(b, UOp): return b.cast(dtype)
+  ret = UOp.const(weak_dtype(dtype).const(b))
+  return (ret._mop(Ops.EXPAND, arg=shape) if shape and ret._shape != shape else ret).cast(dtype)
 
 class CreationMixin(DTypeMixin, MovementMixin):
-  @staticmethod
-  def const(b, dtype=None): raise NotImplementedError
+  # the public entry points state their own signature (Tensor.const(b, dtype) mints the pair, UOp.const(b) the bare CONST),
+  # so mixin code that needs a typed constant of self's class calls _const
+  @classmethod
+  def _const(cls, b:'ConstLike', dtype:DType) -> Self: return cls._wrap_uop(const_uop(b, dtype))
+  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(const_uop(b, self.dtype, self._uop._shape))
 
-  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
+  def _simplify_weak(self) -> Self:
+    # a widthless intermediate resolves to its bare CONST here, so its consumer promotes a CONST (rule 2), not a cast over one
+    return self._wrap_uop(self._uop.simplify()) if self.dtype in dtypes.weaks else self
 
   def _multi_like(self, fxn:'Callable[[tuple[sint, ...], str|None], Self]') -> Self:
     from tinygrad.uop.ops import UOp
@@ -78,7 +90,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
-    val = cls.const(fill_value, dt)
+    val = cls._const(fill_value, dt)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     if not buffer: return val
     ret = val.empty_like(dt if dtype is not None else None, device)

@@ -159,7 +159,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
-    return (type(self).uprod(*per_dim) if per_dim else type(self).const(True)).where(vb, self)
+    return (type(self).uprod(*per_dim) if per_dim else type(self)._const(True, dtypes.bool)).where(vb, self)
 
   @classmethod
   def arange(cls, start, stop=None, step=1, dtype:DTypeLike|None=None) -> Self:
@@ -541,9 +541,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     reduced = squares.sum(axis=axis, keepdim=keepdim)
-    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
     # TODO: remove relu?
-    return reduced.div(denominator.relu())
+    den = (reduced.ufix(n) - correction).relu()  # type: ignore[arg-type]
+    return reduced.div(den._simplify_weak())
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
@@ -1411,10 +1411,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = self
     for dim in range(dims):
       ret = ret.transpose(0, dim)
-      ret = sum(type(self).const(tuple(float(m[k]) for m in mat), ret.dtype).reshape((len(mat),)+(1,)*(ret.ndim-1)) * ret[k]
-                for k in range(len(mat[0])))
-      assert not isinstance(ret, int), "sum over empty winograd matrix"
-      ret = ret.transpose(0, dim)
+      terms = [type(self)._const(tuple(float(m[k]) for m in mat), ret.dtype).reshape((len(mat),)+(1,)*(ret.ndim-1)) * ret[k]
+               for k in range(len(mat[0]))]
+      ret = sum(terms[1:], start=terms[0]).transpose(0, dim)
     return ret
 
   # TODO: winograd can be a rewrite rule like split_reduceop
@@ -1898,7 +1897,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # https://keccak.team/keccak_specs_summary.html
 
     def ctensor(l: Sequence[PyConst], dtype: DType = dtypes.uint64):
-      return type(self).const(tuple(l), dtype)
+      return type(self)._const(tuple(l), dtype)
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
@@ -1918,7 +1917,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     lbe = (data.shape[1] - 1) * 200 + rate - data_pad
     if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (200 - rate, 0)]
     else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = type(self).cat(*(type(self).const(v, dtypes.uint8).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
+    pad_mask = type(self).cat(*(type(self)._const(v, dtypes.uint8).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
     data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 

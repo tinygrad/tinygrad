@@ -2,9 +2,9 @@ from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg, bare_like
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, zero_like
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -181,9 +181,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
+   lambda reduce,x: bare_like(reduce, identity_element(reduce.arg[0], reduce.dtype))
+     if 0 in x.shape and 0 not in reduce.shape else None),
   # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: zero_like(x).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
 ])
 
 # *****************
@@ -304,12 +305,12 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
    remove_noop_bufferize),
   # no buffers for const (ranges don't matter for const - it's the same value everywhere)
-  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
+  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: bare_like(b, c.arg)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
-   lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
+   lambda idx,after: bare_like(idx, Invalid) if after_all_invalid(after) else None),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
   # mstack on CONST is CONST
@@ -445,7 +446,7 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape), dtypes.int),),
+  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape

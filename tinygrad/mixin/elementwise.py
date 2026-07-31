@@ -22,9 +22,11 @@ class ElementwiseMixin(CreationMixin):
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.arg, weak_dtype(out_dtype)))
+      # a weak CONST stays bare and follows the join's KIND: the value converts with it (a weakint under a float lub becomes float)
+      if t.dtype in dtypes.weaks and (c:=t._uop.base).op is Ops.CONST:
+        ret = t._uop.const(float(c.arg) if weak_dtype(out_dtype) is dtypes.weakfloat else c.arg)
+        return t._wrap_uop(ret._mop(Ops.EXPAND, arg=t.shape) if t.shape and ret._shape != t.shape else ret)
       return t.cast(out_dtype)
     return promote(x), promote(y)
 
@@ -245,7 +247,7 @@ class ElementwiseMixin(CreationMixin):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
       a = a.cast(dtypes.default_float)
-    d = a * b.reciprocal()
+    d = a * b.reciprocal()._simplify_weak()
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
     if rounding_mode == "floor": return d.floor()
@@ -395,8 +397,9 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
-    # ~ is width-dependent: min(a,b) == ~max(~a,~b) only holds at a common width, so a weak operand commits at its sibling's
-    t, x = t.cast(dt:=least_upper_dtype(t.dtype, x.dtype)), x.cast(dt)
+    # ~ is width-dependent: min(a,b) == ~max(~a,~b) only holds at a common width, so an int operand commits at its sibling's.
+    # negation is exact at every width, so a float operand stays as it is and its weak const stays bare
+    if not t.is_floating_point(): t, x = t.cast(dt:=least_upper_dtype(t.dtype, x.dtype)), x.cast(dt)
     return t._inverse().maximum(x._inverse())._inverse()
 
   def copysign(self, other: Self | ConstType) -> Self:

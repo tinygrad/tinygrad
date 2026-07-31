@@ -6,8 +6,10 @@ from tinygrad.helpers import strip_parens
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
 def sign_extend(val:UOp, sext_am:int):
-  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff, dtypes.uint32) << sext_am, UOp.const(0, dtypes.uint32)) \
-        | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
+  # the sign mask is a number this rule knows: minted as a shift it stays an unfolded const expression below the
+  # boundary, and WGSL range-checks const expressions at parse
+  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff << sext_am & 0xffffffff).cast(dtypes.uint32),
+                    UOp.const(0).cast(dtypes.uint32)) | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
 def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
@@ -17,7 +19,7 @@ def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
   if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
   idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
-  buf = UOp.load(idx, *((UOp.const(0, dtypes.uint32), gate) if gate is not None else ()), dtype=dtypes.uint32)
+  buf = UOp.load(idx, *((UOp.const(0).cast(dtypes.uint32), gate) if gate is not None else ()), dtype=dtypes.uint32)
   return UOp.store(idx, (buf & wmask) | new_v, *((gate,) if gate is not None else ()))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
@@ -67,6 +69,8 @@ class WGSLRenderer(CStyleLanguage):
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
 
   string_rewrite = PatternMatcher([
+    # a bare weak CONST is a widthless value read by value: WGSL has no type to cast it to, so it must beat the inf/nan rules below
+    (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda x: f"{x.arg}"),
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
     (UPat.cvar("x", dtype=dtypes.bool), lambda x: "true" if x.arg else "false"),
     (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"),

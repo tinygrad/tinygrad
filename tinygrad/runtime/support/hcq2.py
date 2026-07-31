@@ -42,7 +42,7 @@ def unwrap_mstack(u):
   return unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> UOp:
-  offsets = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in patches))
+  offsets = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize).cast(dtypes.int) for off,_ in patches))
   values = UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in patches))
   return buf.index(offsets).store(values)
 
@@ -127,7 +127,7 @@ def _build_wait_cmds(dep_lanes:list[tuple[tuple, int, int]], devices:tuple[str, 
   for (ddevs, dqueue, dtag), lanes in deps.items():
     sig = UOp.mstack(*[make_signal(d if dl is None else ddevs[dl], queue=dqueue, sentinel=dl is None) for dl, d in zip(lanes, devices)])
     val = UOp.mstack(*[make_signal_value(d if dl is None else ddevs[dl], queue=dqueue) for dl, d in zip(lanes, devices)])
-    waits.append(UOp(Ops.INS, arg="wait", src=(sig, val.index(UOp.const(0, dtypes.int)) + dtag)))
+    waits.append(UOp(Ops.INS, arg="wait", src=(sig, val.index(UOp.const(0).cast(dtypes.int)) + dtag)))
   return waits, {dtag for _, _, dtag in deps}
 
 def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[tuple[tuple[str, ...], str]],
@@ -138,7 +138,7 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     for b in itertools.chain.from_iterable(_get_call_bufs_by_lane(call, devices)):
       for bd in to_tuple(b.device): dev_bufs[bd][id(b)] = b
 
-  zero, n, submits, bumps, waited = UOp.const(0, dtypes.int), len(batch_info), [], [], set()
+  zero, n, submits, bumps, waited = UOp.const(0).cast(dtypes.int), len(batch_info), [], [], set()
   for _, devgroup in itertools.groupby(sorted(dev_bufs), key=lambda d: d.split(":")[0]):
     devs = tuple(devgroup)
 
@@ -284,7 +284,8 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[dict[UOp, UOp
   slots = {g:i for i,g in enumerate(order)}
   table = UOp.placeholder((len(order),), dtypes.uint64, next(UOp.unique_num), device=call.arg.aux.device).rtag(name)
 
-  reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
+  reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ())
+              .index(UOp.const(slots[bare[g]]).cast(dtypes.int)).load() for g in gaddrs}
   return reads, (table.after(make_patches(table, [(i * table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
 
 def make_blob_bufs(call:UOp, blobs:list[UOp]) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
@@ -334,7 +335,7 @@ pm_replace_params = PatternMatcher([
 def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   base = bv.src[0].after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ())
   itemsize = bv.src[0].dtype.itemsize if bv.src[0].without_after.op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
-  return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(bv.src[1].arg * itemsize, dtypes.uint64)
+  return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(bv.src[1].arg * itemsize).cast(dtypes.uint64)
 
 pm_early_simplify = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat.any(sl:=UPat(Ops.SLICE, name="bv"), sl.after(allow_any_len=True)),), name="g"), resolve_getaddr_slice),
@@ -416,11 +417,14 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
     b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
+# a constant reaches the linker in either honest form: the bare CONST, or the pair CAST(dt, CONST(weak v)) with the value on the CONST
+def const_val(u:UOp): return u.src[0].arg if u.op is Ops.CAST else u.arg
+
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.arg))
-      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.arg*buf.dtype.itemsize):bo+len(data)] = data
+      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](const_val(v)))
+      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=const_val(off)*buf.dtype.itemsize):bo+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
@@ -429,7 +433,7 @@ def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
   devs, b = g.arg, buf.buffer
   bufs = tuple(cast(Buffer, x.buffer) for x in buf.src) if buf.op is Ops.MSTACK else tuple(b.bufs if isinstance(b, MultiBuffer) else (b,)*len(devs))
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
-  addrs = tuple(UOp.const(x.get_buf(d).va_addr, dtypes.uint64) for x, d in zip(bufs, devs))
+  addrs = tuple(UOp.const(x.get_buf(d).va_addr).cast(dtypes.uint64) for x, d in zip(bufs, devs))
   return addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)
 
 pm_resolve_patches = PatternMatcher([

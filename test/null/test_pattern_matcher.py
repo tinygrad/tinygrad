@@ -5,6 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat
 
 class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
+    # a CONST's dtype IS its python kind
     matcher = PatternMatcher([(UPat(Ops.CONST, name="x", dtype=dtypes.weakfloat), lambda x: x.rtag())])
     c1 = UOp.const(1.0)
     c2 = UOp.const(1)
