@@ -26,7 +26,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
-    for axis in range(9):
+    for axis in range(3):
       tk = k.copy()
       # check TC first and apply hand-coded opts if successful
       try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
