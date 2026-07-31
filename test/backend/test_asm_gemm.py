@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
+from extra.gemm.gemm_mxfp4 import mxfp4_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -156,7 +157,6 @@ class TestMXFP4(unittest.TestCase):
       self.skipTest("requires real amd machine")
 
   def test_empty(self):
-    from extra.gemm.gemm_mxfp4 import mxfp4_gemm
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
     a = Tensor.empty(M, K // 2, dtype=dtypes.uint8)
     b = Tensor.empty(N, K // 2, dtype=dtypes.uint8)
