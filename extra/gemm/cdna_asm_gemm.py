@@ -159,26 +159,8 @@ def quantize_mxfp4(x:Tensor, packed_shape:tuple[int, ...]|None=None, packed_axis
   rows = math.prod(batch)
   assert x.ndim >= 2 and K % 256 == 0 and rows % 32 == 0, \
     f"mxfp4 quantization needs rows%32 and K%256, got {x.shape}"
-  if x.uop.op is Ops.CONTIGUOUS or x.uop.has_buffer_identity(after_ok=True):
-    from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_fused
-    packed, e8 = quantize_mxfp4_fused(x, packed_shape, packed_axis)
-  else:
-    xb = x.float().reshape(*batch, K//32, 32)
-    amax = xb.abs().max(axis=-1)
-
-    # even scale rounding: round the fp32 significand before choosing 2^(floor(log2)-2).
-    amax_rounded = ((amax.bitcast(dtypes.uint32) + 0x200000) & 0xFF800000).bitcast(dtypes.float32)
-    scale_exp = (amax_rounded.maximum(2**-126).log2().floor() - 2).clamp(-127, 127)
-    e8 = (scale_exp + 127).cast(dtypes.uint8)
-    scaled = xb * (-scale_exp).exp2().reshape(*batch, K//32, 1)
-
-    mag = scaled.abs()
-    code = sum(x.cast(dtypes.uint8) for x in
-               (mag > .25, mag >= .75, mag > 1.25, mag >= 1.75, mag > 2.5, mag >= 3.5, mag > 5.0))
-    code = code | ((scaled < 0).cast(dtypes.uint8) << 3)
-    code = code.reshape(*batch, K)
-    packed = code[..., 0::2] | (code[..., 1::2] << 4)
-    if packed_shape is not None: packed = packed.reshape(packed_shape).contiguous()
+  from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_fused
+  packed, e8 = quantize_mxfp4_fused(x, packed_shape, packed_axis)
   if isinstance(x.device, tuple) and x.uop.axis == x.ndim-2 and x.shape[x.uop.axis] == len(x.device):
     axis = x.uop.axis
     order = (axis, *range(axis), *range(axis+1, e8.ndim))
