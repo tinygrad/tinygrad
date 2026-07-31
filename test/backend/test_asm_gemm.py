@@ -165,6 +165,24 @@ class TestMXFP4(unittest.TestCase):
     np.testing.assert_array_equal(codes[0, :11], [0, 1, 1, 2, 3, 4, 5, 6, 7, 7, 15])
     np.testing.assert_array_equal(scale.numpy(), np.full((32, 8), 127, dtype=np.uint8))
 
+  def test_silu_quantize(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4_fused import silu_mul_quantize_mxfp4
+    rng = np.random.default_rng(4)
+    x = Tensor(rng.standard_normal((32, 512), dtype=np.float32), dtype=dtypes.bfloat16)
+    x_ref = Tensor(x.numpy(), dtype=dtypes.bfloat16)
+    Tensor.realize(x, x_ref)
+    act, packed, scale = silu_mul_quantize_mxfp4(x)
+    ref = x_ref[..., :256].silu() * x_ref[..., 256:]
+    ref_packed, _, ref_scale = quantize_mxfp4(ref)
+    act.sum().backward()
+    ref.sum().backward()
+    Tensor.realize(act, packed, scale, ref, ref_packed, ref_scale, x.grad, x_ref.grad)
+    np.testing.assert_array_equal(act.numpy(), ref.numpy())
+    np.testing.assert_array_equal(packed.numpy(), ref_packed.numpy())
+    np.testing.assert_array_equal(scale.numpy(), ref_scale.numpy())
+    np.testing.assert_allclose(x.grad.numpy(), x_ref.grad.numpy(), rtol=0, atol=2e-2)
+
   def test_correctness(self):
     import numpy as np
     M = N = K = 256
