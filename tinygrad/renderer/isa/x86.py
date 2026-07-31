@@ -550,7 +550,7 @@ isel_matcher = PatternMatcher([
 # this handles flag clobbers. Unfortunately x86 doesn't have a good way to store/restore the flag register (then regalloc would handle it)
 # so we rematerialize. This is different from rematerialization you might want to do in regalloc because it is not optional,
 # regalloc shouldn't rematerialize if a src of the instruction is dead, but here you need to as there's no fallback load from stack
-def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
+def flag_rematerialize(ctx:PreRegallocContext, x:UOp):
   flag_def = x if x.arg in X86GroupOp.WriteFlags or x.op in (Ops.RANGE, Ops.END) else x.src[-1] if x.arg in X86GroupOp.ReadFlags else None
   if flag_def is None: return None
   if ctx.lock is not None and ctx.lock is not flag_def: ctx.clobbered.add(ctx.lock)
