@@ -42,8 +42,9 @@ def unwrap_mstack(u):
   return unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> UOp:
-  return buf.index(UOp.stack(*(UOp.const(dtypes.int, off // buf.dtype.itemsize) for off,_ in patches))) \
-            .store(UOp.stack(*(val.simplify().cast(buf.dtype) for _,val in patches)))
+  offsets = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(dtypes.int, off // buf.dtype.itemsize) for off,_ in patches))
+  values = UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in patches))
+  return buf.index(offsets).store(values)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
