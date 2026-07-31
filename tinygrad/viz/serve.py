@@ -37,7 +37,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
       self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
     # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
+    except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo

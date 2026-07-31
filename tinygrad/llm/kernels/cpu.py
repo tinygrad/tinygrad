@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, platform, math
+import functools, math, platform
 from typing import TYPE_CHECKING
 from tinygrad import Tensor, nn, UOp, getenv, dtypes
 from tinygrad.dtype import DType, AddrSpace

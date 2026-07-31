@@ -3,13 +3,14 @@ import numpy as np
 
 from tinygrad import Device, Tensor, TinyJit, UOp, dtypes, nn
 from tinygrad.llm.gguf import _GGML_QUANT, ggml_data_to_tensor
-from tinygrad.llm.cpu import (attention_decode, attention_prefill, causal_conv_silu, expert_pair, expert_silu, expert_weighted_sum, f16_linear,
+from tinygrad.llm.kernels.cpu import (attention_decode, attention_prefill, causal_conv_silu, expert_pair, expert_silu,
+                              expert_weighted_sum, f16_linear,
                               f16_matvec, gated_delta, gated_delta_prefill, gated_delta_q8, gdn_qkv, iq3_repack, moe_ffn, q6_argmax, q8_batched_pair,
                               q8_gdn_norm_projections, q8_gdn_projections, q8_linear_pair, q8_repack, q8_silu_linear,
                               recurrent_decode_bucket, rmsnorm, rmsnorm_f16_linear, shared_gate,
                               silu, silu_mul, uop_attention_prefill, uop_f16_matvec, uop_linear, uop_moe_ffn, uop_q8_linear_pair,
                               uop_q8_prequant_linear, uop_expert_silu_weighted, weighted_sum)
-from tinygrad.llm.cpu import _dot_bytes_ptr, _dot_nibbles_ptr
+from tinygrad.llm.kernels.cpu import _dot_bytes_ptr, _dot_nibbles_ptr
 from tinygrad.llm.model import biased_sigmoid_topk, pairwise_topk, ExpertWeights, FFNBlock, Linear, Transformer, TransformerConfig
 from tinygrad.uop.ops import KernelInfo
 

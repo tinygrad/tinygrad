@@ -2,229 +2,9 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
-from tinygrad.dtype import AddrSpace
-from tinygrad.llm import cpu as llm_cpu
-from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load, _GGML_QUANT
-from tinygrad.uop.ops import resolve, Ops, KernelInfo, AxisType
-
-@functools.cache
-def _q8_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
-  x = x.flatten()
-  token, group = UOp.range(quant.shape[0], 0), UOp.range(in_features // 32, 1)
-  lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
-  raw_value = x[token * in_features + group * 32 + lane].load().float()
-  amax = raw_value.abs()
-  for offset in (16, 8, 4, 2, 1):
-    amax = amax.maximum(UOp(Ops.CUSTOM, dtypes.float32, (((lane ^ offset) * 4).int(), amax),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))"))
-  d = (amax / 127).maximum(1e-8)
-  word = UOp.const(dtypes.uint32, 0)
-  for byte_idx in range(4):
-    source_lane = lane * 4 + byte_idx
-    value = (UOp(Ops.CUSTOM, dtypes.float32, ((source_lane * 4).int(), raw_value),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))") / d).round().maximum(-127).minimum(127)
-    byte = value.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32)
-    word = word | (byte << (8 * byte_idx))
-  stores = [scale[token.valid(lane.eq(0)), group].store(d), quant[token, group, lane.valid(lane < 8)].store(word)]
-  return UOp.group(*stores).end(token, group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
-
-def _q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
-  quant = Tensor.empty(tokens, in_features // 32, 8, dtype=dtypes.uint32, device=x.device)
-  scale = Tensor.empty(tokens, in_features // 32, dtype=dtypes.float32, device=x.device)
-  return tuple(Tensor.custom_kernel(quant, scale, x,
-    fxn=lambda quant,scale,x:_q8_kernel(quant, scale, x, in_features))[:2])  # type: ignore[return-value]
-
-@functools.cache
-def _q8_silu_mul_kernel(quant:UOp, scale:UOp, gate:UOp, up:UOp, in_features:int) -> UOp:
-  gate, up = gate.flatten(), up.flatten()
-  token, group = UOp.range(quant.shape[0], 0), UOp.range(in_features // 32, 1)
-  lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
-  def value(idx:UOp) -> UOp:
-    x = gate[idx].float()
-    return x * x.sigmoid() * up[idx].float()
-  raw_value = value(token * in_features + group * 32 + lane)
-  amax = raw_value.abs()
-  for offset in (16, 8, 4, 2, 1):
-    amax = amax.maximum(UOp(Ops.CUSTOM, dtypes.float32, (((lane ^ offset) * 4).int(), amax),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))"))
-  d = (amax / 127).maximum(1e-8)
-  word = UOp.const(dtypes.uint32, 0)
-  for byte_idx in range(4):
-    source_lane = lane * 4 + byte_idx
-    packed_value = UOp(Ops.CUSTOM, dtypes.float32, ((source_lane * 4).int(), raw_value),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
-    byte = (packed_value / d).round().maximum(-127).minimum(127).cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32)
-    word = word | (byte << (8 * byte_idx))
-  stores = [scale[token.valid(lane.eq(0)), group].store(d), quant[token, group, lane.valid(lane < 8)].store(word)]
-  return UOp.group(*stores).end(token, group, lane).sink(arg=KernelInfo(name="q8_silu_mul", opts_to_apply=()))
-
-def _q8_silu_mul(gate:Tensor, up:Tensor, in_features:int) -> tuple[Tensor, Tensor]:
-  tokens = int(gate.numel()) // in_features
-  quant = Tensor.empty(tokens, in_features // 32, 8, dtype=dtypes.uint32, device=gate.device)
-  scale = Tensor.empty(tokens, in_features // 32, dtype=dtypes.float32, device=gate.device)
-  return tuple(Tensor.custom_kernel(quant, scale, gate, up, fxn=lambda quant,scale,gate,up:
-    _q8_silu_mul_kernel(quant, scale, gate, up, in_features))[:2])  # type: ignore[return-value]
-
-def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c),
-             arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
-
-def _amd_wave_sum(value:UOp, lane:UOp, lane_count:int, wave:UOp|None=None) -> UOp:
-  assert lane_count in (8, 16, 32)
-  for offset in (16, 8, 4, 2, 1)[{32:0, 16:1, 8:2}[lane_count]:]:
-    source_lane = (lane ^ offset) + (wave * lane_count if wave is not None else 0)
-    value = value + UOp(Ops.CUSTOM, dtypes.float32, ((source_lane * 4).int(), value),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
-  return value
-
-@functools.cache
-def _q8_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
-  token_tile = 8 if out.shape[0] % 8 == 0 else 1
-  wave_count = 4 if token_tile == 1 else 1
-  token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // wave_count, 1)
-  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.weakint, 0)
-  output = output_block * wave_count + wave
-  tokens = tuple(token_block * token_tile + i for i in range(token_tile))
-  group_count, lane_count = in_features // 32, min(32, in_features // 32)
-  lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
-
-  def group_dot(group:UOp) -> list[UOp]:
-    block = output * group_count + group
-    base, odd = raw_offset + block * 8 + block // 2, (block & 1).ne(0)
-    dots = [UOp.const(dtypes.int32, 0)] * token_tile
-    for word_idx in range(8):
-      # Q8_0 blocks are 34 bytes, so their two-byte scale makes alternate blocks word-aligned. Read aligned u32s
-      # directly; the other blocks need only two adjacent words instead of four individual byte loads.
-      word = odd.where(raw[base + 1 + word_idx], (raw[base + word_idx] >> 16) | (raw[base + 1 + word_idx] << 16))
-      dots = [_amd_dp4a(word, xq[token, group, word_idx], dot) for token,dot in zip(tokens, dots)]
-    dbits = odd.where(raw[base] >> 16, raw[base] & 0xffff).cast(dtypes.uint16)
-    return [dot.float() * xd[token, group] * dbits.bitcast(dtypes.float16).float() for token,dot in zip(tokens, dots)]
-
-  values = [UOp.const(dtypes.float32, 0)] * token_tile
-  for offset in range(0, group_count, lane_count):
-    dots = group_dot((lane + offset).valid(lane + offset < group_count))
-    values = [value + dot for value,dot in zip(values, dots)]
-  totals = [_amd_wave_sum(value, lane, lane_count, wave if wave_count > 1 else None) for value in values]
-  stores = [out[token.valid(lane.eq(0)), output].store(total.cast(out.dtype)) for token,total in zip(tokens, totals)]
-  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
-    arg=KernelInfo(name="linear_q8", opts_to_apply=()))
-
-@functools.cache
-def _q8_linear_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
-  raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
-  raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_word(byte_offset:UOp) -> UOp:
-    word_index, half_aligned = byte_offset // 4, (byte_offset & 2).ne(0)
-    word = raw[word_index]
-    return half_aligned.where((word >> 16) | (raw[word_index + 1] << 16), word)
-  token_tile = 32 if out.shape[0] % 32 == 0 else 16
-  token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // 16, 1)
-  lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
-  # The codegen may factor this range into several local dimensions. Read the physical wave lane directly.
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
-  physical_col, physical_half = hw_lane % 16, hw_lane // 16
-  output = output_block * 16 + physical_col
-  input_tokens = tuple(token_block * token_tile + tile * 16 + physical_col for tile in range(token_tile // 16))
-  tokens = tuple(tuple(token_block * token_tile + tile * 16 + physical_half * 8 + i for i in range(8))
-                 for tile in range(token_tile // 16))
-  group_count = in_features // 32
-  accs = tuple(UOp.placeholder((8,), dtypes.float32, slot=tile, addrspace=AddrSpace.REG) for tile in range(token_tile // 16))
-  accs = tuple(acc.after(acc.store(acc.const_like(0))) for acc in accs)
-  group = UOp.range(group_count, 3, AxisType.REDUCE)
-  raw_accs = [UOp.const(dtypes.int32, 0).broadcast(8) for _ in accs]
-  for half in range(2):
-    # rocWMMA's gfx11 loader gives each lane eight values, then appends the eight from lane^16.
-    kbase = half * 16 + physical_half * 8
-    def fragment(words:tuple[UOp, ...]|list[UOp]) -> UOp:
-      swapped_words = tuple(UOp(Ops.CUSTOM, dtypes.uint32, (word,), arg="__builtin_amdgcn_ds_swizzle({0}, 16415)") for word in words)
-      return UOp.stack(*(((word >> (byte * 8)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8)
-                         for word in (*words, *swapped_words) for byte in range(4)))
-    block = output * group_count + group
-    bwords = [load_word(raw_offset + block * 34 + 2 + kbase + word * 4) for word in range(2)]
-    bfrag = fragment(bwords)
-    for tile,input_token in enumerate(input_tokens):
-      awords = tuple(xq[input_token, group, kbase // 4 + i].load() for i in range(2))
-      raw_accs[tile] = UOp.wmma(fragment(awords), bfrag, raw_accs[tile], (16, 16, 16), 'AMD', 32)
-  logical_values = []
-  for raw_acc in raw_accs:
-    vals = tuple(raw_acc[i] for i in range(8))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.int32, (value,), arg="__builtin_amdgcn_ds_swizzle({0}, 50688)") for value in vals)
-    low = physical_half.eq(0)
-    logical_values.append((low.where(vals[0], swapped[4]), low.where(swapped[0], vals[4]),
-                           low.where(vals[1], swapped[5]), low.where(swapped[1], vals[5]),
-                           low.where(vals[2], swapped[6]), low.where(swapped[2], vals[6]),
-                           low.where(vals[3], swapped[7]), low.where(swapped[3], vals[7])))
-  block = output * group_count + group
-  scale = (load_word(raw_offset + block * 34) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
-  update = UOp.group(*(acc.after(group)[i].store(acc.after(group)[i] + value.float() * scale * xd[token, group])
-                       for acc,tile_tokens,logical in zip(accs, tokens, logical_values)
-                       for i,(token,value) in enumerate(zip(tile_tokens, logical)))).end(group)
-  stores = [out[token, output].store(acc.after(update)[i]) for acc,tile_tokens in zip(accs, tokens) for i,token in enumerate(tile_tokens)]
-  return UOp.group(*stores).end(token_block, output_block, lane).sink(arg=KernelInfo(name="linear_q8_wmma", opts_to_apply=()))
-
-@functools.cache
-def _q8_linear_pair_kernel(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UOp,
-                           out_features0:int, out_features1:int, in_features:int, offset0:UOp, offset1:UOp) -> UOp:
-  token_tile = 4 if out0.shape[0] % 4 == 0 else 1
-  token_block, output = UOp.range(out0.shape[0] // token_tile, 0), UOp.range(max(out_features0, out_features1), 1)
-  tokens = tuple(token_block * token_tile + i for i in range(token_tile))
-  group_count, lane_count = in_features // 32, min(32, in_features // 32)
-  lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
-
-  def dot(raw:UOp, raw_offset:UOp, output_idx:UOp) -> list[UOp]:
-    values = [UOp.const(dtypes.float32, 0)] * token_tile
-    for group_offset in range(0, group_count, lane_count):
-      group = (lane + group_offset).valid(lane + group_offset < group_count)
-      block = output_idx * group_count + group
-      base, odd = raw_offset.cast(dtypes.uint64) + block * 8 + block // 2, (block & 1).ne(0)
-      accs = [UOp.const(dtypes.int32, 0)] * token_tile
-      for word_idx in range(8):
-        word = odd.where(raw[base + 1 + word_idx], (raw[base + word_idx] >> 16) | (raw[base + 1 + word_idx] << 16))
-        accs = [_amd_dp4a(word, xq[token, group, word_idx], acc) for token,acc in zip(tokens, accs)]
-      dbits = odd.where(raw[base] >> 16, raw[base] & 0xffff).cast(dtypes.uint16)
-      values = [value + acc.float() * xd[token, group] * dbits.bitcast(dtypes.float16).float()
-                for token,acc,value in zip(tokens, accs, values)]
-    return [_amd_wave_sum(value, lane, lane_count) for value in values]
-
-  output0, output1 = output.valid(output < out_features0), output.valid(output < out_features1)
-  totals0, totals1 = dot(raw0, offset0, output0), dot(raw1, offset1, output1)
-  stores = [out0[token.valid(lane.eq(0)), output0].store(total) for token,total in zip(tokens, totals0)] + \
-           [out1[token.valid(lane.eq(0)), output1].store(total) for token,total in zip(tokens, totals1)]
-  return UOp.group(*stores).end(token_block, output, lane).sink(arg=KernelInfo(name="linear_q8_pair", opts_to_apply=()))
-
-@functools.cache
-def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
-  if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
-  output_tile = 2
-  output_block, lane = UOp.range(out_features // output_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
-  outputs, group_count = tuple(output_block * output_tile + i for i in range(output_tile)), in_features // 32
-  type_size, output_size = _GGML_QUANT[14][1], in_features // 256 * _GGML_QUANT[14][1]
-
-  def group_dot(group:UOp, output:UOp) -> UOp:
-    block, subgroup = group // 8, group % 8
-    base = raw_offset + output * output_size + block * type_size
-    dots = [UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 0)]
-    for word_idx in range(8):
-      word = UOp.const(dtypes.uint32, 0)
-      for byte_idx in range(4):
-        pos = subgroup * 32 + word_idx * 4 + byte_idx
-        within = pos % 128
-        low_byte = raw[base + (pos // 128) * 64 + within % 64]
-        low = (low_byte >> ((within // 64) * 4).cast(dtypes.uint8)) & 15
-        high_byte = raw[base + 128 + (pos // 128) * 32 + within % 32]
-        high = (high_byte >> ((within // 32) * 2).cast(dtypes.uint8)) & 3
-        q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
-        word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8 * byte_idx))
-      dots[word_idx // 4] = _amd_dp4a(word, xq[0, group, word_idx], dots[word_idx // 4])
-    scales = [raw[base + 192 + subgroup * 2 + i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
-    dbits = raw[base + 208].cast(dtypes.uint16) | (raw[base + 209].cast(dtypes.uint16) << 8)
-    return (dots[0].float() * scales[0] + dots[1].float() * scales[1]) * xd[0, group] * dbits.bitcast(dtypes.float16).float()
-
-  totals = [_amd_wave_sum(sum((group_dot((lane + offset).valid(lane + offset < group_count), output)
-                                for offset in range(0, group_count, 32)), UOp.const(dtypes.float32, 0)), lane, 32) for output in outputs]
-  stores = [out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)) for output,total in zip(outputs, totals)]
-  return UOp.group(*stores).end(output_block, lane).sink(arg=KernelInfo(name="linear_q6", opts_to_apply=()))
+from tinygrad.llm.kernels import amd as llm_amd, cpu as llm_cpu, generic as llm_generic
+from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load
+from tinygrad.uop.ops import resolve, Ops
 
 class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
@@ -254,30 +34,11 @@ class Linear(nn.Linear):
   def _prepare_packed(self):
     self._raw_offset_uop = self._packed_offset().realize().uop
   def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]|None:
-    return _q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
+    return llm_amd.q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
       if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") else None
   def __call__(self, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
     if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") and (self.ggml_type == 8 or int(x.numel()) == self.in_features):
-      tokens = int(x.numel()) // self.in_features
-      xq, xd = prepared if prepared is not None else _q8_quantize(x, tokens, self.in_features)
-      out = Tensor.empty(tokens, self.out_features, dtype=dtypes.float32, device=x.device)
-      if self._raw_uop is None: self._prepare_packed()
-      assert self._raw_uop is not None and self._raw_offset_uop is not None
-      srcs = (out.uop, self._raw_uop, xq.uop, xd.uop, self._raw_offset_uop)
-      params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-      if self.ggml_type == 8:
-        if tokens % 16 == 0 and self.out_features % 16 == 0:
-          kernel = _q8_linear_wmma_kernel(params[0], params[1], params[2], params[3], self.out_features,
-                                          self.in_features, params[4][0] * 4).call(*srcs)
-        else:
-          params[1] = params[1].replace(dtype=dtypes.uint32, src=(params[1].src[0] * self._raw_uop.dtype.itemsize // 4,),
-                                        arg=replace(params[1].arg, dtype=dtypes.uint32))
-          kernel = _q8_linear_kernel(params[0], params[1], params[2], params[3], self.out_features,
-                                     self.in_features, params[4][0]).call(*srcs)
-      else:
-        kernel = _q6_linear_kernel(params[0], params[1], params[2], params[3], self.out_features, self.in_features, params[4][0] * 4).call(*srcs)
-      out = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], self.out_features)
-      return out if self.bias is None else out + self.bias
+      return llm_amd.q8_linear(self, x, prepared)
     if llm_cpu.SUPPORTED and self.ggml_type in (8, 14) and str(self.weight.device).startswith("CPU") and \
        x.dtype in (dtypes.float16, dtypes.float32):
       return llm_cpu.uop_linear(self, x)
@@ -287,131 +48,6 @@ class Linear(nn.Linear):
       if getenv("HALF", 1): weight = weight.cast('float16')
       return x.linear(weight.transpose(), self.bias)
     return super().__call__(x)
-
-def _q8_linear_pair(first:Linear, second:Linear, x:Tensor, prepared:tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
-  assert first.ggml_type == second.ggml_type == 8 and first.in_features == second.in_features
-  if (tokens := int(x.numel()) // first.in_features) % 16 == 0: return first(x, prepared), second(x, prepared)
-  if first._raw_uop is None: first._prepare_packed()
-  if second._raw_uop is None: second._prepare_packed()
-  assert first._raw_uop is not None and first._raw_offset_uop is not None
-  assert second._raw_uop is not None and second._raw_offset_uop is not None
-  tokens, xq, xd = tokens, *prepared
-  out0 = Tensor.empty(tokens, first.out_features, dtype=dtypes.float32, device=x.device)
-  out1 = Tensor.empty(tokens, second.out_features, dtype=dtypes.float32, device=x.device)
-  srcs = (out0.uop, out1.uop, first._raw_uop, second._raw_uop, xq.uop, xd.uop, first._raw_offset_uop, second._raw_offset_uop)
-  params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-  for i in (2, 3):
-    params[i] = params[i].replace(dtype=dtypes.uint32, src=(params[i].src[0] * srcs[i].dtype.itemsize // 4,),
-                                  arg=replace(params[i].arg, dtype=dtypes.uint32))
-  kernel_args = (params[0], params[1], params[2], params[3], params[4], params[5], first.out_features,
-                 second.out_features, first.in_features, params[6][0], params[7][0])
-  kernel = _q8_linear_pair_kernel(*kernel_args).call(*srcs)
-  return (Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], first.out_features),
-          Tensor(srcs[1].after(kernel)).reshape(*x.shape[:-1], second.out_features))
-
-def _iq3_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, group:UOp, output:UOp,
-                   out_features:int, in_features:int) -> UOp:
-  type_size, expert_size = _GGML_QUANT[21][1], out_features * in_features // 256 * _GGML_QUANT[21][1]
-  block, subgroup = group // 8, group % 8
-  base = expert * expert_size + output * (in_features // 256 * type_size) + block * type_size
-  def load_word(byte_offset:UOp) -> UOp:
-    word_index, half_aligned = byte_offset // 4, (byte_offset & 2).ne(0)
-    word = raw[word_index]
-    return half_aligned.where((word >> 16) | (raw[word_index + 1] << 16), word)
-  qs = (load_word(base + 2 + subgroup * 8), load_word(base + 6 + subgroup * 8))
-  qh_word = load_word(base + 66 + (subgroup // 4) * 4)
-  qh = (qh_word >> (8 * (subgroup % 4)).cast(dtypes.uint32)) & 255
-  signs = load_word(base + 74 + subgroup * 4)
-  dot = UOp.const(dtypes.int32, 0)
-  for word_idx in range(8):
-    qi = ((qs[word_idx // 4] >> (8 * (word_idx % 4))) & 255).cast(dtypes.uint16) + \
-      (((qh >> word_idx) & 1).cast(dtypes.uint16) << 8)
-    sign_bits = (signs >> (word_idx * 4)) & 15
-    sign_mask = lut[512 + sign_bits.cast(dtypes.weakint)]
-    word = (lut[qi.cast(dtypes.weakint)] ^ sign_mask) + (sign_mask & 0x01010101)
-    dot = _amd_dp4a(word, xq[xidx, group, word_idx], dot)
-  scale = 1 + 2 * ((load_word(base + 106) >> (4 * subgroup).cast(dtypes.uint32)) & 15).float()
-  dbits = (load_word(base) & 0xffff).cast(dtypes.uint16)
-  return dot.float() * xd[xidx, group] * dbits.bitcast(dtypes.float16).float() * scale
-
-def _packed_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, group:UOp, output:UOp,
-                      out_features:int, in_features:int, ggml_type:int) -> UOp:
-  if ggml_type == 21: return _iq3_group_dot(raw, lut, xq, xd, expert, xidx, group, output, out_features, in_features)
-  type_size = _GGML_QUANT[ggml_type][1]
-  block, subgroup = group // 8, group % 8
-  base = expert * (out_features * in_features // 256 * type_size) + output * (in_features // 256 * type_size) + block * type_size
-  dot = UOp.const(dtypes.int32, 0)
-  if ggml_type == 23:  # IQ4_XS
-    for word_idx in range(8):
-      qbase, shift = base + 8 + subgroup * 16 + (word_idx % 4) * 4, 4 * (word_idx // 4)
-      packed = raw[qbase // 4]
-      nibbles = tuple((packed >> (8*i + shift)) & 15 for i in range(4))
-      low = lut[(nibbles[0] | (nibbles[1] << 4)).cast(dtypes.weakint)].cast(dtypes.uint32)
-      high = lut[(nibbles[2] | (nibbles[3] << 4)).cast(dtypes.weakint)].cast(dtypes.uint32)
-      dot = _amd_dp4a(low | (high << 16), xq[xidx, group, word_idx], dot)
-    low_offset = base + 4 + subgroup // 2
-    low_byte = (raw[low_offset // 4] >> (8 * (low_offset % 4)).cast(dtypes.uint32)) & 255
-    low = (low_byte >> (4 * (subgroup % 2)).cast(dtypes.uint32)) & 15
-    high_word = (raw[base // 4] >> 16).cast(dtypes.uint16)
-    scale = ((low.cast(dtypes.uint16) | (((high_word >> (2 * subgroup).cast(dtypes.uint16)) & 3) << 4)).cast(dtypes.uint8).
-             bitcast(dtypes.int8)-32).float()
-    dbits = (raw[base // 4] & 0xffff).cast(dtypes.uint16)
-    return dot.float() * xd[xidx, group] * dbits.bitcast(dtypes.float16).float() * scale
-  assert ggml_type == 14  # Q6_K
-  dots = [UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 0)]
-  for word_idx in range(8):
-    word = UOp.const(dtypes.uint32, 0)
-    for byte_idx in range(4):
-      pos = subgroup * 32 + word_idx * 4 + byte_idx
-      within = pos % 128
-      low_byte = raw[base + (pos // 128) * 64 + within % 64]
-      low = (low_byte >> ((within // 64) * 4).cast(dtypes.uint8)) & 15
-      high_byte = raw[base + 128 + (pos // 128) * 32 + within % 32]
-      high = (high_byte >> ((within // 32) * 2).cast(dtypes.uint8)) & 3
-      q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
-      word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8 * byte_idx))
-    dots[word_idx // 4] = _amd_dp4a(word, xq[xidx, group, word_idx], dots[word_idx // 4])
-  scales = [raw[base + 192 + subgroup * 2 + i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
-  dbits = raw[base + 208].cast(dtypes.uint16) | (raw[base + 209].cast(dtypes.uint16) << 8)
-  return (dots[0].float() * scales[0] + dots[1].float() * scales[1]) * xd[xidx, group] * dbits.bitcast(dtypes.float16).float()
-
-@functools.cache
-def _packed_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
-                          out_features:int, in_features:int, ggml_type:int, routes_per_input:int) -> UOp:
-  prefill = out.shape[0] > routes_per_input
-  output_tile = 2 if ggml_type == 21 and not prefill else 4 if ggml_type == 21 else 8 if prefill and ggml_type == 23 else 4
-  wave_count = 2 if prefill else 1
-  if prefill:
-    output_block, route = UOp.range(out_features // (output_tile * wave_count), 0), UOp.range(out.shape[0], 1)
-  else:
-    route, output_block = UOp.range(out.shape[0], 0), UOp.range(out_features // output_tile, 1)
-  group_count, lane_count = in_features // 32, min(32, in_features // 32)
-  lane = UOp.range(lane_count, 2, axis_type=AxisType.LOCAL)
-  wave = UOp.range(wave_count, 3, axis_type=AxisType.LOCAL) if wave_count > 1 else UOp.const(dtypes.weakint, 0)
-  outputs = tuple(output_block * output_tile * wave_count + wave * output_tile + i for i in range(output_tile)) if wave_count > 1 else \
-    tuple(output_block * output_tile + i for i in range(output_tile))
-  if ggml_type in (21, 23):
-    raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
-
-  expert, xidx = sel[route].cast(dtypes.weakint), route // routes_per_input
-  values = [sum((_packed_group_dot(raw, lut, xq, xd, expert, xidx, (lane + offset).valid(lane + offset < group_count), output,
-                                    out_features, in_features, ggml_type)
-                 for offset in range(0, group_count, lane_count)), UOp.const(dtypes.float32, 0)) for output in outputs]
-  totals = [_amd_wave_sum(value, lane, lane_count, wave if wave_count > 1 else None) for value in values]
-  stores = [out[route.valid(lane.eq(0)), output].store(total.cast(out.dtype)) for output,total in zip(outputs, totals)]
-  result = UOp.group(*stores).end(lane, wave, output_block, route) if wave_count > 1 else \
-    UOp.group(*stores).end(route, output_block, lane)
-  return result.sink(
-    arg=KernelInfo(name=f"expert_q8_{ggml_type}", opts_to_apply=()))
-
-@functools.cache
-def _expert_lut(device:str, ggml_type:int) -> Tensor:
-  from tinygrad.runtime.autogen import ggml_common
-  if ggml_type == 21:
-    sign_masks = [sum((0xff << (8*i)) for i in range(4) if signs & (1 << i)) for signs in range(16)]
-    return Tensor([*ggml_common.iq3s_grid, *sign_masks], dtype=dtypes.uint32, device=device).contiguous().realize()
-  values = [((ggml_common.kvalues_iq4nl[i] & 0xff) | ((ggml_common.kvalues_iq4nl[j] & 0xff) << 8)) for j in range(16) for i in range(16)]
-  return Tensor(values, dtype=dtypes.uint16, device=device).contiguous().realize()
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -432,22 +68,14 @@ class ExpertWeights:
   def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]:
     if str(x.device).startswith("CPU"):
       return llm_cpu.q8k_quantize(x, self.in_features) if self.ggml_type in (21, 23) else llm_cpu.q8_quantize(x, self.in_features)
-    return _q8_quantize(x, int(x.numel()) // self.in_features, self.in_features)
+    return llm_amd.q8_quantize(x, int(x.numel()) // self.in_features, self.in_features)
   def __call__(self, sel:Tensor, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     ggml_type = self.ggml_type
     if ggml_type in (14, 21, 23) and str(self.weight.device).startswith("CPU"):
       return llm_cpu.uop_expert(self, sel, x, prepared)
     if ggml_type in (14, 21, 23) and str(self.weight.device).startswith("AMD"):
-      input_count = int(x.numel()) // self.in_features
-      routes_per_input = int(sel.numel()) // input_count
-      xq, xd = prepared if prepared is not None else self.prepare(x)
-      flat_sel = sel if len(sel.shape) == 1 else sel.flatten().clone()
-      out = Tensor.empty(int(sel.numel()), self.out_features, dtype=dtypes.float32, device=x.device)
-      out = Tensor.custom_kernel(out, self.weight, flat_sel, xq, xd, _expert_lut(str(x.device), ggml_type),
-        fxn=lambda out,raw,sel,xq,xd,lut:_packed_expert_kernel(out, raw, sel, xq, xd, lut, self.out_features,
-                                                              self.in_features, ggml_type, routes_per_input))[0]
-      return out if len(sel.shape) == 1 else out.reshape(*sel.shape, self.out_features)
+      return llm_amd.expert(self, sel, x, prepared)
     if self.ggml_type is None: weight = self.weight[sel]
     else:
       packed = self.weight.reshape(self.num_experts, -1)[sel].flatten()
@@ -461,41 +89,6 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
-
-def _topk_256_sort(values:UOp, indices:UOp, next_values:UOp, next_indices:UOp, ready:UOp, lane:UOp) -> tuple[UOp, UOp, UOp]:
-  for size in (2, 4, 8, 16, 32, 64, 128, 256):
-    for stride in (128, 64, 32, 16, 8, 4, 2, 1)[9-size.bit_length():]:
-      partner = lane ^ stride
-      a_value, b_value = values.after(ready)[lane], values.after(ready)[partner]
-      a_index, b_index = indices.after(ready)[lane], indices.after(ready)[partner]
-      a_first = (a_value < b_value) | (a_value.eq(b_value) & (a_index > b_index))
-      want_first = (lane & stride).eq(0).eq((lane & size).eq(0))
-      take_a = want_first.eq(a_first)
-      ready = UOp.group(next_values.after(ready)[lane].store(take_a.where(a_value, b_value)),
-                        next_indices.after(ready)[lane].store(take_a.where(a_index, b_index))).barrier()
-      values, next_values, indices, next_indices = next_values, values, next_indices, indices
-  return values, indices, ready
-
-@functools.cache
-def _topk_256_kernel(out:UOp, sel:UOp, x:UOp, k:int, softmax:bool=False) -> UOp:
-  outer, lane = UOp.range(out.shape[0], 0), UOp.range(256, 1, axis_type=AxisType.LOCAL)
-  values = UOp.placeholder((256,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
-  indices = UOp.placeholder((256,), dtypes.int32, 1, addrspace=AddrSpace.LOCAL)
-  next_values = UOp.placeholder((256,), x.dtype, 2, addrspace=AddrSpace.LOCAL)
-  next_indices = UOp.placeholder((256,), dtypes.int32, 3, addrspace=AddrSpace.LOCAL)
-  ready = UOp.group(values.after(outer)[lane].store(x[outer, lane]),
-                    indices.after(outer)[lane].store(lane.int())).barrier()
-  values, indices, ready = _topk_256_sort(values, indices, next_values, next_indices, ready, lane)
-  valid = lane < k
-  src = 256 - k + lane
-  value = values.after(ready)[src]
-  if softmax:
-    max_value = values.after(ready)[255]
-    value = (value - max_value).exp() / sum(((values.after(ready)[256-k+i] - max_value).exp() for i in range(k)),
-                                            UOp.const(x.dtype, 0))
-  stores = (out[outer, lane.valid(valid)].store(value),
-            sel[outer, lane.valid(valid)].store(indices.after(ready)[src]))
-  return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name=f"topk_256{'_softmax' if softmax else ''}", opts_to_apply=()))
 
 def biased_sigmoid_topk(x:Tensor, bias:Tensor, k:int, normalize:bool) -> tuple[Tensor, Tensor]:
   assert x.shape[-1] == bias.shape[0] == 256
@@ -513,11 +106,7 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   outer = int(x.numel()) // n
   if n == 256 and outer <= 256 and str(x.device).startswith("AMD"):
-    values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
-    indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
-    values, indices = Tensor.custom_kernel(values, indices, x.reshape(outer, n),
-      fxn=lambda out,sel,x:_topk_256_kernel(out, sel, x, k))[:2]
-    return values.reshape(*x.shape[:-1], k), indices.reshape(*x.shape[:-1], k)
+    return llm_generic.topk_256(x, k)
   vals = Tensor.arange(n).to(x.device).reshape(1,1,n).cast(x.dtype).expand(x.shape)
   cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
     (Tensor.arange(n).to(x.device).reshape(1,1,n,1) < Tensor.arange(n).to(x.device).reshape(1,1,1,n)))
@@ -529,46 +118,9 @@ def topk_softmax(x:Tensor, k:int) -> tuple[Tensor, Tensor]:
   if n == 256 and outer <= 512 and str(x.device).startswith("CPU") and x.dtype in (dtypes.float16, dtypes.float32):
     return llm_cpu.uop_topk_softmax(x, k)
   if n == 256 and outer <= 256 and str(x.device).startswith("AMD"):
-    values = Tensor.empty(outer, k, dtype=x.dtype, device=x.device)
-    indices = Tensor.empty(outer, k, dtype=dtypes.int32, device=x.device)
-    values, indices = Tensor.custom_kernel(values, indices, x.reshape(outer, n),
-      fxn=lambda out,sel,x:_topk_256_kernel(out, sel, x, k, softmax=True))[:2]
-    return values.reshape(*x.shape[:-1], k), indices.reshape(*x.shape[:-1], k)
+    return llm_generic.topk_256(x, k, softmax=True)
   values, indices = pairwise_topk(x, k)
   return values.softmax(-1), indices
-
-@functools.cache
-def _inverse_unit_lower_kernel(out:UOp, x:UOp, n:int) -> UOp:
-  outer_count = 1
-  for dim in out.shape[:-2]:
-    assert isinstance(dim, int)
-    outer_count *= dim
-  outer, lane = UOp.range(outer_count, 0), UOp.range(n, 1, axis_type=AxisType.LOCAL)
-  raw = UOp.placeholder((n*n,), x.dtype, 0, addrspace=AddrSpace.LOCAL)
-  solved = UOp.placeholder((n*n,), x.dtype, 1, addrspace=AddrSpace.LOCAL)
-  ready = UOp.group(*(raw[row*n+lane].store(x.flatten()[outer*n*n+row*n+lane]) for row in range(n))).barrier()
-  for row in range(n):
-    base, previous = raw.after(ready), solved.after(ready)
-    value = base[row*n+lane] + sum((base[row*n+i] * previous[i*n+lane] for i in range(row)), UOp.const(x.dtype, 0))
-    ready = solved.after(ready)[row*n+lane].store((lane < row).where(value, UOp.const(x.dtype, 0))).barrier()
-  result = solved.after(ready)
-  stores = [out.flatten()[outer*n*n+row*n+lane].store(lane.eq(row).where(UOp.const(x.dtype, 1), result[row*n+lane]))
-            for row in range(n)]
-  return UOp.group(*stores).end(outer, lane).sink(arg=KernelInfo(name="inverse_unit_lower", opts_to_apply=()))
-
-def inverse_unit_lower(x:Tensor) -> Tensor:
-  """Reference-ordered inverse of I-x for a strictly lower-triangular x."""
-  n = x.shape[-1]
-  assert isinstance(n, int)
-  if n == 64 and str(x.device).startswith("AMD"):
-    out = Tensor.empty(*x.shape, dtype=x.dtype, device=x.device)
-    return Tensor.custom_kernel(out, x, fxn=lambda out,x:_inverse_unit_lower_kernel(out, x, n))[0]
-  rows = [x[..., 0, :].const_like(0)]
-  for i in range(1, n):
-    prefix = x[..., i, :i]
-    previous = Tensor.stack(*rows, dim=-2)[..., :, :i]
-    rows.append((prefix + (prefix.unsqueeze(-1) * previous).sum(-2)).pad((0, n-i)))
-  return Tensor.stack(*rows, dim=-2) + Tensor.eye(n, dtype=x.dtype).to(x.device)
 
 def l2norm(x:Tensor) -> Tensor: return x * (x.square().sum(-1, keepdim=True) + 1e-6).rsqrt()
 
@@ -678,7 +230,7 @@ class FFNBlock:
         flat_sel = sel.flatten().clone()
         if str(h.device).startswith("AMD"):
           gate, up = self.ffn_gate_exps(flat_sel, h, prepared), self.ffn_up_exps(flat_sel, h, prepared)
-          x_down = self.ffn_down_exps(flat_sel, gate, _q8_silu_mul(gate, up, self.config.hidden_dim))
+          x_down = self.ffn_down_exps(flat_sel, gate, llm_amd.q8_silu_mul(gate, up, self.config.hidden_dim))
           out = None
         elif self.ffn_gate_exps.ggml_type == self.ffn_up_exps.ggml_type == 21 and \
              self.ffn_down_exps.ggml_type == 23 and self.ffn_gate_exps.cpu_repacked is not None and \
@@ -701,13 +253,13 @@ class FFNBlock:
       if hasattr(self, 'ffn_gate_shexp'):
         if prepared is not None and str(x.device).startswith("AMD") and \
            self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8:
-          gate, up = _q8_linear_pair(self.ffn_gate_shexp, self.ffn_up_shexp, x, prepared)
+          gate, up = llm_amd.q8_linear_pair(self.ffn_gate_shexp, self.ffn_up_shexp, x, prepared)
         elif self.ffn_gate_shexp.ggml_type == self.ffn_up_shexp.ggml_type == 8 and str(x.device).startswith("CPU"):
           gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(
             self.ffn_gate_shexp, self.ffn_up_shexp, x)
         else: gate, up = self.ffn_gate_shexp(x, prepared), self.ffn_up_shexp(x, prepared)
         if self.ffn_down_shexp.ggml_type in (8, 14) and str(gate.device).startswith("AMD"):
-          shexp = self.ffn_down_shexp(gate, _q8_silu_mul(gate, up, self.config.shared_expert_dim))
+          shexp = self.ffn_down_shexp(gate, llm_amd.q8_silu_mul(gate, up, self.config.shared_expert_dim))
         elif self.ffn_down_shexp.ggml_type in (8, 14) and str(gate.device).startswith("CPU"):
           shexp = self.ffn_down_shexp(llm_cpu.silu_mul(gate, up))
         else: shexp = self.ffn_down_shexp(gate.silu().contiguous() * up)
@@ -717,7 +269,7 @@ class FFNBlock:
     # TODO: remove the need for this contiguous
     prepared = self.ffn_gate.prepare(x)
     if prepared is not None and self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8:
-      gate, up = _q8_linear_pair(self.ffn_gate, self.ffn_up, x, prepared)
+      gate, up = llm_amd.q8_linear_pair(self.ffn_gate, self.ffn_up, x, prepared)
     elif self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8 and str(x.device).startswith("CPU"):
       gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(self.ffn_gate, self.ffn_up, x)
     else: gate, up = self.ffn_gate(x, prepared), self.ffn_up(x, prepared)
@@ -788,7 +340,7 @@ class TransformerBlock(FFNBlock):
     prepared = self.attn_q.prepare(x)
     q = self.attn_q(x, prepared)
     if prepared is not None and self.attn_k.ggml_type == self.attn_v.ggml_type == 8:
-      k, v = _q8_linear_pair(self.attn_k, self.attn_v, x, prepared)
+      k, v = llm_amd.q8_linear_pair(self.attn_k, self.attn_v, x, prepared)
     elif str(x.device).startswith("CPU") and self.attn_k.ggml_type == self.attn_v.ggml_type == 8:
       k, v = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(self.attn_k, self.attn_v, x)
     else: k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
@@ -823,8 +375,7 @@ class TransformerBlock(FFNBlock):
     if flash_decode:
       decode_len = kv_len if isinstance(kv_len, int) else self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
-      from tinygrad.llm.amd import amd_flash_attention_decode
-      attn = amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
+      attn = llm_amd.amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len)
     elif llm_cpu.SUPPORTED and self.attn_k.ggml_type == self.attn_v.ggml_type == 8 and resolve(T == 1) and \
          kv_len is not None and str(x.device).startswith("CPU"):
       attn = llm_cpu.attention_decode(q.float(), assigned_kv, start_pos)
@@ -832,15 +383,10 @@ class TransformerBlock(FFNBlock):
          str(x.device).startswith("CPU"):
       attn = llm_cpu.attention_prefill(q.float(), assigned_kv, start_pos)
     elif use_flash:
-      from tinygrad.llm.amd import amd_flash_attention_causal_cached
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
       valid = valid_len.unbind()[0] if isinstance(valid_len, UOp) else valid_len
       valid_kv_len, key_limit = start + T, start + valid if valid is not None else None
-      q_flat = q.half().reshape(B*self.config.n_heads, T, self.config.head_dim)
-      out = Tensor.empty(B*self.config.n_heads, q_flat.shape[1], self.config.head_dim, dtype="float32", device=x.device)
-      attn = Tensor.custom_kernel(out, q_flat, assigned_kv,
-        fxn=functools.partial(amd_flash_attention_causal_cached, valid_kv_len=valid_kv_len, key_limit=key_limit))[0] \
-        .reshape(B, self.config.n_heads, q_flat.shape[1], -1)
+      attn = llm_amd.flash_attention_causal_cached(q.half(), assigned_kv, valid_kv_len, key_limit)
     else:
       mask:Tensor|None
       if kv_len is not None:
@@ -944,7 +490,7 @@ class GatedDeltaNetBlock(FFNBlock):
          self.ssm_beta_alpha_weight is not None and self.ssm_beta_alpha_weight.dtype == dtypes.float16:
         out_gate, qkv, beta_alpha = llm_cpu.q8_gdn_projections(self.attn_gate, self.attn_qkv, self.ssm_beta_alpha_weight, x)
       elif prepared is not None and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
-        out_gate, qkv = _q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
+        out_gate, qkv = llm_amd.q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
       elif str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
         out_gate, qkv = llm_cpu.q8_linear_pair(self.attn_gate, self.attn_qkv, x)
       else: out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
@@ -1000,7 +546,7 @@ class GatedDeltaNetBlock(FFNBlock):
     x = x.half()
     prepared = self.attn_gate.prepare(x)
     if prepared is not None and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
-      out_gate, qkv = _q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
+      out_gate, qkv = llm_amd.q8_linear_pair(self.attn_gate, self.attn_qkv, x, prepared)
     elif str(x.device).startswith("CPU") and self.attn_gate.ggml_type == self.attn_qkv.ggml_type == 8:
       out_gate, qkv = llm_cpu.q8_batched_pair(self.attn_gate, self.attn_qkv, x)
     else: out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
@@ -1058,7 +604,7 @@ class GatedDeltaNetBlock(FFNBlock):
       g = (gc @ Tensor.ones(chunk_len, chunk_len, dtype=gc.dtype, device=gc.device).tril().T).contiguous()
       decay = (g.unsqueeze(-1) - g.unsqueeze(-2)).exp().tril().contiguous()
       base = (-(kc * bc.unsqueeze(-1) @ kc.transpose(-1, -2) * decay).tril(-1)).contiguous()
-      attn = inverse_unit_lower(base)
+      attn = llm_generic.inverse_unit_lower(base)
       value = attn @ (vc * bc.unsqueeze(-1))
       k_cumdecay = attn @ (kc * bc.unsqueeze(-1) * g.exp().unsqueeze(-1))
       value = value - k_cumdecay @ state
@@ -1272,7 +818,7 @@ class Transformer:
     model_device = str(model.token_embd.weight.device)
     for ggml_type in expert_types:
       if ggml_type not in (14, 21, 23): continue
-      if model_device.startswith("AMD"): _expert_lut(model_device, ggml_type)
+      if model_device.startswith("AMD"): llm_amd.expert_lut(model_device, ggml_type)
       elif model_device.startswith("CPU"): llm_cpu._cpu_expert_lut(model_device, ggml_type)
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:

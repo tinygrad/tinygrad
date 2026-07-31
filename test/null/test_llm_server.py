@@ -95,6 +95,17 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(chunks), 0)
     self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
 
+  def test_chat_template_kwargs(self):
+    import jinja2
+    with patch.object(self.server, "template", jinja2.Template(
+        "{% for m in messages %}{% if m.role == 'assistant' and preserve_thinking %}<think>{{ m.reasoning_content }}</think>"
+        "{% endif %}{{ m.content }}|{% endfor %}")):
+      list(self.client.chat.completions.create(model="test", messages=[
+        {"role":"user", "content":"first"}, {"role":"assistant", "content":"answer", "reasoning_content":"reason"},
+        {"role":"user", "content":"next"}], stream=True,
+        extra_body={"chat_template_kwargs":{"preserve_thinking":True, "messages":[]}}))
+    self.mock_tok.encode.assert_called_with("first|<think>reason</think>answer|next|")
+
   def test_content_is_streamed(self):
     stream = self.client.chat.completions.create(
       model="test",
@@ -108,6 +119,28 @@ class TestLLMServer(unittest.TestCase):
         contents.append(chunk.choices[0].delta.content)
 
     self.assertGreater(len(contents), 0)
+
+  def test_interrupted_stream_logs_tokens(self):
+    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
+         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+      next(stream)
+      next(stream)
+      stream.close()
+    interrupt = log.call_args.args[0]
+    self.assertFalse(interrupt.startswith("\n"))
+    self.assertTrue(interrupt.endswith("\n"))
+    self.assertIn("gen:", interrupt)
+    self.assertIn("out:    1", interrupt)
+    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+
+  def test_stream_disconnect_closes_source(self):
+    from tinygrad.viz.serve import HTTPRequestHandler
+    source, handler = Mock(), Mock()
+    source.__iter__ = Mock(return_value=iter([{}]))
+    handler.wfile.write.side_effect = BrokenPipeError
+    HTTPRequestHandler.stream_json(handler, source)
+    source.close.assert_called_once()
 
   def test_non_streaming(self):
     resp = self.client.chat.completions.create(

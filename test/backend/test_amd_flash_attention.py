@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 
 from tinygrad import Device, Tensor, TinyJit
-from tinygrad.llm.amd import amd_flash_attention_decode
+from tinygrad.llm.kernels.amd import amd_flash_attention_decode
 
 
 @unittest.skipUnless(Device.DEFAULT.startswith("AMD"), "AMD flash attention required")

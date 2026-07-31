@@ -1,7 +1,7 @@
 from tinygrad import Tensor, getenv
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import GlobalCounters, Context
-from tinygrad.llm.amd import amd_flash_attention, amd_flash_attention_causal
+from tinygrad.llm.kernels.amd import amd_flash_attention, amd_flash_attention_causal
 
 if __name__ == "__main__":
   B, H, N, D = getenv("B", 1), getenv("H", 32), getenv("N", 1024), getenv("D", 64)
