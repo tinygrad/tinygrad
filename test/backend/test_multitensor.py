@@ -76,6 +76,12 @@ class TestMultiTensor(unittest.TestCase):
     run_linear(linear)
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
+  def test_shard_beam(self):
+    src = Tensor.ones(16).shard(devices_2, 0).realize()
+    pad = src.to(devices_2[::-1]).schedule_linear().src[0]
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): prg = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[0].src[0]
+    self.assertNotEqual(prg.src[0].arg.applied_opts, ())
+
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d1, X.device), 0)
