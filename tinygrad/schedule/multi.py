@@ -75,8 +75,9 @@ def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
   if not multis: return None
   sharding = multis[0].sharding
-  if len(multis) == len(root.src) and all(m.sharding == sharding for m in multis):
-    srcs = [m.src[0] for m in root.src]
+  # same sharding: apply the ALU to the per-shard srcs, scalar srcs broadcast to every shard
+  if all(m.sharding == sharding for m in multis) and all(s.op is Ops.UNSHARD or s.shape == () for s in root.src):
+    srcs = [m.src[0] if m.op is Ops.UNSHARD else m for m in root.src]
     return srcs[0].alu(root.op, *srcs[1:]).unshard(multis[0].arg, multis[0].src[1:])
   # resharding: single-axis fallback via shard_srcs
   axis = root.axis
@@ -233,6 +234,16 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).unshard(src.arg, src.src[1:])
 
+def store_value_multi(dest:UOp, multi:UOp):
+  # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest.
+  # shrink every sharded axis of dest to this shard's contiguous block (SHRINK keeps the rank); the sub-view
+  # has exactly the value's local shape, then store the value as-is
+  assert tuple(dest.shape) == tuple(multi.shape), f"store shape mismatch {dest.shape} != {multi.shape}"
+  sharding = dict(multi.sharding)
+  marg = tuple((sharding[ax]*multi.src[0].shape[ax], multi.src[0].shape[ax]) if ax in sharding else (0, s)
+               for ax, s in enumerate(multi.shape))
+  return dest._mop(Ops.SHRINK, marg).store(multi.src[0])
+
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
   return UOp(root.op, root.dtype, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
@@ -284,6 +295,8 @@ multi_pm = PatternMatcher([
     UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
+  # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
+  (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),
   # remove UNSHARD from STORE
   (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True),
     lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:]), root.arg)),
