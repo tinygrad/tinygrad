@@ -1711,9 +1711,10 @@ def train_gptoss():
     wandb.init(config=config, **wandb_args, project="MLPerf-gpt-oss")
 
   model_params = GPT_OSS_20B
-  model_params['vocab_size'] = 128256
+  model_params['vocab_size'] = getenv("VOCAB_SIZE", 128256)
   real_vocab_size = model_params['vocab_size']
   if (layers:=getenv("LAYERS")) != 0: model_params['n_layers'] = layers
+  if (experts:=getenv("EXPERTS")) != 0: model_params['n_experts'] = experts
   print(f"model parameters: {model_params}")
 
   model = GPTOSS(**model_params, max_context=SEQLEN)
