@@ -52,8 +52,8 @@ class IndexingContext:
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.WEAK) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
-    # if a range has a 1 src, it's the same as UOp.const(dtypes.weakint, 0)
-    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(None, 0)
+    # if a range has a 1 src, it's the same as UOp.const(0)
+    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if x.op not in GroupOp.Broadcastable: return rngs
@@ -100,8 +100,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
-  valid: UOp = UOp.const(None, True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
-  return valid.where(bx.src[0], UOp.const(x.dtype, 0))
+  valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
+  return valid.where(bx.src[0], UOp.const(0, x.dtype))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
@@ -148,7 +148,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
     acc *= s
-  combined_axes = UOp.const(None, 0).usum(axes_in)
+  combined_axes = UOp.const(0).usum(axes_in)
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
@@ -248,7 +248,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         # we compare the ranges without their valids
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
-          minimum_valid = UOp.const(None, False).usum(valids)
+          minimum_valid = UOp.const(False).usum(valids)
           _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))

@@ -18,7 +18,7 @@ def reindex(idx:UOp, off:int, mul=2) -> UOp:
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
-  zero = UOp.const(dt, 0)
+  zero = UOp.const(0, dt)
   if len(uops) == 2: a0, a1 = uops
   elif len(uops) == 3: a0, a1, b0 = uops  # a shift's count is a single word
   elif len(uops) == 4: a0, a1, b0, b1 = uops
@@ -57,10 +57,10 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         ua0, ua1, ub0, ub1 = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0.bitcast(dtypes.uint), b1.bitcast(dtypes.uint)
         a0, a1 = (a_neg:=a1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ua0, ua1))[0], ua0), a_neg.where(n[1], ua1)
         b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ub0, ub1))[0], ub0), b_neg.where(n[1], ub1)
-      q, r = (z:=UOp.const(dtypes.uint, 0), z), (z, z)
+      q, r = (z:=UOp.const(0, dtypes.uint), z), (z, z)
       for i in range(63, -1, -1):
-        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(dtypes.uint, 1), z)
-        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(dtypes.uint, i), z)[0] & 1), r[1]
+        r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(1, dtypes.uint), z)
+        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(i, dtypes.uint), z)[0] & 1), r[1]
         cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
         q = ((q[0] | shl(cond.cast(dtypes.uint), i % 32), q[1]) if i < 32 else (q[0], q[1] | shl(cond.cast(dtypes.uint), i % 32)))
@@ -158,7 +158,7 @@ pm_long_decomp = PatternMatcher([
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
   (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(x.tag[1], truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF))))
+   UOp.const(truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF)), x.tag[1]))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

@@ -37,7 +37,7 @@ class PM4Ops(FastEnum):
   RELEASE_MEM = auto(); DISPATCH_DIRECT = auto(); EVENT_WRITE = auto()  # noqa: E702
 
 def pkt3(ctx, op:PM4Ops, *vals):
-  return UOp(Ops.INS, arg=op, src=tuple(UOp.const(dtypes.uint32, x)
+  return UOp(Ops.INS, arg=op, src=tuple(UOp.const(x, dtypes.uint32)
     for x in (ctx.pm4.PACKET3(getattr(ctx.pm4, f"PACKET3_{op.name}"), len(vals) - 1), *vals)))
 
 def wreg(ctx, reg:AMDReg, *args:sint, **kwargs:int):
@@ -157,18 +157,18 @@ def pm4_submit(ctx, lin):
   assert size_dw < (1 << 20), f"indirect buffer of {size_dw} dwords doesn't fit one packet"
 
   ib = UOp.placeholder((size_dw + 2,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
-  done_idx, submit_idx = UOp.const(dtypes.int, size_dw + 0), UOp.const(dtypes.int, size_dw + 1)
-  submitted = (counter:=ib.after(make_patches(ib, [((size_dw + i) * 4, UOp.const(dtypes.uint32, 0)) for i in range(2)])).index(submit_idx)).load()
+  done_idx, submit_idx = UOp.const(size_dw + 0, dtypes.int), UOp.const(size_dw + 1, dtypes.int)
+  submitted = (counter:=ib.after(make_patches(ib, [((size_dw + i) * 4, UOp.const(0, dtypes.uint32)) for i in range(2)])).index(submit_idx)).load()
   completed = ib.after(loop:=UOp.loop(0)).index(done_idx).load()
   ib_free = completed.end(loop, completed != submitted)
 
-  bump_fence = pm4_store(ctx, UOp(Ops.SLICE, dtypes.uint32, (ib, UOp.const(dtypes.weakint, size_dw)), 2), (submitted + 1).cast(dtypes.uint64))
+  bump_fence = pm4_store(ctx, UOp(Ops.SLICE, dtypes.uint32, (ib, UOp.const(size_dw)), 2), (submitted + 1).cast(dtypes.uint64))
   cmdbuf = make_cmdbuf(lin.replace(src=lin.src + (bump_fence,)), devs, buf=ib, dep=ib_free)
 
   # the ring itself only carries a packet pointing at the ib, wrapping the ring
-  put = put_ptr.index(zero:=UOp.const(dtypes.int, 0))
+  put = put_ptr.index(zero:=UOp.const(0, dtypes.int))
   pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(cmdbuf.getaddr(devs)), size_dw | ctx.pm4.INDIRECT_BUFFER_VALID)
-  write_pkt = UOp.barrier(*[ring.index(((put + off) % q.ring.size).cast(dtypes.int)).store(UOp.const(dtypes.uint32, x)) for off,x in enumerate(pkt)])
+  write_pkt = UOp.barrier(*[ring.index(((put + off) % q.ring.size).cast(dtypes.int)).store(UOp.const(x, dtypes.uint32)) for off,x in enumerate(pkt)])
 
   # advance the put/write pointers past the packet
   bump_put_ptr = put_ptr.index(zero).store(put + len(pkt))
@@ -186,26 +186,26 @@ class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TR
 def sdma_copy(ctx, call):
   sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
   src_addr, dst_addr = call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs)
-  return call.ins(SDMAOps.COPY, src=tuple(UOp.const(dtypes.uint32, x) for off in range(0, sz, ctx.max_copy_size) for x in (
+  return call.ins(SDMAOps.COPY, src=tuple(UOp.const(x, dtypes.uint32) for off in range(0, sz, ctx.max_copy_size) for x in (
     ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0, *data64_le(src_addr+off), *data64_le(dst_addr+off))))
 
 def sdma_wait(ctx, ins, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
      | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
-  return ins.ins(SDMAOps.POLL_REGMEM, src=tuple(UOp.const(dtypes.uint32, x) for x in (
+  return ins.ins(SDMAOps.POLL_REGMEM, src=tuple(UOp.const(x, dtypes.uint32) for x in (
     op, *data64_le(dst.getaddr(ctx.devs)), val, 0xffffffff,
     ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))))
 
 def sdma_store(ctx, ins, dst, val):
   op = ctx.sdma.SDMA_OP_FENCE | (ctx.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if ctx.target[0] != 9 else 0)
   return UOp(Ops.LINEAR, src=(
-    ins.ins(SDMAOps.FENCE, src=tuple(UOp.const(dtypes.uint32, x) for x in (op, *data64_le(dst.getaddr(ctx.devs)), val))),
-    ins.ins(SDMAOps.TRAP, src=tuple(UOp.const(dtypes.uint32, x) for x in (ctx.sdma.SDMA_OP_TRAP, 0)))))
+    ins.ins(SDMAOps.FENCE, src=tuple(UOp.const(x, dtypes.uint32) for x in (op, *data64_le(dst.getaddr(ctx.devs)), val))),
+    ins.ins(SDMAOps.TRAP, src=tuple(UOp.const(x, dtypes.uint32) for x in (ctx.sdma.SDMA_OP_TRAP, 0)))))
 
 def sdma_timestamp(ctx, ins, dst):
   op = ctx.sdma.SDMA_OP_TIMESTAMP | ctx.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL)
-  return ins.ins(SDMAOps.TIMESTAMP, src=tuple(UOp.const(dtypes.uint32, x) for x in (op, *data64_le(dst.getaddr(ctx.devs)))))
+  return ins.ins(SDMAOps.TIMESTAMP, src=tuple(UOp.const(x, dtypes.uint32) for x in (op, *data64_le(dst.getaddr(ctx.devs)))))
 
 pm_sdma_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
@@ -218,7 +218,7 @@ pm_sdma_opsel = PatternMatcher([
 
 def sdma_submit(cmdbuf, devs):
   # the cmdbuf to submit + the patch writes that fill it
-  size_dw, zero = cmdbuf.nbytes() // dtypes.uint32.itemsize, UOp.const(dtypes.int, 0)
+  size_dw, zero = cmdbuf.nbytes() // dtypes.uint32.itemsize, UOp.const(0, dtypes.int)
 
   # the sdma queue's ring and its host-side ring/write/put pointers
   for d in devs: q = Device[d].sdma_queue(0)
@@ -234,8 +234,8 @@ def sdma_submit(cmdbuf, devs):
 
   # zero the wrapped tail, then copy the cmdbuf into the ring
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
-  zero_tail = ring.index(tail_off_dw + zi).store(UOp.const(dtypes.uint32, 0)).end(zi)
-  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
+  zero_tail = ring.index(tail_off_dw + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
+  i = UOp.range(UOp.const(size_dw, dtypes.int), 0, dtype=dtypes.int, src=(cmdbuf,))
   copy_to_ring = ring.index(start_dw + i).store(cmdbuf.index(i).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf

@@ -27,29 +27,29 @@ class TestBench(unittest.TestCase):
     print(f"{self._testMethodName:30s} {et*1e6/self.N:.2f} us")
 
   def test_uop_instant_creation(self):
-    for i in range(self.N): UOp.const(dtypes.int, 100+i)
+    for i in range(self.N): UOp.const(100+i, dtypes.int)
 
   def test_uop_list_creation(self):
-    [UOp.const(dtypes.int, 100+i) for i in range(self.N)]
+    [UOp.const(100+i, dtypes.int) for i in range(self.N)]
 
   def test_uop_add_2n(self):
-    a = UOp.const(dtypes.int, 2)
+    a = UOp.const(2, dtypes.int)
     for _ in range(self.N): a = a + a
 
   def test_uop_toposort(self):
-    a = UOp.const(dtypes.int, 0)
-    for i in range(self.N): a = a + UOp.const(dtypes.int, 100+i)
+    a = UOp.const(0, dtypes.int)
+    for i in range(self.N): a = a + UOp.const(100+i, dtypes.int)
     self.start_time()
     self.assertEqual(len(a.toposort()), 2*self.N+1)
 
   def test_uop_toposort_2n(self):
-    a = UOp.const(dtypes.int, 0)
+    a = UOp.const(0, dtypes.int)
     for _ in range(self.N): a = a + a
     self.start_time()
     self.assertEqual(len(a.toposort()), self.N+1)
 
   def test_uop_simplify(self):
-    a = UOp.const(dtypes.int, 2)
+    a = UOp.const(2, dtypes.int)
     for _ in range(self.N): (a+a).simplify()
 
   def test_uop_simplify_complex(self):
@@ -68,7 +68,7 @@ class TestBench(unittest.TestCase):
     for _ in range(self.N): expr.simplify()
 
   def test_uop_chain_free(self):
-    a = UOp.const(dtypes.int, 2)
+    a = UOp.const(2, dtypes.int)
     for _ in range(self.N): a = a + a
     self.start_time()
     del a
