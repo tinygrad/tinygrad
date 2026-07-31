@@ -39,7 +39,16 @@ pm_fold_moved_after = PatternMatcher([
 def _mop_index(r:UOp, idx:UOp):
   idxs = idx.src[1:]
   if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+    ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+    if r.op is Ops.PAD:
+      # insert 0 for PAD with where
+      # TODO: does this need simplify
+      a = UOp.const(True)
+      for s in ret.src[1:]:
+        if s.op is Ops.WHERE and s.src[2].op is Ops.CONST and s.src[2].arg == Invalid:
+          a = a & s.src[0]
+      ret = a.where(ret, 0)
+    return ret
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
@@ -577,7 +586,7 @@ def rangeify_on_store(ctx, x:UOp):
   rngs = [UOp.range(s, next(ctx)) for s in x.shape]
   return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
 
-pm_simple_rangeify = pm_mops+PatternMatcher([
+pm_simple_rangeify = PatternMatcher([
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # handle movement ops on INDEX
