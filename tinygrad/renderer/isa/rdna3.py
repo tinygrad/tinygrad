@@ -48,6 +48,7 @@ OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
+V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
 
 # ---- helpers ----
 lane_ctr = itertools.count()
@@ -58,7 +59,7 @@ def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
-  return _aluhint(UOp(Ops.SHR, dtypes.uint32 if nbits <= 32 else dtypes.uint64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
+  return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
@@ -272,45 +273,22 @@ def idiv(ctx, x:UOp):
     q = (is_one | is_big).where(special, q0)
   return (q ^ sign) + -sign if signed else q
 
-# TODO: move special cases out of function into PM
 def alu(ctx, x:UOp):
-  dpreciz = x.dtype.itemsize == 8
-  if dpreciz and x.op is Ops.ADD: return arith64(ctx, x, add=True)
-  if dpreciz and x.op is Ops.SUB: return arith64(ctx, x, add=False)
-  if dpreciz and x.op is Ops.MUL: return mul64(ctx, x)
-
-  # NOTE: ignore b16 instructions for now
-  def _bitwise(sins:InsOp, hins:InsOp): return bitwise64(ctx, x, sins) if dpreciz else _vop2(ctx, x.ins(sins))
-  if x.op is Ops.AND: return _bitwise(RDNA3Ops.v_and_b32_e32, RDNA3Ops.v_and_b16)
-  elif x.op is Ops.OR: return _bitwise(RDNA3Ops.v_or_b32_e32, RDNA3Ops.v_or_b16)
-  elif x.op is Ops.XOR: return _bitwise(RDNA3Ops.v_xor_b32_e32, RDNA3Ops.v_xor_b16)
-
-  if x.op is Ops.SHL:
-    ins = V_LSHL[max(2, x.dtype.itemsize)]
-  elif x.op is Ops.SHR:
-    if x.dtype is dtypes.int32: ins = RDNA3Ops.v_ashrrev_i32_e32 # TODO: handle 64 bit
-    else: ins = V_LSHR[max(2,x.dtype.itemsize)]
-
-  if isinstance(x.arg, InsOp): ins = x.arg # used for instruction overrides, ex. mul_hi for cdiv
-  elif x.op in OP_INS:
-    dt = x.dtype
-    if x.op is Ops.MUL and x.dtype is dtypes.int: dt = dtypes.uint32
-    if dt in OP_INS[x.op]: ins = OP_INS[x.op][dt]
-  elif x.op not in {Ops.SHL, Ops.SHR}: raise NotImplementedError(f"alu optype not implemented. op={x.op}, dtype={x.dtype}")
+  # alu arg used for machine instruction overrides, ex. mul_hi for cdiv
+  ins = x.arg if isinstance(x.arg, InsOp) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 # ---- casting utilities -----
 def cvt(ctx, y:UOp, x:UOp):
+  # NOTE: this is hacky
   def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  def _cvt_ins(dtin:DType, dtout:DType):
-    try: return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
-    except Exception as e: raise Exception(f"cannot natively cast from {dtin} -> {dtout}", e)
+  def _cvt_ins(dtin:DType, dtout:DType): return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
 
-  if x.dtype in (dtypes.uint64, dtypes.int64) and y.dtype.itemsize == 4: # b32 -> b64
+  if x.dtype in dtypes.int64s and y.dtype.itemsize == 4: # b32 -> b64
     targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
     lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
     return to_vgpr(ctx, UOp(Ops.STACK, src=(lo, const(0, targ))))
-  elif y.dtype.itemsize == 8 and x.dtype.itemsize == 4 and y.dtype is not dtypes.float64: # b64 -> b32
+  elif y.dtype in dtypes.int64s and x.dtype.itemsize == 4: # b64 -> b32
     src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
     if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
     else: return y.index(0)
@@ -467,9 +445,10 @@ pre_isel_matcher = PatternMatcher([
     lambda y: (y & const((1 << 8) - 1, dtypes.uint8)).replace(dtype=dtypes.uint8)),
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
     lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
+  # hack?
+  (UPat(Ops.MUL, dtypes.int32, name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(dtypes.int32)),
 ]) + pm_float_to_int + pm_int_to_float
 
-# NOTE: cmp shouldn't always be materialized to sgpr, only for where?
 isel_matcher = PatternMatcher([
   # --- mem ops ---
   # prevent members of gated store address to be irrepareably lowered ahead of time in isel
@@ -491,9 +470,18 @@ isel_matcher = PatternMatcher([
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
   (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
     lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
-  # --- alu ---
-  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
+  # --- double precis bit alu ---
+  (UPat(Ops.MUL, dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: mul64(ctx,x)),
+  (UPat((Ops.ADD, Ops.SUB), dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: arith64(ctx, x, x.op == Ops.ADD)),
+  # --- general alu ---
+  (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
+    if dtypes.is_unsigned(x.dtype) else V_ASHR[x.dtype.itemsize]))),
+  (UPat(Ops.SHL, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHL[max(2, x.dtype.itemsize)]))),
   (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
+  (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: \
+    _vop2(ctx, x.ins(getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))) \
+    if x.dtype.itemsize < 8 else bitwise64(ctx, x, getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))),
+  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
@@ -535,7 +523,6 @@ def encode(ctx, x:UOp):
 
   # NOTE: hacky fixes, find cleaner way to conform to isa
   kw = args = None
-  # if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(tuple(u.tag[0] for u in oprs[:-1])), soffset=dsl.NULL, offset=oprs[-1].arg)
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.GLOBAL:
