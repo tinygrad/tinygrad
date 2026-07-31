@@ -586,11 +586,19 @@ def rangeify_on_store(ctx, x:UOp):
   rngs = [UOp.range(s, next(ctx)) for s in x.shape]
   return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
 
+def index_on_stack(stack:UOp, idx:UOp):
+  srcs = [s.index(*idx.src[2:]) for s in stack.src]
+  r0 = idx.src[1]
+  ret = srcs[-1]
+  for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
+  return ret
+
 pm_simple_rangeify = PatternMatcher([
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
+  (UPat(Ops.STACK, name="stack").index(name="idx", allow_any_len=True), index_on_stack),
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
