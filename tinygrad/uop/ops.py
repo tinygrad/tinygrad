@@ -991,8 +991,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def val(self) -> int: return self.unbind()[1]
   def variables(self) -> list[Variable]:
-    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU},
-                  key=lambda v: v.expr)
+    return sorted({x if x.op is Ops.PARAM else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype)
+                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or x.op is Ops.PARAM
+                   and x.arg.addrspace is AddrSpace.ALU}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
