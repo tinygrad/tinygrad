@@ -259,6 +259,50 @@ if __name__ == "__main__":
   err = (c.float() - ref).abs().max().item()
   print(f"identity exact, random max err: {err:.5f}")
 
+  # ---- benchmark mode: kittens hk_bf16_gemm vs tinygrad stages={1,2} vs the default scheduled gemm ----
+  # run on real hardware with:  DEV=AMD:HIP:gfx950 DEBUG=2 HK_BENCH=1 python extra/gemm/hk_gemm_frag.py
+  # sizes via HK_SIZES="2048x2048x2048,4096x4096x4096" (default 2048 cubed), iteration count via ITERS=20.
+  # timings come from GlobalCounters.time_sum_s (sum of kernel times; same source as the DEBUG=2 'tm' column).
+  if getenv("HK_BENCH"):
+    from tinygrad.helpers import GlobalCounters
+    from extra.gemm.cdna_asm_gemm import asm_gemm
+    from tinygrad import Device
+    dev, iters, warm = Device.DEFAULT, getenv("ITERS", 20), 3
+    arch = Device[dev].renderer.target.arch
+    assert arch.startswith("gfx9"), "CDNA only"
+    def bench(label:str, fn, M:int, N:int, K:int) -> float:
+      try:
+        for _ in range(warm): fn()
+        Device[dev].synchronize()
+        GlobalCounters.reset()
+        import time
+        t0 = time.perf_counter()
+        for _ in range(iters): fn()
+        Device[dev].synchronize()
+        wall = time.perf_counter() - t0
+      except Exception as e:
+        print(f"    {label:32s}  unsupported/failed: {type(e).__name__}: {e}")
+        return float('nan')
+      # prefer kernel-side time (GlobalCounters matches the DEBUG=2 'tm' column); fall back to wall clock
+      ms = (GlobalCounters.time_sum_s if GlobalCounters.time_sum_s > 0 else wall) * 1e3 / iters
+      tf = 2*M*N*K / (ms * 1e-3) / 1e12
+      print(f"    {label:32s} {ms:9.3f} ms  {tf:8.1f} TFLOPS")
+      return tf
+    for (M, N, K) in [tuple(map(int, s.split("x"))) for s in getenv("HK_SIZES", "2048x2048x2048").split(",")]:
+      print(f"  size ({M},{N},{K}), grid {M//BLOCK_M}x{N//BLOCK_N} WGs, amt={K//K_STEP} k-tiles/WG")
+      np.random.seed(0)
+      An, Bn = np.random.randn(M, K), np.random.randn(K, N)
+      A = Tensor(An, dtype=dtypes.bfloat16).contiguous().realize()          # (M,K)
+      Bk = Tensor(Bn, dtype=dtypes.bfloat16).contiguous().realize()          # (K,N) for kittens
+      Bt = Bk.T.contiguous().realize()                                       # (N,K) for ours
+      tf_kc = bench("kittens hk_bf16_gemm (asm_gemm)", lambda: asm_gemm(A, Bk).realize(), M, N, K)
+      tf_s1 = bench("tiny stages=1", lambda: hk_bf16_gemm_tiny(A, Bt, stages=1).realize(), M, N, K)
+      tf_s2 = bench("tiny stages=2", lambda: hk_bf16_gemm_tiny(A, Bt, stages=2).realize(), M, N, K)
+      tf_df = bench("tinygrad default (a @ Bt.T)", lambda: (A @ Bt.T).realize(), M, N, K)
+      err = (hk_bf16_gemm_tiny(A, Bt, stages=2).float() - asm_gemm(A, Bk).float()).abs().max().item()
+      print(f"    correctness tiny-s2 vs kittens max diff: {err:.5f}")
+      for nm, tf in [("s1", tf_s1), ("s2", tf_s2), ("default", tf_df)]:
+        if tf == tf and tf_kc == tf_kc: print(f"    tiny {nm:8s}/kittens: {tf/tf_kc:6.2%}")
   # match the real HipKittens hk_bf16_gemm on the (mock) CDNA4 emulator at small sizes.
   # run from the repo root with:  DEV=MOCK+AMD:HIP:gfx950 HK_COMPARE=1 python extra/gemm/hk_gemm_frag.py
   if getenv("HK_COMPARE"):
