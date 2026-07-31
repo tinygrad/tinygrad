@@ -2027,7 +2027,9 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
 
   stores: list[UOp] = []
   if is_lds and not is_store:
-    # LDS load: buffer -> LDS (bypass VGPRs), LDS addr = M0[17:0] + lane * elem_size
+    # LDS load: buffer -> LDS (bypass VGPRs), LDS addr = M0[17:0] + lane * elem_size.
+    # HW never takes a per-lane LDS address: kittens' direct fill sets M0 (s_mov_b32 m0, sN)
+    # before every lds instruction, giving lane-linear chunks with the swizzle on the GLOBAL side.
     lds_base = ctx.rsgpr_dyn(_c(124)) & _c(0x3FFFF)
     lds_addr = lds_base + lane.cast(dtypes.uint32) * _c(n_dwords * 4)
     for i in range(n_dwords):

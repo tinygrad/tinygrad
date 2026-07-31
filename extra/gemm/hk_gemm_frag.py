@@ -66,7 +66,7 @@ NOTE 3: swizzled addresses are written in provably-contiguous "base + vector-off
 otherwise the devectorizer emits scalar ds_read_u16/ds_write_b16.
 """
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.uop.ops import UOp, AxisType, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, cdiv
@@ -147,6 +147,14 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
 
   # ---- pipelined path (stages=2) ----
   NIT = cdiv(OPS_PER_TILE, NUM_THREADS)      # copy ops per thread per tile
+  def setprio(n:int, slot:int) -> UOp:
+    """__builtin_amdgcn_s_setprio(n), like gemm_bf16.cpp: raise warp priority for the mma phase
+    so global/LDS traffic of the other waves doesn't starve issue slots."""
+    # distinct src slot per call site so identical-priority instructions at different k-tiles
+    # don't get UOp-hash-deduped into one placement (s_setprio is position-sensitive)
+    return UOp(Ops.CUSTOMI, dtypes.void, src=(UOp.const(dtypes.weakint, slot), UOp.const(dtypes.weakint, n)),
+               arg="__builtin_amdgcn_s_setprio({1}); // {0}")
+
   def gload_write_tile(dst:UOp, src:UOp, base_row:UOp, kt, slot:int) -> UOp:
     """store one global tile into an LDS slot (loads and stores share the vec range j)."""
     j = UOp.range(CPV, slot, AxisType.UPCAST)
@@ -202,46 +210,86 @@ def hk_bf16_gemm_kernel(C:UOp, A:UOp, B:UOp, *, arch:str, stages:int=1) -> UOp:
 
     TILE_ELEMS = BLOCK_M * K_STEP
     def copy_stage(dst:UOp, slot_off:UOp, src:UOp, base_row:UOp, kt, slot:int) -> UOp:
-      """store one global tile into dst + slot_off (flat element offset -- slot_off = parity*TILE_ELEMS)."""
-      j = UOp.range(CPV, slot, AxisType.UPCAST)
+      """store one global tile into dst + slot_off (flat element offset -- slot_off = parity*TILE_ELEMS).
+
+      Each thread's 8-element chunk is a single buffer_load_lds direct-to-LDS instruction
+      (the kittens '... offen lds' fill path), emitted via Ops.CUSTOMI so it bypasses the
+      devectorizer (a SHRINK store of a SHRINK load gets expanded to scalars before render)."""
       ir = UOp.range(cdiv(OPS_PER_TILE, NUM_THREADS), slot+1, AxisType.LOOP)
       chunk = ir*NUM_THREADS + tid
       r, cc = chunk // OPR, chunk % OPR
-      return dst[slot_off + st_half_base(r, perm_col(cc*CPV), K_STEP) + j].store(src[base_row + r, kt*K_STEP + cc*CPV + j]).end(ir, j)
+      if getenv("HK_G2L", 0) == 3:
+        # direct-to-LDS fill (kittens '... offen lds' path): the hardware writes each lane's
+        # chunk to the lane-linear LDS address (M0 + lane*size), so the swizzle is moved to
+        # the GLOBAL side: lane q's 16B chunk fetches the matrix element that st_half_base
+        # maps to the tile-linear position q. Verified bijective; the fragment-read layout
+        # (and therefore the read swizzle) is unchanged.
+        chunk = ir*NUM_THREADS + tid
+        p_ = chunk * CPV                             # tile-linear halves position of this lane's chunk
+        sub = p_ >> 9                                # 16x32 subtile id (512 halves)
+        r16 = (p_ & 511) >> 5
+        flip = (r16 >> 3) & 1
+        cb = ((p_ & 31) >> 2) ^ (flip << 2)
+        r_ = (sub >> 1) * 16 + r16
+        c_ = cb*4 + (sub & 1) * 32                   # global column (8-aligned)
+        off_g = (base_row + r_) * K + kt*K_STEP + c_
+        lds_el = slot_off + ir*NUM_THREADS*CPV       # elements; &buf[el*8] = chunk base byte addr
+        # feed the raw PARAM (unwrapping the scheduler's RESHAPE view, which would otherwise
+        # live unfused into the program and fail spec: 'movement ops not allowed in programs').
+        prm = src
+        while prm.op is not Ops.PARAM and len(prm.src): prm = prm.src[0]
+        nbytes = prm.max_numel() * prm.dtype.itemsize
+        gname = f"data{prm.arg.slot}_{prm.max_numel()}"
+        return UOp(Ops.CUSTOMI, dtypes.void, src=(prm, dst, lds_el, off_g),
+                   arg=(f"llvm_amdgcn_raw_buffer_load_lds(make_srsrc_((void*){gname}, {nbytes}), "
+                        f"(as3_uint32_ptr)(&({{1}}[({{2}})])), {CPV*2}, ((unsigned)({{3}}))*2U, 0, 0, 0);")).end(ir)
+      # default: elementwise global->LDS stores
+      off_l = slot_off + st_half_base(r, perm_col(cc*CPV), K_STEP)
+      off_g = (base_row + r) * K + kt*K_STEP + cc*CPV
+      j = UOp.range(CPV, slot, AxisType.UPCAST)
+      return dst[off_l + j].store(src[base_row + r, kt*K_STEP + cc*CPV + j]).end(ir, j)
 
     ZERO = UOp.const(dtypes.weakint, 0)
     # prologue: tile 0 into slot 0 of both buffers, barrier before first read
     g0 = UOp.group(copy_stage(A_l, ZERO, A, by*BLOCK_M, ZERO, 100),
                    copy_stage(B_l, ZERO, B, bx*BLOCK_N, ZERO, 110))
     bar0 = UOp.barrier(g0)
-    # Double-buffered pipeline with symbolic-parity slot indexing (FA/gemm_fragment
-    # conventions): slot ko%2 holds k-tile ko; compute of tile ko overlaps the prefetch
-    # copy of tile ko+1 into the other slot. No fill iteration, no predication, one static
-    # store per slot scope, add_war_barrier protects each hand-off.
-    # NOTE: this requires pm_split_ranges to split the ko LOOP range at the (ko % 2)
-    # boundary (ko -> 2 inner iterations with static parity per body). Without the split
-    # the parity stays symbolic, the LDS swizzle decomposition masks it with (x & 8191)<<2
-    # style chains, the devectorizer scalarizes all fragment reads/copies
-    # (DS_READ_U16/DS_WRITE_B16 -> mis-addressed + 2 mfma's lost) and the kernel misfires.
-    ko = UOp.range(amt, 600, AxisType.LOOP)
-    pr, pn = ko % 2, (ko+1) % 2                      # slot of the tile being computed / being prefetched
-    kt_next = UOp.minimum(ko+1, amt-1)               # clamped tail prefetch (its data is unused)
-    # the prefetch of the NEXT tile is ordered only against the iteration chain (not the
-    # compute's fragment stores), so it can be issued BEFORE the wmma's and overlap them:
-    # its write slot is the one compute read TWO iterations ago (slot (ko-1)%2 == (ko+1)%2),
-    # and the loop-end raw/war barrier covers the hand-off (write(ko) -> read(ko+1)).
-    # flat slot indexing (parity * TILE_ELEMS) keeps the swizzled fragment base in
-    # "chunk base + vector offset" form so the devectorizer keeps ds_read/ds_write_b128;
-    # A_l[pr][...] (leading-dim select on the (2, tile) view) scalarizes to ds_read_u16.
-    pa, pb = A_l.after(bar0, ko), B_l.after(bar0, ko)
-    ga = UOp.group(copy_stage(pa, pn*TILE_ELEMS, A, by*BLOCK_M, kt_next, 130),
-                   copy_stage(pb, pn*TILE_ELEMS, B, bx*BLOCK_N, kt_next, 140))
-    last = compute(acc, pa, pb, afters=(ko,), aoff=pr*TILE_ELEMS, boff=pr*TILE_ELEMS)
-    # one barrier per k-tile hand-off (like stages=1): covers write(ko)->read(ko+1), and
-    # read(ko)->write(ko+1) is safe because (ko+1)%2 slot was fully read at iteration ko-1
-    # which is closed by the ko-1 barrier. The prefetch rides IN FRONT of the wmma's and
-    # overlaps them; there is no barrier between the copy and the compute in an iteration.
-    acc = acc.after(UOp.group(last, ga).barrier().end(ko))
+    # Double-buffered pipeline: slot ko%2 holds k-tile ko; the prefetch copy of tile ko+1
+    # (into the other slot) rides IN FRONT of the wmma's and overlaps them; one barrier per
+    # k-tile hand-off covers write(ko)->read(ko+1) [and read(ko)->write(ko+1) is closed by
+    # the ko-1 barrier already]. The parities/offsets are static python constants when
+    # HK_UNROLL (default on): straight-line like the kittens main loop; the rolled variant
+    # uses pm_split_ranges to split the ko LOOP range at the (ko % 2) boundary.
+    if getenv("HK_UNROLL", 1) and amt % (UN := getenv("HK_UNROLL_U", 8)) == 0:
+      # outer rolled loop of amt//U iterations, U python-unrolled k-tiles inside: nearly the
+      # kittens straight-line node shape (one barrier per k-tile) at a fraction of the
+      # full-unroll uop count (full unroll of amt=64 needs ~12 min of schedule time; U=8
+      # keeps every tile's prefetch + compute + hand-off barrier but stays seconds).
+      ko_o = UOp.range(amt // UN, 600, AxisType.LOOP)
+      pa, pb = A_l.after(bar0, ko_o), B_l.after(bar0, ko_o)
+      for i in range(UN):
+        kt = ko_o * UN + i
+        pr, pn = (i % 2) * TILE_ELEMS, ((i + 1) % 2) * TILE_ELEMS
+        kt_next = UOp.minimum(kt + 1, amt - 1)
+        ga0 = UOp.group(copy_stage(pa, UOp.const(dtypes.weakint, pn), A, by*BLOCK_M, kt_next, 300 + 4*i),
+                        copy_stage(pb, UOp.const(dtypes.weakint, pn), B, bx*BLOCK_N, kt_next, 302 + 4*i))
+        sp_hi = setprio(1, 300 + 4*i)                      # kittens: raised prio for the mma phase
+        last = compute(acc, pa, pb, afters=(ko_o, sp_hi), aoff=UOp.const(dtypes.weakint, pr), boff=UOp.const(dtypes.weakint, pr))
+        sp_lo = setprio(0, 301 + 4*i)
+        handoff = UOp.group(last, sp_lo, ga0).barrier()
+        acc = acc.after(handoff)
+        pa, pb = A_l.after(handoff, ga0), B_l.after(handoff, ga0)
+      acc = acc.after(UOp.group(handoff).end(ko_o))
+    else:
+      ko = UOp.range(amt, 600, AxisType.LOOP)
+      pr, pn = ko % 2, (ko+1) % 2                    # slot of the tile being computed / being prefetched
+      kt_next = UOp.minimum(ko+1, amt-1)             # clamped tail prefetch (its data is unused)
+      pa, pb = A_l.after(bar0, ko), B_l.after(bar0, ko)
+      ga = UOp.group(copy_stage(pa, pn*TILE_ELEMS, A, by*BLOCK_M, kt_next, 130),
+                     copy_stage(pb, pn*TILE_ELEMS, B, bx*BLOCK_N, kt_next, 140))
+      sp_hi = setprio(1, 150)
+      last = compute(acc, pa, pb, afters=(ko, sp_hi), aoff=pr*TILE_ELEMS, boff=pr*TILE_ELEMS)
+      acc = acc.after(UOp.group(last, setprio(0, 151), ga).barrier().end(ko))
 
   # ---- epilogue: per-thread fragment stores, cast to bf16 (scalar per fragment element) ----
   mt, nt = UOp.range(MT, 801, AxisType.LOOP), UOp.range(NT, 802, AxisType.LOOP)

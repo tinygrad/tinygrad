@@ -236,7 +236,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
-      if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
+      if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK} or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -474,6 +474,42 @@ class NVCCRenderer(CUDARenderer):
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
+def _g2l_parts(u:UOp) -> tuple[UOp, UOp, UOp, UOp]|None:
+  """STORE(local[li]) <- LOAD(global[gi]) (scalar INDEX or vec SHRINK): a global->shared copy expressible
+  as one buffer_load_lds (direct-to-LDS) instruction on gfx9.4+. Returns (buf, lidx, gbuf, gidx)."""
+  if u.op is not Ops.STORE or len(u.src) != 2: return None
+  li, ld = u.src
+  if li.op is Ops.INDEX and li.addrspace == AddrSpace.LOCAL and len(li.src) == 2: buf, idx = li.src
+  elif li.op is Ops.SHRINK and li.src[1].dtype is not None and li.src[0].addrspace == AddrSpace.LOCAL: buf, idx = li.src[0], li.src[1]
+  else: return None
+  if ld.op is not Ops.LOAD or len(ld.src) != 1: return None
+  gi = ld.src[0]
+  if gi.op is Ops.INDEX and gi.addrspace == AddrSpace.GLOBAL and len(gi.src) == 2: gbuf, gidx = gi.src
+  elif gi.op is Ops.SHRINK and gi.src[0].addrspace == AddrSpace.GLOBAL: gbuf, gidx = gi.src[0], gi.src[1]
+  else: return None
+  if li.dtype.scalar() != ld.dtype.scalar(): return None
+  return buf, idx, gbuf, gidx
+
+def _g2l_match(u:UOp) -> bool: return _g2l_parts(u) is not None
+
+def _render_g2l_lds(ctx, u:UOp) -> str|None:
+  if (parts := _g2l_parts(u)) is None: return None
+  buf, idx, gbuf, gidx = parts
+  sz = u.src[0].dtype.itemsize   # whole copy size in bytes (16 for an 8xbf16 chunk)
+  esz = u.src[0].dtype.scalar().itemsize
+  return (f"llvm_amdgcn_raw_buffer_load_lds(make_srsrc_((void*){ctx[gbuf]}, {gbuf.max_numel()*gbuf.dtype.itemsize}), "
+          f"(as3_uint32_ptr)(&({ctx[buf]}[({ctx[idx]})])), {sz}, ((unsigned)({ctx[gidx]}))*{esz}U, 0, 0, 0);")
+
+G2L_LDS_DECLS = [
+  "typedef int int32x4_t __attribute__((ext_vector_type(4)));",
+  "typedef __attribute__((address_space(3))) unsigned* as3_uint32_ptr;",
+  ("extern __attribute__((device)) void\n"
+   "llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc, as3_uint32_ptr lds_ptr, int size, int voffset, int soffset, int offset, int aux)\n"
+   ' __asm("llvm.amdgcn.raw.buffer.load.lds");'),
+  """static inline __attribute__((device)) int32x4_t make_srsrc_(const void* p, unsigned rb) {
+  int32x4_t r = {(int)(unsigned long)p, (int)(((unsigned long)p)>>32), (int)rb, 0x110000};
+  return r;\n}"""]
+
 class HIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
@@ -491,6 +527,8 @@ class HIPRenderer(CStyleLanguage):
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
+        # direct global->LDS copies (buffer_load_lds), skipping the register round-trip
+        (UPat(Ops.STORE, name="st"), lambda ctx,st: _render_g2l_lds(ctx, st) if getenv("HK_G2L") else None),
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
           f" {fp8_index(x.src[0].dtype)}, {fp8_index(x.src[0].dtype)}, 0, 0, 0, 0)" if x.arg[0][2] == 128 else None),
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
@@ -536,6 +574,9 @@ class HIPRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix, ockl = [], []
+    g2l_used = any(_g2l_match(u) for u in uops) or \
+      any(u.op is Ops.CUSTOMI and isinstance(u.arg, str) and u.arg.startswith("llvm_amdgcn_raw_buffer_load_lds") for u in uops)
+    if self.is_cdna(self.target.arch) and g2l_used: prefix += G2L_LDS_DECLS
     type_map = { dtypes.bfloat16: "bf16", dtypes.float: "f32", dtypes.half: "f16", dtypes.fp8e4m3: "_fp8_fp8", dtypes.fp8e5m2: "_bf8_bf8" }
     used_dtypes = uops_to_dtypes(uops)
     if any(u.op is Ops.CONST and not math.isfinite(u.arg) for u in uops):
