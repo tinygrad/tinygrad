@@ -501,7 +501,7 @@ jobs:
 
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
-    runs-on: [self-hosted, Linux, comma4]
+    runs-on: [self-hosted, Linux, ci-tinyc6]
     timeout-minutes: 20
     defaults:
       run:
