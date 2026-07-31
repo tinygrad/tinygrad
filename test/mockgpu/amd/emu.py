@@ -6,7 +6,7 @@
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
-import ctypes, functools, re, platform, subprocess, tempfile
+import ctypes, functools, re, platform, subprocess, tempfile, os
 from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
@@ -2269,6 +2269,18 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
             # All waves have either hit barrier or endpgm — release barrier waves for next round
+            if os.getenv("EMU_DUMP_ROUNDS") and lds_size > 0 and total_inst < int(os.getenv("EMU_DUMP_ROUNDS")):
+              import numpy as _np
+              lds_words = _np.frombuffer((ctypes.c_uint32 * (lds_size//4)).from_address(lds_buf._buf.va_addr), dtype=_np.uint32)
+              nz = _np.argwhere(lds_words != 0)
+              print(f"[emu-dump] round={total_inst} lds nonzero words={len(nz)}",
+                    (f"first16={[f'w{w}:0x{lds_words[w]:08x}' for w in nz[:16].flatten()]}" if len(nz) else ""), flush=True)
+              for wi2, (st2, _) in enumerate(waves):
+                v = _np.frombuffer((ctypes.c_uint32 * (256*st2.wave_size)).from_address(st2.vgpr_buf._buf.va_addr), dtype=_np.uint32)
+                if st2.wave_size == 64:
+                  av = _np.frombuffer((ctypes.c_uint32 * (256*st2.wave_size)).from_address(st2.accvgpr_buf._buf.va_addr), dtype=_np.uint32)
+                else: av = _np.zeros(1, dtype=_np.uint32)
+                print(f"[emu-dump]   wave{wi2} vgpr nonzero={int((v!=0).sum())} accvgpr nonzero={int((av!=0).sum())}", flush=True)
           else: raise RuntimeError("exceeded 10M total scheduling rounds")
           tracing = False  # only trace the first workgroup
 
