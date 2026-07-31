@@ -168,8 +168,7 @@ class TestVminVmaxProperties(unittest.TestCase):
 
   def test_vmin_vmax_invalid_vconst(self):
     x = UOp.const(dtypes.weakint, (0, 4, Invalid, Invalid))
-    self.assertLess(x.vmin, 0)
-    self.assertGreater(x.vmax, 4)
+    self.assertEqual((x.vmin, x.vmax), (0, 4))
 
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):

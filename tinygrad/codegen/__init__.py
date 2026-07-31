@@ -1,9 +1,9 @@
 from dataclasses import replace, dataclass
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import AxisType
+from tinygrad.uop.ops import AxisType, pm_commit_weak
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -21,12 +21,13 @@ from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, Mem2RegContext, pm_mem2reg_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
-from tinygrad.uop.ops import _align_left, _broadcast_shape, identity_element
+from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -88,25 +89,20 @@ expander2 = PatternMatcher([
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
-def broadcast_binary(x:UOp):
+def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
   if any(s is None for s in shapes) or all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
-  return x.replace(src=tuple(src_reshaped))
+  shape = _broadcast_shape(*shapes)
+  return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
   shapes = [u.shape[:-1] for u in b.src]
   if all_same(shapes): return None
-  shaped_aligned = _align_left(*shapes)
-  broadcasted = _broadcast_shape(*shapes)
-  src_reshaped = [u.reshape(shp+(u.shape[-1],)).expand(broadcasted+(u.shape[-1],))
-                  for u,shp in zip(b.src, shaped_aligned)]
+  shape = _broadcast_shape(*shapes)
+  src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
   for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in src_reshaped])))
+    src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
 pm_wmma_add = PatternMatcher([
@@ -119,19 +115,19 @@ pm_wmma_add = PatternMatcher([
     lambda wmma,reshape,permute,add: (wmma + add.permute(argsort(permute.arg)).reshape(wmma.shape)).reshape(reshape.shape).permute(permute.arg)),
 ])
 
-unbroadcast = pm_wmma_add+PatternMatcher([
-  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+pm_expand_broadcast = pm_wmma_add+PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked
-  if not all_same([x.shape for x in b.src]): return None
+  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
+  if not all(x.shape == b.shape or x.base.arg is Invalid for x in b.src): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
-    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
+    idx_c = [UOp.const(None, i) for i in idx]
+    src.append(b.replace(dtype=None, src=tuple(x.base if x.base.arg is Invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -140,7 +136,7 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp.stack(*[b.index(UOp.const(dtypes.weakint, i)) for i in range(b.max_numel())]))
+      src.append(UOp.stack(*[b.index(i) for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -166,7 +162,7 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # RESHAPE a void is removed (hack for AFTER)
   (UPat(Ops.RESHAPE, dtype=dtypes.void, name="x"), lambda x: x.src[0]),
   # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(UOp.const(dtypes.weakint, 0)) if x.marg == () and x.src[0].shape == (1,) else None),
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> STACK
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
    lambda x,out: UOp.stack(*([x]*out.max_numel())) if x.shape == () and out.shape == (out.max_numel(),) else None),
@@ -247,7 +243,7 @@ pm_add_loads = PatternMatcher([
 
 def add_local_buffer(ctx, x:UOp):
   buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
-  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]).barrier())
+  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
@@ -260,13 +256,42 @@ pm_cast_float_alu = PatternMatcher([
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
+def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
+
+def add_raw_barrier(after:UOp):
+  # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
+  if after.addrspace is not AddrSpace.LOCAL: return None
+  # one toposort over all the deps
+  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER)
+  if not any(_is_local_store(x) for x in deps): return None
+  return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
+
+def add_war_barrier(end:UOp):
+  # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
+  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.arg[1] in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
+  if not rngs or end.src[0].op is Ops.BARRIER: return None
+  sl = end.src[0].backward_slice_with_self
+  # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
+  store_bufs = {x.buf_uop for x in sl if _is_local_store(x) and any(r in x.ranges for r in rngs)}
+  # a load whose buffer matches a local store's buffer is necessarily a local load
+  if not (loads:=[x for x in sl if x.op is Ops.LOAD and x.src[0].buf_uop in store_bufs]): return None
+  return end.replace(src=(UOp(Ops.BARRIER, src=(end.src[0], *loads)),)+end.src[1:])
+
+pm_implicit_barriers = PatternMatcher([
+  (UPat(Ops.AFTER, name="after"), add_raw_barrier),
+  (UPat(Ops.END, name="end"), add_war_barrier),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
+  # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
+  sink = graph_rewrite(ast, multi_pm, name="multi_pm")
+
   # preprocess
-  sink = graph_rewrite(ast, pm_mops, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -302,7 +327,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+unbroadcast+pm_add_loads, name="*** unbroadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
@@ -333,11 +358,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
+  pm_decomp = symbolic_simple+pm_commit_weak+get_simplifying_rewrite_patterns(supported_ops)
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
@@ -348,6 +373,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
+
+  # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
@@ -410,8 +438,7 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
-  new_arg = replace(prg.arg, aux=tuple(ctx.aux(list(lin.src)))) if ctx.has_aux else prg.arg
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if DEBUG >= 4: print(source.arg)
@@ -444,7 +471,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prog_info = ProgramInfo.from_sink(full_sink)
+    prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
@@ -452,14 +479,14 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
+  config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT)
   key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

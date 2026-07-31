@@ -50,8 +50,7 @@ def _dequant_fwd_fxn(wq_p, ws_p, device):
   return _dequant_fwd(Tensor(wq_p, device=device), Tensor(ws_p, device=device))
 
 def _dequant_bwd(grad:UOp, call:UOp) -> tuple:
-  w_scale = Tensor(call.src[2])
-  return ((Tensor(grad).cast(dtypes.bfloat16) * _mx_scale(w_scale).cast(dtypes.bfloat16)).uop, None)
+  return (Tensor(grad).cast(dtypes.bfloat16).uop, None)
 
 def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)

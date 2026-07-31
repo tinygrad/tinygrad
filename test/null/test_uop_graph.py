@@ -248,6 +248,14 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
 
+  def test_devectorize_derives_lane_dtype(self):
+    from tinygrad.codegen import do_devectorize
+    # an Invalid lane derives bool while the value lane derives float: the lane rebuild must derive, not inherit
+    lhs = UOp.stack(UOp.invalid(), UOp.const(None, 1.0).cast(dtypes.float))
+    out = do_devectorize(lhs * lhs)
+    invalid_lane_mul = next(u for u in out.src[0].toposort() if u.op is Ops.MUL)
+    self.assertIs(invalid_lane_mul.dtype, dtypes.bool)
+
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
     d0 = UOp.param(0, dtypes.float, (1,))
@@ -424,8 +432,8 @@ class TestUOpGraph(unittest.TestCase):
     # mnist indexing with split reduceop
     # Make sure we are not doign math on the loaded index, which would promote it to long
     c0 = UOp.param(0, dtypes.uchar, (128000,))
-    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.WEAK)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
@@ -441,8 +449,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_idx_no_math_on_loaded(self):
     # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
     c0 = UOp.param(0, dtypes.uchar, (128000,))
-    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.WEAK)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, (512,))
     c4 = c3.index(c1)  # c4 is a load
     c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)

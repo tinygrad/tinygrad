@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEFAULT_FLOAT, DEFAULT_INT
 from enum import IntEnum, auto
 
 class ConstFloat(float):
@@ -83,7 +83,7 @@ class DType(metaclass=DTypeMetaClass):
     return ConstFloat(float(val)) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
 
 
-class dtypes:
+class DTypes:
   @staticmethod
   @functools.cache
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
@@ -99,10 +99,10 @@ class dtypes:
   def from_py(x) -> DType:
     # NOTE: isinstance(True, int) is True, so bool must be checked before int
     if isinstance(x, (bool, InvalidType)): return dtypes.bool
-    if isinstance(x, float): return dtypes.default_float
-    if isinstance(x, int): return dtypes.default_int
+    if isinstance(x, float): return dtypes.weakfloat
+    if isinstance(x, int): return dtypes.weakint
     # put this in the last is faster because there are more items than lists/tuples to check
-    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)): return strong_dtype(max(dtypes.from_py(xi) for xi in x)) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -111,7 +111,7 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # NOTE: not in the promo lattice: index math never mixes dtypes
+  weakint: Final[DType] = DType.new(0, 800, "weakint", None)  # the weak int position in the promo lattice
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
@@ -129,7 +129,6 @@ class dtypes:
   fp8e4m3fnuz: Final[DType] = DType.new(10, 8, "float8_e4m3fnuz", None)
   fp8e5m2fnuz: Final[DType] = DType.new(11, 8, "float8_e5m2fnuz", None)
   float16: Final[DType] = DType.new(12, 16, "half", 'e')
-  # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType.new(13, 16, "__bf16", None)
   float32: Final[DType] = DType.new(14, 32, "float", 'f')
   float64: Final[DType] = DType.new(15, 64, "double", 'd')
@@ -139,8 +138,10 @@ class dtypes:
   uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
   char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
-  default_float: ClassVar[DType] = float32
-  default_int: ClassVar[DType] = int32
+  @property
+  def default_float(self) -> DType: return to_dtype(DEFAULT_FLOAT.value)
+  @property
+  def default_int(self) -> DType: return to_dtype(DEFAULT_INT.value)
 
   fp8_ocp = (fp8e4m3, fp8e5m2)
   fp8_fnuz = (fp8e4m3fnuz, fp8e5m2fnuz)
@@ -153,24 +154,25 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  weaks = (weakfloat,)
+  weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
-if (env_default_float := getenv("DEFAULT_FLOAT", "")):
-  dtypes.default_float = getattr(dtypes, env_default_float.lower())
-  assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
+dtypes = DTypes()
 
 DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
+assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a float dtype"
+assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
-  # TODO: weakint
-  return dtypes.default_float if dtype == dtypes.weakfloat else dtype
+  return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
+def weak_dtype(dtype:DType) -> DType:
+  return dtypes.weakfloat if dtypes.is_float(dtype) else dtypes.weakint if dtypes.is_int(dtype) else dtype
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support complex type
-# TODO: weakint
-promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
-  dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
+promo_lattice = { dtypes.bool: [dtypes.weakint], dtypes.weakint: [dtypes.int8, dtypes.uint8],
+  dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
+  dtypes.int64: [dtypes.weakfloat], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.weakfloat],
   dtypes.weakfloat: [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.fp8e4m3fnuz, dtypes.fp8e5m2fnuz],
   dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16],
@@ -183,9 +185,10 @@ def _get_recursive_parents(dtype:DType) -> set[DType]:
 @functools.cache
 def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
-def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
+def least_upper_float(dt:DType) -> DType:
+  return dtypes.weakfloat if dt is dtypes.weakint else dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
+DTYPES_DICT = {k: v for k, v in DTypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "weak", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "weakint":"weakint", "weakfloat":"weakfloat"}
 
 @functools.cache
@@ -209,7 +212,6 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
-  if dt in dtypes.weaks: return dt
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
@@ -305,6 +307,7 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 @functools.cache
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
+  dtype = strong_dtype(dtype)
   if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8

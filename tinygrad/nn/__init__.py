@@ -315,7 +315,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
-    grad_weight_uop = Tensor.empty(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.multi(axis=0)
+    grad_weight_uop = Tensor.empty(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.unshard(axis=0)
   else:
     # weight is replicated (or single device), grad_weight should match
     grad_weight_uop = Tensor.empty(weight.shape, dtype=dtypes.float, device=weight.device).uop
@@ -337,7 +337,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     BLOCK_J = min(256, embed_size)
     n_j_blocks = (embed_size + BLOCK_J - 1) // BLOCK_J
     i = UOp.range(grad_emb_flat.shape[0], 0)         # batch_size * sequence_length -> GLOBAL
-    j_inner = UOp.range(BLOCK_J, 2, AxisType.LOOP if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
+    j_inner = UOp.range(BLOCK_J, 2, AxisType.WEAK if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
     j_outer = UOp.range(n_j_blocks, 1)
     j = j_outer * BLOCK_J + j_inner
     # mask padded embed
@@ -346,7 +346,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.variable("_device_num", 0, ndev-1)
+      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)

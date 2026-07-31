@@ -2,7 +2,7 @@ import unittest, itertools
 
 from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, pm_lower_index_dtype
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
@@ -491,6 +491,16 @@ class TestImageSimplification(unittest.TestCase):
     idx = (r12*4 + (gidx0+3)%4 + (gidx0+3)//4*24 - 3888, UOp.const(dtypes.weakint, 0))
     load = get_load_image_uop((1, 48, 4), valid, idx)
     self.check(load, None, "(r12*4+(gidx0+3)%4+(gidx0+3)//4*24+-3888)", "0")
+
+  def test_drop_gate_committed_in_the_index_pass(self):
+    # the fused index pass runs without symbolic, so committing a weak src must not leave a CAST that
+    # symbolic later folds inside the index only: the gate's copy of the expression has to stay the same node
+    f = UOp.variable("f", 0.0, 9.0, dtypes.float)
+    idx_y = (f + UOp.const(None, 1.0)).cast(dtypes.int)
+    load = get_load_image_uop((10, 10, 4), (UOp.const(None, -1) < idx_y) & (idx_y < UOp.const(None, 10)),
+                              (Special("gidx0", 10), idx_y))
+    off = graph_rewrite(load.sink(), pm_lower_index_dtype+indexing_simplify, ctx={}).src[0].src[0]
+    self.assertEqual(off.src[1].get_valid(), UOp.const(dtypes.bool, True))
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):

@@ -28,8 +28,8 @@ def compile(onnx_file):
     inputs = {k:Tensor(v.numpy(), device=Device.DEFAULT).realize() if 'img' in k else v for k,v in inputs.items()}
   print("created tensors")
 
-  run_onnx_jit = TinyJit(lambda **kwargs:
-                         next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32'), prune=True)
+  @TinyJit(prune=True)
+  def run_onnx_jit(**kwargs): return next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32')
   for i in range(3):
     GlobalCounters.reset()
     print(f"run {i}")

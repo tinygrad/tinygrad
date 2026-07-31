@@ -169,7 +169,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
-                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
+                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
@@ -188,7 +188,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     for threads in [32,16,12,8,6,5,4,3,2]:
       # Skip if too many threads. Heuristic: use about 128K ops per thread
       if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
-      for axis in k.axes_of(AxisType.LOOP):
+      for axis in k.axes_of(AxisType.WEAK):
         if k.full_shape[axis] % threads == 0:
           try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
           except KernelOptError: pass

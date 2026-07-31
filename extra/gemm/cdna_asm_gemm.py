@@ -72,7 +72,7 @@ def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|
     elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=dtypes.bfloat16, device=a.device), 2
     elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=dtypes.bfloat16, device=a.device), 1
     else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
-    out = Tensor(inv.uop.multi(out_axis), device=a.device)
+    out = Tensor(inv.uop.unshard(out_axis), device=a.device)
     dname = a.device[0]
   else:
     out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device)
@@ -171,8 +171,8 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
-  m = UOp.range(M, 1, AxisType.LOOP)
-  n = UOp.range(N, 2, AxisType.LOOP)
+  m = UOp.range(M, 1)
+  n = UOp.range(N, 2)
   k = UOp.range(K, 0, AxisType.REDUCE)
   mul = (A.flatten().index((m*UOp.const(dtypes.weakint, K)+k))*
          B.flatten().index((k*UOp.const(dtypes.weakint, N)+n))).cast(dtypes.float32)
@@ -234,7 +234,7 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
     elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=a.dtype, device=a.device), 2
     elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=a.dtype, device=a.device), 1
     else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device), 0, True
-    out = Tensor(inv.uop.multi(out_axis), device=a.device)
+    out = Tensor(inv.uop.unshard(out_axis), device=a.device)
     dname = a.device[0]
   else:
     out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device)
@@ -366,11 +366,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
 
   if is_multi:
     if n_sharded:
-      out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.multi(2), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.unshard(2), device=a.device)
     elif m_sharded:
-      out = Tensor(Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device).uop.multi(1), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device).uop.unshard(1), device=a.device)
     else:
-      out = Tensor(Tensor.invalids(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.multi(0),
+      out = Tensor(Tensor.invalids(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.unshard(0),
                    device=a.device)
   else:
     out = Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device)

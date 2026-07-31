@@ -11,7 +11,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
-  if gate is None: gate = UOp.const(dtypes.bool, True)
+  if gate is None: gate = UOp.const(None, True)
   # TODO: check for overflow
   if not CHECK_OOB or is_image_shape(buf._shape): return True
 
@@ -44,7 +44,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
 # ***** new specs *****
-
+def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.arg is Invalid  # Invalid matches any dtype
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
@@ -59,27 +59,27 @@ spec_shared = PatternMatcher([
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
   (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
-   lambda s: all_same([x.shape for x in s.src]) and all(x.dtype == s.dtype for x in s.src)),
+   lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype in dtypes.weaks for x in s.src)),
 
   # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
-  # a weak dtype matches any dtype (TODO: make python scalars weak consts)
+  # a weak dtype matches any dtype until lowering commits its operand
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(), UPat())),
-   lambda w: all(s.dtype == w.dtype or s.dtype in dtypes.weaks for s in w.src[1:])),
+   lambda w: all(matches_dtype(s, w.dtype) or s.dtype in dtypes.weaks for s in w.src[1:])),
   (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
-   lambda x,y: x.dtype == y.dtype or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
+   lambda x,y: matches_dtype(x, y.dtype) or matches_dtype(y, x.dtype) or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
   (UPat((Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR), name="x"), lambda x: False if any(dtypes.is_float(s.dtype) for s in x.src) else None),
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype or None),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: matches_dtype(x, a.dtype) or None),
   (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(y.dtype == x.dtype or y.dtype in dtypes.weaks for y in x.src)),
+  (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype in dtypes.weaks for y in x.src)),
 
   # CAST
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
-    rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+    matches_dtype(x, rng.dtype) and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
-  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
+  (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.arg is Invalid for y in x.src[1:]) or None),
   # END closes RANGEs
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:]) or None),
   # a loop-ended END requires a trailing bool condition for the backedge (loop again while true)
@@ -95,15 +95,15 @@ spec_shared = PatternMatcher([
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.MULTI, Ops.BITCAST, Ops.INS})),),
-        allow_any_len=True), lambda: True),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+        allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # CALL of an external function
   (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),
-   lambda x: x.src[0].dtype is dtypes.uint64 if x.src[0].dtype is not dtypes.void else None),
+   lambda x: matches_dtype(x.src[0], dtypes.uint64) if x.src[0].dtype is not dtypes.void else None),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
@@ -117,7 +117,7 @@ spec_shared = PatternMatcher([
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
+   lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
@@ -130,8 +130,7 @@ spec_shared = PatternMatcher([
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
 
-def valid_gettuple(g:UOp, t:UOp):
-  return isinstance(g.arg, int) and 0 <= g.arg < len(t.src) and g.dtype == t.src[g.arg].dtype
+def valid_gettuple(g:UOp, t:UOp): return isinstance(g.arg, int) and 0 <= g.arg < len(t.src) and matches_dtype(t.src[g.arg], g.dtype)
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
@@ -139,11 +138,12 @@ spec_tensor = PatternMatcher([
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and buf.src[0].dtype == dtypes.weakint and is_device(buf.arg.device))
+   (isinstance(buf.dtype, DType) and matches_dtype(buf.src[0], dtypes.weakint) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.long, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.long,dtypes.weakint,))), arg=None),
+   lambda: True),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -158,10 +158,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
-
-  # inputs to movement ops
-  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.weakint),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
 
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat())), lambda: True),
@@ -173,19 +170,21 @@ spec_tensor = PatternMatcher([
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
    and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
-  # COPY. TODO: this should not have allow_any_len, but something is adding ranges
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"),), allow_any_len=True), lambda copy,x: copy.dtype == x.dtype and is_device(copy.arg)),
-  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, tuple) and
+  # COPY
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"),)), lambda copy,x: matches_dtype(x, copy.dtype) and is_device(copy.arg)),
+  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"),)), lambda red,x: matches_dtype(x, red.dtype) and isinstance(red.arg, tuple) and
    len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
-  # MULTI/MSELECT/MSTACK
-  (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
+  # UNSHARD/MSELECT/MSTACK
+  # an UNSHARD carries the value and one sharding range per sharded axis (usually a DEVICE RANGE, but can be a derived expression)
+  (UPat(Ops.UNSHARD, name="multi"), lambda multi: len(multi.src) == 1+len(multi.arg) and matches_dtype(multi.src[0], multi.dtype)
+    and all(isinstance(a, int) for a in multi.arg) and all(r.dtype in dtypes.weaks for r in multi.src[1:])),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
-   lambda root,x: root.dtype == x.dtype),
+   lambda root,x: matches_dtype(x, root.dtype)),
 
   # TODO: this should not be here. STAGE is transformed to BUFFER later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
@@ -222,7 +221,7 @@ spec_program = PatternMatcher([
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
   # SPECIAL is int32 after index lowering
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
 ])+spec_shared
 
 spec_hcq = PatternMatcher([

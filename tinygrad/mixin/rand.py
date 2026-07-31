@@ -21,7 +21,7 @@ class RandMixin(OpMixin):
     for i in range(0, num, dtypes.uint32.max):
       chunk_num = min(num - i, dtypes.uint32.max)
       c_low = low + (i & 0xffffffff)
-      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      c_high = high + (i >> 32) + (c_low < low)
       new_key = cls._threefry_random_bits(key, c_low, c_high)
       counts0 = cls.arange(ceildiv(chunk_num, 2), dtype=dtypes.uint32)
       counts1 = counts0 + ceildiv(chunk_num, 2)

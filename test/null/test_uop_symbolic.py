@@ -5,6 +5,7 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
 from tinygrad.uop.validate import uops_to_z3
 
@@ -346,6 +347,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_lt(self):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    c0, c1 = 2, 2**54+1
+    self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
+    c0, c1 = -2, -(2**54-1)
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
     self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
@@ -986,7 +993,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
 
   def test_bitcast_chain(self):
-    a = Variable("a", 0, 3)
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
 
   def test_negation_in_where(self):
@@ -1015,7 +1022,7 @@ class TestSymbolic(unittest.TestCase):
 
     # the vars are now scalar PARAMs
     pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<2).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
+    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(dtypes.int, 2)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
@@ -1330,7 +1337,8 @@ class TestInvalidIndex(unittest.TestCase):
   def test_invalid_times_0(self):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())*0
-    self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+    self.assertIs(idx.simplify(), (ridx<5).where(UOp.const(dtypes.weakint, 0), UOp.invalid()),
+                  "multiplying an index by 0 should preserve the invalid")
 
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
@@ -1384,11 +1392,7 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     idx = buf.index(a.valid(valid))
     expr = cond.where(idx, idx.const_like(0))
     out = graph_rewrite(expr, pm_move_where_on_load)
-    # any WHERE in the rewritten graph must have matched-dtype branches
-    for u in out.toposort():
-      if u.op is Ops.WHERE:
-        self.assertEqual(u.dtype, u.src[1].dtype, f"WHERE branch 1 dtype mismatch: {u}")
-        self.assertEqual(u.dtype, u.src[2].dtype, f"WHERE branch 2 dtype mismatch: {u}")
+    type_verify(out, spec_shared)  # Invalid matches any dtype
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):

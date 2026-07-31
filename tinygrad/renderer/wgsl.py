@@ -13,6 +13,8 @@ def sign_extend(val:UOp, sext_am:int):
 def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
   elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
+  # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
+  if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
   idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
   buf = UOp.load(idx, *((UOp.const(dtypes.uint32, 0), gate) if gate is not None else ()), dtype=dtypes.uint32)
@@ -47,7 +49,7 @@ wgsl_matcher = PatternMatcher([
    lambda b,var,gate,s: packed_store(b,var,gate) if is_packed(s) else None),
   (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
   (UPat.var("a") != UPat.var("a"), is_nan),
   ])

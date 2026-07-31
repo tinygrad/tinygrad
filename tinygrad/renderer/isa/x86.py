@@ -193,8 +193,9 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
+  # NOTE: the 0 is int so the bool gate zero-extends and compares as int (a byte compare renders different kernels)
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison else None),
+   lambda m,a,b: m.ne(UOp.const(dtypes.int, 0)).where(a,b) if m.op not in GroupOp.Comparison else None),
 ])
 
 # ***** X86 registers *****
@@ -803,7 +804,7 @@ class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = (NUM_CPU_THREADS.value, 0, 0)
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
