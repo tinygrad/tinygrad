@@ -520,7 +520,7 @@ jobs:
     - name: openpilot compile3 big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl
     - name: openpilot load_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py openpilot.pkl
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
     - name: openpilot run_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle RUN_PICKLE=1 PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py - openpilot.pkl
     - name: Test copy speeds
