@@ -46,10 +46,6 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 # ***** new specs *****
 def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.arg is Invalid  # Invalid matches any dtype
 
-def _unshard_spec(multi:UOp):
-  # structural validity of the factor args; UNSHARDs transiently rank-mangled by rangeify are resolved by multi_pm
-  return multi.arg is None and matches_dtype(multi.src[0], multi.dtype) \
-    and all(dtypes.is_int(f.dtype) for fs in multi.factors for f in fs)
 
 # ***** multi helpers *****
 
@@ -187,7 +183,9 @@ spec_tensor = PatternMatcher([
   # an UNSHARD carries the value and one factor arg per axis (a bare int UOp or a STACK of them). const factors are
   # LOCAL (their value is the span), factors containing RANGEs are OWNER factors (span vmax+1). the full shape is
   # the per-axis product of spans, the shard shape is the per-axis product of the local spans.
-  (UPat(Ops.UNSHARD, name="multi"), lambda multi: _unshard_spec(multi)),
+  # UNSHARDs transiently rank-mangled by rangeify are resolved by multi_pm, so the factor args are only structurally checked
+  (UPat(Ops.UNSHARD, name="multi"), lambda multi: multi.arg is None and matches_dtype(multi.src[0], multi.dtype) and
+   all(dtypes.is_int(f.dtype) for fs in multi.factors for f in fs)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
