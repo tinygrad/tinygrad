@@ -252,6 +252,7 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def is_link_patch(p:UOp, jit:bool) -> bool:
+  if p.tag == "link": return True
   store = p.src[0] if (is_binary_patch:=(p.op is Ops.END and p.src[0].op is Ops.STORE)) else p
   if not jit: return store.buf_uop.tag == "program"
   return is_binary_patch or (store.op is Ops.STORE and is_value_known_at_link(store.src[1]))
