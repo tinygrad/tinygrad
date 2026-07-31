@@ -682,36 +682,36 @@ class TestUOpGetItem(unittest.TestCase):
 
 class TestUOpBroadcast(unittest.TestCase):
   def test_broadcast_row(self):
-    a = UOp.const(1, dtypes.float, shape=(4, 8))
-    b = UOp.const(2, dtypes.float, shape=(4, 1))
+    a = UOp.const(1, dtypes.float).expand((4, 8))
+    b = UOp.const(2, dtypes.float).expand((4, 1))
     c = a + b
     self.assertEqual(c.shape, (4, 8))
     self.assertEqual(c.op, Ops.ADD)
 
   def test_broadcast_col(self):
-    a = UOp.const(1, dtypes.float, shape=(4, 8))
-    b = UOp.const(2, dtypes.float, shape=(1, 8))
+    a = UOp.const(1, dtypes.float).expand((4, 8))
+    b = UOp.const(2, dtypes.float).expand((1, 8))
     c = a + b
     self.assertEqual(c.shape, (4, 8))
     self.assertEqual(c.op, Ops.ADD)
 
   def test_broadcast_lower_dim(self):
-    a = UOp.const(1, dtypes.float, shape=(4, 8))
-    b = UOp.const(2, dtypes.float, shape=(8,))
+    a = UOp.const(1, dtypes.float).expand((4, 8))
+    b = UOp.const(2, dtypes.float).expand((8,))
     c = a * b
     self.assertEqual(c.shape, (4, 8))
     self.assertEqual(c.op, Ops.MUL)
 
   def test_broadcast_scalar(self):
-    a = UOp.const(1, dtypes.float, shape=(4, 8))
+    a = UOp.const(1, dtypes.float).expand((4, 8))
     c = a * 2
     self.assertEqual(c.shape, (4, 8))
     self.assertEqual(c.op, Ops.MUL)
 
   def test_broadcast_symbolic_same_shape(self):
     t = Variable("t", 1, 10)
-    a = UOp.const(1, dtypes.float, shape=(1, 1, t))
-    b = UOp.const(2, dtypes.float, shape=(1, 1, t))
+    a = UOp.const(1, dtypes.float).expand((1, 1, t))
+    b = UOp.const(2, dtypes.float).expand((1, 1, t))
     c = a + b
     self.assertEqual(c.op, Ops.ADD)
 
