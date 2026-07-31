@@ -162,7 +162,7 @@ class TestMXFP4(unittest.TestCase):
     b = Tensor.empty(N, K // 2, dtype=dtypes.uint8)
     scale_a = Tensor.empty(M, K // 32, dtype=dtypes.uint8)
     scale_b = Tensor.empty(N, K // 32, dtype=dtypes.uint8)
-    mxfp4_gemm(a, b, scale_a, scale_b).realize()
+    asm_gemm(a, b.T, mx_scales=(scale_a, scale_b)).realize()
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
