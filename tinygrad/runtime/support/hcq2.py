@@ -42,8 +42,9 @@ def unwrap_mstack(u):
   return unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> UOp:
-  return buf.index(UOp.stack(*(UOp.const(dtypes.int, off // buf.dtype.itemsize) for off,_ in patches))) \
-            .store(UOp.stack(*(val.simplify().cast(buf.dtype) for _,val in patches)))
+  offsets = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(dtypes.int, off // buf.dtype.itemsize) for off,_ in patches))
+  values = UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in patches))
+  return buf.index(offsets).store(values)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
@@ -51,13 +52,13 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   return buf.index(r).store(data.index(r).load()).end(r)
 
 def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
-  blob, patches = b'', []
+  blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
-    if (ssimp:=s.simplify()).op is not Ops.CONST: patches.append((len(blob), ssimp))
-    blob += struct.pack(f'<{ssimp.dtype.fmt}', ssimp.arg if ssimp.op is Ops.CONST else 0x0)
+    if s.op is not Ops.CONST: patches.append((len(blob), s))
+    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   writable = cmdbuf.after(dep) if dep is not None else cmdbuf
-  return cmdbuf.after(make_binary_patch(writable, blob), *((make_patches(writable, patches),) if patches else ()))
+  return cmdbuf.after(make_binary_patch(writable, bytes(blob)), *((make_patches(writable, patches),) if patches else ()))
 
 def make_signal(devs, queue="COMPUTE:0", sentinel=False):
   return UOp.placeholder((1,), dtypes.uint64, 0, device=devs, volatile=True).rtag("sentinel_signal" if sentinel else f"{queue}_timeline_signal")

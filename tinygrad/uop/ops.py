@@ -791,7 +791,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STACK:
         # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
-        return UOp(Ops.STACK, src=tuple(u.cast(dtype_from_uop(Ops.STACK, srcs, None)) for u in srcs))
+        dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
+        return UOp(Ops.STACK, dtype, tuple(u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
