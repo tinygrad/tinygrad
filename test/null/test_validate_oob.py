@@ -138,6 +138,14 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])  # oob
 
+  def test_load_from_shrink_as_index(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf0 = UOp.param(0, dtypes.int, (16,))
+      buf1 = UOp.param(1, dtypes.int, (64,))
+      shrink = UOp(Ops.SHRINK, src=(buf0, UOp.const(dtypes.int, 0), UOp.const(dtypes.weakint, 4)))
+      ld0 = shrink.load(dtype=dtypes.int).index(0)
+      to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])
+
   def test_load_bool_as_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, (16,))
