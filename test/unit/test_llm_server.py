@@ -3,9 +3,25 @@ from unittest.mock import patch
 from tinygrad import Tensor, UOp
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.serve import StreamRouter
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
+
+class TestStreamRouter(unittest.TestCase):
+  @staticmethod
+  def route(router:StreamRouter, *pieces:str) -> dict[str, str]:
+    routed = [x for piece in pieces for x in router.route(piece)]
+    routed += list(router.route("", final=True))
+    return {field:"".join(text for f, text in routed if f == field) for field in {x[0] for x in routed}}
+
+  def test_generated_reasoning_tag(self):
+    self.assertEqual(self.route(StreamRouter(), "<thi", "nk>reason", "</thi", "nk>answer"),
+                     {"reasoning_content":"reason", "content":"answer"})
+
+  def test_prompt_opened_reasoning(self):
+    self.assertEqual(self.route(StreamRouter(reasoning=True), "reason", "</thi", "nk>answer"),
+                     {"reasoning_content":"reason", "content":"answer"})
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_kv_cache_reuse(self):
