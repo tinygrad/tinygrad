@@ -132,7 +132,6 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   B_shared = B_shared.after(with_threads(B_shared).store(with_threads(b)))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA
-
   kk = UOp.range(BLOCK_K, 11, AxisType.LOOP)
   ir = UOp.range(TM, 12, AxisType.LOOP)
   jj = UOp.range(TN, 13, AxisType.UPCAST)

@@ -166,10 +166,14 @@ class TestFactorLayout(unittest.TestCase):
     st = self.resolve(dest.store(x))
     self.assertEqual(st.op, Ops.STORE)
     self.assertFalse([u for u in st.toposort() if u.op is Ops.UNSHARD])
-    # dest is factored to (2, 2, 4) and shrunk at this shard's owner coordinate; the value is the (1, 2, 4) shard
-    self.assertEqual(st.src[0].op, Ops.SHRINK)
-    self.assertEqual(st.src[0].src[0].op, Ops.RESHAPE)
-    self.assertTrue(st.src[0].marg[0][0] is drng and st.src[0].marg[0][1] == 1)  # SHRINK marg is (start, len)
+    # the value is stored as-is: all the shape bookkeeping lives on the dest side
+    self.assertIs(st.src[1], x.src[0])
+    # dest is factored to (2, 2, 4), shrunk at this shard's owner coordinate, then squeezed back to the local shape
+    self.assertEqual(st.src[0].op, Ops.RESHAPE)
+    subview = st.src[0].src[0]
+    self.assertEqual(subview.op, Ops.SHRINK)
+    self.assertEqual(subview.src[0].op, Ops.RESHAPE)
+    self.assertTrue(subview.marg[0][0] is drng and subview.marg[0][1] == 1)  # SHRINK marg is (start, len)
     self.assertEqual(st.src[0].shape, st.src[1].shape)
 
 

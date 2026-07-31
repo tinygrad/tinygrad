@@ -134,11 +134,12 @@ def factor_subview(full:UOp, multi:UOp, reshape_to:tuple[sint, ...]|None=None) -
   return view if reshape_to is None else view.reshape(reshape_to)
 
 def store_value_multi(dest:UOp, multi:UOp):
-  # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest
-  val_shape = tuple(1 if is_owner(f) else factor_span(f) for fs in multi.factors for f in fs)
-  dest, val = factor_subview(dest, multi), multi.src[0].reshape(val_shape)
-  assert tuple(dest.shape) == tuple(val.shape), f"store sub-view shape mismatch {dest.shape} != {val.shape}"
-  return dest.store(val)
+  # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest.
+  # all the shape bookkeeping lives on the dest side: factor, shrink to this shard's owner coords, squeeze the
+  # rank-preserved SHRINK back to the value's local shape, then store the value as-is
+  dest = factor_subview(dest, multi, reshape_to=multi.src[0].shape)
+  assert tuple(dest.shape) == tuple(multi.src[0].shape), f"store sub-view shape mismatch {dest.shape} != {multi.src[0].shape}"
+  return dest.store(multi.src[0])
 
 # ***** multi functions *****
 
