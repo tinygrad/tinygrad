@@ -522,7 +522,7 @@ class HIPRenderer(CStyleLanguage):
       lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),
     # bfloat16 constant casting
-    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
+    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(x.arg, dtypes.float))),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:

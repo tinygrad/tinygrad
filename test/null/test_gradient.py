@@ -14,7 +14,7 @@ class TestGradient(unittest.TestCase):
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     if jf is None: jf = f
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), set([x]))[x]
+    gx = compute_gradient(f(x), UOp.const(1.0, dtypes.float), set([x]))[x]
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
       tg_out = gx.substitute({x: x.const_like(val)}).ssimplify()
@@ -26,7 +26,7 @@ class TestGradient(unittest.TestCase):
     if jf is None: jf = f
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), set([x, y]))
+    grads = compute_gradient(f(x, y), UOp.const(1.0, dtypes.float), set([x, y]))
     gx, gy = grads[x], grads[y]
 
     for valx in [-5., -2.0, 0.0, 2.0, 5.]:

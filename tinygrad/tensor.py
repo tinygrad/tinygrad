@@ -71,11 +71,11 @@ class Tensor(RandMixin):
 
     # create a UOp from the different types of inputs
     if data is None:
-      data = UOp.const(_dtype, 0.0)
+      data = UOp.const(0.0, _dtype)
     elif isinstance(data, get_args(ConstType)):
-      data = UOp.const(_dtype, data)
+      data = UOp.const(data, _dtype)
     elif is_numpy_ndarray(data) and data.shape == ():
-      data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
+      data = UOp.const(data.item(), _dtype or _from_np_dtype(data.dtype))
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes):
@@ -120,7 +120,7 @@ class Tensor(RandMixin):
   @classmethod
   def _wrap_uop(cls, u:UOp) -> Tensor: return cls(u)
   @staticmethod
-  def const(dtype:DType, b:ConstLike) -> Tensor: return Tensor(UOp.const(dtype, b))
+  def const(b:ConstLike, dtype:DType|None=None) -> Tensor: return Tensor(UOp.const(b, dtype))
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
@@ -516,7 +516,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
+    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s, dtypes.int) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

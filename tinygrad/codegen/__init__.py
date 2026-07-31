@@ -84,7 +84,7 @@ def expand_wmma(ctx:dict[int, int], u:UOp):
 expander2 = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
-   lambda ctx, r: UOp.const(r.dtype, tuple(range(r.vmax+1))) \
+   lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
@@ -126,7 +126,7 @@ def do_devectorize(b:UOp):
   if not all(x.shape == b.shape or x.base.arg is Invalid for x in b.src): return None
   src = []
   for idx in itertools.product(*[range(x) for x in b.shape]):
-    idx_c = [UOp.const(None, i) for i in idx]
+    idx_c = [UOp.const(i) for i in idx]
     src.append(b.replace(dtype=None, src=tuple(x.base if x.base.arg is Invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 

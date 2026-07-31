@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 class CreationMixin(DTypeMixin, MovementMixin):
   @staticmethod
-  def const(dtype, b): raise NotImplementedError
+  def const(b, dtype=None): raise NotImplementedError
 
   def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
 
@@ -78,7 +78,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
-    val = cls.const(dt, fill_value)
+    val = cls.const(fill_value, dt)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     if not buffer: return val
     ret = val.empty_like(dt if dtype is not None else None, device)

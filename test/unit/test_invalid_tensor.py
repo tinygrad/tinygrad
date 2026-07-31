@@ -134,8 +134,8 @@ class TestInvalidTensor(unittest.TestCase):
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_uop_where_keeps_invalid_bare(self):
-    cond = UOp.const(dtypes.weakint, 0) < UOp.const(dtypes.weakint, 1)
-    idx = UOp(Ops.STACK, src=tuple(UOp.const(dtypes.weakint, x) for x in range(3)))
+    cond = UOp.const(0) < UOp.const(1)
+    idx = UOp(Ops.STACK, src=tuple(UOp.const(x) for x in range(3)))
     out = cond.where(idx, UOp.invalid())
     self.assertIs(cond.op, Ops.CMPLT)
     self.assertIs(idx.op, Ops.STACK)
