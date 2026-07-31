@@ -1202,6 +1202,10 @@ class TestSymInfer(unittest.TestCase):
     # floor: 1 % -1000 = -999, 1 // -1000 = -1
     assert sym_infer(a%b, var_vals) == -999
     assert sym_infer(a//b, var_vals) == -1
+  def test_sym_infer_with_cast(self):
+    a = Variable("a", 0, 100, dtypes.int)
+    assert sym_infer(a.cast(dtypes.long) + 1, {a.expr: 5}) == 6
+    assert sym_infer(a.cast(dtypes.float) * 0.5, {a.expr: 5}) == 2.5
   def test_sym_infer_with_bitcast(self):
     a = Variable("a", 1, 10, dtypes.int)
     expr = ((a.bitcast(dtypes.uint) << UOp.const(1)).bitcast(dtypes.int) + 2)

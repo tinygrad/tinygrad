@@ -58,6 +58,8 @@ renderer_infer = PatternMatcher([
   (UPat(Ops.CDIV, name="x"), lambda ctx,x: f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.FLOORMOD, name="x"), lambda ctx,x: f"floormod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.FLOORDIV, name="x"), lambda ctx,x: f"floordiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
+  (UPat(Ops.CAST, name="x"),
+    lambda ctx,x: f"{'float' if dtypes.is_float(x.dtype) else 'bool' if x.dtype is dtypes.bool else 'int'}({ctx[x.src[0]]})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast({ctx[x.src[0]]}, {x.src[0].dtype!r}, {x.dtype!r})"),
 ]) + renderer
 
