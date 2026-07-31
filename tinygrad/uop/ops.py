@@ -1800,6 +1800,13 @@ pm_commit_weak = PatternMatcher([
    lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
 ])
 
+# push cast to weak src
+pm_cast_weak = PatternMatcher([
+  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.Broadcastable, dtype=dtypes.weaks, name="u"),)),
+   lambda c,u: u.replace(dtype=None, src=tuple(commit_weak(s, c.dtype) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
+   if c.dtype not in dtypes.weaks else None),
+])
+
 pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
