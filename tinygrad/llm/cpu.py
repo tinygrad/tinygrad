@@ -21,7 +21,7 @@ def _dot_byte_parts(a:tuple[UOp, ...], b:tuple[UOp, ...]) -> UOp:
 
 def _dot_byte_vectors(a:UOp, b:UOp, scale:UOp|None=None) -> UOp:
   assert a.shape == b.shape and len(a.shape) == 1 and a.shape[0] % 4 == 0
-  product = a.cast(dtypes.int32) * b.cast(dtypes.int32)
+  product = a.int() * b.int()
   if scale is not None: product = product * scale
   return product.reshape(a.shape[0]//4, 4)._rop(Ops.ADD, (1,))
 
@@ -36,7 +36,7 @@ def _unpack_nibbles(packed:UOp, values:tuple[int, ...]) -> UOp:
 
 def _dot_bytes(a:tuple[UOp, ...], b:tuple[UOp, ...]) -> UOp:
   parts = _dot_byte_parts(a, b)
-  return sum((parts.index(i) for i in range(len(a)//4)), UOp.const(dtypes.int32, 0))
+  return sum((parts[i] for i in range(len(a)//4)), UOp.const(dtypes.int32, 0))
 
 def _contiguous_vector_load(ptr:UOp, lanes:int, dtype:DType|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
@@ -78,8 +78,8 @@ def _dot_q6_ptr(block:UOp, x:UOp, subgroup:int) -> UOp:
   return _dot_byte_vectors(qvalues, xv)
 
 def _rms_f16_product_ptr(x:UOp, norm:UOp, weight:UOp, scale:UOp) -> UOp:
-  return _contiguous_vector_load(x, 8).cast(dtypes.float32) * _contiguous_vector_load(norm, 8).cast(dtypes.float32) * \
-         _contiguous_vector_load(weight, 8).cast(dtypes.float32) * scale
+  return _contiguous_vector_load(x, 8).float() * _contiguous_vector_load(norm, 8).float() * \
+         _contiguous_vector_load(weight, 8).float() * scale
 
 def _parallel_work(total:int, core_limit:int=32) -> tuple[UOp, UOp, UOp]:
   cores = min(total, core_limit)
@@ -99,7 +99,7 @@ def _q8_quantize_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
   job = UOp.range(end - begin, 90)
   work = begin + job
   token, group = work // groups, work % groups
-  values = tuple(x[token * in_features + group * 32 + i].load().cast(dtypes.float32) for i in range(32))
+  values = tuple(x[token * in_features + group * 32 + i].load().float() for i in range(32))
   amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in values))
   d = (amax / 127).maximum(1e-8)
   stores = [scale[token, group].store(d)] + \
@@ -119,9 +119,9 @@ def _rmsnorm_q8_quantize_kernel(normed:UOp, quant:UOp, qscale:UOp, x:UOp, weight
   acc = UOp.placeholder((8,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   acc = _vector_acc_init(acc)
   chunk = UOp.range(in_features // 8, 90)
-  values = _contiguous_vector_load(x[chunk * 8], 8).cast(dtypes.float32)
+  values = _contiguous_vector_load(x[chunk * 8], 8).float()
   summed = _vector_acc_update(acc, values * values, chunk).end(chunk)
-  sumsq = sum((acc.after(summed).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  sumsq = sum((acc.after(summed)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   rms_scale = (sumsq / in_features + eps).rsqrt()
 
   values_reg = UOp.placeholder((32,), dtypes.float16, slot=1, addrspace=AddrSpace.REG)
@@ -129,11 +129,11 @@ def _rmsnorm_q8_quantize_kernel(normed:UOp, quant:UOp, qscale:UOp, x:UOp, weight
   value_stores:list[UOp] = []
   for lane in range(32):
     idx = group * 32 + lane
-    value = x[idx].load().cast(dtypes.float32) * weight[idx].load().cast(dtypes.float32) * rms_scale
+    value = x[idx].load().float() * weight[idx].load().float() * rms_scale
     rounded = value.cast(dtypes.float16)
     value_stores.extend((values_reg[lane].after(group).store(rounded), normed[idx].store(rounded)))
   values_ready = UOp.group(*value_stores)
-  group_values = [values_reg.after(values_ready)[lane].load().cast(dtypes.float32) for lane in range(32)]
+  group_values = [values_reg.after(values_ready)[lane].load().float() for lane in range(32)]
   amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in group_values))
   d = (amax / 127).maximum(1e-8)
   quant_stores = [qscale[0, group].store(d)] + [
@@ -166,7 +166,7 @@ def _q8_silu_quantize_kernel(quant:UOp, scale:UOp, gate:UOp, up:UOp, in_features
     g = gate[idx].load()
     value_stores.append(values_reg[lane].after(job).store((g * g.sigmoid() * up[idx].load()).cast(dtypes.float16)))
   values_ready = UOp.group(*value_stores)
-  values = [values_reg.after(values_ready)[lane].load().cast(dtypes.float32) for lane in range(32)]
+  values = [values_reg.after(values_ready)[lane].load().float() for lane in range(32)]
   amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in values))
   d = (amax / 127).maximum(1e-8)
   stores = [scale[token, group].store(d)] + \
@@ -193,19 +193,19 @@ def _q8k_quantize_kernel(quant:UOp, scale:UOp, x:UOp, in_features:int) -> UOp:
   best = UOp.placeholder((8,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   best = best.after(best.after(job).store(best.const_like(0)))
   chunk = UOp.range(32, 100)
-  values = UOp.stack(*(x[token * in_features + block * 256 + chunk * 8 + lane].load().cast(dtypes.float32) for lane in range(8)))
+  values = UOp.stack(*(x[token * in_features + block * 256 + chunk * 8 + lane].load().float() for lane in range(8)))
   previous = best.after(chunk)
   selected = (values.abs() > previous.abs()).where(values, previous)
   found = best.after(chunk).store(selected).end(chunk)
-  signed_max = best.after(found).index(0)
+  signed_max = best.after(found)[0]
   for lane in range(1, 8):
-    candidate = best.after(found).index(lane)
+    candidate = best.after(found)[lane]
     signed_max = (candidate.abs() > signed_max.abs()).where(candidate, signed_max)
   d = (signed_max.ne(0)).where(-signed_max / 127, UOp.const(dtypes.float32, 0))
   scale_store = scale[token, block].store(d)
   qchunk = UOp.range(32, 101)
   quant_stores = [quant[token, block, qchunk * 8 + lane].store(
-    d.ne(0).where((x[token * in_features + block * 256 + qchunk * 8 + lane].load().cast(dtypes.float32) / d).round(),
+    d.ne(0).where((x[token * in_features + block * 256 + qchunk * 8 + lane].load().float() / d).round(),
                    UOp.const(dtypes.float32, 0)).maximum(-127).minimum(127).cast(dtypes.int8)) for lane in range(8)]
   return UOp.group(scale_store, UOp.group(*quant_stores).end(qchunk)).end(job, core).sink(
     arg=KernelInfo(name="q8k_quantize_cpu", optimize=False, parallel=True))
@@ -225,26 +225,26 @@ def _q8k_q8_quantize_kernel(qk:UOp, dk:UOp, q:UOp, d:UOp, xk:UOp, x:UOp, in_feat
   best = UOp.placeholder((8,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   best = best.after(best.after(qk_work).store(best.const_like(0)))
   chunk = UOp.range(32, 100)
-  values = UOp.stack(*(xk[qk_token * in_features + block * 256 + chunk * 8 + lane].load().cast(dtypes.float32) for lane in range(8)))
+  values = UOp.stack(*(xk[qk_token * in_features + block * 256 + chunk * 8 + lane].load().float() for lane in range(8)))
   previous = best.after(chunk)
   selected = (values.abs() > previous.abs()).where(values, previous)
   found = best.after(chunk).store(selected).end(chunk)
-  signed_max = best.after(found).index(0)
+  signed_max = best.after(found)[0]
   for lane in range(1, 8):
-    candidate = best.after(found).index(lane)
+    candidate = best.after(found)[lane]
     signed_max = (candidate.abs() > signed_max.abs()).where(candidate, signed_max)
   qkd = (signed_max.ne(0)).where(-signed_max / 127, UOp.const(dtypes.float32, 0))
   qk_scale = dk[qk_token, block].store(qkd)
   qk_chunk = UOp.range(32, 101)
   qk_stores = [qk[qk_token, block, qk_chunk * 8 + lane].store(
-    qkd.ne(0).where((xk[qk_token * in_features + block * 256 + qk_chunk * 8 + lane].load().cast(dtypes.float32) / qkd).round(),
+    qkd.ne(0).where((xk[qk_token * in_features + block * 256 + qk_chunk * 8 + lane].load().float() / qkd).round(),
                     UOp.const(dtypes.float32, 0)).maximum(-127).minimum(127).cast(dtypes.int8)) for lane in range(8)]
   qk_done = UOp.group(qk_scale, UOp.group(*qk_stores).end(qk_chunk)).end(qk_work)
 
   q_tokens, groups = _concrete_int(q.shape[0]), in_features // 32
   q_work = UOp.range(q_tokens * groups, 91)
   token, group = q_work // groups, q_work % groups
-  qvalues = tuple(x[token * in_features + group * 32 + lane].load().cast(dtypes.float32) for lane in range(32))
+  qvalues = tuple(x[token * in_features + group * 32 + lane].load().float() for lane in range(32))
   amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in qvalues))
   qd = (amax / 127).maximum(1e-8)
   q_stores = [d[token, group].store(qd)] + [
@@ -266,10 +266,10 @@ def q8k_q8_quantize(xk:Tensor, x:Tensor, in_features:int) -> tuple[Tensor, Tenso
 
 def _load_f16(raw:UOp, offset:UOp) -> UOp:
   bits = raw[offset].load().cast(dtypes.uint16) | (raw[offset + 1].load().cast(dtypes.uint16) << 8)
-  return bits.bitcast(dtypes.float16).cast(dtypes.float32)
+  return bits.bitcast(dtypes.float16).float()
 
 def _load_f16x8_ptr(raw:UOp) -> UOp:
-  return _contiguous_vector_load(raw, 8, dtypes.float16).cast(dtypes.float32)
+  return _contiguous_vector_load(raw, 8, dtypes.float16).float()
 
 def _vector_reg(reg:UOp, *deps:UOp) -> UOp:
   reg = reg.after(*deps)
@@ -286,8 +286,8 @@ def _finite_exp2(x:UOp) -> UOp:
   # The causal-convolution activation is finite. Bounding the exponent preserves sigmoid saturation while avoiding
   # the generic transcendental decomposition's NaN/Inf and overflow branches.
   x = x.maximum(-126.0).minimum(126.0)
-  q = (x + (x < 0).where(-0.5, 0.5)).cast(dtypes.int32)
-  s = x - q.cast(dtypes.float32)
+  q = (x + (x < 0).where(-0.5, 0.5)).int()
+  s = x - q.float()
   poly = UOp.const(dtypes.float32, 0.0001535920892)
   for coefficient in (0.001339262701, 0.009618384764, 0.05550347269, 0.2402264476, 0.6931471825, 1.0):
     poly = poly * s + coefficient
@@ -317,10 +317,10 @@ def _cpu_expert_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp
     meta, data = base + block * 6, base + meta_size + block * 128 + subgroup * 16
     parts = _dot_nibbles_ptr(raw[data], xq[xidx, block, subgroup * 32],
                              (1, 3, 5, 7, 9, 11, 13, 15, -1, -3, -5, -7, -9, -11, -13, -15))
-    dot = sum((parts.index(i) for i in range(8)), UOp.const(dtypes.int32, 0))
+    dot = sum((parts[i] for i in range(8)), UOp.const(dtypes.int32, 0))
     scale_byte = raw[meta + 2 + subgroup // 2].load()
-    scale = 1 + 2 * ((scale_byte >> (4 * (subgroup % 2)).cast(dtypes.uint8)) & 15).cast(dtypes.float32)
-    return dot.cast(dtypes.float32) * scale * xd[xidx, block] * _load_f16(raw, meta)
+    scale = 1 + 2 * ((scale_byte >> (4 * (subgroup % 2)).cast(dtypes.uint8)) & 15).float()
+    return dot.float() * scale * xd[xidx, block] * _load_f16(raw, meta)
   row_size = in_features // 256 * type_size
   base = (expert * out_features + output) * row_size + block * type_size
   qvalues:list[UOp] = []
@@ -335,16 +335,16 @@ def _cpu_expert_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp
         negative = ((signs >> (4 * (word_idx % 2) + byte_idx)) & 1).ne(0)
         qvalues.append(negative.where(-magnitude, magnitude).cast(dtypes.int8))
     scale_byte = raw[base + 106 + subgroup // 2].load()
-    scale = 1 + 2 * ((scale_byte >> (4 * (subgroup % 2)).cast(dtypes.uint8)) & 15).cast(dtypes.float32)
+    scale = 1 + 2 * ((scale_byte >> (4 * (subgroup % 2)).cast(dtypes.uint8)) & 15).float()
   elif ggml_type == 23:
     parts = _dot_nibbles_ptr(raw[base + 8 + subgroup * 16], xq[xidx, block, subgroup * 32],
                              (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113))
-    dot = sum((parts.index(i) for i in range(8)), UOp.const(dtypes.int32, 0))
+    dot = sum((parts[i] for i in range(8)), UOp.const(dtypes.int32, 0))
     low_byte = raw[base + 4 + subgroup // 2].load()
     low = (low_byte >> (4 * (subgroup % 2)).cast(dtypes.uint8)) & 15
     high_word = raw[base + 2].load().cast(dtypes.uint16) | (raw[base + 3].load().cast(dtypes.uint16) << 8)
     high = (high_word >> (2 * subgroup).cast(dtypes.uint16)) & 3
-    scale = (low.cast(dtypes.uint16) | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float32) - 32
+    scale = (low.cast(dtypes.uint16) | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).float() - 32
   else:
     assert ggml_type == 14
     for pos in range(32):
@@ -359,10 +359,10 @@ def _cpu_expert_group_dot(raw:UOp, lut:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp
                   xq[xidx, group, pos].load() for pos in range(32))
   if ggml_type == 14:
     dot0, dot1 = _dot_bytes(tuple(qvalues[:16]), xvalues[:16]), _dot_bytes(tuple(qvalues[16:]), xvalues[16:])
-    scales = tuple(raw[base + 192 + subgroup * 2 + i].load().bitcast(dtypes.int8).cast(dtypes.float32) for i in range(2))
-    return (dot0.cast(dtypes.float32) * scales[0] + dot1.cast(dtypes.float32) * scales[1]) * xd[xidx, group] * _load_f16(raw, base + 208)
-  if ggml_type == 23: return dot.cast(dtypes.float32) * scale * xd[xidx, block] * _load_f16(raw, base)
-  return _dot_bytes(tuple(qvalues), xvalues).cast(dtypes.float32) * scale * xd[xidx, block] * _load_f16(raw, base)
+    scales = tuple(raw[base + 192 + subgroup * 2 + i].load().bitcast(dtypes.int8).float() for i in range(2))
+    return (dot0.float() * scales[0] + dot1.float() * scales[1]) * xd[xidx, group] * _load_f16(raw, base + 208)
+  if ggml_type == 23: return dot.float() * scale * xd[xidx, block] * _load_f16(raw, base)
+  return _dot_bytes(tuple(qvalues), xvalues).float() * scale * xd[xidx, block] * _load_f16(raw, base)
 
 def _cpu_iq3_repacked_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:UOp, output:UOp,
                                   out_features:int, in_features:int) -> tuple[UOp, UOp]:
@@ -376,7 +376,7 @@ def _cpu_iq3_repacked_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:U
   for subgroup in range(0, 8, 2):
     parts0, parts1 = _dot_nibbles_pair_ptr(raw[data + subgroup * 16], xq[xidx, block, subgroup * 32], values)
     scale_byte = raw[meta + 2 + subgroup // 2].load()
-    scale0, scale1 = 1 + 2 * (scale_byte & 15).cast(dtypes.int32), 1 + 2 * (scale_byte >> 4).cast(dtypes.int32)
+    scale0, scale1 = 1 + 2 * (scale_byte & 15).int(), 1 + 2 * (scale_byte >> 4).int()
     total = total + parts0 * scale0 + parts1 * scale1
   return total, _load_f16(raw, meta)
 
@@ -392,8 +392,8 @@ def _cpu_iq4_block_parts(raw:UOp, xq:UOp, expert:UOp, xidx:UOp, block:UOp, outpu
     low_byte = raw[base + 4 + subgroup // 2].load()
     low0, low1 = low_byte & 15, low_byte >> 4
     high0, high1 = (high_word >> (2 * subgroup)) & 3, (high_word >> (2 * (subgroup + 1))) & 3
-    scale0 = (low0.cast(dtypes.uint16) | (high0 << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.int32) - 32
-    scale1 = (low1.cast(dtypes.uint16) | (high1 << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.int32) - 32
+    scale0 = (low0.cast(dtypes.uint16) | (high0 << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).int() - 32
+    scale1 = (low1.cast(dtypes.uint16) | (high1 << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).int() - 32
     total = total + parts[0] * scale0 + parts[1] * scale1
   return total, _load_f16(raw, base)
 
@@ -403,8 +403,8 @@ def _cpu_q6_block_parts(raw:UOp, xq:UOp, xd:UOp, expert:UOp, xidx:UOp, block:UOp
   base = (expert * out_features + output) * row_size + block * 210
   total = UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8)))
   for subgroup in range(8):
-    parts = _dot_q6_ptr(raw[base], xq[xidx, block * 8 + subgroup, 0], subgroup).cast(dtypes.float32)
-    scales = UOp.stack(*(raw[base + 192 + subgroup * 2 + i].load().bitcast(dtypes.int8).cast(dtypes.float32) for i in range(2)))
+    parts = _dot_q6_ptr(raw[base], xq[xidx, block * 8 + subgroup, 0], subgroup).float()
+    scales = UOp.stack(*(raw[base + 192 + subgroup * 2 + i].load().bitcast(dtypes.int8).float() for i in range(2)))
     total = total + parts * UOp.stack(*(scales[i // 4] for i in range(8))) * xd[xidx, block * 8 + subgroup]
   return total * _load_f16(raw, base + 208)
 
@@ -421,12 +421,12 @@ def _cpu_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
   if ggml_type == 23:
     block = UOp.range(in_features // 256, 110)
     parts, scale = _cpu_iq4_block_parts(raw, xq, expert, xidx, block, output, out_features, in_features)
-    value = parts.cast(dtypes.float32) * xd[xidx, block] * scale
+    value = parts.float() * xd[xidx, block] * scale
     accumulated = _vector_acc_update(acc, value, block).end(block)
   elif ggml_type == 21 and repacked:
     block = UOp.range(in_features // 256, 110)
     parts, scale = _cpu_iq3_repacked_block_parts(raw, xq, expert, xidx, block, output, out_features, in_features)
-    value = parts.cast(dtypes.float32) * xd[xidx, block] * scale
+    value = parts.float() * xd[xidx, block] * scale
     accumulated = _vector_acc_update(acc, value, block).end(block)
   elif ggml_type == 14:
     block = UOp.range(in_features // 256, 110)
@@ -436,8 +436,8 @@ def _cpu_expert_kernel(out:UOp, raw:UOp, sel:UOp, xq:UOp, xd:UOp, lut:UOp,
     group = UOp.range(groups, 110)
     value = _cpu_expert_group_dot(raw, lut, xq, xd, expert, xidx, group, output, out_features, in_features, ggml_type, repacked)
     accumulated = acc.after(group).store(acc.after(group) + value).end(group)
-  result = sum((acc.after(accumulated).index(i) for i in range(8)), UOp.const(dtypes.float32, 0)) if vectorized else \
-    acc.after(accumulated).index(0)
+  result = sum((acc.after(accumulated)[i] for i in range(8)), UOp.const(dtypes.float32, 0)) if vectorized else \
+    acc.after(accumulated)[0]
   return out[route, output].store(result.cast(out.dtype)).end(job, core).sink(
     arg=KernelInfo(name=f"expert_uop_cpu_{ggml_type}_{routes}_{out_features}_{in_features}", optimize=False, parallel=True))
 
@@ -474,12 +474,12 @@ def _cpu_expert_weighted_uop(out:UOp, raw:UOp, probs:UOp, sel:UOp, xq:UOp, xd:UO
   block = UOp.range(in_features // 256, 101)
   if ggml_type == 23:
     parts, scale = _cpu_iq4_block_parts(raw, xq, expert, route, block, output, out_features, in_features)
-    value = parts.cast(dtypes.float32) * xd[route, block] * scale
+    value = parts.float() * xd[route, block] * scale
   else:
     assert ggml_type == 14
     value = _cpu_q6_block_parts(raw, xq, xd, expert, route, block, output, out_features, in_features)
   route_dot = _vector_acc_update(acc, value, block).end(block)
-  route_value = sum((acc.after(route_dot).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  route_value = sum((acc.after(route_dot)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   accumulated = total.after(local_route).store(total.after(local_route) + route_value * probs[route].load()).end(local_route)
   return out[input_idx, output].store(total.after(accumulated)[0].load()).end(job, core).sink(
     arg=KernelInfo(name=f"expert_weighted_uop_cpu_{ggml_type}_{inputs}_{routes_per_input}_{out_features}_{in_features}",
@@ -515,7 +515,7 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
   copied = UOp.group(matched_probs[match_idx].store(probs[matched_route].load()),
                      matched_routes[match_idx].store(matched_route.cast(route_dtype)))
   match_next = match_idx + 1
-  routes_ready = cursor.after(copied)[0].store(match_next.cast(dtypes.int32)).end(match_loop, match_next < matched_count)
+  routes_ready = cursor.after(copied)[0].store(match_next.int()).end(match_loop, match_next < matched_count)
 
   output_lane = UOp.range(output_tile, 101)
   output = output_base + output_lane
@@ -530,7 +530,7 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
     low_byte = raw[base + 4 + subgroup // 2].load()
     low = (low_byte >> (4 * (subgroup % 2))) & 15
     high = (high_word >> (2 * subgroup)) & 3
-    scales.append((low.cast(dtypes.uint16) | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.int32) - 32)
+    scales.append((low.cast(dtypes.uint16) | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8).int() - 32)
   block_scale = _load_f16(raw, base)
 
   reset = cursor.after(routes_ready, output_lane, block)[0].store(0)
@@ -544,11 +544,11 @@ def _cpu_expert_weighted_grouped_uop(out:UOp, raw:UOp, probs:UOp, head:UOp, next
   for subgroup in range(8):
     xv = _contiguous_vector_load(xq[route, block, subgroup * 32], 32, dtypes.int8)
     stage = _vector_acc_update(block_acc, _dot_byte_vectors(qvalues[subgroup], xv, scales[subgroup]), stage)
-  dot = sum((block_acc.after(stage).index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32)
+  dot = sum((block_acc.after(stage)[i] for i in range(8)), UOp.const(dtypes.int32, 0)).float()
   contribution = dot * xd[route, block] * block_scale * matched_probs[route_idx].load()
   updated = totals[output_lane, input_idx].store(totals.after(route_loop)[output_lane, input_idx].load() + contribution)
   next_idx = route_idx + 1
-  routes_done = cursor.after(updated)[0].store(next_idx.cast(dtypes.int32)).end(route_loop, next_idx < matched_count)
+  routes_done = cursor.after(updated)[0].store(next_idx.int()).end(route_loop, next_idx < matched_count)
   accumulated = routes_done.end(block, output_lane, unique_idx)
 
   output_store = UOp.range(output_tile * inputs, 120)
@@ -589,10 +589,10 @@ def _expert_route_links_uop(head:UOp, next_route:UOp, unique:UOp, unique_count:U
   expert_count = head.after(initialized, route)[expert].load()
   count_value = count.after(route)[0].load()
   is_new = expert_count.eq(0)
-  saved_unique = unique[count_value.cast(dtypes.weakint).valid(is_new)].store(expert.cast(dtypes.int32))
-  advanced_count = count[0].store(count_value + is_new.cast(dtypes.int32))
+  saved_unique = unique[count_value.cast(dtypes.weakint).valid(is_new)].store(expert.int())
+  advanced_count = count[0].store(count_value + is_new.int())
   slot = expert_count.maximum(0).minimum(routes - 1).cast(dtypes.weakint)
-  linked = UOp.group(saved_unique, advanced_count, next_route[expert, slot].store(route.cast(dtypes.int32)),
+  linked = UOp.group(saved_unique, advanced_count, next_route[expert, slot].store(route.int()),
                      head[expert].store(expert_count + 1)).end(route)
   return unique_count[0].store(count.after(linked)[0].load()).sink(
     arg=KernelInfo(name=f"expert_route_links_{routes}_{num_experts}", opts_to_apply=()))
@@ -636,7 +636,7 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
   cleared = UOp.group(*(acc[init_idx].store(UOp.const(dtypes.float32, 0)) for acc in accs),
                       matched[init_idx].store(next_route[expert, init_idx].load()))
   init_next = init_idx + 1
-  initialized = cursor.after(cleared)[0].store(init_next.cast(dtypes.int32)).end(init_loop, init_next < matched_count)
+  initialized = cursor.after(cleared)[0].store(init_next.int()).end(init_loop, init_next < matched_count)
 
   blocks, meta_size = in_features // 256, (in_features // 256 * 6 + 63) // 64 * 64
   row_size = meta_size + blocks * 128
@@ -655,7 +655,7 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
         qvalues.append(_unpack_nibbles(packed, values))
     for subgroup in range(8):
       scale_byte = raw[meta + 2 + subgroup // 2].load()
-      scales.append(1 + 2 * ((scale_byte >> (4 * (subgroup % 2))) & 15).cast(dtypes.int32))
+      scales.append(1 + 2 * ((scale_byte >> (4 * (subgroup % 2))) & 15).int())
 
     reset = cursor.after(projection_done, block)[0].store(0)
     route_loop = UOp.loop(120 + projection)
@@ -670,11 +670,11 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
       parts = _dot_byte_vectors(qvalues[subgroup], xv, scales[subgroup])
       stage = _vector_acc_update(block_acc, parts, stage)
     block_sum = block_acc.after(stage)
-    value = sum((block_sum.index(i) for i in range(8)), UOp.const(dtypes.int32, 0)).cast(dtypes.float32) * \
+    value = sum((block_sum[i] for i in range(8)), UOp.const(dtypes.int32, 0)).float() * \
       xd[xidx, block] * _load_f16(raw, meta)
     updated = accs[projection][route_idx].store(accs[projection].after(route_loop)[route_idx].load() + value)
     next_idx = route_idx + 1
-    projection_done = cursor.after(updated)[0].store(next_idx.cast(dtypes.int32)).end(route_loop, next_idx < matched_count)
+    projection_done = cursor.after(updated)[0].store(next_idx.int()).end(route_loop, next_idx < matched_count)
   accumulated = projection_done.end(block)
 
   final_reset = cursor.after(accumulated)[0].store(0)
@@ -686,7 +686,7 @@ def _cpu_expert_silu_grouped_uop(out:UOp, raw0:UOp, raw1:UOp, head:UOp, next_rou
   gate, up = (acc.after(final_loop)[final_idx].load() for acc in accs)
   saved = out[final_route, final_output].store((gate * gate.sigmoid() * up).cast(out.dtype))
   final_next = final_idx + 1
-  routes_done = cursor.after(saved)[0].store(final_next.cast(dtypes.int32)).end(final_loop, final_next < matched_count)
+  routes_done = cursor.after(saved)[0].store(final_next.int()).end(final_loop, final_next < matched_count)
   return routes_done.end(job, core).sink(
     arg=KernelInfo(name=f"expert_silu_grouped_local_uop_cpu_{routes}_{out_features}_{in_features}",
                    optimize=False, parallel=True, estimates=Estimates(next_route.shape[0] * out_features * in_features * 8)))
@@ -742,8 +742,8 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
       rgate, xkq, expert, UOp.const(dtypes.weakint, 0), rblock, output, hidden, dim)
     rparts1, rscale1 = _cpu_iq3_repacked_block_parts(
       rup, xkq, expert, UOp.const(dtypes.weakint, 0), rblock, output, hidden, dim)
-    rv0, rv1 = (rparts0.cast(dtypes.float32) * xkd[0, rblock] * rscale0,
-                 rparts1.cast(dtypes.float32) * xkd[0, rblock] * rscale1)
+    rv0, rv1 = (rparts0.float() * xkd[0, rblock] * rscale0,
+                 rparts1.float() * xkd[0, rblock] * rscale1)
     rdone = UOp.group(_vector_acc_update(racc0, rv0, rinit, rblock),
                       _vector_acc_update(racc1, rv1, rinit, rblock)).end(rblock)
   else:
@@ -755,9 +755,9 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
     rdone = UOp.group(racc0.after(rinit, rgroup).store(racc0.after(rgroup) + rv0),
                       racc1.after(rinit, rgroup).store(racc1.after(rgroup) + rv1)).end(rgroup)
   if expert_repacked:
-    rg = sum((racc0.after(rdone).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-    ru = sum((racc1.after(rdone).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-  else: rg, ru = racc0.after(rdone).index(0), racc1.after(rdone).index(0)
+    rg = sum((racc0.after(rdone)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
+    ru = sum((racc1.after(rdone)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
+  else: rg, ru = racc0.after(rdone)[0], racc1.after(rdone)[0]
   stores.append(rhidden[route, output].store(rg * rg.sigmoid() * ru).end(routed_job))
 
   shared_begin, shared_end = hidden * core // cores, hidden * (core + 1) // cores
@@ -773,7 +773,7 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
       row_base = shared_output * groups * 34
       factors = _load_f16x8_ptr(raw[row_base + sblock * 16]) * UOp.stack(*(xd[0, sblock * 8 + lane].load() for lane in range(8)))
       block_sum = sum((_dot_bytes_ptr(raw[row_base + groups * 2 + (sblock * 8 + lane) * 32],
-                                      xq[0, sblock * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                      xq[0, sblock * 8 + lane, 0]).float() * factors[lane]
                        for lane in range(8)), UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))))
       svalues.append(_vector_acc_update(acc, block_sum, sinit, sblock))
     sdone = UOp.group(*svalues).end(sblock)
@@ -785,11 +785,11 @@ def _moe_stage1_uop(rhidden:UOp, shidden:UOp, rgate:UOp, rup:UOp, sgate:UOp, sup
       scale_base = row_base + sgroup * (2 if shared_repacked else 34)
       weight_base = row_base + (groups * 2 + sgroup * 32 if shared_repacked else sgroup * 34 + 2)
       svalues.append(_vector_acc_update(acc,
-        _dot_bytes_ptr(raw[weight_base], xq[0, sgroup, 0]).cast(dtypes.float32) *
+        _dot_bytes_ptr(raw[weight_base], xq[0, sgroup, 0]).float() *
         _load_f16(raw, scale_base) * xd[0, sgroup], sinit, sgroup))
     sdone = UOp.group(*svalues).end(sgroup)
-  sg = sum((sacc0.after(sdone).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-  su = sum((sacc1.after(sdone).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  sg = sum((sacc0.after(sdone)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
+  su = sum((sacc1.after(sdone)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   stores.append(shidden[shared_output].store(sg * sg.sigmoid() * su).end(shared_job))
   return UOp.group(*stores).end(core).sink(
     arg=KernelInfo(name=f"moe_stage1_uop_{routes}_{dim}_{hidden}", optimize=False, parallel=True))
@@ -813,13 +813,13 @@ def _moe_stage2_uop(out:UOp, rdown:UOp, sdown:UOp, sel:UOp, probs:UOp, rhq:UOp, 
   if down_type == 23:
     rblock = UOp.range(hidden // 256, 100)
     rparts, rscale = _cpu_iq4_block_parts(rdown, rhq, expert, route, rblock, output, dim, hidden)
-    rv = rparts.cast(dtypes.float32) * rhd[route, rblock] * rscale
+    rv = rparts.float() * rhd[route, rblock] * rscale
     route_dot = _vector_acc_update(racc, rv, rblock).end(rblock)
   else:
     rblock = UOp.range(hidden // 256, 100)
     rv = _cpu_q6_block_parts(rdown, rhq, rhd, expert, route, rblock, output, dim, hidden)
     route_dot = _vector_acc_update(racc, rv, rblock).end(rblock)
-  route_value = sum((racc.after(route_dot).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  route_value = sum((racc.after(route_dot)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   routed = total.after(route).store(total.after(route) + route_value * probs[route].load()).end(route)
 
   sacc = UOp.placeholder((8,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
@@ -830,7 +830,7 @@ def _moe_stage2_uop(out:UOp, rdown:UOp, sdown:UOp, sel:UOp, probs:UOp, rhq:UOp, 
     sblock = UOp.range(groups // 8, 101)
     factors = _load_f16x8_ptr(sdown[row_base + sblock * 16]) * UOp.stack(*(shd[0, sblock * 8 + lane].load() for lane in range(8)))
     block_sum = sum((_dot_bytes_ptr(sdown[row_base + groups * 2 + (sblock * 8 + lane) * 32],
-                                    shq[0, sblock * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                    shq[0, sblock * 8 + lane, 0]).float() * factors[lane]
                      for lane in range(8)), UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))))
     shared_done = _vector_acc_update(sacc, block_sum, sblock).end(sblock)
   else:
@@ -838,9 +838,9 @@ def _moe_stage2_uop(out:UOp, rdown:UOp, sdown:UOp, sel:UOp, probs:UOp, rhq:UOp, 
     scale_base = row_base + sgroup * (2 if shared_repacked else 34)
     weight_base = row_base + (groups * 2 + sgroup * 32 if shared_repacked else sgroup * 34 + 2)
     shared_done = _vector_acc_update(sacc,
-      _dot_bytes_ptr(sdown[weight_base], shq[0, sgroup, 0]).cast(dtypes.float32) *
+      _dot_bytes_ptr(sdown[weight_base], shq[0, sgroup, 0]).float() *
       _load_f16(sdown, scale_base) * shd[0, sgroup], sgroup).end(sgroup)
-  shared = sum((sacc.after(shared_done).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  shared = sum((sacc.after(shared_done)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   return out[output].store(total.after(shared_done)[0].load() + shared * shared_scale[0].load()).end(job, core).sink(
     arg=KernelInfo(name=f"moe_stage2_uop_{down_type}_{routes}_{dim}_{hidden}", optimize=False, parallel=True))
 
@@ -895,14 +895,14 @@ def _q8_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_featur
       factors = scales * UOp.stack(*(xd[token, block * 8 + lane].load() for lane in range(8)))
       if token_tile == 1:
         block_sum = sum((_dot_bytes_ptr(raw[row_base + groups * 2 + (block * 8 + lane) * 32],
-                                        xq[token, block * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                        xq[token, block * 8 + lane, 0]).float() * factors[lane]
                          for lane in range(8)), UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))))
         updates.append(_vector_acc_update(acc, block_sum, block))
       else:
         previous = block
         for lane in range(8):
           value = _dot_bytes_ptr(raw[row_base + groups * 2 + (block * 8 + lane) * 32],
-                                 xq[token, block * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                 xq[token, block * 8 + lane, 0]).float() * factors[lane]
           previous = _vector_acc_update(acc, value, previous)
         updates.append(previous)
     done = UOp.group(*updates).end(block)
@@ -910,10 +910,10 @@ def _q8_linear_uop(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_featur
     group = UOp.range(groups, 100)
     weight_scale = _load_f16(raw, row_base + group * 34)
     updates = [_vector_acc_update(acc,
-      _dot_bytes_ptr(raw[row_base + group * 34 + 2], xq[token, group, 0]).cast(dtypes.float32) *
+      _dot_bytes_ptr(raw[row_base + group * 34 + 2], xq[token, group, 0]).float() *
       weight_scale * xd[token, group], group) for acc,token in zip(accs, tokens)]
     done = UOp.group(*updates).end(group)
-  stores = [out[token, output].store(sum((acc.after(done).index(i) for i in range(8)),
+  stores = [out[token, output].store(sum((acc.after(done)[i] for i in range(8)),
                                          UOp.const(dtypes.float32, 0)).cast(out.dtype)) for acc,token in zip(accs, tokens)]
   return UOp.group(*stores).end(job, core).sink(
     arg=KernelInfo(name=f"linear_q8_cpu_{out_features}_{in_features}{'_repacked' if repacked else ''}",
@@ -926,7 +926,7 @@ def uop_linear(layer:Linear, x:Tensor) -> Tensor:
   if layer.ggml_type == 14:
     weight = ggml_data_to_tensor(layer.weight, layer.out_features * layer.in_features, 14,
                                  contiguous=False).reshape(layer.out_features, layer.in_features)
-    activation = (xq.cast(dtypes.float32) * xd.unsqueeze(-1)).reshape(tokens, layer.in_features)
+    activation = (xq.float() * xd.unsqueeze(-1)).reshape(tokens, layer.in_features)
     return (activation @ weight.T).reshape(*x.shape[:-1], layer.out_features)
   out = Tensor.empty(tokens, layer.out_features, dtype=x.dtype, device=x.device)
   repacked = tokens == 1 and layer.in_features % 256 == 0 and layer.cpu_repacked is not None
@@ -964,7 +964,7 @@ def _q8_linear_pair_uop(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UOp,
       block = UOp.range(groups // 8, 100 + projection)
       factors = _load_f16x8_ptr(raw[row_base + block * 16]) * UOp.stack(*(xd[0, block * 8 + lane].load() for lane in range(8)))
       block_sum = sum((_dot_bytes_ptr(raw[row_base + groups * 2 + (block * 8 + lane) * 32],
-                                      xq[0, block * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                      xq[0, block * 8 + lane, 0]).float() * factors[lane]
                        for lane in range(8)), UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))))
       done = _vector_acc_update(acc, block_sum, block).end(block)
     else:
@@ -972,9 +972,9 @@ def _q8_linear_pair_uop(out0:UOp, out1:UOp, raw0:UOp, raw1:UOp, xq:UOp, xd:UOp,
       scale_base = row_base + group * (2 if repacked else 34)
       weight_base = row_base + (groups * 2 + group * 32 if repacked else group * 34 + 2)
       done = _vector_acc_update(acc,
-        _dot_bytes_ptr(raw[weight_base], xq[0, group, 0]).cast(dtypes.float32) *
+        _dot_bytes_ptr(raw[weight_base], xq[0, group, 0]).float() *
         _load_f16(raw, scale_base) * xd[0, group], group).end(group)
-    projection_stores.append(out[0, output].store(sum((acc.after(done).index(i) for i in range(8)),
+    projection_stores.append(out[0, output].store(sum((acc.after(done)[i] for i in range(8)),
                                                        UOp.const(dtypes.float32, 0)).cast(out.dtype)).end(job))
   return UOp.group(*projection_stores).end(core).sink(
     arg=KernelInfo(name=f"linear_pair_q8_cpu_{out_features0}_{out_features1}_{in_features}", optimize=False, parallel=True))
@@ -1012,7 +1012,7 @@ def _q8_gdn_projections_uop(out0:UOp, out1:UOp, out2:UOp, raw0:UOp, raw1:UOp, xq
       scales = _load_f16x8_ptr(raw[row_base + block * 16])
       factors = scales * UOp.stack(*(xd[0, block * 8 + lane].load() for lane in range(8)))
       block_sum = sum((_dot_bytes_ptr(raw[row_base + groups * 2 + (block * 8 + lane) * 32],
-                                      xq[0, block * 8 + lane, 0]).cast(dtypes.float32) * factors.index(lane)
+                                      xq[0, block * 8 + lane, 0]).float() * factors[lane]
                        for lane in range(8)), UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8))))
       done = _vector_acc_update(acc, block_sum, block).end(block)
     else:
@@ -1020,9 +1020,9 @@ def _q8_gdn_projections_uop(out0:UOp, out1:UOp, out2:UOp, raw0:UOp, raw1:UOp, xq
       scale_base = row_base + group * (2 if repacked else 34)
       weight_base = row_base + (groups * 2 + group * 32 if repacked else group * 34 + 2)
       done = _vector_acc_update(acc,
-        _dot_bytes_ptr(raw[weight_base], xq[0, group, 0]).cast(dtypes.float32) *
+        _dot_bytes_ptr(raw[weight_base], xq[0, group, 0]).float() *
         _load_f16(raw, scale_base) * xd[0, group], group).end(group)
-    stores.append(out[output].store(sum((acc.after(done).index(i) for i in range(8)),
+    stores.append(out[output].store(sum((acc.after(done)[i] for i in range(8)),
                                         UOp.const(dtypes.float32, 0)).cast(out.dtype)).end(job))
 
   f16_begin, f16_end = out2.shape[0] * core // cores, out2.shape[0] * (core + 1) // cores
@@ -1031,10 +1031,10 @@ def _q8_gdn_projections_uop(out0:UOp, out1:UOp, out2:UOp, raw0:UOp, raw1:UOp, xq
   f16_acc = UOp.placeholder((8,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
   f16_acc = _vector_acc_init(f16_acc, f16_job)
   chunk = UOp.range(in_features // 8, 102)
-  xv = UOp.stack(*(x[chunk * 8 + lane].load().cast(dtypes.float32) for lane in range(8)))
-  wv = UOp.stack(*(weight[f16_output * in_features + chunk * 8 + lane].load().cast(dtypes.float32) for lane in range(8)))
+  xv = UOp.stack(*(x[chunk * 8 + lane].load().float() for lane in range(8)))
+  wv = UOp.stack(*(weight[f16_output * in_features + chunk * 8 + lane].load().float() for lane in range(8)))
   f16_done = _vector_acc_update(f16_acc, xv * wv, chunk).end(chunk)
-  stores.append(out2[f16_output].store(sum((f16_acc.after(f16_done).index(i) for i in range(8)),
+  stores.append(out2[f16_output].store(sum((f16_acc.after(f16_done)[i] for i in range(8)),
                                            UOp.const(dtypes.float32, 0)).cast(out2.dtype)).end(f16_job))
   return UOp.group(*stores).end(core).sink(
     arg=KernelInfo(name=f"q8_gdn_projections_uop_{out_features0}_{out_features1}_{in_features}", optimize=False, parallel=True))
@@ -1167,9 +1167,9 @@ def _attention_decode_uop(out:UOp, q:UOp, cache:UOp, valid_len:UOp) -> UOp:
   chunk = UOp.range(chunks, 91)
   qv = UOp.stack(*(qf[bh * dim + chunk * 8 + lane].load() for lane in range(8)))
   kbase = ((bi * kv_heads + kv_head) * cache_len + position) * dim
-  kval = UOp.stack(*(cachef[kbase + chunk * 8 + lane].load().cast(dtypes.float32) for lane in range(8)))
+  kval = UOp.stack(*(cachef[kbase + chunk * 8 + lane].load().float() for lane in range(8)))
   qk_done = qk_acc.after(chunk).store(qk_acc.after(chunk) + qv * kval).end(chunk)
-  score = sum((qk_acc.after(qk_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0)) / math.sqrt(dim)
+  score = sum((qk_acc.after(qk_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0)) / math.sqrt(dim)
   previous_max, previous_sum = row_max.after(qk_done)[0].load(), row_sum.after(qk_done)[0].load()
   next_max = previous_max.maximum(score)
   old_scale, weight = ((previous_max - next_max) * log2e).exp2(), ((score - next_max) * log2e).exp2()
@@ -1178,7 +1178,7 @@ def _attention_decode_uop(out:UOp, q:UOp, cache:UOp, valid_len:UOp) -> UOp:
   vbase = batch * kv_heads * cache_len * dim + ((bi * kv_heads + kv_head) * cache_len + position) * dim
   updates = [numerator[value_chunk * 8 + lane].store(
     numerator.after(position)[value_chunk * 8 + lane].load() * old_scale +
-    cachef[vbase + value_chunk * 8 + lane].load().cast(dtypes.float32) * weight) for lane in range(8)]
+    cachef[vbase + value_chunk * 8 + lane].load().float() * weight) for lane in range(8)]
   values_done = UOp.group(*updates).end(value_chunk)
   update = UOp.group(values_done, row_max[0].store(next_max), row_sum[0].store(previous_sum * old_scale + weight)).end(position)
 
@@ -1224,7 +1224,7 @@ def _attention_prefill_online_uop(out:UOp, q:UOp, cache:UOp, start_pos:UOp) -> U
 
   next_maxes, old_scales, weights = [], [], []
   for token_offset,(acc,row_max) in enumerate(zip(qk_accs, row_maxes)):
-    score = sum((acc.after(qk_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0)) / math.sqrt(dim)
+    score = sum((acc.after(qk_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0)) / math.sqrt(dim)
     valid = position < start_pos + token_base + token_offset + 1
     previous_max = row_max.after(qk_done)[0].load()
     next_max = valid.where(previous_max.maximum(score), previous_max)
@@ -1303,7 +1303,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
 
   current = UOp.placeholder((dim * dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   init_chunk = UOp.range(dim * dim // 8, 90)
-  initial_values = _contiguous_vector_load(statef[bh * dim * dim + init_chunk * 8], 8).cast(dtypes.float32)
+  initial_values = _contiguous_vector_load(statef[bh * dim * dim + init_chunk * 8], 8).float()
   initialized_state = _contiguous_vector_ptr(current, init_chunk * 8, 8).store(initial_values).end(init_chunk)
 
   token = UOp.range(tokens, 91)
@@ -1314,7 +1314,7 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   qvec = _contiguous_vector_load(qf[token_base + chunk * 8], 8)
   kvec = _contiguous_vector_load(kf[token_base + chunk * 8], 8)
   kq_done = _vector_acc_update(kq_acc, qvec * kvec, chunk).end(chunk)
-  kq = sum((kq_acc.after(kq_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  kq = sum((kq_acc.after(kq_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
 
   core_values = UOp.placeholder((dim,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
   row = UOp.range(dim, 93)
@@ -1328,8 +1328,8 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   k_vec = _contiguous_vector_load(kf[token_base + col * 8], 8)
   dots = UOp.group(_vector_acc_update(state_k, state_vec * k_vec, dot_init, col),
                    _vector_acc_update(state_q, state_vec * q_vec, dot_init, col)).end(col)
-  sk = sum((state_k.after(dots).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
-  sq = sum((state_q.after(dots).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  sk = sum((state_k.after(dots)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
+  sq = sum((state_q.after(dots)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
   av, bv = alphaf[bh * tokens + token].load(), betaf[bh * tokens + token].load()
   delta = (vf[token_base + row].load() - sk * av) * bv
   saved_core = core_values.after(dots)[row].store(sq * av + delta * kq)
@@ -1346,11 +1346,11 @@ def _gated_delta_prefill_uop(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta
   norm_chunk = UOp.range(chunks, 96)
   cv = _contiguous_vector_load(core_values.after(rows_done)[norm_chunk * 8], 8)
   norm_done = _vector_acc_update(norm_acc, cv * cv, norm_chunk).end(norm_chunk)
-  norm_sum = sum((norm_acc.after(norm_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  norm_sum = sum((norm_acc.after(norm_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
   scale = (norm_sum / dim + norm_eps).rsqrt()
   output = UOp.range(dim, 97)
   token_done = coref[token_base + output].store(
-    core_values.after(norm_done)[output].load() * scale * normf[output].load().cast(dtypes.float32)).end(output, token)
+    core_values.after(norm_done)[output].load() * scale * normf[output].load().float()).end(output, token)
 
   save_chunk = UOp.range(dim * dim // 8, 98)
   saved_values = _contiguous_vector_load(current.after(token_done)[save_chunk * 8], 8).cast(next_state.dtype)
@@ -1377,7 +1377,7 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
   qv = _contiguous_vector_load(qf[bh * dim + chunk * 8], 8)
   kv = _contiguous_vector_load(kf[bh * dim + chunk * 8], 8)
   kq_done = _vector_acc_update(kq_acc, qv * kv, chunk).end(chunk)
-  kq = sum((kq_acc.after(kq_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  kq = sum((kq_acc.after(kq_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
 
   core_values = UOp.placeholder((dim,), dtypes.float32, slot=1, addrspace=AddrSpace.REG)
   row = UOp.range(dim, 91)
@@ -1386,20 +1386,20 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
   initialized = UOp.group(_vector_reg(state_k, row).store(state_k.const_like(0)),
                           _vector_reg(state_q, row).store(state_q.const_like(0)))
   col = UOp.range(chunks, 92)
-  state_vec = _contiguous_vector_load(statef[bh * dim * dim + row * dim + col * 8], 8).cast(dtypes.float32)
+  state_vec = _contiguous_vector_load(statef[bh * dim * dim + row * dim + col * 8], 8).float()
   q_vec = _contiguous_vector_load(qf[bh * dim + col * 8], 8)
   k_vec = _contiguous_vector_load(kf[bh * dim + col * 8], 8)
   dots = UOp.group(_vector_acc_update(state_k, state_vec * k_vec, initialized, col),
                    _vector_acc_update(state_q, state_vec * q_vec, initialized, col)).end(col)
-  sk = sum((state_k.after(dots).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
-  sq = sum((state_q.after(dots).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  sk = sum((state_k.after(dots)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
+  sq = sum((state_q.after(dots)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
   av, bv = alphaf[bh].load(), betaf[bh].load()
   delta = (vf[bh * dim + row].load() - sk * av) * bv
   core_value = sq * av + delta * kq
   saved_core = core_values.after(dots)[row].store(core_value)
   update = UOp.range(chunks, 93)
   state_base = bh * dim * dim + row * dim + update * 8
-  state_values = _contiguous_vector_load(statef[state_base], 8).cast(dtypes.float32)
+  state_values = _contiguous_vector_load(statef[state_base], 8).float()
   key_values = _contiguous_vector_load(kf[bh * dim + update * 8], 8)
   next_values = (state_values * av + delta * key_values).cast(next_state.dtype)
   update_state = _contiguous_vector_ptr(nextf.after(dots), state_base, 8).store(next_values).end(update)
@@ -1411,7 +1411,7 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
     norm_chunk = UOp.range(chunks, 94)
     cv = _contiguous_vector_load(core_values.after(rows_done)[norm_chunk * 8], 8)
     norm_done = _vector_acc_update(norm_acc, cv * cv, norm_chunk).end(norm_chunk)
-    norm_sum = sum((norm_acc.after(norm_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+    norm_sum = sum((norm_acc.after(norm_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
     scale = (norm_sum / dim + norm_eps).rsqrt()
     source = core_values.after(norm_done)
   else:
@@ -1420,7 +1420,7 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
     assert coref is not None and quant_scale is None and gate is None
     output = UOp.range(dim, 95)
     value = source[output].load() * scale
-    if normalize: value = value * norm_weight[output].load().cast(dtypes.float32)
+    if normalize: value = value * norm_weight[output].load().float()
     stores = coref[bh * dim + output].store(value).end(output)
     name = f"gated_delta_uop_{batch}_{heads}_{dim}_{state.dtype.name}"
   else:
@@ -1432,16 +1432,16 @@ def _gated_delta_uop(core:UOp|None, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UO
     for chunk_idx in range(4):
       offset = chunk_idx * 8
       source_values = _contiguous_vector_load(source[quant_group * 32 + offset], 8)
-      norm_values = _contiguous_vector_load(norm_weight[quant_group * 32 + offset], 8).cast(dtypes.float32)
-      gate_values = _contiguous_vector_load(gatef[base + offset], 8).cast(dtypes.float32)
-      gate_sigmoid = UOp.stack(*(gate_values.index(i).sigmoid() for i in range(8)))
+      norm_values = _contiguous_vector_load(norm_weight[quant_group * 32 + offset], 8).float()
+      gate_values = _contiguous_vector_load(gatef[base + offset], 8).float()
+      gate_sigmoid = UOp.stack(*(gate_values[i].sigmoid() for i in range(8)))
       value_vecs.append(source_values * scale * norm_values * gate_values * gate_sigmoid)
-    values = tuple(value_vecs[i // 8].index(i % 8) for i in range(32))
+    values = tuple(value_vecs[i // 8][i % 8] for i in range(32))
     amax = functools.reduce(lambda a,b:a.maximum(b), (value.abs() for value in values))
     d = (amax / 127).maximum(1e-8)
     quant_stores = []
     for chunk_idx,value_vec in enumerate(value_vecs):
-      quant_values = UOp.stack(*((value_vec.index(i) / d).round().maximum(-127).minimum(127).cast(dtypes.int8) for i in range(8)))
+      quant_values = UOp.stack(*((value_vec[i] / d).round().maximum(-127).minimum(127).cast(dtypes.int8) for i in range(8)))
       quant_stores.append(_contiguous_vector_ptr(quantf, base + chunk_idx * 8, 8).store(quant_values))
     stores = UOp.group(scalef[bh * (dim // 32) + quant_group].store(d), *quant_stores).end(quant_group)
     name = f"gated_delta_q8_uop_{batch}_{heads}_{dim}_{state.dtype.name}"
@@ -1517,13 +1517,13 @@ def _causal_conv_silu_uop(out:UOp, state:UOp, x:UOp, weight:UOp, kernel_size:int
     from_state = position < kernel_size - 1
     state_pos, x_pos = position.minimum(kernel_size - 2), (position - (kernel_size - 1)).maximum(0)
     values = UOp.stack(*(from_state.where(state[batch_idx, state_pos, channel + lane].load(),
-                                          x[batch_idx, x_pos, channel + lane].load()).cast(dtypes.float32)
+                                          x[batch_idx, x_pos, channel + lane].load()).float()
                          for lane in range(8)))
-    weights = UOp.stack(*(weight[tap, channel + lane].load().cast(dtypes.float32) if weight_transposed else
-                          weight[channel + lane, tap].load().cast(dtypes.float32) for lane in range(8)))
+    weights = UOp.stack(*(weight[tap, channel + lane].load().float() if weight_transposed else
+                          weight[channel + lane, tap].load().float() for lane in range(8)))
     total = total + values * weights
   result = total / (1.0 + _finite_exp2(total * (-1 / math.log(2))))
-  stores = UOp.group(*(out[batch_idx, token, channel + lane].store(result.index(lane)) for lane in range(8)))
+  stores = UOp.group(*(out[batch_idx, token, channel + lane].store(result[lane]) for lane in range(8)))
   return stores.end(job, core).sink(
     arg=KernelInfo(name=f"causal_conv_silu_uop_{batch}_{tokens}_{channels}_{kernel_size}", optimize=False, parallel=True))
 
@@ -1551,20 +1551,20 @@ def _gdn_qkv_uop(q:UOp, k:UOp, v:UOp, conv:UOp, k_heads:int, v_heads:int, dim:in
   initialized = UOp.group(_vector_reg(qsum, job).store(qsum.const_like(0)),
                           _vector_reg(ksum, job).store(ksum.const_like(0)))
   chunk = UOp.range(dim // 8, 100)
-  qvalue = _contiguous_vector_load(conv[qbase + chunk * 8], 8).cast(dtypes.float32)
-  kvalue = _contiguous_vector_load(conv[kbase + chunk * 8], 8).cast(dtypes.float32)
+  qvalue = _contiguous_vector_load(conv[qbase + chunk * 8], 8).float()
+  kvalue = _contiguous_vector_load(conv[kbase + chunk * 8], 8).float()
   summed = UOp.group(_vector_acc_update(qsum, qvalue * qvalue, initialized, chunk),
                      _vector_acc_update(ksum, kvalue * kvalue, initialized, chunk)).end(chunk)
-  qtotal = sum((qsum.after(summed).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
-  ktotal = sum((ksum.after(summed).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  qtotal = sum((qsum.after(summed)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
+  ktotal = sum((ksum.after(summed)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   qscale, kscale = ((qtotal + 1e-6) * dim).rsqrt(), (ktotal + 1e-6).rsqrt()
 
   out_chunk = UOp.range(dim // 8, 101)
-  qvalues = _contiguous_vector_load(conv[qbase + out_chunk * 8], 8).cast(dtypes.float32) * qscale
-  kvalues = _contiguous_vector_load(conv[kbase + out_chunk * 8], 8).cast(dtypes.float32) * kscale
-  vvalues = _contiguous_vector_load(conv[vbase + out_chunk * 8], 8).cast(dtypes.float32)
+  qvalues = _contiguous_vector_load(conv[qbase + out_chunk * 8], 8).float() * qscale
+  kvalues = _contiguous_vector_load(conv[kbase + out_chunk * 8], 8).float() * kscale
+  vvalues = _contiguous_vector_load(conv[vbase + out_chunk * 8], 8).float()
   stores = UOp.group(*(
-    target[batch_idx, head, token, out_chunk * 8 + lane].store(values.index(lane))
+    target[batch_idx, head, token, out_chunk * 8 + lane].store(values[lane])
     for target,values in ((q, qvalues), (k, kvalues), (v, vvalues)) for lane in range(8))).end(out_chunk)
   return stores.end(job, core).sink(
     arg=KernelInfo(name=f"gdn_qkv_uop_{batch}_{tokens}_{k_heads}_{v_heads}_{dim}", optimize=False, parallel=True))
@@ -1602,8 +1602,8 @@ def _cpu_topk_uop(out:UOp, sel:UOp, x:UOp, k:int, bias:UOp|None=None, normalize:
 
   index = UOp.range(256, 92)
   raw = x[row, index].load()
-  score = raw.cast(dtypes.float32) if bias is None else \
-    (raw.sigmoid().cast(x.dtype) + bias[index].load()).cast(x.dtype).cast(dtypes.float32)
+  score = raw.float() if bias is None else \
+    (raw.sigmoid().cast(x.dtype) + bias[index].load()).cast(x.dtype).float()
   worst_score, worst_index, worst_slot = scores.after(initialized, index)[0].load(), indices.after(initialized, index)[0].load(), \
     UOp.const(dtypes.weakint, 0)
   for slot in range(1, k):
@@ -1611,9 +1611,9 @@ def _cpu_topk_uop(out:UOp, sel:UOp, x:UOp, k:int, bias:UOp|None=None, normalize:
     worse = (candidate_score < worst_score) | ((candidate_score == worst_score) & (candidate_index > worst_index))
     worst_score, worst_index = worse.where(candidate_score, worst_score), worse.where(candidate_index, worst_index)
     worst_slot = worse.where(UOp.const(dtypes.weakint, slot), worst_slot)
-  take = (score > worst_score) | ((score == worst_score) & (index.cast(dtypes.int32) < worst_index))
+  take = (score > worst_score) | ((score == worst_score) & (index.int() < worst_index))
   selected = UOp.group(scores[worst_slot.valid(take)].store(score),
-                       indices[worst_slot.valid(take)].store(index.cast(dtypes.int32))).end(index)
+                       indices[worst_slot.valid(take)].store(index.int())).end(index)
 
   sorted_values = selected
   # Ascending score order, with larger indices first on ties, matches the reference implementation's reversed descending list.
@@ -1642,7 +1642,7 @@ def _cpu_topk_uop(out:UOp, sel:UOp, x:UOp, k:int, bias:UOp|None=None, normalize:
     value = (exps[0] if k == 1 else
              ((scores.after(sorted_values, rank)[rank].load() - maximum) * (1 / math.log(2))).exp2()) / sum(
                exps, UOp.const(dtypes.float32, 0))
-  stores = UOp.group(out[row, rank].store(value.cast(out.dtype)), sel[row, rank].store(selected_index.cast(dtypes.int32)))
+  stores = UOp.group(out[row, rank].store(value.cast(out.dtype)), sel[row, rank].store(selected_index.int()))
   return stores.end(rank, job, core).sink(
     arg=KernelInfo(name=f"cpu_uop_{'biased_' if bias is not None else ''}topk_{outer}_{k}", optimize=False, parallel=True))
 
@@ -1693,7 +1693,7 @@ def _f16_matvec_uop(out:UOp, x:UOp, weight:UOp) -> UOp:
     updates.append(_vector_reg(acc, chunk).store(previous + values * weights))
   done = UOp.group(*updates).end(chunk)
   stores = [outf[(token_base + token) * out_features + output].store(
-    sum((acc.after(done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0)).cast(out.dtype))
+    sum((acc.after(done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0)).cast(out.dtype))
             for token,acc in enumerate(accs)]
   return UOp.group(*stores).end(token_block, output_job, core).sink(
     arg=KernelInfo(name=f"f16_matvec_uop_{tokens}_{out_features}_{in_features}", optimize=False, parallel=True))
@@ -1741,13 +1741,13 @@ def _rmsnorm_f16_linear_uop(normalized:UOp, out:UOp, x:UOp, norm_weight:UOp, wei
   chunk = UOp.range(dim // 8, 90)
   xv = UOp.stack(*(xf[chunk * 8 + lane].load() for lane in range(8)))
   norm_done = norm_acc.after(chunk).store(norm_acc.after(chunk) + xv * xv).end(chunk)
-  norm_sum = sum((norm_acc.after(norm_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  norm_sum = sum((norm_acc.after(norm_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
   scale = (norm_sum / dim + eps).rsqrt()
 
   norm_job = UOp.range(dim // cores, 91)
   norm_idx = core * (dim // cores) + norm_job
   normalized_done = normalizedf[norm_idx].store(
-    xf[norm_idx].load() * scale * normf[norm_idx].load().cast(dtypes.float32)).end(norm_job)
+    xf[norm_idx].load() * scale * normf[norm_idx].load().float()).end(norm_job)
 
   output_job = UOp.range(out_features // cores, 92)
   output = core * (out_features // cores) + output_job
@@ -1757,7 +1757,7 @@ def _rmsnorm_f16_linear_uop(normalized:UOp, out:UOp, x:UOp, norm_weight:UOp, wei
   products = _rms_f16_product_ptr(xf[linear_chunk * 8], normf[linear_chunk * 8],
                                    weightf[output * dim + linear_chunk * 8], scale)
   linear_done = linear_acc.after(linear_chunk).store(linear_acc.after(linear_chunk) + products).end(linear_chunk)
-  value = sum((linear_acc.after(linear_done).index(lane) for lane in range(8)), UOp.const(dtypes.float32, 0))
+  value = sum((linear_acc.after(linear_done)[lane] for lane in range(8)), UOp.const(dtypes.float32, 0))
   return outf[output].store(value).end(output_job, core).sink(
     arg=KernelInfo(name=f"rmsnorm_f16_linear_uop_{out_features}_{dim}", optimize=False, parallel=True))
 
@@ -1817,7 +1817,7 @@ def _q6_argmax_uop(values:UOp, indices:UOp, raw:UOp, xq:UOp, xd:UOp, out_feature
   begin, rows = out_features * core // cores, out_features // cores
   best = UOp.placeholder((1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   best_idx = UOp.placeholder((1,), dtypes.int32, slot=1, addrspace=AddrSpace.REG)
-  initialized = UOp.group(best.after(core).store(best.const_like(-math.inf)), best_idx.after(core).store(begin.cast(dtypes.int32)))
+  initialized = UOp.group(best.after(core).store(best.const_like(-math.inf)), best_idx.after(core).store(begin.int()))
   row_job = UOp.range(rows, 90)
   row = begin + row_job
   acc = UOp.placeholder((8,), dtypes.float32, slot=2, addrspace=AddrSpace.REG)
@@ -1826,14 +1826,14 @@ def _q6_argmax_uop(values:UOp, indices:UOp, raw:UOp, xq:UOp, xd:UOp, out_feature
   base = row * row_size + block * 210
   block_sum = UOp.stack(*(UOp.const(dtypes.float32, 0) for _ in range(8)))
   for subgroup in range(8):
-    parts = _dot_q6_ptr(raw[base], xq[0, block, subgroup * 32], subgroup).cast(dtypes.float32)
-    scales = UOp.stack(*(raw[base + 192 + subgroup * 2 + j].load().bitcast(dtypes.int8).cast(dtypes.float32) for j in range(2)))
+    parts = _dot_q6_ptr(raw[base], xq[0, block, subgroup * 32], subgroup).float()
+    scales = UOp.stack(*(raw[base + 192 + subgroup * 2 + j].load().bitcast(dtypes.int8).float() for j in range(2)))
     block_sum = block_sum + parts * UOp.stack(*(scales[j // 4] for j in range(8)))
   block_done = acc.after(block).store(acc.after(block) + block_sum * xd[0, block] * _load_f16(raw, base + 208)).end(block)
-  value = sum((acc.after(block_done).index(i) for i in range(8)), UOp.const(dtypes.float32, 0))
+  value = sum((acc.after(block_done)[i] for i in range(8)), UOp.const(dtypes.float32, 0))
   take = value > best.after(block_done)[0].load()
   selected = UOp.group(best[0].store(take.where(value, best.after(block_done)[0].load())),
-                       best_idx[0].store(take.where(row.cast(dtypes.int32), best_idx.after(block_done)[0].load()))).end(row_job)
+                       best_idx[0].store(take.where(row.int(), best_idx.after(block_done)[0].load()))).end(row_job)
   return UOp.group(values[core].store(best.after(selected)[0].load()),
                    indices[core].store(best_idx.after(selected)[0].load())).end(core).sink(
     arg=KernelInfo(name=f"q6_argmax_uop_{out_features}_{in_features}", optimize=False, parallel=True))

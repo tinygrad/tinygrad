@@ -19,7 +19,7 @@ LOG2E = math.log2(math.e)
 
 def warp_shfl_xor(val, offset, lane):
   """Read val from lane ^ offset using ds_bpermute."""
-  idx = ((lane ^ offset) * 4).cast(dtypes.int)
+  idx = ((lane ^ offset) * 4).int()
   if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
   return UOp(Ops.CUSTOM, dtypes.float, (idx, val),
              arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
@@ -27,7 +27,7 @@ def warp_shfl_xor(val, offset, lane):
 def warp_reduce_max(val, lane):
   """Tree reduce MAX across LANES_PER_WAVE_N=16 lanes."""
   for offset in [8, 4, 2, 1]:
-    val = UOp(Ops.MAX, dtypes.float, (val, warp_shfl_xor(val, offset, lane)))
+    val = val.maximum(warp_shfl_xor(val, offset, lane))
   return val
 
 def warp_reduce_sum(val, lane):
