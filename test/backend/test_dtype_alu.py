@@ -408,5 +408,14 @@ class TestDTypeALU(unittest.TestCase):
     np.testing.assert_equal(t1.item(), t2.item())
     np.testing.assert_equal(t2.item(), 2**24)
 
+  def test_float_const_alu_rounds_like_buffer(self):
+    # a float width is a rounding GRID, not just a range: both operands land on it before the add, so the sum is 0.
+    # folding the two consts at python precision instead would give 1
+    a, b = float(2**24 + 1), float(-2**24)
+    t1 = Tensor([a], dtype=dtypes.float32) + Tensor([b], dtype=dtypes.float32)
+    t2 = Tensor(a, dtype=dtypes.float32) + Tensor(b, dtype=dtypes.float32)
+    np.testing.assert_equal(t1.item(), t2.item())
+    np.testing.assert_equal(t2.item(), 0.0)
+
 if __name__ == '__main__':
   unittest.main()

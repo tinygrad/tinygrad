@@ -21,11 +21,12 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
 
   # casting
-  # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to.
+  # a typed constant is the pair CAST(dt, CONST(weak v)): it renders as the typed const it commits to. the literal goes out at
+  # the value's own precision and the target compiler lands it on the width's grid (const_value's rounding only lengthens digits).
   # a non-finite float at an int width is UB: render what the compiled cast computes (saturate, nan to 0)
   (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="c"),)),
    lambda ctx,x,c: ctx.string_rewrite.rewrite(UOp(Ops.CONST, x.dtype, arg=(0 if math.isnan(c.arg) else x.dtype.max if c.arg > 0 else
-     x.dtype.min) if isinstance(c.arg, float) and not math.isfinite(c.arg) and dtypes.is_int(x.dtype) else x.const_value),
+     x.dtype.min) if isinstance(c.arg, float) and not math.isfinite(c.arg) and dtypes.is_int(x.dtype) else x.dtype.const(c.arg)),
      ctx=ctx) if x.dtype not in dtypes.weaks else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
     if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),

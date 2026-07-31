@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, pm_below_boundary
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
@@ -377,11 +377,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # THE BOUNDARY: the one semantic->machine pass; every weak value commits, a bare CONST as the pair CAST(dt, CONST(v))
   sink = graph_rewrite(sink, symbolic_simple+pm_pair_weak+pm_cast_weak, name="commit weak")
 
-  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
+  # the closing commit rides the final rewrite: what a below-boundary rule mints bare commits in the same fixpoint
+  pm_final_rewrite = pm_decomp+pm_below_boundary+extra_matcher+pm_split_ends+pm_pair_weak+pm_cast_weak
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
-
-  # cleanup the weak minted inside pm_final_rewrite (pm_decomp rerun + extra_matcher) — transitional closing commit
-  sink = graph_rewrite(sink, symbolic_simple+pm_pair_weak+pm_cast_weak, name="commit weak leftovers")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")

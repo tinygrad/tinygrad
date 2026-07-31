@@ -614,7 +614,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def const_value(self) -> ConstType:
     # the value a committed constant commits to: the pair states its width on the CAST, so the value converts at the CAST's kind
-    return self.dtype.const(self.src[0].arg) if self.op is Ops.CAST else self.arg
+    # AND lands on its grid — a float width is a rounding grid, not just a range (2**24+1 at float32 IS 2**24)
+    if self.op is not Ops.CAST: return self.arg
+    return self.dtype.const(truncate[self.dtype](self.src[0].arg) if self.dtype in dtypes.floats else self.src[0].arg)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
     # a stated dtype is the pair CAST(dt, CONST(v)): the value carries the dtype's KIND, the CAST carries its width

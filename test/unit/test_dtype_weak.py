@@ -112,6 +112,14 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIs(graph_rewrite(pair.cast(dtypes.int), symbolic_simple).src[0], pair)
     self.assertEqual(graph_rewrite(UOp.const(3.7).cast(dtypes.float32).cast(dtypes.int), symbolic_simple), UOp.const(3).cast(dtypes.int))
 
+  def test_pair_holds_its_value_on_its_own_grid(self):
+    # a float width is a rounding grid: the pair's value is what the width HOLDS, and that is what folds — at python
+    # precision the same add gives 1.0, which is not what the machine computes
+    off_grid, on_grid = UOp.const(float(2**24+1)).cast(dtypes.float32), UOp.const(float(-2**24)).cast(dtypes.float32)
+    self.assertEqual(off_grid.const_value, float(2**24))
+    self.assertEqual(on_grid.const_value, float(-2**24))
+    self.assertEqual((off_grid+on_grid).simplify().const_value, 0.0)
+
   def test_weak_shift_lhs_commits_the_node(self):
     # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
     shl = graph_rewrite(UOp.const(0xFFFF) << UOp.variable("x", 0, 16, dtypes.uint), symbolic_simple+pm_pair_weak)

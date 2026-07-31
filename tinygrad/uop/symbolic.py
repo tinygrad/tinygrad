@@ -36,12 +36,20 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if c.dtype.itemsize != root.dtype.itemsize: return None
   def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   # the bit pattern IS the width, so the result states it
-  return bare_like(root, convert(c.arg)).cast(root.dtype)
+  return bare_like(root, convert(c.const_value)).cast(root.dtype)
+
+# BELOW THE BOUNDARY the pair is the typed constant it commits to, so a fold that needs a constant's WIDTH reads it here
+# (rule 4 forbids that above). a bit pattern is exactly such a width, and above the boundary it has no bare form to fold from
+# a bare bool CONST is committed too: bool is the lattice bottom, it has no weak twin and never acquires a cast
+pm_below_boundary = PatternMatcher([
+  (UPat(Ops.BITCAST, name="root", src=(UPat.any(UPat(Ops.CONST, dtype=dtypes.weaks).cast(name="c"), UPat.cvar("c", dtypes.bool)),)), fold_bitcast),
+])
 
 def fold_cast_const(root:UOp, c:UOp) -> UOp|None:
   # a KIND-crossing cast of a constant is a conversion, so it folds into the value: the const moves to the target's kind
-  # and the CAST is left stating the width. a same-kind cast states only a width — it IS the pair, and stays (rule 4)
-  if dtypes.is_float(root.dtype) is dtypes.is_float(c.dtype): return None
+  # and the CAST is left stating the width. a same-kind cast states only a width — it IS the pair, and stays (rule 4).
+  # the kinds are the weak dtypes, bool included: it is the lattice bottom, and bool->number is a conversion (True is 1)
+  if weak_dtype(root.dtype) is weak_dtype(c.dtype): return None
   convert, arg = root.dtype.const, (c.arg if c.op is Ops.CONST else c.src[0].arg)
   # a non-finite float has no int conversion: that is the renderer's UB to state, not a fold
   if dtypes.is_int(root.dtype) and isinstance(arg, float) and not math.isfinite(arg): return None
@@ -181,8 +189,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x") * 0, fold_mul_zero),
   # *** cast/bitcast ***
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
-  (UPat(Ops.CAST, name="root", src=(UPat(Ops.CONST, dtype=dtypes.weaks).or_casted("c"),)), fold_cast_const),
-  (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
+  (UPat(Ops.CAST, name="root", src=(UPat(Ops.CONST, dtype=dtypes.weaks+(dtypes.bool,)).or_casted("c"),)), fold_cast_const),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # bitcast twice
@@ -257,8 +264,9 @@ def relax_committed_const(u:UOp) -> UOp|None:
     # a non-finite float constant is width-invariant: inf is inf at every float width, so its pair carries no information
     if dtypes.is_float(s.dtype) and isinstance(s.src[0].arg, float) and not math.isfinite(s.src[0].arg): return s.src[0]
     # sound only as a round trip: the width must be sibling-carried and the bare const must not move the lattice
-    # (a kind-crossing pair, e.g. a weakfloat committed at int, is a real conversion and stays)
-    if s.dtype == dt and dt not in dtypes.weaks and least_upper_dtype(dt, s.src[0].dtype) == dt: return s.src[0]
+    # (a kind-crossing pair, e.g. a weakfloat committed at int, is a real conversion and stays). what relaxes is the value
+    # the width HOLDS — a float width is a rounding grid, and the raw value would fold at python precision instead of the machine's
+    if s.dtype == dt and dt not in dtypes.weaks and least_upper_dtype(dt, s.src[0].dtype) == dt: return UOp.const(s.const_value)
     return s
   if (src:=tuple(relax(s) for s in u.src)) == u.src: return None
   # a relax that leaves the node weak dropped the only copy of the width: the node restates it as the demand cast

@@ -203,29 +203,24 @@ spec_tensor = PatternMatcher([
 # a widthless value is read by value, never by width: a bare weak CONST, or the STACK of them a multi-dim shape is (an image's (h,w,4))
 def is_widthless(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
+# the widthless SLOTS: operand positions no instruction reads at a width. every other position is data and has one
+def widthless_slot(u:UOp, i:int) -> bool:
+  if u.op in (Ops.PARAM, Ops.BUFFER): return True     # every src is the shape
+  if u.op is Ops.SPECIAL: return i == 0               # the launch bound, read by the runtime
+  if u.op is Ops.SHRINK: return i == 2                # the size the renderer reads
+  return u.op is Ops.INDEX and i == 1 and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU)  # a lane selector picks a register
+
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
   # a widthless value is a legal weak leaf; every other weak program node is forbidden
   (UPat(GroupOp.All, dtypes.weaks, name="x"), lambda x: is_widthless(x)),
 
-  # widthless CONST slots: REG/ALU lane selectors and buffer sizes read the value, never a width
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(Ops.CONST, dtypes.weakint)), allow_any_len=True, name="x"),
-   lambda x,buf: x.dtype not in dtypes.weaks and buf.addrspace in (AddrSpace.REG, AddrSpace.ALU)
-   and all(s.dtype not in dtypes.weaks for s in x.src[2:])),
-  # a PARAM's/BUFFER's shape srcs are widthless: a widthless weak value is legal there, any other weak src is not
-  (UPat((Ops.PARAM, Ops.BUFFER, Ops.SPECIAL), name="x"),
-   lambda x: False if any(s.dtype in dtypes.weaks and not is_widthless(s) for s in x.src) else None),
-
   # a typed constant is the pair CAST(dt, CONST(weak v)): legal wherever data is
   (UPat(Ops.CAST, name="x", src=(UPat(Ops.CONST, dtypes.weaks),)), lambda x: True if x.dtype not in dtypes.weaks else None),
 
-  # a SHRINK's size src is widthless (the renderer reads the value): a bare weak CONST is legal there, weak is banned everywhere else
-  (UPat(Ops.SHRINK, name="x"), lambda x: False if x.src[1].dtype in dtypes.weaks
-   or any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in x.src) else None),
-
-  # all remaining operand slots are data: a bare weak CONST is not a data value
-  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER, Ops.SHRINK, Ops.SPECIAL}, name="x"),
-   lambda x: False if any(s.dtype in dtypes.weaks for s in x.src) else None),
+  # so a weak operand is legal exactly where a widthless value meets a widthless slot
+  (UPat(GroupOp.All, name="x"), lambda x: False if any(s.dtype in dtypes.weaks and not (widthless_slot(x, i) and is_widthless(s))
+                                                      for i,s in enumerate(x.src)) else None),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
@@ -243,9 +238,9 @@ spec_program = PatternMatcher([
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  # SPECIAL is int32 after index lowering; its size src is launch metadata (a bare weak CONST reads by value)
+  # SPECIAL is int32 after index lowering; its size src is launch metadata, and the widthless-slot rule above vouches for a weak one
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.int32, dtypes.weakint)),), name="s"),
-   lambda s,x: (matches_dtype(x, s.dtype) or (x.op is Ops.CONST and x.dtype is dtypes.weakint)) and isinstance(s.arg, str)),
+   lambda s,x: (matches_dtype(x, s.dtype) or x.dtype is dtypes.weakint) and isinstance(s.arg, str)),
 ])+spec_shared
 
 spec_hcq = PatternMatcher([
