@@ -577,7 +577,7 @@ class TestRangeShrink(unittest.TestCase):
     # emulates mask.where(x.pad_to(mask.shape), Invalid): range should shrink accordingly
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(1, dtypes.float), Invalid)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
@@ -586,7 +586,7 @@ class TestRangeShrink(unittest.TestCase):
     # above, but flipped
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(1, dtypes.float), Invalid)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)

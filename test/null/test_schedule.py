@@ -1640,11 +1640,11 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   def test_const_schedule(self):
-    constv = Tensor.empty(2, 2).uop.const_like(10)
+    constv = Tensor.empty(2, 2).const_like(10).uop
     check_schedule(constv, 0)
 
   def test_const_schedule_contig(self):
-    constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
+    constv = Tensor.empty(2, 2).const_like(10).uop.contiguous()
     check_schedule(constv, 0)
 
   def test_advanced_simple_indexing_combined(self):
