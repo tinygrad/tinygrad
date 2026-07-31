@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef
-from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
+from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
 
 # ***** X86 Ops *****
 
