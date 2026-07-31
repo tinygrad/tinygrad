@@ -551,6 +551,17 @@ pm_copy_to_store = PatternMatcher([
   (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
 ])
 
+# **** simple rangeify ****
+
+def this_is_rangeify(ctx, x:UOp):
+  if x.shape == (): return None
+  rngs = [UOp.range(s, next(ctx)) for s in x.shape]
+  return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
+
+pm_simple_rangeify = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), this_is_rangeify),
+])
+
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
@@ -560,10 +571,11 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  #tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  tsink = graph_rewrite(tsink, pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  #tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
