@@ -48,17 +48,17 @@ OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
-V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
+V_ASHR = { 2:RDNA3Ops.v_ashrrev_i16, 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
 
 # ---- helpers ----
 lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
-def to_vgpr(ctx, x:UOp) -> UOp: return vmov(x) if is_const(x) else x
+def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
-  if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
+  # if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
   return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
@@ -114,7 +114,7 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   if x.op is Ops.LOAD and x.src[0].addrspace is not AddrSpace.REG: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
-  if x.op is Ops.GROUP and not all(s.op is Ops.INS for s in x.src): return None
+  # if x.op is Ops.GROUP and not all(rdef(s) is not None for s in x.src): return None
 
   if x.op is Ops.GROUP:
     vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
@@ -178,7 +178,7 @@ def store(ctx, idx:UOp, val:UOp):
   n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize * 8
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
-  return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(ctx,val),))
+  return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
 
 # TODO: cleanup + make load copy zero cost?
 def gated_load(idx:UOp, alt:UOp, gate:UOp):
@@ -224,6 +224,7 @@ def mul64(ctx, x:UOp):
   p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)), add=True)
   return _mad(a.index(0), b.index(0), p3)
 
+# TODO: fold const 64 as imms here?, shift hi, mas lo
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
   lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(0), b.index(0)))
@@ -287,22 +288,19 @@ def cvt(ctx, y:UOp, x:UOp):
   if x.dtype in dtypes.int64s and y.dtype.itemsize == 4: # b32 -> b64
     targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
     lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
-    return to_vgpr(ctx, UOp(Ops.STACK, src=(lo, const(0, targ))))
+    return to_vgpr(UOp(Ops.STACK, src=(lo, const(0, targ))))
   elif y.dtype in dtypes.int64s and x.dtype.itemsize == 4: # b64 -> b32
     src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
     if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
     else: return y.index(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
-# NOTE: this needs work, maybe cleaner to define 2 reg buffer and just .store()
+# TODO: cleanup this slop + manual constr
 def int_to_int64(y:UOp, tdt:DType):
-  do_sext = not dtypes.is_unsigned(y.dtype)
-  if do_sext:
+  if not dtypes.is_unsigned(y.dtype): # sext
     nbits = y.dtype.itemsize*8
-    hi = getsign(vmov(y), nbits)
-    # extend sign to upper part of low
-    # TODO: cleanup this slop + manual constr
-    lo = vmov(y) if y.dtype.itemsize >= 4 else UOp(Ops.OR, dtypes.uint32, src=(vmov(y), UOp(Ops.AND, dtypes.uint32, src=(hi, const(~((1 << nbits) - 1)))))) 
+    lo = vmov(y)
+    hi = getsign(to_vgpr(y), nbits)
   else: lo, hi = vmov(y), vmov(const(0))
   return multireg(lo, hi, dtype=tdt)
 
@@ -310,10 +308,10 @@ def int_to_int64(y:UOp, tdt:DType):
 def intcast(y:UOp, x:UOp):
   if y.dtype.itemsize == x.dtype.itemsize: return y if y.dtype == x.dtype else y.bitcast(x.dtype)  # same size: noop or retype
   if x.dtype.itemsize > y.dtype.itemsize:
-    if x.dtype.itemsize == 2: return (y & const(0xFFFF)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(0xFFFF, y.dtype)).bitcast(x.dtype)
     return (y & const(0xFFFFFFFF, y.dtype)).bitcast(x.dtype)
   if y.dtype.itemsize <= 4 and x.dtype.itemsize < y.dtype.itemsize: # masked narrow
-    if x.dtype.itemsize == 2: return (y & const(0xFFFF)).bitcast(x.dtype)
+    if x.dtype.itemsize == 2: return (y & const(0xFFFF, y.dtype)).bitcast(x.dtype)
     return (y & const(0xFF, y.dtype)).bitcast(x.dtype)
 
 # https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp#L3691
@@ -493,7 +491,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
-  (UPat(name="x").bitcast(), lambda x: x),
+  (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
 ])
 
 pre_regalloc_matcher = PatternMatcher([
@@ -521,6 +519,8 @@ def encode(ctx, x:UOp):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+
+  # print("encoding", opc, rdefs(x), [(s.op, s.arg, rdefs(s), [(k.op, rdefs(k))  for k in s.src]) for s in oprs])
 
   kw = args = None
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
