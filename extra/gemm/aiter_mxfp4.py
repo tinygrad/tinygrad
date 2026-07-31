@@ -1,13 +1,11 @@
-import functools, pathlib
-from dataclasses import replace
+import functools
 from tinygrad import Device, Tensor, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ceildiv
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import KernelInfo, Ops, ProgramInfo, UOp
-def _aiter_mxfp4_program_info(sink:UOp, M:int, N:int, tile_m:int, tile_n:int) -> ProgramInfo:
-  info = ProgramInfo.from_sink(sink)
-  return replace(info, global_size=(ceildiv(N, tile_n), ceildiv(M, tile_m), 1), local_size=(256, 1, 1),
-                 outs=(info.globals[0],), ins=info.globals[1:])
+from tinygrad.uop.ops import KernelInfo, Ops, UOp
+from extra.gemm.amd.aiter_f4.aiter_mxfp4 import aiter_mxfp4_instructions
+
 @functools.cache
 def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:int, tile_n:int) -> UOp:
   M, half_k = A.shape
@@ -16,16 +14,11 @@ def _custom_aiter_mxfp4(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, tile_m:in
   assert half_k == half_k_b and C.shape == (M, N)
   threads = UOp.special(256, "lidx0")
   groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
-  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, threads, groups_x, groups_y,
+  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, lds, threads, groups_x, groups_y,
                   arg=KernelInfo(f"aiter_mxfp4_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K)))
-  root = pathlib.Path(__file__).parent/"amd"/"aiter_f4"
-  src = (root/"aiter_mxfp4.s").read_text()
-  for name, value in (("TILE", tile_m*1000+tile_n), ("M", M), ("N", N), ("K", K), ("SCALE_K", K//32)):
-    src = src.replace(f".set AITER_MXFP4_{name}, 0", f".set AITER_MXFP4_{name}, {value}")
-  info = replace(_aiter_mxfp4_program_info(sink, M, N, tile_m, tile_n), target=Device[C.device].renderer.target)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=Device[C.device].compiler.compile_cached(src))),
-             arg=info)
+  insts = aiter_mxfp4_instructions(M, N, K, tile_m, tile_n)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
 def shuffle_mxfp4_weight(x:Tensor) -> Tensor:
   assert x.ndim == 2 and x.dtype == dtypes.uint8
   N, half_k = x.shape
