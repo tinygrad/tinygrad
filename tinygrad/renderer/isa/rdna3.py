@@ -59,9 +59,10 @@ def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
   return _aluhint(UOp(Ops.SHR, dtypes.uint32 if nbits <= 32 else dtypes.uint64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))), RDNA3Ops.v_ashrrev_i32_e32 if nbits <= 32 else RDNA3Ops.v_ashrrev_i64)
-def vmov(x:UOp) -> UOp:
+def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
-  return x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
+  nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
+  return nx if r is None else nx.replace(tag=(r,))
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 
 # ---- register classes/kernel init state ----
@@ -187,7 +188,8 @@ def gated_load(idx:UOp, alt:UOp, gate:UOp):
   dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
   out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
   thru = out.load()
-  gated = out.store(idx.load(), gate).after(out.store(alt))
+  # out.store(alt) needs to be emitted directly before the gated store/copy
+  gated = out.store(idx.load(), gate).after(out.store(alt.after(idx, gate)))
   return thru.after(gated)
 
 # ------ ALU ------
@@ -385,8 +387,9 @@ def lower_end(ctx, x:UOp, acc:UOp):
 # NOTE: this should just be triggered in to_vgpr????
 def gethalf(x:UOp, buf:UOp, idx:UOp):
   i = idx.arg
-  b32 = buf.index(UOp.const(i // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
-  if i % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype) # NOTE: manual construction, needs to be cleaned
+  b32 = buf.index(const(i // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
+  # NOTE: manual construction, needs to be cleaned
+  if i % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype) 
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
@@ -433,7 +436,7 @@ pre_isel_matcher = PatternMatcher([
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
-    lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint8)))),
+    lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint32)) + x.src[2:])),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != 0),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
@@ -495,7 +498,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
-  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if x.tag is None else None),
+  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if rdef(x) is None else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
@@ -591,11 +594,14 @@ class RDNA3Renderer(ISARenderer):
     self.tensor_cores = tc.get_amd(target.arch)
 
   @staticmethod
-  def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS)
+  def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS, width=(u.src[0].dtype.itemsize+3)//4)
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
-  def copy(self, u:UOp, r:VRegister|Register) -> UOp: return u.ins(RDNA3Ops.v_mov_b32_e32, src=(u,), tag=(r,))
+  def copy(self, u:UOp, r:VRegister|Register) -> UOp:
+    if u.dtype.itemsize == 8:
+      return multireg(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype).replace(tag=(r,))
+    return vmov(u,r)
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()

@@ -96,11 +96,16 @@ class Mem2RegContext:
     return tuple(self.home.setdefault(slot, self.ren.mem2reg_alloc(f"mvr{next(self.ridx)}", u)) for slot in RegSlot.get(u.src[0]))
 
 def promos(ctx, x:UOp, idx:UOp, val:UOp):
+  while val.op is Ops.AFTER: val = val.src[0]
   if idx.op is Ops.SHRINK:
     lanes = [val.index(i) for i in range(idx.src[-1].arg)]
     copies = [ctx.ren.copy(l, vr) for l,vr in zip(lanes, ctx.vrs(x))]
     return UOp.group(*copies), lanes + copies
-  else: return (nx := ctx.ren.copy(val, ctx.vrs(x)[0])), [nx]
+  else:
+    copy = ctx.ren.copy(val, *ctx.vrs(x))
+    lanes = [val.index(i) for i in range(len(copy.src))] if copy.op is Ops.GROUP else []
+    lines = list(copy.src) if copy.op is Ops.GROUP else [copy]
+    return copy, lanes + lines
 
 pm_mem2reg_rewrite = PatternMatcher([
   # each index into shrink load gets its own transparent copy
