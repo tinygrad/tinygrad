@@ -13,11 +13,14 @@ from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
+from extra.gemm.moe_gemm import grouped_mx_gemm
+from extra.gemm.moe_routing import route, dispatch, combine
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
 INIT_STD = 0.02
 ASM_GEMM = getenv("ASM_GEMM", 1)
+
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
   # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
@@ -203,17 +206,32 @@ class GPTOSS:
                    w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor):
     x_normed, rrms = rmsnorm(x, self.norm_eps)
     inp = x_normed * ffn_norm
-
     logits = inp.float() @ gate.float().T + gate_bias.float()
-    thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
-    weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
+    dim, inter = self.dim, self.intermediate_size
 
-    out = None
-    for e in range(self.n_experts):
-      gate_up = matmul_mx(inp, w_gate_up[e], w_gate_up_scale[e]) + w_gate_up_bias[e]
-      y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), w_down[e], w_down_scale[e]) + w_down_bias[e]).contiguous()
-      contrib = weights[..., e:e+1].cast(y.dtype) * y
-      out = contrib if out is None else out + contrib
+    if getenv("GROUPED_MOE", 0):
+      bsz, seqlen = x.shape[:2]
+      inp, logits = inp.reshape(-1, dim), logits.reshape(-1, self.n_experts)
+      r = route(logits, self.experts_per_tok, self.n_experts)
+      onehot = r.rows_e.one_hot(self.n_experts).float()
+      xg = dispatch(_pad_cols(inp.cast(dtypes.bfloat16)), r)
+      h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + (onehot @ w_gate_up_bias.float()).cast(dtypes.bfloat16)
+      y = swiglu(h, self.swiglu_limit)
+      z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
+          + (onehot @ w_down_bias.float()).cast(dtypes.bfloat16)
+      out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+    else:
+      thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
+      weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
+
+      out = None
+      for e in range(self.n_experts):
+        gu_q, gu_s = w_gate_up[e][:2*inter, :dim].contiguous(), w_gate_up_scale[e][:2*inter, :dim//32].contiguous()
+        dn_q, dn_s = w_down[e][:dim, :inter].contiguous(), w_down_scale[e][:dim, :inter//32].contiguous()
+        gate_up = matmul_mx(inp, gu_q, gu_s) + w_gate_up_bias[e]
+        y = (matmul_mx(swiglu(gate_up, self.swiglu_limit), dn_q, dn_s) + w_down_bias[e]).contiguous()
+        contrib = weights[..., e:e+1].cast(y.dtype) * y
+        out = contrib if out is None else out + contrib
     return out, [x_normed, rrms]
 
   @function(precompile=True, precompile_backward=True)
