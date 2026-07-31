@@ -34,6 +34,7 @@ def random_packed(rng:np.random.Generator, ggml_type:int, elements:int) -> np.nd
   blocks = rng.integers(0, 256, size=(elements // block_size, type_size), dtype=np.uint8)
   scales = rng.uniform(0.001, 0.02, size=len(blocks)).astype(np.float16).view(np.uint8).reshape(-1, 2)
   blocks[:, :2] = scales
+  if ggml_type in (12, 13): blocks[:, 2:4] = scales
   if ggml_type == 14: blocks[:, -2:] = scales
   return blocks.flatten()
 
@@ -42,14 +43,17 @@ def random_packed(rng:np.random.Generator, ggml_type:int, elements:int) -> np.nd
 class TestLLMQuantAMD(unittest.TestCase):
   def test_packed_linear_offset_matches_reference(self):
     rng = np.random.default_rng(32)
-    for ggml_type,in_features in ((8, 256), (14, 256)):
-      raw, out_features = random_packed(rng, ggml_type, 64 * in_features), 64
-      weight = ggml_data_to_tensor(Tensor(raw), out_features * in_features, ggml_type).numpy().reshape(out_features, in_features)
-      storage = Tensor(np.concatenate((np.zeros(68, dtype=np.uint8), raw)), dtype=dtypes.uint8, device="AMD").realize()
-      layer = Linear(in_features, out_features, bias=False)
-      layer.set_quantized(storage[68:], ggml_type)
-      x = rng.standard_normal((1, in_features), dtype=np.float32)
-      np.testing.assert_allclose(layer(Tensor(x, device="AMD")).numpy(), q8_activation(x) @ weight.T, rtol=1e-5, atol=5e-4)
+    for ggml_type,in_features in ((8, 256), (12, 256), (13, 256), (14, 256), (23, 256)):
+      for tokens in ((1, 16, 32) if ggml_type == 23 else (1, 16) if ggml_type in (12, 13, 14) else (1,)):
+        raw, out_features = random_packed(rng, ggml_type, 64 * in_features), 64
+        weight = ggml_data_to_tensor(Tensor(raw), out_features * in_features, ggml_type).numpy().reshape(out_features, in_features)
+        storage = Tensor(np.concatenate((np.zeros(68, dtype=np.uint8), raw)), dtype=dtypes.uint8, device="AMD").realize()
+        layer = Linear(in_features, out_features, bias=False)
+        layer.set_quantized(storage[68:], ggml_type)
+        x = rng.standard_normal((tokens, in_features), dtype=np.float32)
+        expected = x.astype(np.float16).astype(np.float32) @ weight.astype(np.float16).astype(np.float32).T \
+          if ggml_type in (12, 13, 23) and tokens > 1 else q8_activation(x) @ weight.T
+        np.testing.assert_allclose(layer(Tensor(x, device="AMD")).numpy(), expected, rtol=1e-5, atol=2e-3)
 
   def test_iq3_expert_prefill_and_decode_match_reference(self):
     rng = np.random.default_rng(31)

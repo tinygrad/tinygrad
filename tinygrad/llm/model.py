@@ -33,11 +33,13 @@ class Linear(nn.Linear):
     return Tensor([self._raw_offset_words], dtype=dtypes.uint64, device=self.weight.device)
   def _prepare_packed(self):
     self._raw_offset_uop = self._packed_offset().realize().uop
-  def prepare(self, x:Tensor) -> tuple[Tensor, Tensor]|None:
+  def prepare(self, x:Tensor) -> tuple[Tensor, ...]|None:
+    if self.ggml_type in (12, 13) and str(self.weight.device).startswith("AMD"):
+      return llm_amd.q8_quantize_sum(x, int(x.numel()) // self.in_features, self.in_features)
     return llm_amd.q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
-      if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") else None
-  def __call__(self, x:Tensor, prepared:tuple[Tensor, Tensor]|None=None) -> Tensor:
-    if self.ggml_type in (8, 14) and str(self.weight.device).startswith("AMD") and (self.ggml_type == 8 or int(x.numel()) == self.in_features):
+      if self.ggml_type in (8, 14, 23) and str(self.weight.device).startswith("AMD") else None
+  def __call__(self, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> Tensor:
+    if self.ggml_type in (8, 12, 13, 14, 23) and str(self.weight.device).startswith("AMD"):
       return llm_amd.q8_linear(self, x, prepared)
     if llm_cpu.SUPPORTED and self.ggml_type in (8, 14) and str(self.weight.device).startswith("CPU") and \
        x.dtype in (dtypes.float16, dtypes.float32):
@@ -267,12 +269,12 @@ class FFNBlock:
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    prepared = self.ffn_gate.prepare(x)
-    if prepared is not None and self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8:
-      gate, up = llm_amd.q8_linear_pair(self.ffn_gate, self.ffn_up, x, prepared)
+    dense_prepared = self.ffn_gate.prepare(x)
+    if dense_prepared is not None and self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8:
+      gate, up = llm_amd.q8_linear_pair(self.ffn_gate, self.ffn_up, x, dense_prepared)
     elif self.ffn_gate.ggml_type == self.ffn_up.ggml_type == 8 and str(x.device).startswith("CPU"):
       gate, up = (llm_cpu.q8_linear_pair if int(x.numel()) == self.config.dim else llm_cpu.q8_batched_pair)(self.ffn_gate, self.ffn_up, x)
-    else: gate, up = self.ffn_gate(x, prepared), self.ffn_up(x, prepared)
+    else: gate, up = self.ffn_gate(x, dense_prepared), self.ffn_up(x, dense_prepared)
     return self.ffn_down(gate.silu().contiguous() * up)
 
   def _normalized_feed_forward(self, x:Tensor) -> Tensor:
@@ -766,6 +768,7 @@ class Transformer:
     packed_linears:list[Linear] = []
     cpu_q8_weights:list[tuple[Linear, Tensor]] = []
     cpu_iq3_weights:list[tuple[ExpertWeights, Tensor]] = []
+    packed_linear_types = (8, 12, 13, 14, 23) if str(load_device).startswith("AMD") else (8, 14)
     def resolve_owner(path:list[str]):
       obj = model
       for part in path: obj = obj[int(part)] if isinstance(obj, list) else getattr(obj, part)
@@ -773,7 +776,8 @@ class Transformer:
     for name, weight in state_dict.items():
       parts = name.split('.')
       quantization = get_ggml_quantization(weight)
-      if quantization is not None and quantization[1] in (8, 14) and parts[-1] == "weight" and isinstance(owner:=resolve_owner(parts[:-1]), Linear):
+      if quantization is not None and quantization[1] in packed_linear_types and parts[-1] == "weight" and \
+         isinstance(owner:=resolve_owner(parts[:-1]), Linear):
         owner.set_quantized(*quantization)
         packed_linears.append(owner)
         if quantization[1] == 8 and str(load_device).startswith("CPU") and getenv("CPU_Q8_REPACK", 1):
