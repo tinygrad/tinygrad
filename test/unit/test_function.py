@@ -593,7 +593,7 @@ class TestFunctionTuple(unittest.TestCase):
     state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
     @function(precompile=True, allow_implicit=True)
     def f(a:Tensor):
-      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float32, Invalid, shape=(2,))))
+      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(Invalid, dtypes.float32, shape=(2,))))
       return Tensor(after).contiguous() + a
     out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
     np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])

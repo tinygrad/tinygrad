@@ -661,7 +661,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_deviceless_const(self):
     s = Tensor.empty(4, device="CPU:1", dtype=dtypes.float)
-    s.assign(Tensor(UOp.const(dtypes.float, 2.0)))
+    s.assign(Tensor(UOp.const(2.0, dtypes.float)))
     np.testing.assert_equal(s.numpy(), [2, 2, 2, 2])
 
   def test_nested_after_contiguous_store(self):

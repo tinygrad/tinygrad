@@ -36,21 +36,21 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
 
 class TestWeakConstFolding(unittest.TestCase):
   def test_weakint_math(self):
-    out = (UOp.const(dtypes.weakint, 2**40) + UOp.const(dtypes.weakint, 2**40)).simplify()
+    out = (UOp.const(2**40) + UOp.const(2**40)).simplify()
     self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakint, 2**41))
 
   def test_float_unaries(self):
     for dtype in (dtypes.weakfloat,):
       for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
-        out = UOp.const(dtype, 4).alu(op).simplify()
+        out = UOp.const(4, dtype).alu(op).simplify()
         self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))
 
   def test_weakfloat_math(self):
-    out = (UOp.const(dtypes.weakfloat, 1.25) + UOp.const(dtypes.weakfloat, 2.5)).simplify()
+    out = (UOp.const(1.25) + UOp.const(2.5)).simplify()
     self.assertEqual((out.op, out.dtype, out.arg), (Ops.CONST, dtypes.weakfloat, 3.75))
 
   def test_invalid_poison(self):
-    self.assertIs(UOp.invalid().alu(Ops.CDIV, UOp.const(dtypes.weakint, 0)).simplify().arg, Invalid)
+    self.assertIs(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().arg, Invalid)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
@@ -121,7 +121,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          r = full_rewrite(UOp.const(from_v, from_dt).bitcast(to_dt).sink()).src[0]
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
           np.testing.assert_equal(r.arg, to_v, msg)
@@ -145,7 +145,7 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const(dtypes.int32, (-1, -2**31, 75)).bitcast(dtypes.uint32).sink()).src
+      srcs = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink()).src
     self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
     self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
 

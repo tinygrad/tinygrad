@@ -7,7 +7,7 @@ from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
-def lane(y:UOp, i:int) -> UOp: return y.index(UOp.const(dtypes.int, i), dtype=y.dtype.scalar())
+def lane(y:UOp, i:int) -> UOp: return y.index(UOp.const(i, dtypes.int), dtype=y.dtype.scalar())
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):

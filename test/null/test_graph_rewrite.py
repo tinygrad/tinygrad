@@ -32,30 +32,30 @@ def evaluate_uop(uop, variables):
 
 class TestArithmeticSimplifications(unittest.TestCase):
   def test_full_graph_rewrite_division_by_zero(self):
-    optimized_div_uop = apply_rewrite(UOp.const(dtypes.float32, 10.0) / UOp.const(dtypes.float32, 0.0))
+    optimized_div_uop = apply_rewrite(UOp.const(10.0, dtypes.float32) / UOp.const(0.0, dtypes.float32))
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
     self.assertTrue(math.isinf(optimized_div_uop.arg) or math.isnan(optimized_div_uop.arg))
 
   def test_full_graph_rewrite_redundant_operations(self):
-    optimized_uop = apply_rewrite((UOp.const(dtypes.float32, 10.0) + UOp.const(dtypes.float32, 0.0)) * UOp.const(dtypes.float32, 1.0))
+    optimized_uop = apply_rewrite((UOp.const(10.0, dtypes.float32) + UOp.const(0.0, dtypes.float32)) * UOp.const(1.0, dtypes.float32))
     self.assertEqual(optimized_uop.op, Ops.CONST)
     self.assertEqual(optimized_uop.arg, 10.0)
 
   def test_full_graph_rewrite_large_graph(self):
-    prev_uop = UOp.const(dtypes.int32, 0)
+    prev_uop = UOp.const(0, dtypes.int32)
     for i in range(1, 101):
-      prev_uop += UOp.const(dtypes.int32, i)
+      prev_uop += UOp.const(i, dtypes.int32)
     optimized_uop = apply_rewrite(prev_uop)
     self.assertEqual(optimized_uop.op, Ops.CONST)
     self.assertEqual(optimized_uop.arg, sum(range(1, 101)))
 
   def test_full_graph_rewrite_division_by_one(self):
-    optimized_uop = apply_rewrite(UOp.const(dtypes.float32, 42.0) / UOp.const(dtypes.float32, 1.0))
+    optimized_uop = apply_rewrite(UOp.const(42.0, dtypes.float32) / UOp.const(1.0, dtypes.float32))
     self.assertEqual(optimized_uop.op, Ops.CONST)
     self.assertEqual(optimized_uop.arg, 42.0)
 
   def test_full_graph_rewrite_modulo_by_one(self):
-    optimized_uop = apply_rewrite(UOp.const(dtypes.int32, 42) % UOp.const(dtypes.int32, 1))
+    optimized_uop = apply_rewrite(UOp.const(42, dtypes.int32) % UOp.const(1, dtypes.int32))
     self.assertEqual(optimized_uop.op, Ops.CONST)
     self.assertEqual(optimized_uop.arg, 0)
 
@@ -63,17 +63,17 @@ class TestArithmeticSimplifications(unittest.TestCase):
 class TestFoldingAndReduction(unittest.TestCase):
   @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_constant_reduction_folding(self):
-    const1 = UOp.const(dtypes.int32, 5)
-    const2 = UOp.const(dtypes.int32, 10)
-    const3 = UOp.const(dtypes.int32, 20)
+    const1 = UOp.const(5, dtypes.int32)
+    const2 = UOp.const(10, dtypes.int32)
+    const3 = UOp.const(20, dtypes.int32)
     optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(Ops.ADD))
     expected_sum = 5 + 10 + 20
     self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_reduction_with_unused_range(self):
-    const1 = UOp.const(dtypes.int32, 15)
-    const2 = UOp.const(dtypes.int32, 25)
+    const1 = UOp.const(15, dtypes.int32)
+    const2 = UOp.const(25, dtypes.int32)
     rng = UOp.range(10, idx=0)
     optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
@@ -89,7 +89,7 @@ class TestFoldingAndReduction(unittest.TestCase):
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_simple_reduction_folding(self):
     simple_range = UOp.range(4, idx=0)
-    add_uop = simple_range + UOp.const(dtypes.int32, 1)
+    add_uop = simple_range + UOp.const(1, dtypes.int32)
     optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
     self.assertEqual(optimized_sink.arg, expected_sum)
@@ -128,9 +128,9 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, src=(
-      UOp(Ops.STACK, arg=None, src=(UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 32),), arg='lidx0'),)*4),
-      UOp.const(dtypes.int, (0, 256, 512, 768))))
-    rhs = UOp.const(dtypes.int, (2,)*4)
+      UOp(Ops.STACK, arg=None, src=(UOp(Ops.SPECIAL, src=(UOp.const(32, dtypes.int),), arg='lidx0'),)*4),
+      UOp.const((0, 256, 512, 768), dtypes.int)))
+    rhs = UOp.const((2,)*4, dtypes.int)
     unopt = lhs<rhs
     opt = apply_rewrite(unopt)
     print(unopt)
@@ -159,7 +159,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
 class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
-    optimized_sink = full_rewrite(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
+    optimized_sink = full_rewrite(UOp.const(-1.0, dtypes.float32).log2().sink(UOp.const(0.0, dtypes.float32).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
     self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
     self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
@@ -182,27 +182,27 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
 class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
-    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
+    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0), dtypes.float32)
     self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
-    base_vector = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
+    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0), dtypes.float32)
     self.assertEqual(list(apply_rewrite_values(UOp.stack(*[base_vector.index(i) for i in (2, 3)]))), [3.0, 4.0])
 
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
-    const_stack = UOp.const(dtypes.float32, (1.0, 2.0, 3.0, 4.0))
+    const_stack = UOp.const((1.0, 2.0, 3.0, 4.0), dtypes.float32)
     self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
-    const_stack = UOp.const(dtypes.float32, (7.0, 8.0, 9.0, 10.0))
+    const_stack = UOp.const((7.0, 8.0, 9.0, 10.0), dtypes.float32)
     self.assertEqual(list(apply_rewrite_values(UOp.stack(*[const_stack.index(i) for i in (1, 3)]))), [8.0, 10.0])
 
   def test_vectorize_multiple_elements(self):
     # Vectorizing multiple elements using GEP
-    base_vector = UOp.const(dtypes.float32, (5.0, 10.0, 15.0, 20.0))
+    base_vector = UOp.const((5.0, 10.0, 15.0, 20.0), dtypes.float32)
     vectorized_uop = UOp(Ops.STACK, src=tuple(base_vector.index(i) for i in range(4)))
     self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
@@ -213,7 +213,7 @@ from tinygrad.uop.symbolic import symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):
-    a = UOp.const(dtypes.int, 5)
+    a = UOp.const(5, dtypes.int)
     ret = (a*3) + (a*7)
     gt = graph_rewrite(ret, symbolic_simple)
     ret = graph_rewrite(ret, symbolic_simple, bottom_up=True)
@@ -305,7 +305,7 @@ class TestRecurse(unittest.TestCase):
     graph_rewrite(a, pm, bottom_up=True)
 
   def test_inf_loop(self):
-    a = UOp.const(dtypes.int, 3)
+    a = UOp.const(3, dtypes.int)
     pm = PatternMatcher([
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
@@ -314,7 +314,7 @@ class TestRecurse(unittest.TestCase):
       graph_rewrite(a, pm)
 
   def test_inf_loop_bottom_up(self):
-    a = UOp.const(dtypes.int, 3)
+    a = UOp.const(3, dtypes.int)
     pm = PatternMatcher([
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
@@ -325,8 +325,8 @@ class TestRecurse(unittest.TestCase):
 def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
-    a = UOp.const(dtypes.int, 1)
-    b = UOp.const(dtypes.int, 2)
+    a = UOp.const(1, dtypes.int)
+    b = UOp.const(2, dtypes.int)
     c = a + b
     pm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, False)) ])
     bpm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, True)) ])
@@ -336,11 +336,11 @@ class TestBidirectional(unittest.TestCase):
 
 class TestStopEarly(unittest.TestCase):
   def test_stop_early(self):
-    a = UOp.const(dtypes.int, 3)
-    b = UOp.const(dtypes.int, 4)
+    a = UOp.const(3, dtypes.int)
+    b = UOp.const(4, dtypes.int)
     c = a+b
-    cn = UOp.const(dtypes.int, 7)
-    d = UOp.const(dtypes.int, 2)
+    cn = UOp.const(7, dtypes.int)
+    d = UOp.const(2, dtypes.int)
     def visit_const(c:UOp):
       print(f"visit {c.arg}")
       assert c.arg not in (3,4)
@@ -376,7 +376,7 @@ class TestWalkRewrite(unittest.TestCase):
 
   def test_walk_topdown_no_fixed_point(self):
     """A bouncing pattern applies once and stops instead of looping."""
-    a = UOp.const(dtypes.int, 3)
+    a = UOp.const(3, dtypes.int)
     pm = PatternMatcher([
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
@@ -384,7 +384,7 @@ class TestWalkRewrite(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
     ret = graph_rewrite(a, pm, walk=True)
-    self.assertIs(ret, UOp.const(dtypes.int, 4))
+    self.assertIs(ret, UOp.const(4, dtypes.int))
 
   def test_walk_topdown_rewrites_children(self):
     a = UOp.variable('a', 0, 10)
@@ -421,8 +421,8 @@ class TestWalkRewrite(unittest.TestCase):
       ctx.append(x.arg if x.op is Ops.CONST else x.op)
       return None
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), track_visit)])
-    a = UOp.const(dtypes.int, 1)
-    b = UOp.const(dtypes.int, 2)
+    a = UOp.const(1, dtypes.int)
+    b = UOp.const(2, dtypes.int)
     graph_rewrite(a + b, pm, ctx=visited, walk=True)
     self.assertEqual(visited, [1, 2, Ops.ADD])
 
@@ -454,13 +454,13 @@ class TestWalkRewrite(unittest.TestCase):
 
   def test_walk_bottomup_no_fixed_point(self):
     """Bottom-up walk also applies once per node, no fixed-point iteration."""
-    a = UOp.const(dtypes.int, 3)
+    a = UOp.const(3, dtypes.int)
     pm = PatternMatcher([
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     ret = graph_rewrite(a, pm, bottom_up=True, walk=True)
-    self.assertIs(ret, UOp.const(dtypes.int, 4))
+    self.assertIs(ret, UOp.const(4, dtypes.int))
 
   def test_walk_bottomup_visit_order(self):
     """Bottom-up walk fires bpm before descending (pre-order)."""
@@ -469,8 +469,8 @@ class TestWalkRewrite(unittest.TestCase):
       ctx.append(x.arg if x.op is Ops.CONST else x.op)
       return None
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), track_visit)])
-    a = UOp.const(dtypes.int, 1)
-    b = UOp.const(dtypes.int, 2)
+    a = UOp.const(1, dtypes.int)
+    b = UOp.const(2, dtypes.int)
     graph_rewrite(a + b, pm, ctx=visited, bottom_up=True, walk=True)
     # bpm fires on each node before children: +, 1, 2
     self.assertEqual(visited, [Ops.ADD, 1, 2])
@@ -497,8 +497,8 @@ class TestWalkRewrite(unittest.TestCase):
       return None
     bpm = PatternMatcher([(UPat(GroupOp.All, name="x"), bpm_visit)])
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), pm_visit)])
-    a = UOp.const(dtypes.int, 1)
-    b = UOp.const(dtypes.int, 2)
+    a = UOp.const(1, dtypes.int)
+    b = UOp.const(2, dtypes.int)
     graph_rewrite(a + b, pm, ctx=visited, bpm=bpm, walk=True)
     # bpm fires pre-order, pm fires post-order
     self.assertEqual(visited, [
@@ -518,14 +518,14 @@ class TestWalkRewrite(unittest.TestCase):
       return None
     bpm = PatternMatcher([(UPat(GroupOp.All, name="x"), bpm_match)])
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), pm_match)])
-    a = UOp.const(dtypes.int, 1)
-    b = UOp.const(dtypes.int, 2)
+    a = UOp.const(1, dtypes.int)
+    b = UOp.const(2, dtypes.int)
     ret = graph_rewrite(a + b, pm, ctx=visited, bpm=bpm, walk=True)
     # bpm matches const(1) and short-circuits it, so pm never fires on const(1)
     self.assertNotIn((1, "pm"), visited)
     # but pm still fires on const(2) and the rebuilt ADD
     self.assertIn((2, "pm"), visited)
-    self.assertIs(ret, UOp.const(dtypes.int, 10) + b)
+    self.assertIs(ret, UOp.const(10, dtypes.int) + b)
 
 if __name__ == '__main__':
   unittest.main()
