@@ -137,6 +137,38 @@ def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   packed = mx_pack(e8) if len(batch) == 1 and scale_K % 4 == 0 else None
   return x_clamped.cast(FP8_DTYPE), e8, packed
 
+def _mxfp4_shuffle_weight(x:Tensor) -> Tensor:
+  # shuffle_weight(x, layout=(16, 16)) on the packed uint8 buffer.
+  rows, half_k = x.shape
+  return x.reshape(rows//16, 16, half_k//32, 2, 16).permute(0, 2, 3, 1, 4).reshape(rows, half_k).contiguous()
+
+def _mxfp4_shuffle_scales(x:Tensor) -> Tensor:
+  # e8m0_shuffle: each 256x8 scale tile is arranged for the raw MFMA scale loads.
+  rows, scale_k = x.shape
+  return x.reshape(rows//32, 2, 16, scale_k//8, 2, 4).permute(0, 3, 5, 2, 4, 1).reshape(rows, scale_k).contiguous()
+
+def quantize_mxfp4(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+  # OCP MXFP4: 1x32 blocks, E2M1 values packed low-nibble first, and E8M0 scales.
+  assert x.ndim == 2 and x.shape[1] % 256 == 0 and x.shape[0] % 32 == 0, \
+    f"mxfp4 quantization needs rows%32 and K%256, got {x.shape}"
+  rows, K = x.shape
+  xb = x.float().reshape(rows, K//32, 32)
+  amax = xb.abs().max(axis=-1)
+
+  # even scale rounding: round the fp32 significand before choosing 2^(floor(log2)-2).
+  amax_rounded = ((amax.bitcast(dtypes.uint32) + 0x200000) & 0xFF800000).bitcast(dtypes.float32)
+  scale_exp = (amax_rounded.maximum(2**-126).log2().floor() - 2).clamp(-127, 127)
+  e8 = (scale_exp + 127).cast(dtypes.uint8)
+  scaled = xb * (-scale_exp).exp2().reshape(rows, K//32, 1)
+
+  mag = scaled.abs()
+  code = sum(x.cast(dtypes.uint8) for x in
+             (mag > .25, mag >= .75, mag > 1.25, mag >= 1.75, mag > 2.5, mag >= 3.5, mag > 5.0))
+  code = code | ((scaled < 0).cast(dtypes.uint8) << 3)
+  code = code.reshape(rows, K)
+  packed = code[:, 0::2] | (code[:, 1::2] << 4)
+  return packed, e8, _mxfp4_shuffle_scales(e8)
+
 def mx_pack(e8:Tensor) -> Tensor:
   rows, scale_K = e8.shape
   return e8.reshape(rows, scale_K // 4, 4).bitcast(dtypes.uint32).reshape(rows, scale_K // 4).permute(1, 0).contiguous()
@@ -162,9 +194,7 @@ atexit.register(_asm_gemm_report)
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
-  # fp4 encoded as packed uint8
-  # TODO: add fp4 dtype?
-  if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE, dtypes.uint8}: return todo(f"only bfloat16/float16/fp8/fp4, got {a.dtype}")
+  if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE}: return todo(f"only bfloat16/float16/fp8, got {a.dtype}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple):
@@ -365,14 +395,11 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
-             a_pretranspose:Tensor|None=None) -> Tensor:
+             a_pretranspose:Tensor|None=None, mxfp4:bool=False) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
-  if (mxfp4:=a.dtype == dtypes.uint8):
-    assert mx_scales is not None and len(mx_scales) == 2
-    scale_a, scale_b = mx_scales
-    K = a.shape[-1] * 2
-    assert scale_a.shape == (*a.shape[:-1], K // 32) and scale_b.shape == (b.shape[1], K // 32)
-    assert scale_a.dtype == scale_b.dtype == dtypes.uint8 and a.device == b.device == scale_a.device == scale_b.device
+  if mxfp4:
+    assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
+    assert a.dtype == dtypes.bfloat16, f"cannot quantize {a.dtype} to mxfp4"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
   if unfold_batch:
@@ -406,7 +433,10 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     if mxfp4:
       tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
       fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
-      out = Tensor.custom_kernel(out, a, b.T, scale_a, scale_b, fxn=fxn)[0]
+      a_q, _, scale_a = quantize_mxfp4(a.reshape(batch*M, K))
+      b_q, _, scale_b = quantize_mxfp4(b.T)
+      a_q, b_q = a_q.reshape(batch, M, K//2).contiguous(), _mxfp4_shuffle_weight(b_q)
+      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, fxn=fxn)[0]
     elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:
