@@ -1,3 +1,4 @@
+from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import sys, struct, functools
@@ -7,6 +8,7 @@ from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
+from dataclasses import dataclass, field
 
 # ***** X86 Ops *****
 
@@ -800,6 +802,11 @@ encodings = {
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 
+@dataclass
+class PostRegallocCtx:
+  ren: X86Renderer
+  loop_label: dict[UOp, str] = field(default_factory=dict)
+
 class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
@@ -816,6 +823,7 @@ class X86Renderer(ISARenderer):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
+    self.post_regalloc_ctx = PostRegallocCtx(self)
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
   def spill_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int

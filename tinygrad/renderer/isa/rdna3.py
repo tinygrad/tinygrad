@@ -566,6 +566,7 @@ class RDNA3Renderer(ISARenderer):
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
+  do_asm = True
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):

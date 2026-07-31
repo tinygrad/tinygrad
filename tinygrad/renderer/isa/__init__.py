@@ -49,6 +49,7 @@ class ISARenderer(Renderer):
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
+  do_asm: bool = False
   mem2reg_alloc = None
 
   def is_two_address(self, x:UOp) -> bool: return False
