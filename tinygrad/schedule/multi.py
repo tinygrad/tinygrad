@@ -71,13 +71,29 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
       srcs.append(full if axis in broadcast_axes(mlb.shape, out_shape) else full._shard(src_axis, sharding_rng))
   return srcs
 
+def shard_subview(full:UOp, multi:UOp) -> UOp:
+  """the sub-view of an unsharded full-shape value (shape == multi.shape) that belongs to this shard:
+  _shard along every sharded axis (contiguous blocks, like the device path)."""
+  assert tuple(full.shape) == tuple(multi.shape), f"shard sub-view shape mismatch {full.shape} != {multi.shape}"
+  # an EXPAND of a scalar over the full shape is the same broadcast on every shard: re-expand over the shard shape
+  if full.op is Ops.EXPAND and full.src[0].shape == (): return full.src[0].expand(multi.src[0].shape)
+  for ax, rng in multi.sharding: full = full._shard(ax, rng)
+  return full
+
 def alu_multi(root:UOp):
   multis = [m for m in root.src if m.op is Ops.UNSHARD]
   if not multis: return None
   sharding = multis[0].sharding
-  if len(multis) == len(root.src) and all(m.sharding == sharding for m in multis):
-    srcs = [m.src[0] for m in root.src]
-    return srcs[0].alu(root.op, *srcs[1:]).unshard(multis[0].arg, multis[0].src[1:])
+  target = multis[0]
+  def can_handle(m:UOp) -> bool:
+    # same sharding (peel the UNSHARD), or a whole unsharded value of the full tile shape (takes its per-shard
+    # sub-view), or a broadcast scalar
+    if m.sharding: return m.sharding == sharding
+    return m.shape == () or tuple(m.shape) == tuple(target.shape)
+  if all(can_handle(m) for m in root.src):
+    # every src either has the target sharding or is whole on every shard: run the alu per-shard
+    srcs = [m.src[0] if m.op is Ops.UNSHARD else m if m.shape == () else shard_subview(m, target) for m in root.src]
+    return srcs[0].alu(root.op, *srcs[1:]).unshard(target.arg, target.src[1:])
   # resharding: single-axis fallback via shard_srcs
   axis = root.axis
   assert axis is not None
@@ -233,6 +249,18 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).unshard(src.arg, src.src[1:])
 
+def store_value_multi(dest:UOp, multi:UOp):
+  # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest
+  return shard_subview(dest, multi).store(multi.src[0])
+
+def store_dest_multi(root:UOp, multi:UOp):
+  # STORE with a sharded dest: every shard stores into its own shard of the dest.
+  # the value is handled like in alu_multi: UNSHARD srcs peel, full-shape values take their per-shard sub-view
+  # (scalars arrive EXPANDed to the full shape by UOp.store's const_like, so they sub-view like everything else)
+  srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if tuple(x.shape) == tuple(multi.shape) else x
+                           for x in root.src[1:]]
+  return UOp(root.op, root.dtype, tuple(srcs), root.arg)
+
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
   return UOp(root.op, root.dtype, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
@@ -284,7 +312,8 @@ multi_pm = PatternMatcher([
     UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
-  # remove UNSHARD from STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True),
-    lambda root,multi: UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:]), root.arg)),
+  # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
+  (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),
+  # STORE into a sharded dest (e.g. the fragment init): every shard stores into its own shard
+  (UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), store_dest_multi),
 ])+replace_allreduce

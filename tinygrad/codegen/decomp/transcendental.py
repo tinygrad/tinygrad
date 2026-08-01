@@ -93,7 +93,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
   def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
 
-  a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  a = [_take(UOp.const(0, dtypes.uint32), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)

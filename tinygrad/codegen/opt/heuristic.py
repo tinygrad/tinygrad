@@ -26,22 +26,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
-    good_tc_opt = False
-    tk = k.copy()
-    try: # check TC first and apply hand-coded opts if successful
-      rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
-      good_tc_opt = True
-    except KernelOptError:
-      pass
-    if good_tc_opt:
-      if rngs is not None:
-        for tc_dim in [1,0]: # attempt to upcast M and N
-          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-          if szs:
-            # set it to the replaced range
-            rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-          tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+    for axis in range(3):
+      tk = k.copy()
+      # check TC first and apply hand-coded opts if successful
+      try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
+      except KernelOptError: continue
+      for tc_dim in [1,0]: # attempt to upcast M and N
+        szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+        if szs:
+          # set it to the replaced range
+          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
+      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+        tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk
 
   # make a copy so it does not mutate the input
