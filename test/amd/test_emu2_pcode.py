@@ -67,32 +67,32 @@ class TestParseExpr(unittest.TestCase):
 
   def test_integer_literals(self):
     """Test parsing integer literals."""
-    self.assertEqual(parse_expr('0', {}).arg, 0)
-    self.assertEqual(parse_expr('42', {}).arg, 42)
-    self.assertEqual(parse_expr('42U', {}).arg, 42)
+    self.assertEqual(parse_expr('0', {}).val, 0)
+    self.assertEqual(parse_expr('42', {}).val, 42)
+    self.assertEqual(parse_expr('42U', {}).val, 42)
 
   def test_negative_integers(self):
     """Test parsing negative integer literals."""
     result = parse_expr('-1', {})
-    self.assertEqual(result.arg, -1)
+    self.assertEqual(result.val, -1)
     self.assertEqual(result.dtype, dtypes.int)
 
   def test_float_literals(self):
     """Test parsing float literals."""
     result = parse_expr('1.0F', {})
-    self.assertEqual(result.arg, 1.0)
+    self.assertEqual(result.val, 1.0)
     self.assertEqual(result.dtype, dtypes.float32)
 
   def test_hex_literals(self):
     """Test parsing hex literals."""
     result = parse_expr('0xFF', {})
-    self.assertEqual(result.arg, 255)
+    self.assertEqual(result.val, 255)
 
   def test_variable_lookup(self):
     """Test variable lookup in parse_expr."""
     vrs = {'x': UOp.const(42, dtypes.uint32)}
     result = parse_expr('x', vrs)
-    self.assertEqual(result.arg, 42)
+    self.assertEqual(result.val, 42)
 
   def test_binary_ops(self):
     """Test parsing binary operations."""
@@ -105,7 +105,7 @@ class TestParseExpr(unittest.TestCase):
     # Subtraction with constant folding
     result = parse_expr('10 - 5', {})
     self.assertEqual(result.op, Ops.CONST)
-    self.assertEqual(result.arg, 5)
+    self.assertEqual(result.val, 5)
 
   def test_ternary(self):
     """Test parsing ternary expressions."""
@@ -150,7 +150,7 @@ class TestForLoopParsing(unittest.TestCase):
     # Unwrap CAST if present
     while val.op == Ops.CAST:
       val = val.src[0]
-    self.assertEqual(val.arg, -1)
+    self.assertEqual(val.val, -1)
 
   def test_ctz_parsing(self):
     """Test CTZ pcode parsing."""
@@ -262,8 +262,8 @@ class TestDSPcodePatterns(unittest.TestCase):
     _, assigns = parse_pcode(pcode, srcs)
     # Check addresses: 100 + 2*4 = 108, 100 + 5*4 = 120
     # assigns[i][1] is (addr, val) tuple for MEM writes; mypy sees UOp
-    self.assertEqual(assigns[0][1][0].simplify().arg, 108)  # type: ignore[index]
-    self.assertEqual(assigns[1][1][0].simplify().arg, 120)  # type: ignore[index]
+    self.assertEqual(assigns[0][1][0].simplify().val, 108)  # type: ignore[index]
+    self.assertEqual(assigns[1][1][0].simplify().val, 120)  # type: ignore[index]
 
   def test_ds_store_data_values(self):
     """Test DS_STORE_2ADDR_B32 uses correct data values."""
@@ -280,8 +280,8 @@ class TestDSPcodePatterns(unittest.TestCase):
     _, assigns = parse_pcode(pcode, srcs)
     # assigns[i][1] is (addr, val) tuple for MEM writes; mypy sees UOp
     # DATA[31:0] should preserve the value
-    self.assertEqual(assigns[0][1][1].simplify().arg, 0xAAAAAAAA)  # type: ignore[index]
-    self.assertEqual(assigns[1][1][1].simplify().arg, 0xBBBBBBBB)  # type: ignore[index]
+    self.assertEqual(assigns[0][1][1].simplify().val, 0xAAAAAAAA)  # type: ignore[index]
+    self.assertEqual(assigns[1][1][1].simplify().val, 0xBBBBBBBB)  # type: ignore[index]
 
 class TestConditionalParsing(unittest.TestCase):
   """Test conditional (if/elsif/else) pcode parsing."""
@@ -306,12 +306,12 @@ class TestConcatWidthParsing(unittest.TestCase):
   def test_permlanex16_altrow_concat(self):
     for row, expected in [(0, 1), (1, 0), (2, 3), (3, 2)]:
       parsed = parse_expr('{ row[1], ~row[0] }', {'row': UOp.const(row, dtypes.uint32)})
-      self.assertEqual(parsed.simplify().arg, expected)
+      self.assertEqual(parsed.simplify().val, expected)
 
   def test_permlane64_altlane_concat(self):
     for lane, expected in [(0, 32), (1, 33), (31, 63), (32, 0), (63, 31)]:
       parsed = parse_expr('{ ~lane[5], lane[4:0] }', {'lane': UOp.const(lane, dtypes.uint32)})
-      self.assertEqual(parsed.simplify().arg, expected)
+      self.assertEqual(parsed.simplify().val, expected)
 
   def test_permlane64_wave64_pcode_indices(self):
     vgpr = UOp.param(0, dtypes.uint32, (256,))
@@ -333,12 +333,12 @@ class TestConcatWidthParsing(unittest.TestCase):
       self.assertEqual(simp.src[0].op, Ops.INDEX)
       idx = simp.src[0].src[1].simplify()
       self.assertEqual(idx.op, Ops.CONST)
-      return idx.arg
+      return idx.val
 
     _, assigns = parse_pcode(PCODE[VOP1Op.V_PERMLANE64_B32_E32], srcs)
     self.assertEqual(len(assigns), 64)
     for lane, (dst_idx, src_idx) in {0: (64, 32), 31: (95, 63), 32: (96, 0), 63: (127, 31)}.items():
-      self.assertEqual(assigns[lane][1][0].simplify().arg, dst_idx)  # type: ignore[index]
+      self.assertEqual(assigns[lane][1][0].simplify().val, dst_idx)  # type: ignore[index]
       self.assertEqual(load_idx(assigns[lane][1][1]), src_idx)  # type: ignore[index]
 
 class TestAllPcode(unittest.TestCase):

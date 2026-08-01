@@ -709,7 +709,7 @@ class _Ctx:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
         # VGPR bit-slice: (vgpr_idx, rhs_val, hi_bit, lo_bit) - hi/lo are UOp constants
-        hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
+        hi_bit, lo_bit = int(val[2].val), int(val[3].val)
         width = hi_bit - lo_bit + 1
         old = self.vgpr.index(val[0]).load()
         new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)

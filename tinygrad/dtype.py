@@ -17,6 +17,7 @@ class ConstFloat(float):
     if self is other: return True
     if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
     return float.__eq__(self, other)
+  def __ne__(self, other): return res if (res:=self.__eq__(other)) is NotImplemented else not res  # float.__ne__ disagrees with __eq__ on nan
   def __hash__(self): return hash(self.bits)
   def __repr__(self): return f"ConstFloat({float.__repr__(self)})"
   def __str__(self): return float.__repr__(self)
@@ -74,8 +75,7 @@ class DType(metaclass=DTypeMetaClass):
   def max(self):
     if dtypes.is_int(self): return 2**(self.bitsize)-1+self.min
     return float("inf") if dtypes.is_float(self) else True
-  def const(self, val: tuple[ConstType, ...]|ConstType):
-    if isinstance(val, tuple): return tuple(map(self.const, val))
+  def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan

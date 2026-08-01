@@ -529,7 +529,7 @@ class TestRangeShrink(unittest.TestCase):
     load = get_gated_load_uop(r < UOp.const(4), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    self.assertEqual(ranges[0].src[0].val, 4)
 
   def test_range_shrink_picks_max_guard(self):
     # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
@@ -538,7 +538,7 @@ class TestRangeShrink(unittest.TestCase):
     load2 = get_gated_load_uop(r < UOp.const(8), r)
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 8)
+    self.assertEqual(ranges[0].src[0].val, 8)
 
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
@@ -546,7 +546,7 @@ class TestRangeShrink(unittest.TestCase):
     load = get_gated_load_uop(r < UOp.const(300), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assertEqual(ranges[0].src[0].val, 204)
 
   def test_range_no_shrink_when_unguarded_elsewhere(self):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
@@ -555,7 +555,7 @@ class TestRangeShrink(unittest.TestCase):
     load2 = UOp(Ops.LOAD, src=(UOp.param(1, dtypes.float, (204,)).index(r),))
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assertEqual(ranges[0].src[0].val, 204)
 
   def test_range_no_shrink_when_used_in_reduce(self):
     # range used in both a gated load AND directly in the reduce expression -> no shrink
@@ -564,7 +564,7 @@ class TestRangeShrink(unittest.TestCase):
     red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
     ranges = self.get_ranges(red.sink())
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assertEqual(ranges[0].src[0].val, 204)
 
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
@@ -577,19 +577,19 @@ class TestRangeShrink(unittest.TestCase):
     # emulates mask.where(x.pad_to(mask.shape), Invalid): range should shrink accordingly
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(1, dtypes.float), Invalid)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    self.assertEqual(ranges[0].src[0].val, 4)
 
   def test_range_shrink_store_where_invalid_flipped(self):
     # above, but flipped
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(1, dtypes.float), Invalid)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
     self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    self.assertEqual(ranges[0].src[0].val, 4)
 
 if __name__ == '__main__':
   unittest.main()
