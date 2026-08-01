@@ -643,12 +643,8 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
-        amd: 'true'
-        ocelot: 'true'
     - name: Run unit tests
       run: DEV=METAL python -m pytest -n=auto test/unit/ --durations=20
-    - name: Run NULL backend tests
-      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/backend/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
@@ -659,6 +655,25 @@ jobs:
       run: DEV=METAL python3 -m pytest test/device/test_metal.py
     #- name: Fuzz Test linearizer
     #  run: DEV=METAL DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  unittestmacosmock:
+    name: MacOS (unit, mock)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest-macos-mock
+        deps: testing_unit
+        amd: 'true'
+        ocelot: 'true'
+    - name: Run NULL backend tests
+      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run pytest (amd)
       env:
         DEV: MOCKKFD+AMD
