@@ -120,17 +120,15 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-@functools.cache
-def _range_values(s:int) -> tuple[UOp, ...]: return tuple(UOp.const(i) for i in range(s))
-
 def do_devectorize(b:UOp):
-  if (shape:=b.shape) == (): return None
+  if b.shape == (): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
-  if not all(x.shape == shape or x.base.is_invalid for x in b.src): return None
-  src_info = tuple((x, x.base) for x in b.src)
-  idxs = itertools.product(*map(_range_values, shape))
-  src = [b.replace(dtype=None, src=tuple(base if base.is_invalid else x.index(*idx) for x,base in src_info)) for idx in idxs]
-  return UOp.stack(*src).reshape(shape) if b.op is not Ops.STORE else UOp.group(*src)
+  if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
+  src = []
+  for idx in itertools.product(*[range(x) for x in b.shape]):
+    idx_c = [UOp.const(i) for i in idx]
+    src.append(b.replace(dtype=None, src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
+  return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
