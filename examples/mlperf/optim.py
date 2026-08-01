@@ -123,6 +123,9 @@ class GradAccClipAdamW(Optimizer):
     return out.shard_like(t) if offloaded else out
 
 class GradAccClipAdamWGroup(OptimizerGroup):
+  def __init__(self, *optimizers:GradAccClipAdamW):
+    super().__init__(*optimizers)
+    for o in self.optimizers[1:]: o.lr = self.optimizers[0].lr
   def fstep(self, grads:list[Tensor], grad_norm:Tensor|None=None):
     offset = 0
     to_realize = []
