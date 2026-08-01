@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, re, time, typing, uuid
+import json, pathlib, queue, re, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -60,6 +60,11 @@ class StreamRouter:
     if emit: yield "content", emit
     if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
 
+class Request:
+  def __init__(self, ids:list[int], model_name:str, include_usage:bool, max_tokens:int|None, temperature:float):
+    self.ids, self.model_name, self.include_usage, self.max_tokens, self.temperature = ids, model_name, include_usage, max_tokens, temperature
+    self.out: queue.Queue[dict|None] = queue.Queue()
+
 class Handler(HTTPRequestHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
@@ -67,46 +72,10 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    model, tok = self.server.model, self.server.tok
-    prompt_tokens = len(ids)
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
-    yield chunk({"role":"assistant", "content":""})
-    out: list[int] = []
-    finish_reason = "stop"
-    st = time.perf_counter()
-    dec = tok.stream_decoder()
-    router = StreamRouter()
-    for next_id in model.generate(ids, temperature=temperature):
-      if len(out) == 0: stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if tok.is_end(next_id): break
-      out.append(next_id)
-      for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
-      if max_tokens is not None and len(out) >= max_tokens:
-        finish_reason = "length"
-        break
-    for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
-    tool_calls: list[dict] = []
-    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
-      if (parsed := parse_tool_call(m.group(1))) is None:
-        stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-        yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
-      else:
-        name, args = parsed
-        tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
-    if tool_calls:
-      yield chunk({"tool_calls":tool_calls})
-      if finish_reason == "stop": finish_reason = "tool_calls"
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-    if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                      "total_tokens": prompt_tokens + len(out)}, **tmpl}
-    et = time.perf_counter()
-    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
+    # hand off to the scheduler thread (the only thread that touches the model), drain our private stream
+    req = Request(ids, model_name, include_usage, max_tokens, temperature)
+    self.server.waiting.put(req)
+    while (c := req.out.get()) is not None: yield c
 
   def do_POST(self):
     request_st = time.perf_counter()
@@ -152,4 +121,58 @@ class Handler(HTTPRequestHandler):
 class LLMServer(TCPServerWithReuse):
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+    self.waiting: queue.Queue[Request] = queue.Queue()
+    threading.Thread(target=self.scheduler, daemon=True, name="LLMScheduler").start()
     super().__init__(server_address, Handler)
+
+  def scheduler(self):
+    # single thread owns the model; handler threads enqueue requests and drain req.out
+    while True:
+      req = self.waiting.get()                                   # admit FCFS
+      try:
+        for c in self._generate(req): req.out.put(c)             # TODO: batch decodes across requests (batched_step)
+      except Exception: traceback.print_exc()
+      req.out.put(None)                                          # retire: None ends the client's stream
+
+  def _generate(self, req:Request):
+    ids, model_name, include_usage, max_tokens, temperature = req.ids, req.model_name, req.include_usage, req.max_tokens, req.temperature
+    model, tok = self.model, self.tok
+    prompt_tokens = len(ids)
+    cache_start_pos = model.get_start_pos(ids)
+    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
+    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
+    yield chunk({"role":"assistant", "content":""})
+    out: list[int] = []
+    finish_reason = "stop"
+    st = time.perf_counter()
+    dec = tok.stream_decoder()
+    router = StreamRouter()
+    for next_id in model.generate(ids, temperature=temperature):
+      if len(out) == 0: stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+      if tok.is_end(next_id): break
+      out.append(next_id)
+      for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+      if max_tokens is not None and len(out) >= max_tokens:
+        finish_reason = "length"
+        break
+    for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
+    tool_calls: list[dict] = []
+    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+      if (parsed := parse_tool_call(m.group(1))) is None:
+        stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+        yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+      else:
+        name, args = parsed
+        tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+    if tool_calls:
+      yield chunk({"tool_calls":tool_calls})
+      if finish_reason == "stop": finish_reason = "tool_calls"
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
+    if include_usage:
+      yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
+                                      "total_tokens": prompt_tokens + len(out)}, **tmpl}
+    et = time.perf_counter()
+    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")

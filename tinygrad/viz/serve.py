@@ -13,8 +13,10 @@ from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
-class TCPServerWithReuse(socketserver.TCPServer):
+# NOTE: ThreadingMixIn means handlers must be thread-safe: LLMServer funnels model access through its scheduler thread
+class TCPServerWithReuse(socketserver.ThreadingMixIn, socketserver.TCPServer):
   allow_reuse_address = True
+  daemon_threads = True
   def __init__(self, server_address, RequestHandlerClass):
     print(f"*** started server on http://127.0.0.1:{server_address[1]} at {time.perf_counter()-START_TIME:.2f} s")
     super().__init__(server_address, RequestHandlerClass)
@@ -522,10 +524,12 @@ def pma_timeline(blob:bytes, sm_version:int) -> list[ProfileEvent]:
 
 # ** Assembly static analyzers
 
+# redirect_stdout mutates global sys.stdout, serialize capture across request threads
+stdout_lock = threading.Lock()
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
   try:
-    with redirect_stdout(buf), redirect_stderr(buf): f()
+    with stdout_lock, redirect_stdout(buf), redirect_stderr(buf): f()
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
