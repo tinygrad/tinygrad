@@ -988,8 +988,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
-  @property
-  def val(self) -> int: return self.unbind()[1]
   def variables(self) -> list[Variable]:
     return sorted({x for x in self.backward_slice_with_self if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU},
                   key=lambda v: v.expr)
