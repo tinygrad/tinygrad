@@ -12,7 +12,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   # x//y is constant
   if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
   # PARAM // c is irreducible
-  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.arg == 0: return d.const_like(0) if d.op is Ops.FLOORMOD else None
+  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.FLOORMOD else None
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -20,7 +20,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
-  if y.op is Ops.CONST and (c := y.arg) > 0:
+  if y.op is Ops.CONST and (c := y.val) > 0:
     # nested_div: (x%(k*c))//c -> (x//c)%k (requires k>0); the mod case is handled by remove_nested_mod below
     if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k > 0: return x.src[0] // y % k
 
@@ -76,7 +76,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
   gcd = UOp.gcd(*all_uops, y).simplify()
-  if not (gcd.op is Ops.CONST and gcd.arg==1):
+  if not (gcd.op is Ops.CONST and gcd.val==1):
     ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
     return ret*gcd if d.op is Ops.FLOORMOD else ret
 
@@ -85,8 +85,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   quo, rem = [], []
   for u in all_uops:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
-    elif y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
-      rem.append(u.divides(c)*(c%y.arg))
+    elif y.op is Ops.CONST and (c:=u.const_factor())%y.val!=c:
+      rem.append(u.divides(c)*(c%y.val))
       quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.FLOORDIV else u.const_like(0))
     else: rem.append(u)
 

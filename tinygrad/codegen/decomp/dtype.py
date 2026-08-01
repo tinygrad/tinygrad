@@ -158,7 +158,7 @@ pm_long_decomp = PatternMatcher([
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
   (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(truncate[x.tag[1]]((x.arg >> 32) if x.tag[0] == 1 else (x.arg & 0xFFFFFFFF)), x.tag[1]))
+   UOp.const(truncate[x.tag[1]]((x.val >> 32) if x.tag[0] == 1 else (x.val & 0xFFFFFFFF)), x.tag[1]))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

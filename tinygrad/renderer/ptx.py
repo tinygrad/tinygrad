@@ -79,8 +79,8 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
 
 string_rewrite = PatternMatcher([
-  (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
-  (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
+  (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.val, x.dtype)}, 0;"),
+  (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.val, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
    f"ld.param.{ctx.types[dtypes.ulong] if x.addrspace is AddrSpace.GLOBAL else ctx.mem_types[x.dtype]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
@@ -203,7 +203,7 @@ class PTXRenderer(Renderer):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
         if u.op is not Ops.LOAD and u.src[1].op is not Ops.CONST:
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].arg]
+        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].val]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:

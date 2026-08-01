@@ -126,8 +126,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           if rng in idx.backward_slice: num_strides += 1
           for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
-            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
-            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
+            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].val
+            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].val
         xb_choices.append((num_strides, sum_strides, axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)

@@ -289,8 +289,8 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   # buffers are indexed by element, everything else (the stack pointer) by byte
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   sz = imm(dtypes.uint8, base.dtype.itemsize)
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * scale), sz)
-  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * scale), sz)
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].val * scale), sz)
+  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.val * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
@@ -353,7 +353,7 @@ isel_matcher = PatternMatcher([
   # cast of void is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # range is lowered to acc, cmp, jmp after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
+  (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.val),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
   (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
@@ -367,10 +367,10 @@ isel_matcher = PatternMatcher([
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # constants that can't be immediates, move them to registers
-  (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
-  (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
+  (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.val),)) if not x.tag else None),
+  (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.val),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.floats), lambda x:
-   UOp.const(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, x.arg))[0], dt).bitcast(x.dtype) if not x.tag else None),
+   UOp.const(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, x.val))[0], dt).bitcast(x.dtype) if not x.tag else None),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.int8s+dtypes.int16s+dtypes.int32s+(dtypes.int64,)), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 else None),
@@ -453,9 +453,9 @@ isel_matcher = PatternMatcher([
   # scalar int binary
   ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
   # scalar int binary with immediate
-  (UPat.var("a", dtypes.ints) << UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.arg)))),
-  (UPat.var("a", dtypes.uints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.arg)))),
-  (UPat.var("a", dtypes.sints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SARi, src=(a, imm(dtypes.uint8, c.arg)))),
+  (UPat.var("a", dtypes.ints) << UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
+  (UPat.var("a", dtypes.uints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),
+  (UPat.var("a", dtypes.sints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SARi, src=(a, imm(dtypes.uint8, c.val)))),
   (UPat.var("a", dtypes.ints) + UPat.cvar("c"), lambda a,c: a.ins(X86Ops.ADDi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints) * UPat.cvar("c"), lambda a,c: a.ins(X86Ops.IMULi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.cvar("c"), lambda a,c: a.ins(X86Ops.ANDi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
@@ -664,10 +664,10 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # DISP byte
     if mod == 0b01 or mod == 0b10:
       assert disp_uop is not None
-      inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.arg)
+      inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.val)
     # IMM byte
     if imm_uop is not None:
-      if imm_uop.op is Ops.CONST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.arg)
+      if imm_uop.op is Ops.CONST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.val)
       elif isinstance(greg(imm_uop), Register): inst += bytes([(greg(imm_uop).index & 0b1111) << 4 | 0b0000])
     return inst
 
@@ -840,10 +840,10 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(s.dtype.itemsize, o) if \
+        return [str(s.val) if s.op is Ops.CONST else reg_strs[o].get(s.dtype.itemsize, o) if \
                 (o:=str(greg(s))) in reg_strs else o for s in src if greg(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, sz:UOp) -> list[str]:
-        return [f"[{greg(base)}" + (f" + {greg(idx)}*{sz.arg}" if greg(idx) else "") + (f" + {disp.arg}" if disp.arg else "") + "]"]
+        return [f"[{greg(base)}" + (f" + {greg(idx)}*{sz.val}" if greg(idx) else "") + (f" + {disp.val}" if disp.val else "") + "]"]
 
       if len(x.src) > 4 and x.arg in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:4]) + _format(x.src[4:])
       elif len(x.src) > 3 and x.arg in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:4]) + _format(x.src[4:])
