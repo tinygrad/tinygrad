@@ -186,7 +186,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     if b.op is Ops.BIND:
       nm = b.src[0].expr
       if nm not in used_vars: continue
-      val = b.src[1].arg
+      val = b.src[1].val
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 

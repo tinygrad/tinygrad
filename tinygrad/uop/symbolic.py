@@ -23,11 +23,11 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.fmt) is None or (to_fmt:=root.dtype.fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
   def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
-  return root.const_like(convert(c.arg))
+  return root.const_like(convert(c.val))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
-  if u.op is Ops.CONST: return u.arg
-  if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.arg for s in u.src)
+  if u.op is Ops.CONST: return u.val
+  if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.val for s in u.src)
   return None
 
 def fold_const_alu(a:UOp) -> UOp|None:
@@ -39,8 +39,8 @@ def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # moves consts freely: the quotient may be merged ((x//c + a)//div -> (x + a*c)//(c*div) for div>0) and shifted ((y + k*D)//D == y//D + k)
   (q, s), (num, a) = q.pop_const(), base.pop_const()
   if q.op is not Ops.FLOORDIV or q.src[1].op is not Ops.CONST: return None
-  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].arg == (c:=num.src[1].arg)*div: num, a, D = num.src[0], a*c, c*div
-  elif q.src[1].arg == div: D = div
+  if div > 0 and num.op is Ops.FLOORDIV and num.src[1].op is Ops.CONST and q.src[1].val == (c:=num.src[1].val)*div: num, a, D = num.src[0], a*c, c*div
+  elif q.src[1].val == div: D = div
   else: return None
   (x, xa), (p, pa) = num.pop_const(), q.src[0].pop_const()
   if p is not x or (t:=xa + a - pa) % D: return None
@@ -54,13 +54,13 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
     if mod.op is not Ops.FLOORMOD or mod.src[1].op is not Ops.CONST: continue
-    base, div = mod.src[0], mod.src[1].arg
+    base, div = mod.src[0], mod.src[1].val
     for j,v in enumerate(terms):
       q, scale = v.pop_const(Ops.MUL)
       if i == j or scale != div*mul: continue
       rest = [t for k,t in enumerate(terms) if k not in (i,j)]
       if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
-      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
+      if q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].val) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
         return ((b % (div*d))*mul).usum(*rest)
   return None
 
@@ -119,7 +119,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(False, dtypes.bool), UPat.const(True, dtypes.bool)), lambda x: x.logical_not()),
   # CAST(bool -> int) != const — CAST(True)=1, CAST(False)=0, so fold based on const value
   (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)) != UPat.cvar("c"),
-   lambda x,c: x if c.arg == 0 else x.logical_not() if c.arg == 1 else x.const_like(True)),
+   lambda x,c: x if c.val == 0 else x.logical_not() if c.val == 1 else x.const_like(True)),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False, dtypes.bool)), # x < x -> False
@@ -129,9 +129,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # (x&mask)>>k -> x>>k when mask only clears bits below k
   # TODO: combine this with "# rules for threefry" below
   ((UPat.var("x") & UPat.cvar("mask")) >> UPat.cvar("k"),
-   lambda x,mask,k: x >> k.arg if mask.arg | ((1 << k.arg) - 1) == -1 else None),
+   lambda x,mask,k: x >> k.val if mask.val | ((1 << k.val) - 1) == -1 else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
-   lambda x,mask,c: x // c.arg if c.arg > 0 and c.arg & (c.arg-1) == 0 and mask.arg | (c.arg-1) == -1 else None),
+   lambda x,mask,c: x // c.val if c.val > 0 and c.val & (c.val-1) == 0 and mask.val | (c.val-1) == -1 else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
@@ -199,7 +199,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
   changed, ret = False, []
   for u in X.split_uop(Ops.ADD):
     # assumed the const is the last src of MUL
-    if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
+    if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].val > 0:
       changed = True
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
@@ -265,10 +265,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** lt **
   # c0*x<c1 -> sign(c0)*x < ceil(c1/abs(c0))
   ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
-   lambda x,c0,c1: (x if c0.arg > 0 else -x)<-(-c1.arg//abs(c0.arg)) if abs(c0.arg) > 1 else None),
+   lambda x,c0,c1: (x if c0.val > 0 else -x)<-(-c1.val//abs(c0.val)) if abs(c0.val) > 1 else None),
   # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
-   lambda x,d,c: (x<c.arg*d.arg) if d.arg > 0 else (x>c.arg*d.arg) if d.arg < 0 else None),
+   lambda x,d,c: (x<c.val*d.val) if d.val > 0 else (x>c.val*d.val) if d.val < 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1 if y.op is not Ops.CONST else None),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
@@ -304,12 +304,12 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
 
-  if v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].arg == 1 and (s0:=v.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype):
+  if v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].val == 1 and (s0:=v.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype):
     # (X < c).ne(True) -> X >= c
     return s0.src[0], False, int(s0.src[1].vmin)
   if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
     # c < X -> X >= c+1 (a const on the left is a lower bound on the right)
-    if v.src[0].op is Ops.CONST: return v.src[1], False, int(v.src[0].arg)+1
+    if v.src[0].op is Ops.CONST: return v.src[1], False, int(v.src[0].val)+1
     # X < c -> X <= c-1
     return v.src[0], True, int((v.src[1]).vmax)-1
   return None

@@ -10,7 +10,7 @@ from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, a
 def validate_index(uidx:UOp, gate:UOp|None=None):
   if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
-  if idx.op is Ops.CONST and idx.arg is Invalid: return True
+  if idx.op is Ops.CONST and idx.val is Invalid: return True
   if gate is None: gate = UOp.const(True)
   # TODO: check for overflow
   if not CHECK_OOB or is_image_shape(buf._shape): return True
@@ -54,7 +54,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.NOOP), lambda: True),
 
   # CONST is everywhere
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.val) is type(x.dtype.const(x.val))),
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
