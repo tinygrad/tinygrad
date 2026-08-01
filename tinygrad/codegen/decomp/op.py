@@ -77,7 +77,7 @@ def get_simplifying_rewrite_patterns(ops:tuple[Ops, ...]) -> PatternMatcher:
   # these are rewrites that make things simpler
   pat: list[tuple[UPat, Callable]] = [(UPat.var("a")//UPat.var("b"), floordiv_to_idiv)]
   # FLOORMOD by 2**y -> x & (2**y-1) (correct floor mod for any sign in two's complement); fires before floormod_to_mod
-  if Ops.AND in ops: pat.append((UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None))
+  if Ops.AND in ops: pat.append((UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.val-1) if c.val in powers_of_two else None))
   pat.append((UPat.var("a")%UPat.var("b"), floormod_to_mod))
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
@@ -91,19 +91,19 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
   # rewrite MUL/CDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
-  if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+  if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.val, 0)) else None)]
   if Ops.SHR in ops:
     # uint CDIV by 2**v -> x >> v (FLOORDIV is lowered to CDIV by the rule above before reaching here)
     pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.uints), UPat.cvar("c"))),
-      lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+      lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None)]
     # signed CDIV (trunc) by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
     pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
       lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
-        if (v:=powers_of_two.get(c.arg, 0)) else None)]
+        if (v:=powers_of_two.get(c.val, 0)) else None)]
     if not disable_fast_idiv:
       # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
       pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
-        lambda ctx, x, d: fast_idiv(ctx, x, d.arg) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
+        lambda ctx, x, d: fast_idiv(ctx, x, d.val) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
       # rewrite raw CMOD -> x - d*CDIV(x,d) so fast_idiv can pick up the CDIV. only on non-negative inputs;
       # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.CMOD as an implementation detail)
       pat += [(UPat(Ops.CMOD, src=(UPat.var("x", dtypes.ints), UPat.var("d"))),
@@ -119,13 +119,13 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*UPat.cvar("c"), lambda x,y,c: y*(-c)<x),
       (UPat.var("x", dtypes.sints)*-1 < UPat.cvar("c"), lambda x,c:-c<x),
       ((UPat.cvar("c1")<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2")),
-        lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
+        lambda x,c1,c2: x.eq(c1+1) if c1.val+1==c2.val-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
   if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
     # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first
-    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.arg), c))]
+    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.val), c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]

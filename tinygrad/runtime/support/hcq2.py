@@ -55,7 +55,7 @@ def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:UOp|None=None):
   blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
     if s.op is not Ops.CONST: patches.append((len(blob), s))
-    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0))
+    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.val if s.op is Ops.CONST else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   writable = cmdbuf.after(dep) if dep is not None else cmdbuf
   return cmdbuf.after(make_binary_patch(writable, bytes(blob)), *((make_patches(writable, patches),) if patches else ()))
@@ -77,9 +77,11 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
 # *****************
 # 0.1. prep: replace buffers with params
 
-def replace_call_buffers(ctx:list[UOp], call:UOp) -> UOp|None:
-  ctx += [s for s in call.src[1:] if s not in ctx and s.op not in (Ops.PARAM, Ops.BIND)]
-  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(ctx.index(s)) for s in call.src[1:]))
+def replace_call_buffers(ctx:tuple[list[UOp], dict[UOp, int]], call:UOp) -> UOp|None:
+  bufs, slots = ctx
+  for s in call.src[1:]:
+    if s.op not in (Ops.PARAM, Ops.BIND) and slots.setdefault(s, len(bufs)) == len(bufs): bufs.append(s)
+  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(slots[s]) for s in call.src[1:]))
 pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
 
 # *****************
@@ -252,6 +254,7 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def is_link_patch(p:UOp, jit:bool) -> bool:
+  if p.tag == "link": return True
   store = p.src[0] if (is_binary_patch:=(p.op is Ops.END and p.src[0].op is Ops.STORE)) else p
   if not jit: return store.buf_uop.tag == "program"
   return is_binary_patch or (store.op is Ops.STORE and is_value_known_at_link(store.src[1]))
@@ -320,7 +323,7 @@ def replace_params(call:UOp) -> UOp|None:
   addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
-  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
+  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
@@ -333,7 +336,7 @@ pm_replace_params = PatternMatcher([
 def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   base = bv.src[0].after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ())
   itemsize = bv.src[0].dtype.itemsize if bv.src[0].without_after.op in (Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT) else bv.dtype.itemsize
-  return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(bv.src[1].arg * itemsize, dtypes.uint64)
+  return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(bv.src[1].val * itemsize, dtypes.uint64)
 
 pm_early_simplify = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat.any(sl:=UPat(Ops.SLICE, name="bv"), sl.after(allow_any_len=True)),), name="g"), resolve_getaddr_slice),
@@ -373,7 +376,9 @@ hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
-  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, name="replace buffer")
+  if input_uops is not None:
+    slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
 
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
     # prep
@@ -418,8 +423,8 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.arg))
-      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.arg*buf.dtype.itemsize):bo+len(data)] = data
+      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.val))
+      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.val*buf.dtype.itemsize):bo+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:

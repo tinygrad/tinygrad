@@ -47,7 +47,7 @@ def mark_gated(ctx, idx):
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
   else: x, guards = idx, {}
   # ensure that we choose max(c_i) for all i where r < c_i
-  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].arg < c.arg)}
+  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].val < c.val)}
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
@@ -62,7 +62,7 @@ pm_simplify_ranges = PatternMatcher([
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   # ranges that aren't looped over can't be split
   if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
-    and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+    and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})

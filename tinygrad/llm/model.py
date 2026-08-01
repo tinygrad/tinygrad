@@ -432,9 +432,10 @@ class Transformer:
     if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
+      n_toks = min(chunk_size, len(tokens) - start_pos)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
-      start_pos += nt.val
+      start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))

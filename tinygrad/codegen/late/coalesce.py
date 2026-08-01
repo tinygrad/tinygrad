@@ -84,7 +84,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
   buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
   shapes[buf.arg.slot] = (h, w)
-  if valid.op is not Ops.CONST or valid.arg is not True:
+  if valid.op is not Ops.CONST or valid.val is not True:
     return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid), dtype=dtypes.float)
   else:
     return buf.index(cidx.src[1], cidx.src[0], dtype=dtypes.float)
@@ -111,10 +111,10 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       if buf.addrspace == AddrSpace.REG: continue
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str
-      if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-      elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
-      elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
-      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
+      if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
+      elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].val
+      elif idx.op is Ops.CONST and idx.val is Invalid: root_src, arg = "INVALID", 0
+      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
       else: root_src, arg = idx, 0
       memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
 

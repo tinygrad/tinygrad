@@ -26,22 +26,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
-    good_tc_opt = False
-    tk = k.copy()
-    try: # check TC first and apply hand-coded opts if successful
-      rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
-      good_tc_opt = True
-    except KernelOptError:
-      pass
-    if good_tc_opt:
-      if rngs is not None:
-        for tc_dim in [1,0]: # attempt to upcast M and N
-          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-          if szs:
-            # set it to the replaced range
-            rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-          tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+    for axis in range(3):
+      tk = k.copy()
+      # check TC first and apply hand-coded opts if successful
+      try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
+      except KernelOptError: continue
+      for tc_dim in [1,0]: # attempt to upcast M and N
+        szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+        if szs:
+          # set it to the replaced range
+          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
+      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+        tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk
 
   # make a copy so it does not mutate the input
@@ -130,8 +126,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           if rng in idx.backward_slice: num_strides += 1
           for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
-            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
-            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
+            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].val
+            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].val
         xb_choices.append((num_strides, sum_strides, axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)

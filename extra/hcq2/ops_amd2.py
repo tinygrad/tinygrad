@@ -158,7 +158,8 @@ def pm4_submit(ctx, lin):
 
   ib = UOp.placeholder((size_dw + 2,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
   done_idx, submit_idx = UOp.const(size_dw + 0, dtypes.int), UOp.const(size_dw + 1, dtypes.int)
-  submitted = (counter:=ib.after(make_patches(ib, [((size_dw + i) * 4, UOp.const(0, dtypes.uint32)) for i in range(2)])).index(submit_idx)).load()
+  init_counters = make_patches(ib, [((size_dw + i) * 4, UOp.const(0, dtypes.uint32)) for i in range(2)]).rtag("link")
+  submitted = (counter:=ib.after(init_counters).index(submit_idx)).load()
   completed = ib.after(loop:=UOp.loop(0)).index(done_idx).load()
   ib_free = completed.end(loop, completed != submitted)
 
