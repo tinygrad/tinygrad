@@ -5,10 +5,8 @@ from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.uop.spec import type_verify, spec_program
-import gc, os, sys
 
 if __name__ == "__main__":
-  gc.disable()
   mdl = ResNet50()
   for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
@@ -45,5 +43,3 @@ if __name__ == "__main__":
           with Timing("***** model verify in    "):
             for u in uops_line: type_verify(u, spec_program)
           print(sum(len(u) for u in uops_line))
-  sys.stdout.flush()
-  if not getenv("PGO_TRAIN"): os._exit(0)

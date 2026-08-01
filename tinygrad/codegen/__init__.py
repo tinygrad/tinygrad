@@ -28,7 +28,6 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
-from tinygrad.codegen.devectorize import do_devectorize_fast
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def do_number_param(ctx:list[int], x:UOp):
@@ -121,8 +120,17 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
+@functools.cache
+def _range_values(s:int) -> tuple[UOp, ...]: return tuple(UOp.const(i) for i in range(s))
+
 def do_devectorize(b:UOp):
-  return do_devectorize_fast(b)
+  if (shape:=b.shape) == (): return None
+  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
+  if not all(x.shape == shape or x.base.is_invalid for x in b.src): return None
+  src_info = tuple((x, x.base) for x in b.src)
+  idxs = itertools.product(*map(_range_values, shape))
+  src = [b.replace(dtype=None, src=tuple(base if base.is_invalid else x.index(*idx) for x,base in src_info)) for idx in idxs]
+  return UOp.stack(*src).reshape(shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -324,10 +332,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
-
-  # simplify indexing
-  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
 
   # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")

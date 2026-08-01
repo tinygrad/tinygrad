@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
@@ -231,9 +231,6 @@ class recursive_property(property):
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
-UOP_CONST_CACHE:dict[tuple[DType, ConstType], UOp] = {}
-FLOAT_CONST_DTYPES = frozenset(dtypes.floats + (dtypes.weakfloat,))
-
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.op import OpMixin
 from tinygrad.mixin.rand import RandMixin
@@ -246,13 +243,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   tag:Any = None
-  _cache:dict[str, Any] = field(default_factory=dict, init=False, repr=False)
-
   def __del__(self):
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
     except AttributeError: pass
-
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
@@ -270,9 +264,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.arg
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
-  @property
-  def key(self) -> bytes: return self._get_recursive_cached("key", UOp._key_uncached)
-  def _key_uncached(self) -> bytes:
+  @recursive_property
+  def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self):
     from tinygrad.uop.render import pretty_print
@@ -283,6 +276,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
+
+  @functools.cached_property
+  def backward_slice(self:UOp) -> dict[UOp, None]:
+    res: dict[UOp, None] = self.toposort()
+    res.pop(self)
+    return res
+
+  @property
+  def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+
+  @recursive_property
+  def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
+  # NOTE: self is added outside the cache, a cached self-reference is a cycle the refcounter can't free
+  @property
+  def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
@@ -310,60 +321,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       else: cache[node] = visitor(node)
     return cache[self]
 
-  def _get_cached(self, nm:str, fxn:Callable[[UOp], Any]) -> Any:
-    if nm not in self._cache: self._cache[nm] = fxn(self)
-    return self._cache[nm]
-
-  def _get_recursive_cached(self, nm:str, fxn:Callable[[UOp], Any]) -> Any:
-    if nm in self._cache: return self._cache[nm]
-    ready = True
-    for s in self.src:
-      if nm not in s._cache:
-        ready = False
-        break
-    if ready:
-      self._cache[nm] = fxn(self)
-      return self._cache[nm]
-    stack:list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      node, visited = stack.pop()
-      if nm in node._cache: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src):
-          if nm not in s._cache: stack.append((s, False))
-      else: node._cache[nm] = fxn(node)
-    return self._cache[nm]
-
   @functools.cached_property
-  def backward_slice(self:UOp) -> dict[UOp, None]:
-    res: dict[UOp, None] = self.toposort()
-    res.pop(self)
-    return res
-
-  @property
-  def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
-
-  @property
-  def _bool_slice(self) -> frozenset[UOp]: return self._get_recursive_cached("_bool_slice", UOp._bool_slice_uncached)
-  def _bool_slice_uncached(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
-  # NOTE: self is added outside the cache, a cached self-reference is a cycle the refcounter can't free
-  @property
-  def bool_slice(self) -> frozenset[UOp]: return self._bool_slice | {self} if self.dtype is dtypes.bool else self._bool_slice
-
-  @property
-  def tuplize(self:UOp) -> tuple: return self._get_cached("tuplize", UOp._tuplize_uncached)
-  def _tuplize_uncached(self:UOp) -> tuple:
+  def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 
-  @property
-  def _shape(self) -> Any: return self._get_recursive_cached("_shape", UOp._shape_uncached)
-  def _shape_uncached(self) -> tuple[sint, ...]|None:
+  @recursive_property
+  def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
@@ -496,13 +461,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in GroupOp.Broadcastable:
-      broadcast_shapes:list[tuple[sint, ...]|None] = [x._shape for x in self.src]
-      assert len(self.src) > 0 and all(x is not None for x in broadcast_shapes), f"None input shape not supported for {self.op}"
-      shapes = cast(list[tuple[sint, ...]], broadcast_shapes)
-      if DISALLOW_BROADCAST and not all_same(broadcast_shapes):
-        raise RuntimeError(f"shape mismatch at {self.op}: {broadcast_shapes} {[x.op for x in self.src]}")
+      input_shapes = [x._shape for x in self.src]
+      assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
+      if DISALLOW_BROADCAST and not all_same(input_shapes):
+        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       # broadcasting lives in _shape property now
-      return _broadcast_shape(*shapes)
+      return _broadcast_shape(*input_shapes)
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
@@ -525,9 +489,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def max_shard_shape(self) -> tuple[int, ...]: return to_max_shape(self.shard_shape)
 
-  @property
-  def ended_ranges(self) -> tuple[UOp, ...]: return self._get_cached("ended_ranges", UOp._ended_ranges_uncached)
-  def _ended_ranges_uncached(self) -> tuple[UOp, ...]:
+  @functools.cached_property
+  def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
@@ -535,9 +498,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ()
 
   # determine what ranges this is in
-  @property
-  def _ranges(self) -> dict[UOp, None]: return self._get_recursive_cached("_ranges", UOp._ranges_uncached)
-  def _ranges_uncached(self) -> dict[UOp, None]:
+  @recursive_property
+  def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     for s in self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
@@ -659,18 +621,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
-    arg:ConstType
-    if isinstance(b, InvalidType): arg = b
-    elif dtype is dtypes.bool: arg = bool(b)
-    elif dtype in FLOAT_CONST_DTYPES:
-      val = float(b)
-      arg = ConstFloat(math.nan if math.isnan(val) else val)
-    else: arg = int(b)
-    key = (dtype, arg)
-    if (ret:=UOP_CONST_CACHE.get(key)) is not None: return ret
-    ret = UOp(Ops.CONST, dtype, arg=arg, src=())
-    UOP_CONST_CACHE[key] = ret
-    return ret
+    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -823,9 +774,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is not Ops.STACK: return (ssimplify(self),)
     return tuple(s.val if s.op is Ops.CONST else ssimplify(s) for s in self.src)
 
-  @property
-  def marg(self) -> Any: return self._get_cached("marg", UOp._marg_uncached)
-  def _marg_uncached(self) -> Any:
+  @functools.cached_property
+  def marg(self):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
       case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
@@ -892,9 +842,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = self.empty_like(device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
     return ret.after(ret.store(src.cast(ret.dtype)))
-  @property
-  def device(self) -> Any: return self._get_recursive_cached("device", UOp._device_uncached)
-  def _device_uncached(self) -> str|tuple[str, ...]|None:
+  @recursive_property
+  def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
     if self.op is Ops.STAGE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
@@ -913,9 +862,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: no device means no place to store, weak means no width to store. neither can back a buffer as-is
     # TODO: unify with has_buffer_identity
     return self.device is None or self.dtype in dtypes.weaks
-  @property
-  def addrspace(self) -> AddrSpace|None: return self._get_recursive_cached("addrspace", UOp._addrspace_uncached)
-  def _addrspace_uncached(self) -> AddrSpace|None:
+  @recursive_property
+  def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
@@ -1094,9 +1042,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def vmin(self) -> PyConst: return self._min_max[0]
   @property
   def vmax(self) -> PyConst: return self._min_max[1]
-  @property
-  def _min_max(self) -> tuple[PyConst, PyConst]: return self._get_cached("_min_max", UOp._min_max_uncached)
-  def _min_max_uncached(self) -> tuple[PyConst, PyConst]:
+  @functools.cached_property
+  def _min_max(self) -> tuple[PyConst, PyConst]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
@@ -1505,7 +1452,6 @@ class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
-    self.rewrite_caches: dict[tuple[bool, bool], dict[UOp, UOp]] = {}
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
@@ -1522,7 +1468,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None):
     if len(pats:=self.pdict.get(uop.op, [])):
-      if (ler:=uop._cache.get('_src_ops')) is None: uop._cache['_src_ops'] = ler = {u.op for u in uop.src}
+      if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
         if not early_reject.issubset(ler): continue
         if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
@@ -1683,12 +1629,12 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None, enter_calls=False, replace:dict[UOp, UOp]|None=None):
+  def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
-    self.replace: dict[UOp, UOp] = {} if replace is None else replace
+    self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
@@ -1795,13 +1741,7 @@ class RewriteContext:
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
-  cacheable_codegen = {"early movement ops", "load collapse", "initial symbolic", "postopt symbolic", "*** expand broadcast / add loads",
-                       "simplify load/store indexing", "early symbolic", "extra symbolic", "final symbolic", "cast float alu operands",
-                       "early decompositions", "move gates from index", "add implicit barriers"}
-  # Limit cross-kernel memoization to context-free codegen passes; schedule rewrites can depend on surrounding CALL/device state.
-  cache = None if ctx is not None or walk or bpm is not None or name not in cacheable_codegen \
-    else pm.rewrite_caches.setdefault((bottom_up, enter_calls), {})
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, cache)
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
