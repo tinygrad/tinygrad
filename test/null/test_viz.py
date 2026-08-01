@@ -96,8 +96,8 @@ class TestViz(unittest.TestCase):
   def test_exceptions(self):
     # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
-      assert x.arg <= 3
-      return x.replace(arg=x.arg+1)
+      assert x.val <= 3
+      return x.replace(arg=x.val+1)
     err_pm = PatternMatcher([(UPat.cvar("x"), count_3),])
     a = UOp.const(1)
     with save_viz() as viz:
