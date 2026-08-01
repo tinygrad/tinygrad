@@ -47,7 +47,7 @@ def mark_gated(ctx, idx):
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
   else: x, guards = idx, {}
   # ensure that we choose max(c_i) for all i where r < c_i
-  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].arg < c.arg)}
+  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].val < c.val)}
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 

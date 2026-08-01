@@ -268,9 +268,9 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg)
-    assert (idxs[0].arg, idxs[0].src[0].arg) == ('gidx0', 6), idxs[0]
-    assert (idxs[1].arg, idxs[1].src[0].arg) == ('gidx1', 5), idxs[1].arg
-    assert (idxs[2].arg, idxs[2].src[0].arg) == ('gidx2', 4), idxs[2].arg
+    assert (idxs[0].arg, idxs[0].src[0].val) == ('gidx0', 6), idxs[0]
+    assert (idxs[1].arg, idxs[1].src[0].val) == ('gidx1', 5), idxs[1].arg
+    assert (idxs[2].arg, idxs[2].src[0].val) == ('gidx2', 4), idxs[2].arg
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()

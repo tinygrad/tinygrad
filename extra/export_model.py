@@ -264,7 +264,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
         if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and \
            any(s.op is Ops.PARAM and s.addrspace is AddrSpace.ALU for s in dim.src) and any(s.op is Ops.CONST for s in dim.src):
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
-          global_size[j] = f"_{name.expr}[0] + {val.arg}"
+          global_size[j] = f"_{name.expr}[0] + {val.val}"
 
   prg = ""
   if target == "clang":
