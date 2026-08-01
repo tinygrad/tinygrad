@@ -22,7 +22,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
   # invalids() returns fresh write-only scratch: a clone storing CONST(Invalid)
   # don't capture it as an input; only skip fresh buffers, not realized ones
   return {u.src[0].buf_uop for u in uret.backward_slice_with_self
-          if u.op is Ops.STORE and u.src[1].base.op is Ops.CONST and u.src[1].base.arg is Invalid
+          if u.op is Ops.STORE and u.src[1].base.op is Ops.CONST and u.src[1].base.val is Invalid
           and not u.src[0].buf_uop.is_realized}
 
 ReturnType = TypeVar('ReturnType')

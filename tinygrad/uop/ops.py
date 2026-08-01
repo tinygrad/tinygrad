@@ -567,7 +567,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
-    if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
+    if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
     return UOp(Ops.INDEX, src=(self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
@@ -931,7 +931,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
-      offset = self.src[1].arg
+      offset = self.src[1].val
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
@@ -1787,7 +1787,7 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
 
 def commit_weak(s:UOp, dt:DType) -> UOp:
   # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
-  return UOp.const(s.arg, dt) if s.op is Ops.CONST else s.cast(dt)
+  return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
