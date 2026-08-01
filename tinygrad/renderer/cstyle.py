@@ -95,7 +95,7 @@ def cast_float_to_bf16(x: UOp) -> UOp:
   x = (-x & 0x7f800000).ne(0).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).ne(0).where((x | 0x10000), x))
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
-# manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
+# manual bfloat16 casting patterns (shared between LLVM, Clang, AMD, and CUDA renderers to avoid compiler intrinsics)
 pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
