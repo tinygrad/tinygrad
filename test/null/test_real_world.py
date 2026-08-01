@@ -47,11 +47,7 @@ class TestRealWorld(unittest.TestCase):
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
-    self.old_float = dtypes.default_float
     np.random.seed(2002)
-
-  def tearDown(self):
-    dtypes.default_float = self.old_float
 
   @slow
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
@@ -81,7 +77,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_llama(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = LLaMaTransformer(**args_tiny)
@@ -93,7 +89,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_gpt2(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
     model = GPT2Transformer(**args_tiny)
@@ -150,7 +146,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_train_cifar_hyp(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
     with Context(TRAINING=1):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])

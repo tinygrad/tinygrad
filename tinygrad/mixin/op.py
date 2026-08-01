@@ -139,13 +139,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
       if v is None: return x  # advanced getitem
       # advanced setitem: resolve tensor dims in collapsed space, then fall through to basic setitem path
-      vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
+      vb = v._broadcast_to(_broadcast_shape(x.shape, v.shape))
       for dim in sum_axis: vb = vb.unsqueeze(dim)  # add back reduced dims from sum
       start = dims[0] if not permuted else 0
       vb = x_pre._masked_merge(vb, mask, tuple(range(start, start + len(big_shape))))
     elif v is None: return x  # basic getitem
     # basic setitem: broadcast v, reshape to self.ndim (unsqueeze int dims, squeeze None dims)
-    else: vb = v.cast(self.dtype)._broadcast_to(x.shape)
+    else: vb = v._broadcast_to(x.shape)
     vb = vb.reshape(tuple(1 if p['collapse_dim'] else p['size'] for p in indices_parsed if p['index'] is not None))
     per_dim = []
     for d, m in enumerate(mops):
@@ -159,7 +159,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
-    return (type(self).uprod(*per_dim) if per_dim else type(self).const(dtypes.bool, True)).where(vb, self)
+    return (type(self).uprod(*per_dim) if per_dim else type(self).const(True)).where(vb, self)
 
   @classmethod
   def arange(cls, start, stop=None, step=1, dtype:DTypeLike|None=None) -> Self:
@@ -184,8 +184,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if stop is None: stop, start = start, 0
-    if dtype is None: dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
+    if dtype is None:
+      dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
+      # an int range too large for default_int picks int64
+      if dtype is dtypes.default_int and (lo < dtype.min or dtype.max < hi): dtype = dtypes.int64
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
@@ -437,7 +440,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])
     alpha = sorted(sz)
     # align all tensors to alphabet, multiply, sum non-output, permute to output order
-    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
+    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]) if s else x
           for s, x in zip(inputs, xs)]
     return xs[0].uprod(*xs[1:]).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
 
@@ -618,8 +621,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.normalize(p=1, dim=0).numpy())
     ```
     """
-    if p == 0: return self / self.ne(0).sum(dim, keepdim=True).maximum(eps)
-    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+    den = self.ne(0).sum(dim, keepdim=True) if p == 0 else self.abs().pow(p).sum(dim, keepdim=True).pow(1/p)
+    return self / den.maximum(eps)
 
   def logsumexp(self, axis=None, keepdim=False) -> Self:
     """
@@ -700,6 +703,28 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
+  def softmin(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the softmin function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmin is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmin().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmin(axis=0).numpy())
+    ```
+    """
+    return (-self).softmax(axis, dtype)
+
   def cat(self, *args:Self, dim:int=0) -> Self:
     """
     Concatenates self with other tensors in `args` along an axis specified by `dim`.
@@ -716,6 +741,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
+    if all(t.shape[dim] == self.shape[dim] for t in args): return self.stack(*args, dim=dim).flatten(dim, dim+1)
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
     return padded[0].usum(*padded[1:])
@@ -734,11 +760,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     SPLIT = 256
     value = identity_element(op, self.dtype)
     if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret).alu(op, fix(base))
+    chunks = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
+    base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
+    return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
   def cumsum(self, axis:int=0) -> Self:
     """
@@ -782,7 +806,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, buffer=False)
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, buffer=False).triu()
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, dtype=dtypes.bool, buffer=False).triu()
     idx = (-(match * type(self).arange(n, 0, -1).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
@@ -827,7 +851,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
-    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
+    x_unsqueezed = x.unsqueeze(-2)
     x_cummax = x.cummax(-1)[0].detach()
     mask = type(self).ones(last_dim_size, last_dim_size, buffer=False, dtype=dtypes.bool).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
@@ -976,11 +1000,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # helper function commonly used for indexing
   def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
-    from tinygrad.uop.ops import sint_to_uop
     if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
     offset = self.ndim - self._resolve_dim(dim) - 1
-    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
-    return self.eq(type(self).arange(num_classes, dtype=dt).reshape((num_classes,) + (1,) * offset))
+    return self.eq(type(self).arange(num_classes).reshape((num_classes,) + (1,) * offset))
 
   def one_hot(self, num_classes:int) -> Self:
     """
@@ -1382,22 +1404,17 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2).where(self.reshape(bs,c,1,-1), 0)).sum(3)
     return ret.reshape(bs,c,*output_size)
 
-  @classmethod
-  def _get_winograd_matcols(cls, mat, dims:int, shp:tuple[sint, ...], dtype:DType) -> list[list[Self]]:
-    return [[cls.cat(*[cls.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), dtype=dtype, buffer=False) for m in mat], dim=dim)
-             for k in range(len(mat[0]))] for dim in range(dims)]
-
   # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
   def _apply_winograd_matrix(self, mat, dims:int) -> Self:
-    # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
-    # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
-    t_ = self.reshape(self.shape[:dims] + (1,) * dims + self.shape[dims:]).expand(
-      self.shape[:dims] + (len(mat),) * dims + self.shape[dims:])  # add output dims
-    # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
-    matcols = type(self)._get_winograd_matcols(mat, dims, t_.shape[dims:], t_.dtype)
-    # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
-    ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
-    assert not isinstance(ret, int), "sum over empty winograd matrix"
+    # apply mat along each of the first `dims` axes: the separable transform kron(mat, ..., mat) @ self
+    # column k of mat is a stacked-CONST vector that folds into the arithmetic, so no constant is materialized
+    ret = self
+    for dim in range(dims):
+      ret = ret.transpose(0, dim)
+      ret = sum(type(self).const(tuple(float(m[k]) for m in mat), ret.dtype).reshape((len(mat),)+(1,)*(ret.ndim-1)) * ret[k]
+                for k in range(len(mat[0])))
+      assert not isinstance(ret, int), "sum over empty winograd matrix"
+      ret = ret.transpose(0, dim)
     return ret
 
   # TODO: winograd can be a rewrite rule like split_reduceop
@@ -1417,8 +1434,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # (bs, cin_, tyx, HWI)
     pads = [(pB, pA + (-(s + pB + pA - 2) % 4)) for (pB, pA), s in zip(flat_to_grouped(padding_), self.shape[-len(HW):])]
     d = self.pad(flatten(reversed(pads)))._pool(HWI, HWO)
-    # move HW to the front: # (HWI, bs, cin_, tyx)
-    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
+    # move HW to the front: # (HWI, bs, cin_, tyx); contiguous_backward keeps the input transform's adjoint out of the overlap accumulation
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW))).contiguous_backward()
     tyx = d.shape[-len(HWI):]  # dim of tiling
 
     g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
@@ -1881,8 +1898,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # https://keccak.team/keccak_specs_summary.html
 
     def ctensor(l: Sequence[PyConst], dtype: DType = dtypes.uint64):
-      # TODO: contiguous is here for compile speed
-      return type(self).stack(*(type(self).const(dtype, v) for v in l)).contiguous()
+      return type(self).const(tuple(l), dtype)
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
@@ -1902,7 +1918,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     lbe = (data.shape[1] - 1) * 200 + rate - data_pad
     if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (200 - rate, 0)]
     else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = type(self).cat(*(type(self).const(dtypes.uint8, v).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
+    pad_mask = type(self).cat(*(type(self).const(v, dtypes.uint8).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
     data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 

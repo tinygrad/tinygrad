@@ -1,5 +1,5 @@
-import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system, getenv
+import ctypes, hashlib, tempfile, subprocess, pathlib
+from tinygrad.helpers import amdgpu_disassemble, getenv
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -9,21 +9,8 @@ try:
     assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
 except AttributeError: pass  # ignore if ROCm isn't installed
 from tinygrad.device import Compiler, CompileError
-from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.runtime.support import c
-from tinygrad.helpers import OSX, to_char_p_p
-
-def _find_llvm_objdump():
-  if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
-  # Try ROCm path first, then versioned, then unversioned
-  for p in ['/opt/rocm/llvm/bin/llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20', 'llvm-objdump']:
-    if shutil.which(p): return p
-  raise FileNotFoundError("llvm-objdump not found")
-
-def amdgpu_disassemble(lib:bytes):
-  asm = system(f"{_find_llvm_objdump()} -d -", input=lib).splitlines()
-  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
-  print("\n".join(asm))
+from tinygrad.helpers import to_char_p_p
 
 def check(status):
   if status != 0:
@@ -117,17 +104,4 @@ class HIPCCCompiler(Compiler):
                         "-O3", "-mllvm", "-amdgpu-internalize-symbols", "-c", "-o", libf.name, bcf.name] + self.extra_options, check=True)
 
         return pathlib.Path(libf.name).read_bytes()
-  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
-
-class AMDLLVMCompiler(LLVMCompiler):
-  jit = False
-  def __init__(self, arch: str):
-    self.arch = arch
-    super().__init__("AMDGPU", self.arch, "+cumode")
-  def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
-  def compile(self, src:str) -> bytes:
-    try: return super().compile(src)
-    except RuntimeError as e:
-      if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
-      raise CompileError(e) from e
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)

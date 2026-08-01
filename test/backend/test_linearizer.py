@@ -13,6 +13,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.isa import ISARenderer
 from test.helpers import replace_opts
+from test.backend.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
 from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
@@ -391,6 +392,16 @@ class TestLinearizer(unittest.TestCase):
 
     # the global store doesn't change
     assert stores[1].src[1].dtype == dtypes.float
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_two_grouped_stores_local(self):
+    # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
+    a = Tensor.rand(32, 32).realize()
+    opts = [Opt(OptOps.GROUP, 1, 4), Opt(OptOps.GROUP, 2, 4)]
+    ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
+    uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
 
 # *** helpers ***
 

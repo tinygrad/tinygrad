@@ -123,6 +123,14 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
 
+  def test_cat_equal_pieces(self):
+    # concatenating equal-size pieces lowers to STACK: pure data movement, no arithmetic
+    equal = [Tensor.empty(256, 128) for _ in range(4)]
+    self.assertEqual(get_stats(Tensor.cat(*equal, dim=1))[0], 0)
+    # a mismatched piece falls back to pad+usum, which sums N zero-padded copies and pays their adds
+    unequal = equal[:3] + [Tensor.empty(256, 129)]
+    self.assertGreater(get_stats(Tensor.cat(*unequal, dim=1))[0], 0)
+
   def test_simple_matmul(self, M=1024, N=1024, K=1024):
     a = Tensor.empty(M,N)
     b = Tensor.empty(N,K)

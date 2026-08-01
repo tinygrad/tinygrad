@@ -39,8 +39,8 @@ add_tags = PatternMatcher([
 ])
 
 def replace_contig_with_store_after(u:UOp):
-  # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
-  if u.device is None: return None
+  # can't allocate a buffer for a virtual value
+  if u.is_virtual: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
@@ -50,7 +50,7 @@ def replace_contig_with_store_after(u:UOp):
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.MULTI}: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
@@ -60,27 +60,27 @@ def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
   name = f"buf{buf.arg.slot}_offset{next(ctx.offset_counts.setdefault(buf, count()))}"
   offset = UOp.variable(name, 0, buf.max_numel() - (size:=src.max_numel() * src.element_size() // buf.element_size()),
                         multiple_of=min(offset & -offset or 1, 16)).bind(offset) # don't assume alignment more than 16 bytes
-  return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(dtypes.weakint, size))).bitcast(src.dtype).reshape(src.shape)
+  return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(size))).bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(ctx: AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK(VARIABLE) when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
-  if buf.op not in {Ops.BUFFER, Ops.MULTI}: return None
+  if buf.op not in {Ops.BUFFER, Ops.UNSHARD}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
 
-  if buf.op is not Ops.MULTI and (view := _make_buffer_view(ctx, src)) is not None:
+  if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(ctx, src)) is not None:
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
-  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create a per-shard buffer offset
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
-    if resolved.op is not Ops.MULTI: return None
+    if resolved.op is not Ops.UNSHARD: return None
     if (view := _make_buffer_view(ctx, resolved.src[0])) is None: return None
-    return view.multi(resolved.arg)
+    return view.unshard(resolved.arg, resolved.src[1:])
 
   return None
 
@@ -89,7 +89,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   # materialize straight into t
   if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
+  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
@@ -146,16 +146,16 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"), lambda x,copy:
-   copy.replace(src=(x,)+copy.src[1:], tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,), tag=None) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None, dtype=x.src[0].dtype),)+x.src[1:]) \
+   x.replace(src=(copy.replace(src=(x.src[0],), tag=None, dtype=x.src[0].dtype),)+x.src[1:]) \
    if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
-   lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+   lambda x: None if x.tag is None else x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
@@ -183,10 +183,9 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
+  if b.op is Ops.BIND: return b.param_like(len(ctx.replacements)-1)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, name=b.src[0].expr if b.op is Ops.BIND else None,
-                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL,
-                   multiple_of=b.src[0].arg.multiple_of if b.op is Ops.BIND else None)
+                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
@@ -206,7 +205,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
   # same predicate as Tensor.realize
-  ctx = AllocCtx(bases={base for x in big_sink.src if (base:=x.base).device is not None and not base.has_buffer_identity()
+  ctx = AllocCtx(bases={base for x in big_sink.src if not (base:=x.base).is_virtual and not base.has_buffer_identity()
                         and base.op is not Ops.AFTER and base.addrspace is not AddrSpace.ALU})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up

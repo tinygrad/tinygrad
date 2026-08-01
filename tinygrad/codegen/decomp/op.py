@@ -1,6 +1,6 @@
 from typing import Callable
 import functools
-from tinygrad.dtype import dtypes, promo_lattice
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.renderer import Renderer
 
@@ -35,8 +35,10 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
     if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
-  # promo_lattice needs to return an unsigned type if the type is unsigned
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and next_dtype in ren.supported_dtypes():
+  # the next integer width that holds x*m
+  widen = {dtypes.int8:dtypes.int16, dtypes.int16:dtypes.int32, dtypes.int32:dtypes.int64, dtypes.int64:dtypes.uint64,
+           dtypes.uint8:dtypes.uint16, dtypes.uint16:dtypes.uint32, dtypes.uint32:dtypes.uint64}
+  if (next_dtype := widen.get(x.dtype)) is not None and next_dtype in ren.supported_dtypes():
     if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
@@ -61,7 +63,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 def floordiv_to_idiv(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin > 0) or (a.vmax <= 0 and b.vmax < 0): return a.alu(Ops.CDIV, b)
-  return a.alu(Ops.CDIV, b) - (a.alu(Ops.CMOD, b).ne(0) & (a<0).ne(b<0)).cast(a.dtype)
+  return a.alu(Ops.CDIV, b) - (a.alu(Ops.CMOD, b).ne(0) & (a<0).ne(b<0))
 
 def floormod_to_mod(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin > 0) or (a.vmax <= 0 and b.vmax < 0): return a.alu(Ops.CMOD, b)
@@ -112,8 +114,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
-      ((UPat.var("x", dtypes.sints) < UPat.cvar("c", dtypes.sints)).logical_not(), lambda x,c: c-1<x),
-      ((UPat.cvar("c", dtypes.sints) < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
+      ((UPat.var("x", dtypes.sints) < UPat.cvar("c")).logical_not(), lambda x,c: c-1<x),
+      ((UPat.cvar("c") < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
       (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*UPat.cvar("c"), lambda x,y,c: y*(-c)<x),
       (UPat.var("x", dtypes.sints)*-1 < UPat.cvar("c"), lambda x,c:-c<x),
       ((UPat.cvar("c1")<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2")),
@@ -127,5 +129,5 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
-    pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
+    pat += [(UPat.var("a", dtypes.floats) * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
   return PatternMatcher(pat)

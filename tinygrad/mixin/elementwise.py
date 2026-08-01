@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
@@ -21,8 +21,12 @@ class ElementwiseMixin(CreationMixin):
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    if x.dtype == y.dtype: return x, y
-    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
+    out_dtype = least_upper_dtype(x.dtype, y.dtype)
+    # keep weak CONST weak, might lift weakint -> weakfloat
+    def promote(t):
+      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.arg, weak_dtype(out_dtype)))
+      return t.cast(out_dtype)
+    return promote(x), promote(y)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
@@ -51,7 +55,7 @@ class ElementwiseMixin(CreationMixin):
     """
     Returns a contiguous tensor.
     """
-    if self.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {self.dtype}")
+    if self.dtype in dtypes.weaks: return self
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
     return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))
@@ -71,10 +75,6 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     return self.logical_not() if self.dtype == dtypes.bool else self * (-1)
-
-  def _check_dtype(self) -> None:
-    if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):
-      raise RuntimeError(f"{self.dtype} is not supported")
 
   def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -147,7 +147,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, False]).bitwise_not().numpy())
     ```
     """
-    self._check_dtype()
     if self.dtype == dtypes.bool: return self.logical_not()
     return (self ^ self.dtype.max) if dtypes.is_unsigned(self.dtype) else (self ^ -1)
 
@@ -163,7 +162,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.AND, x, reverse)
 
   def bitwise_or(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -178,7 +176,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.OR, x, reverse)
 
   def bitwise_xor(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -194,7 +191,6 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([True, True, False, False]).bitwise_xor(Tensor([True, False, True, False])).numpy())
     ```
     """
-    self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -208,7 +204,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    if dtypes.is_int(a.dtype): return a.alu(Ops.FLOORMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.FLOORMOD, b)
     return a - a.div(b, rounding_mode="floor") * b
 
   def fmod(self, x: Self | ConstType) -> Self:
@@ -221,7 +217,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x)
-    if dtypes.is_int(a.dtype): return a.alu(Ops.CMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.CMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
   def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
@@ -245,9 +241,10 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    if dtypes.is_int(a.dtype):
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
+      a = a.cast(dtypes.default_float)
     d = a * b.reciprocal()
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
@@ -398,6 +395,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
+    # ~ is width-dependent: min(a,b) == ~max(~a,~b) only holds at a common width, so a weak operand commits at its sibling's
+    t, x = t.cast(dt:=least_upper_dtype(t.dtype, x.dtype)), x.cast(dt)
     return t._inverse().maximum(x._inverse())._inverse()
 
   def copysign(self, other: Self | ConstType) -> Self:
@@ -406,7 +405,7 @@ class ElementwiseMixin(CreationMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     a, b = self._broadcasted(other)
-    return a.abs() * ((b < 0) | (b.reciprocal() < 0)).where(-1, 1)
+    return ((b < 0) | (b.reciprocal() < 0)).where(-(mag := a.abs()), mag)
 
   def logaddexp(self, other: Self | ConstType) -> Self:
     """
@@ -499,8 +498,8 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
     ```
     """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
+    self = self.cast(least_upper_float(self.dtype))
+    return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
 
   def exp(self) -> Self:
     """
@@ -512,9 +511,8 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    if self.is_floating_point():
-      return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
-    return self.mul(1/math.log(2)).exp2()
+    self = self.cast(least_upper_float(self.dtype))
+    return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
 
   def log2(self) -> Self:
     """
@@ -557,7 +555,7 @@ class ElementwiseMixin(CreationMixin):
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
-    if not base.is_floating_point() and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
+    if not dtypes.is_float(least_upper_dtype(base.dtype, exponent.dtype)) and isinstance(x, ConstType) and not (isinstance(x, int) and x >= 0):
       raise RuntimeError("base needs to be float")
     return base.alu(Ops.POW, exponent)
 

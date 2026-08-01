@@ -297,10 +297,10 @@ class TestPolyN(unittest.TestCase):
     from tinygrad.dtype import dtypes
     from tinygrad.uop.ops import UOp
     from test.helpers import eval_uop
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 1.0), [1.0, -2.0, 1.0])), 0.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 2.0), [1.0, -2.0, 1.0])), 1.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 3.0), [1.0, -2.0, 1.0])), 4.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 4.0), [1.0, -2.0, 1.0])), 9.0)
+    np.testing.assert_allclose(eval_uop(polyN(UOp.const(1.0).cast(dtypes.float), [1.0, -2.0, 1.0])), 0.0)
+    np.testing.assert_allclose(eval_uop(polyN(UOp.const(2.0).cast(dtypes.float), [1.0, -2.0, 1.0])), 1.0)
+    np.testing.assert_allclose(eval_uop(polyN(UOp.const(3.0).cast(dtypes.float), [1.0, -2.0, 1.0])), 4.0)
+    np.testing.assert_allclose(eval_uop(polyN(UOp.const(4.0).cast(dtypes.float), [1.0, -2.0, 1.0])), 9.0)
 
 class TestTimeToStr(unittest.TestCase):
   def test_seconds(self):           self.assertEqual("   10.01s ", time_to_str(10.01))

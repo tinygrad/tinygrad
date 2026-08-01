@@ -603,14 +603,12 @@ class TestSchedule(unittest.TestCase):
     check_schedule(p, 4)
 
   def test_conv2d(self, allowed=4, dtype=dtypes.float):
-    old_default_float, dtypes.default_float = dtypes.default_float, dtype
-    dtypes.default_float = dtype
+    self.enterContext(Context(DEFAULT_FLOAT=dtype))
     Tensor.manual_seed(0)
     BS, CIN = 2, 3
     img = Tensor.randn(BS, CIN, 64, 64).realize()
     w = Tensor.uniform(16, CIN, 3, 3).realize()
     ret = Tensor.conv2d(img, w).relu().mean().backward()
-    dtypes.default_float = old_default_float
     linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
     cnt = len([call for call in linear.src if call.src[0].op is Ops.SINK])
     assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
@@ -1642,11 +1640,11 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   def test_const_schedule(self):
-    constv = Tensor.empty(2, 2).uop.const_like(10)
+    constv = Tensor.empty(2, 2).const_like(10).uop
     check_schedule(constv, 0)
 
   def test_const_schedule_contig(self):
-    constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
+    constv = Tensor.empty(2, 2).const_like(10).uop.contiguous()
     check_schedule(constv, 0)
 
   def test_advanced_simple_indexing_combined(self):

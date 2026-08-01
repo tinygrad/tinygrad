@@ -1,7 +1,7 @@
 from __future__ import annotations
-import ctypes, functools
+import ctypes
 from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator, Program, TinyELF
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -15,9 +15,10 @@ def check(status):
     error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
-def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
-  c_args = init_c_struct_t(len(args) * 8 + len(vals) * 4, tuple([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-                                                                [(f'v{i}', ctypes.c_int, len(args)*8 + i*4) for i in range(len(vals))]))(*args, *vals)
+def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
+  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
+            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
+  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
@@ -33,18 +34,18 @@ def cu_time_execution(cb, enable=False) -> float|None:
   for ev in evs: cuda.cuEventDestroy_v2(ev)
   return ret.value * 1e-3
 
-class CUDAProgram:
-  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0, **kwargs):
-    self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
-    if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
+class CUDAProgram(Program['CUDADevice']):
+  def __init__(self, dev:CUDADevice, obj:TinyELF, smem:int=0):
+    self.dev, self.name, self.lib, self.signature, self.smem = dev, obj.name, obj.lib, obj.signature, smem
+    if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(obj.lib.decode('utf-8')).split("\n"))]))
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
-    status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
+    status = cuda.cuModuleLoadData(ctypes.byref(self.module), obj.lib)
     if status != 0:
       del self.module
       raise RuntimeError(f"module load failed with status code {status}: {cuda.enum_cudaError_enum.get(status)}")
-    check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
+    check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, obj.name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
 
@@ -54,7 +55,7 @@ class CUDAProgram:
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
-      self.c_args, self.vargs = encode_args(args, vals)
+      self.c_args, self.vargs = encode_args(args, vals, self.signature)
 
       # HACK: For MOCKGPU send the args struct itself.
       if MOCKGPU: self.vargs = self.c_args # type: ignore[assignment]
@@ -117,8 +118,8 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
-                     None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
+    super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], CUDAProgram, None if MOCKGPU else CUDAGraph,
+                     arch=f"sm_{major.value}{minor.value}")
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(ctypes.byref(x)))).value
 

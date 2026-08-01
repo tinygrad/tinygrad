@@ -88,7 +88,7 @@ def example_3_custom_uop(a:Tensor, correct):
 
     # store all the per lane accumulators to LOCAL
     local_accs = UOp.placeholder((LCLS,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-    local_accs = local_accs.after(local_accs[lane].store(acc[0]).barrier())
+    local_accs = local_accs.after(local_accs[lane].store(acc[0]))
 
     # accumulate LOCALs into a single per CU accumulator
     late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)

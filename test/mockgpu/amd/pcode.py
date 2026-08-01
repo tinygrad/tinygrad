@@ -7,7 +7,7 @@ from tinygrad.codegen.decomp.dtype import f2f
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
 
-def _const(dt, v): return UOp.const(dt, v)
+def _const(dt, v): return UOp.const(v, dt)
 def _u32(v): return _const(dtypes.uint32, v)
 def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
@@ -837,16 +837,16 @@ class Parser:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
-        for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint64) << _u64(i * 8))
+        for i in range(8): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
         val = mindex(idx).load().cast(dt)
       elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
         lo = mindex(idx).load().cast(dtypes.uint32)
-        hi = mindex(idx + _const(dtypes.int, 1)).load().cast(dtypes.uint32)
+        hi = mindex(idx + _const(adt, 1)).load().cast(dtypes.uint32)
         val = (lo | (hi << _u32(8))).cast(dt)
       else:
         val = _u32(0)
-        for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i)).load().cast(dtypes.uint32) << _u32(i * 8))
+        for i in range(4): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
       idx = addr >> _const(addr.dtype, 2)
       val = mindex(idx)
@@ -866,8 +866,8 @@ class Parser:
         idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
         safe_idx_hi = is_unaligned.where(idx_hi_native, idx_native)
         hi = mindex(safe_idx_hi)
-        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
+        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32, dtypes.uint64))
+        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32), val)
     return _cast_to(val, dt)
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
@@ -1339,7 +1339,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
               return (dest, (val[0], cnd.where(val[1], val[1])))
             return (dest, val)
           # Build combined condition: each branch fires when its cond is true AND no earlier cond was true
-          remaining = UOp.const(dtypes.bool, True)
+          remaining = UOp.const(True)
           for bc, bse in branch_assigns:
             effective = remaining & bc if remaining.op != Ops.CONST else bc
             for dest, val in bse: assigns.append(_cond_side_effect(effective, dest, val))

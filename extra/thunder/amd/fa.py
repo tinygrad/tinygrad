@@ -14,7 +14,7 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   shard_axis = ref.uop.axis if axis is None else axis
   shape = tuple(s // len(ref.device) if i == shard_axis else s for i, s in enumerate(shape))
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
+  return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.unshard(axis), dtype=dtype, device=ref.device)
 
 @functools.cache
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,

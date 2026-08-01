@@ -26,8 +26,14 @@ def run_program(prg:UOp, bufs:list[Buffer]):
   for u,b in zip(buf_uops, bufs): buffers[u] = b
   run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
+def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
+  supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+  if unsupported := [f"{name}={dtype}" for name,dtype in (("dtype_in", dtype_in), ("dtype_out", dtype_out)) if dtype not in supported_dtypes]:
+    raise unittest.SkipTest(f"tensor core requires unsupported renderer dtype: {', '.join(unsupported)}")
+
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
+  _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
   sched = r.schedule_linear()
@@ -47,6 +53,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
     except KernelOptError: pass
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
+  _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
@@ -73,6 +80,13 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_nested_reduce(self):
+    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
+    a, b = Tensor.empty(tc.dims[1]*2, tc.dims[2], dtype=tc.dtype_in), Tensor.empty(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
+    ast = replace_opts(a.matmul(b, dtype=tc.dtype_out).sum(0).schedule_linear().src[-1].src[0], [Opt(OptOps.TC, 0, (-1, 0, 1))])
+    with self.assertRaises(KernelOptError): to_program(ast, Device[Device.DEFAULT].renderer)
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")

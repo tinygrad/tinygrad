@@ -16,7 +16,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
 
   wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
   tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
+  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.WEAK)
   lane = UOp.range(VEC, 3, AxisType.UNROLL)
 
   idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
@@ -36,19 +36,19 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
   lmax_val = lmax.after(lmax_store.end(it))[0]
 
   lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(lds[tid].store(lmax_val).barrier())
+  lds = lds.after(lds[tid].store(lmax_val))
 
   step = THREADS_PER_WG // 2
   while step:
     active = tid < step
     other = lds[(tid + step).valid(active)].load()
-    lds = lds.after(lds[tid.valid(active)].store(lds[tid].maximum(other)).barrier())
+    lds = lds.after(lds[tid.valid(active)].store(lds[tid].maximum(other)))
     step //= 2
 
   device = device[0].split(":")[0] if isinstance(device, tuple) else device.split(":")[0]
   if device in {"AMD", "NULL"}: atomic_arg = "if ({2} > {3}) __hip_atomic_fetch_max((int*){0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
   else: raise NotImplementedError(f"no atomic max for device {device}")
-  amax_idx = amax_out.reshape((1,)).index(UOp.const(dtypes.weakint, 0))
+  amax_idx = amax_out.reshape((1,)).index(UOp.const(0))
   max_val = lds[0].load()
   atomic = UOp(Ops.CUSTOM, dtypes.void, (amax_idx, max_val.bitcast(dtypes.int32), max_val, amax_idx.load()), arg=atomic_arg)
   return atomic.end(tid, wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", opts_to_apply=()))

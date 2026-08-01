@@ -18,9 +18,9 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   SEQ = inp.shape[1]
   OUT = weight.shape[0]
   IN = weight.shape[-1]
-  seq_idx = UOp.range(SEQ, 2, AxisType.LOOP)
-  out_idx = UOp.range(OUT, 3, AxisType.LOOP)
-  batch_idx = UOp.range(output.size//SEQ//OUT, 1, AxisType.LOOP)
+  seq_idx = UOp.range(SEQ, 2)
+  out_idx = UOp.range(OUT, 3)
+  batch_idx = UOp.range(output.size//SEQ//OUT, 1)
   reduce_idx = UOp.range(IN, 0, AxisType.REDUCE)
   product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)
@@ -53,7 +53,7 @@ class FP8Linear:
     x_fp8, x_scale = quantize_to_fp8(x)
     GPUS = self.weight.device
     if isinstance(GPUS, tuple) and len(GPUS) > 1:
-      y = Tensor(Tensor.empty((batch//len(GPUS), seq, self.weight.shape[0]), dtype=dtypes.float, device=GPUS).uop.multi(0), device=GPUS)
+      y = Tensor(Tensor.empty((batch//len(GPUS), seq, self.weight.shape[0]), dtype=dtypes.float, device=GPUS).uop.unshard(0), device=GPUS)
     else:
       y = Tensor.empty((batch, seq, self.weight.shape[0]), dtype=dtypes.float)
     y = Tensor.custom_kernel(y, x_fp8, w_fp8, fxn=custom_matmul, grad_fxn=custom_matmul_backward)[0]

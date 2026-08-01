@@ -21,7 +21,7 @@ class RandMixin(OpMixin):
     for i in range(0, num, dtypes.uint32.max):
       chunk_num = min(num - i, dtypes.uint32.max)
       c_low = low + (i & 0xffffffff)
-      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      c_high = high + (i >> 32) + (c_low < low)
       new_key = cls._threefry_random_bits(key, c_low, c_high)
       counts0 = cls.arange(ceildiv(chunk_num, 2), dtype=dtypes.uint32)
       counts1 = counts0 + ceildiv(chunk_num, 2)
@@ -269,7 +269,7 @@ class RandMixin(OpMixin):
     if replacement or num_samples == 1:
       cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
       unif_samples = type(self).rand(num_samples, cdf.shape[0], 1).to(self.device)  # type: ignore[attr-defined]
-      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+      indices = (unif_samples >= cdf).sum(2).permute((1, 0))
     else:
       # Efraimidis-Spirakis
       indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
