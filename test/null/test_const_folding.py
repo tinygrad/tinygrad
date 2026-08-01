@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType, Invalid
+from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
 import numpy as np
@@ -49,7 +49,7 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakfloat, 3.75))
 
   def test_invalid_poison(self):
-    self.assertIs(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().val, Invalid)
+    self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):

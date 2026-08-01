@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Self
-from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype, Invalid
+from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype
 from tinygrad.uop import Ops
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ class DTypeMixin:
     print(t.dtype, t.numpy())
     ```
     """
-    return self if self.dtype == (dt:=to_dtype(dtype)) or self._uop.base.arg is Invalid else self._wrap_uop(self._uop.alu(Ops.CAST, arg=dt))
+    return self if self.dtype == (dt:=to_dtype(dtype)) or self._uop.base.is_invalid else self._wrap_uop(self._uop.alu(Ops.CAST, arg=dt))
 
   def bitcast(self, dtype:DTypeLike) -> Self:
     """
