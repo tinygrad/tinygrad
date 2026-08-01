@@ -53,7 +53,7 @@ V_ASHR = { 2:RDNA3Ops.v_ashrrev_i16, 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_
 # ---- helpers ----
 lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
-def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const(dt, (v if isinstance(v, InvalidType) else truncate[dt](v))).rtag()
+def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
 def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
@@ -386,7 +386,7 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
- 
+
 pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
@@ -461,7 +461,7 @@ isel_matcher = PatternMatcher([
     if x.src[-1].op is not Ops.INS else None),
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
-    lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None), 
+    lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
   # --- fused alu ---
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
@@ -484,7 +484,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
-  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if rdef(x) is None else None),
+  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if not any(isinstance(v,Register) for v in rdefs(x)) else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
@@ -520,7 +520,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  # print("encoding", opc, rdefs(x), [(s.op, s.arg, rdefs(s), [(k.op, rdefs(k))  for k in s.src]) for s in oprs])
+  # print("encoding", opc, rdefs(x), [(s.op, s.arg, rdefs(s)) for s in oprs])
 
   kw = args = None
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)

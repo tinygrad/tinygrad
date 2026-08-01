@@ -11,13 +11,13 @@ class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = uops, ren, itertools.count()
     self.prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.uops = [u for u in uops if u.op not in PSEUDO_OPS|{Ops.BUFFER}]
+    self.uops = [u for u in uops if u.op not in PSEUDO_OPS]
     self.live_intervals: dict[VRegister, list[int]] = {}
 
     lis = self.live_intervals
     range_vars: list[VRegister] = []
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
-      if u.op is Ops.INDEX and not len(rdefs(u)): return _live_units(u.src[0]) # hack
+      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return _live_units(u.src[0]) # hack
       return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for u in reversed(self.uops):
       pt, defs, uses = self.prgpts[u], _live_units(u), []
@@ -110,7 +110,7 @@ def promos(ctx, x:UOp, idx:UOp, val:UOp):
 pm_mem2reg_rewrite = PatternMatcher([
   # each index into shrink load gets its own transparent copy
   # maintains single vreg and index passthrough semantics clean for regalloc
-  (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: 
+  (UPat(Ops.INDEX, name="idx"), lambda ctx,idx:
     ((nx := ld.replace(tag=(ld.tag[idx.src[1].arg],))), [nx])
     if (ld := gbuf(idx)).op is Ops.LOAD else None),
   # regspace LOAD is just an empty register carrier
