@@ -96,7 +96,7 @@ class TestPatternMatcher(unittest.TestCase):
   def test_filter_arg(self):
     matcher = PatternMatcher([
       (UPat(Ops.MUL, src=[UPat(Ops.CONST, name="c"), UPat(Ops.CONST, arg=2)], name="x"),
-       lambda x,c: x.rtag() if c.arg in {1, -1} else None)
+       lambda x,c: x.rtag() if c.val in {1, -1} else None)
     ])
     y1 = UOp.const(1)
     y2 = UOp.const(2)

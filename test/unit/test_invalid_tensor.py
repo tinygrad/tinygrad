@@ -141,7 +141,7 @@ class TestInvalidTensor(unittest.TestCase):
     self.assertIs(idx.op, Ops.STACK)
     self.assertIs(out.op, Ops.WHERE)
     self.assertIs(out.src[2].op, Ops.CONST)
-    self.assertIs(out.src[2].arg, Invalid)
+    self.assertIs(out.src[2].val, Invalid)
 
 if __name__ == '__main__':
   unittest.main()

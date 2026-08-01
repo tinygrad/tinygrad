@@ -1178,7 +1178,7 @@ class TestSymbolicVariables(unittest.TestCase):
     b = Variable("x", 1, 1).bind(1)
     s = b.simplify()
     self.assertEqual(s.op, Ops.CONST)
-    self.assertEqual(s.arg, 1)
+    self.assertEqual(s.val, 1)
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
