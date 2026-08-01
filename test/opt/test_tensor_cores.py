@@ -180,6 +180,7 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "AMD", "very slow on MOCKGPU")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
     # skip fp8 tcs: the unoptimized ALU baseline quantizes products to fp8 (JAX promotion), which legitimately
@@ -195,6 +196,7 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "AMD", "very slow on MOCKGPU")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
@@ -210,6 +212,7 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "AMD", "very slow on MOCKGPU")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
