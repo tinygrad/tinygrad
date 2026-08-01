@@ -23,7 +23,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   while True:
     if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: x, after = x.src[0], after.reshape(x.src[0].shape)
-    elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
+    elif x.op is Ops.WHERE and x.src[2].base.is_invalid and x.src[1].op is Ops.PAD:
       x, after = x.src[1].src[0], after.shrink(tuple((o, s+o) for (o,_),s in zip(x.src[1].marg, x.src[1].src[0].shape)))
     else: break
   ctx[x] = after
@@ -293,7 +293,7 @@ def remove_noop_bufferize(idx,b2):
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
   # check all ranges are used (no expand), and same size (no pad and shrink)
-  return all(s.op is Ops.END and (st:=s.src[0]).op is Ops.STORE and st.src[1].base.arg is Invalid and st.src[0].buf_uop is buf
+  return all(s.op is Ops.END and (st:=s.src[0]).op is Ops.STORE and st.src[1].base.is_invalid and st.src[0].buf_uop is buf
     and all(r in st.src[0].ranges for r in s.ended_ranges)
     and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 

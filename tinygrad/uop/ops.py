@@ -195,7 +195,7 @@ class UOpMetaClass(type):
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
     # an INDEX presents its access dtype, which a still-weak source matches up to weakness
     if SPEC == 2 and op is not Ops.CONST and \
-       not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
+       not any(s.base.is_invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
        not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
@@ -263,6 +263,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def val(self):
     assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
     return self.arg
+  @property
+  def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
@@ -648,10 +650,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
-    return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
+    return self.src[1] if self.op is Ops.WHERE and self.src[2].is_invalid else self
   def get_valid(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
-    return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(self.arg is not Invalid)
+    return self.src[0] if self.op is Ops.WHERE and self.src[2].is_invalid else UOp.const(not self.is_invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
     if isinstance(arg, Ops): arg = (arg, 0)
@@ -1747,7 +1749,7 @@ def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
   # TODO: these ops keep their stored dtype until dtype_from_uop works
   if n.op in {Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
-     all(a.dtype is b.dtype or b.base.arg is Invalid for a,b in zip(n.src, new_src)): return n.dtype
+     all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)

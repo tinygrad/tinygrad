@@ -81,11 +81,11 @@ pm_data_invalid = PatternMatcher([
   (invalid_pat.where(UPat(), UPat()), lambda i: i),
   (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i)),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
-  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
+  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if not val.is_invalid else i),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
   (UPat.var("a").where(invalid_gate, UPat.var("c")), lambda cond,i,x,a,c:
-   (a.logical_not()|cond).where(a.where(x,c), i) if c.arg != Invalid else None),
-  (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if b.arg != Invalid else None),
+   (a.logical_not()|cond).where(a.where(x,c), i) if not c.is_invalid else None),
+  (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if not b.is_invalid else None),
   # fold gated LOAD/STORE
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
@@ -94,8 +94,8 @@ pm_data_invalid = PatternMatcher([
 
 pm_remove_invalid = PatternMatcher([
   (invalid_gate.named("w"), lambda cond,x,i,w: w.replace(src=(cond,x,w.const_like(0)))),
-  (UPat(Ops.STACK, name="s"), lambda s: s.replace(src=tuple(UOp.const(0, s.dtype) if x.arg is Invalid else x for x in s.src))
-   if any(x.arg is Invalid for x in s.src) else None),
+  (UPat(Ops.STACK, name="s"), lambda s: s.replace(src=tuple(UOp.const(0, s.dtype) if x.is_invalid else x for x in s.src))
+   if any(x.is_invalid for x in s.src) else None),
 ])
 
 symbolic_simple = pm_data_invalid + PatternMatcher([
@@ -237,7 +237,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.weakint) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # y*(x+c) -> y*x + y*c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
-   lambda cond, t, f: cond.where(f,t) if f.arg is not Invalid else None),
+   lambda cond, t, f: cond.where(f,t) if not f.is_invalid else None),
   # in cond.where(t, f), uses of cond fold to True within t and False within f
   (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
