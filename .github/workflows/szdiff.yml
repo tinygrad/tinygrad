@@ -26,13 +26,14 @@ jobs:
       - name: Check whether branch is up-to-date
         id: brstat
         run: |
-          git fetch origin master
+          # fetch master from the base repo (tinygrad/tinygrad on GitHub, the mirror on Gitea), not the PR head remote
+          git fetch "${{ github.event.pull_request.base.repo.clone_url }}" master
           echo "${{ github.event.pull_request.head.sha }}"
-          git rev-list --left-right --count origin/master...${{ github.event.pull_request.head.sha }} | awk '{print "Behind "$1" - Ahead "$2""}'
-          count=$(git rev-list --left-right --count origin/master...${{ github.event.pull_request.head.sha }} | awk '{print $1}')
+          git rev-list --left-right --count FETCH_HEAD...${{ github.event.pull_request.head.sha }} | awk '{print "Behind "$1" - Ahead "$2""}'
+          count=$(git rev-list --left-right --count FETCH_HEAD...${{ github.event.pull_request.head.sha }} | awk '{print $1}')
           if [ $count -gt 0 ]
           then
-            echo "Current branch is behind master branch!"
+            echo "Current branch is behind ${{ github.event.pull_request.base.repo.full_name }} master branch!"
             echo "stat=true" >> "$GITHUB_OUTPUT"
           else
             echo "stat=false" >> "$GITHUB_OUTPUT"
@@ -76,21 +77,11 @@ jobs:
         continue-on-error: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          API="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments"
-          BODY=$(python3 -c "import json; print(json.dumps(open('loc_content.txt').read()))")
-          # find existing sticky comment (contains "### Changes")
-          EXISTING_ID=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" "$API" \
-            | python3 -c "import sys,json; cs=json.load(sys.stdin); print(next((c['id'] for c in cs if '### Changes' in c.get('body','')), ''))")
-          if [ -n "$EXISTING_ID" ]; then
-            curl -sf -X PATCH -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/comments/$EXISTING_ID" \
-              -d "{\"body\": $BODY}"
-          else
-            curl -sf -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
-              "$API" -d "{\"body\": $BODY}"
-          fi
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: "### Changes"
+          BODY_FILE: loc_content.txt
+        # note: run the script from the base checkout, never from the PR checkout
+        run: python3 "$GITHUB_WORKSPACE/base/.github/workflows/sticky_comment.py"
 
   rebase:
     name: Core Library Line Difference
@@ -100,23 +91,14 @@ jobs:
     needs: checkbranch
     if: needs.checkbranch.outputs.branchstat == 'true'
     steps:
+      # pull_request_target: a plain checkout gets the base repo, so no PR code is executed
+      - uses: actions/checkout@v6
       - name: Comment Rebase
         continue-on-error: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          API="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments"
-          MSG="This branch currently is behind master. The line count difference bot is disabled."
-          BODY=$(python3 -c "import json; print(json.dumps('''$MSG'''))")
-          # find existing sticky comment (contains "line count difference bot is disabled")
-          EXISTING_ID=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" "$API" \
-            | python3 -c "import sys,json; cs=json.load(sys.stdin); print(next((c['id'] for c in cs if 'line count difference bot is disabled' in c.get('body','')), ''))")
-          if [ -n "$EXISTING_ID" ]; then
-            curl -sf -X PATCH -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/comments/$EXISTING_ID" \
-              -d "{\"body\": $BODY}"
-          else
-            curl -sf -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" \
-              "$API" -d "{\"body\": $BODY}"
-          fi
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: "line count difference bot is disabled"
+          MESSAGE: |
+            This branch currently is behind ${{ github.event.pull_request.base.repo.full_name }} master. The line count difference bot is disabled.
+        run: python3 .github/workflows/sticky_comment.py
