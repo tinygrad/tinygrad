@@ -1,7 +1,7 @@
 from typing import Any, Callable
-import itertools, functools
+import itertools, inspect, functools, types
 from tinygrad.helpers import partition, dedup, Context
-from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function, reconstruct_function, function_has_ctx
+from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
 class UPatCompileError(Exception): pass
 
@@ -160,8 +160,8 @@ def _get_code(self:UPat, has_ctx:bool):
 
 @functools.cache
 def upat_compile(self:UPat, fxn) -> Callable|None:
-  real_fxn = reconstruct_function(deconstruct_function(fxn))
-  code = _get_code(self, function_has_ctx(real_fxn))
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  code = _get_code(self, 'ctx' in inspect.signature(real_fxn).parameters)
   if code is None: return None
   code_str, dyn_lookup = code
   globs = dyn_lookup.copy()

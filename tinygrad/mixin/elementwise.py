@@ -1,34 +1,15 @@
 import math, functools, operator
-from typing import TYPE_CHECKING, Literal, Self, Any
-from mypy_extensions import mypyc_attr, trait
+from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
-from tinygrad.mixin.dtype import DTypeMixin
-from tinygrad.mixin.movement import MovementMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp, sint
 
-def _promote(t, out_dtype):
-  if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.arg, weak_dtype(out_dtype)))
-  return t.cast(out_dtype)
 
-@mypyc_attr(allow_interpreted_subclasses=True)
-@trait
-class ElementwiseMixin(CreationMixin, DTypeMixin, MovementMixin):
-  @property
-  def dtype(self) -> DType: raise NotImplementedError
-  @property
-  def _uop(self) -> Any: raise NotImplementedError
-  @property
-  def device(self) -> str|tuple[str, ...]|None: raise NotImplementedError
-  @classmethod
-  def _wrap_uop(cls, u:Any) -> Self: raise NotImplementedError
-  # mypyc does not always propagate methods through a diamond of native traits.
-  def cast(self, dtype:DTypeLike) -> Self: return DTypeMixin.cast(self, dtype)
-  def is_floating_point(self) -> bool: return DTypeMixin.is_floating_point(self)
+class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
@@ -42,7 +23,10 @@ class ElementwiseMixin(CreationMixin, DTypeMixin, MovementMixin):
     x, y = (self, y) if not reverse else (y, self)
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     # keep weak CONST weak, might lift weakint -> weakfloat
-    return _promote(x, out_dtype), _promote(y, out_dtype)
+    def promote(t):
+      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.arg, weak_dtype(out_dtype)))
+      return t.cast(out_dtype)
+    return promote(x), promote(y)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)

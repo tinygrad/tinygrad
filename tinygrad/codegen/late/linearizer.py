@@ -86,7 +86,7 @@ pm_add_control_flow = PatternMatcher([
 
 def do_split_ends(e:UOp):
   ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.dtype in (dtypes.void, dtypes.bool))
-  for r in sorted(UOp(Ops.SINK, src=tuple(x for x in e.src[1:] if x not in backedge)).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
   return ret.end(*backedge) if len(backedge) else ret
 
 pm_split_ends = PatternMatcher([

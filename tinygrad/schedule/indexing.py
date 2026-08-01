@@ -136,9 +136,10 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])
 
-def fix_deviceless(ctx, b):
-  return b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None
-pm_fix_deviceless = PatternMatcher([(UPat(Ops.STAGE, name="b"), fix_deviceless)])
+pm_fix_deviceless = PatternMatcher([
+  (UPat(Ops.STAGE, name="b"),
+    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None),
+])
 
 @functools.cache
 def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
@@ -153,7 +154,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-  return graph_rewrite(UOp(Ops.SINK, src=tuple(axes_out[::-1])), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
 # this is the definition of the movement ops
 @functools.cache
@@ -169,7 +170,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      sink = UOp(Ops.SINK, src=tuple(rngs)).simplify() # NOTE: this applies any commutative flips to the rngs early
+      sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:r.replace(src=r.src[:1], arg=(i, AxisType.PLACEHOLDER)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
@@ -207,7 +208,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # ranges the consumers iterate that this node broadcasts over
     ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
              for i in broadcast_axes(x.shape, c.shape)]
-    broadcast_ending_ranges = list(UOp(Ops.SINK, src=tuple(ended)).ranges)
+    broadcast_ending_ranges = list(UOp.sink(*ended).ranges)
     # fusion decision: REDUCE before the broadcast
     if x.op is Ops.REDUCE: ending_ranges[x] += broadcast_ending_ranges
 
@@ -288,7 +289,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] += list(UOp(Ops.SINK, src=tuple(out_rngs[:len(x.marg)])).ranges.keys())
+      ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and x.arg[1]:

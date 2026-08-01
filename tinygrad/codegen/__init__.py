@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace, Invalid as Invalid
+from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -26,17 +26,10 @@ from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import flatten, argsort, partition
-from tinygrad.uop.ops import _broadcast_shape, identity_element, shape_to_shape_arg as shape_to_shape_arg
-from tinygrad.codegen.devectorize import do_devectorize_native
+from tinygrad.helpers import all_same, flatten, argsort, partition
+from tinygrad.uop.ops import _broadcast_shape, identity_element
+from tinygrad.codegen.devectorize import do_devectorize_fast
 from tinygrad.schedule.rangeify import BufferizeOpts
-
-def all_same(xs) -> bool:
-  if len(xs) < 2: return True
-  first = xs[0]
-  for x in xs[1:]:
-    if not (x == first): return False
-  return True
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
@@ -89,12 +82,11 @@ def expand_wmma(ctx:dict[int, int], u:UOp):
                    arg=(*u.arg[:4], None))
   return unroll_axis(ctx, wmma, out0)
 
-def expand_range(ctx, r):
-  return UOp.const(tuple(range(r.vmax+1)), r.dtype).reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) \
-    if r.arg[0] in ctx else None
 expander2 = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
-  (UPat(Ops.RANGE, name="r"), expand_range),
+  (UPat(Ops.RANGE, name="r"),
+   lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
+    .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
@@ -130,7 +122,7 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
 ])
 
 def do_devectorize(b:UOp):
-  return do_devectorize_native(b)
+  return do_devectorize_fast(b)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -301,13 +293,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
     # split ranges
-    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges", recursive=True)
+    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
 
     # optimize (schedule) the AST
-    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges", recursive=True)
+    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
@@ -316,35 +308,43 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander", recursive=True)
+  sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers", recursive=True)
+  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims", cacheable=True)
+  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # **** optimizations are done, now we lower to actual code ****
 
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2", cacheable=True)
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2, ctx=ren, name="devectorize2")
+
+  # simplify indexing
+  sink = graph_rewrite(sink, indexing_simplify, name="simplify load/store indexing")
 
   # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, sym+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True,
-                       cacheable=ren if not IMAGE else False)
+  sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image, name="add images", ctx=({}, ren), bottom_up=True)
+
+  # extra symbolic before decomp. crashes without this?
+  sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify+symbolic, ctx={}, name="lower all index dtypes", cacheable=ren)
+  sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
+
+  # final symbolic before decomp
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
@@ -356,23 +356,23 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes", recursive=True)
+  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions", cacheable=True)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_commit_weak+pm_cast_weak+pm_decomp+extra_matcher+pm_split_ends
-  sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite", cacheable=True)
+  sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True, recursive=True)
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])

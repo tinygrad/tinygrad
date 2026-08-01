@@ -3,14 +3,7 @@ import math, struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
-from tinygrad.helpers import partition, prod, flatten, unwrap, IMAGE, dedup
-
-def all_same(xs) -> bool:
-  if len(xs) < 2: return True
-  first = xs[0]
-  for x in xs[1:]:
-    if not (x == first): return False
-  return True
+from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
 

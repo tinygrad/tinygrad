@@ -27,7 +27,7 @@ def _index_scalar(x:UOp, idx_c:tuple[UOp, ...]) -> UOp:
     break
   return ret
 
-def do_devectorize_native(b:UOp) -> UOp|None:
+def do_devectorize_fast(b:UOp) -> UOp|None:
   if (shape:=b._shape) is None: raise RuntimeError(f"shape requested, but {b.op} doesn't have a shape")
   if shape == (): return None
   if not all(x._shape == shape or x.base.arg is Invalid for x in b.src): return None

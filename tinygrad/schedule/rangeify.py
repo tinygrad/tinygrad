@@ -260,7 +260,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     nonlocal buffer_in_reduce
     if x.op in {Ops.PARAM, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
     return not buffer_in_reduce
-  UOp(Ops.SINK, src=tuple(x.src[0] for x in reduces)).toposort(gate=buf_gate)
+  UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
   if buffer_in_reduce:
     if PCONTIG > 2:

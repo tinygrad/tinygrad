@@ -187,7 +187,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
 
     # signal queue timeline if someone waits for us
     if tag in waited: q += [UOp(Ops.INS, arg="store", src=(make_signal(devices, queue), make_signal_value(devices, queue).index(0) + tag))]
-    src.append(UOp.custom_function("hcq", make_submit(*q, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))  # type: ignore[misc]
+    src.append(UOp.custom_function("hcq", make_submit(*q, devs=devices, queue=queue).sink()).call(name="hcq", aux=info))
   return src + finalizers
 
 def sched_hcq_batches(l:UOp) -> UOp:
@@ -206,7 +206,7 @@ def _merged_hcq_call(calls:list[UOp]) -> UOp: # TODO: simplify?
   info = replace(calls[0].arg.aux, name=f"submit {calls[0].arg.aux.queue} ({len(calls)})",
                  estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()))
   cmds = [cmd for c in calls for cmd in get_submit(c).src[0].src]
-  return UOp.custom_function("hcq", make_submit(*cmds, devs=info.device, queue=info.queue).sink()).call(name="hcq", aux=info)  # type: ignore[misc]
+  return UOp.custom_function("hcq", make_submit(*cmds, devs=info.device, queue=info.queue).sink()).call(name="hcq", aux=info)
 
 def merge_queues(linear:UOp) -> UOp:
   new_src:list[UOp] = []
