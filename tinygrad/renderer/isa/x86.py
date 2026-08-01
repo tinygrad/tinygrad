@@ -6,7 +6,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef
+from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef, VRegister
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
 from dataclasses import dataclass, field
 
@@ -330,14 +330,14 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.arg is X86Ops.DEFINE and x.tag is not None: return None
+  # if x.arg is X86Ops.DEFINE and x.tag is not None: return None
   if x.arg is X86Ops.LOOP_CMP: return None
   # this is an immediate
   if x.arg is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
-  if isinstance(x.tag, tuple) and x.tag[0]._cons: return None
+  if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   # allocate vreg definitions, the value of a BUFFER is its address so it lives in a gpr
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
