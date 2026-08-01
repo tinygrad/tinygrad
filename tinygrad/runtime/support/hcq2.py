@@ -77,9 +77,11 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
 # *****************
 # 0.1. prep: replace buffers with params
 
-def replace_call_buffers(ctx:list[UOp], call:UOp) -> UOp|None:
-  ctx += [s for s in call.src[1:] if s not in ctx and s.op not in (Ops.PARAM, Ops.BIND)]
-  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(ctx.index(s)) for s in call.src[1:]))
+def replace_call_buffers(ctx:tuple[list[UOp], dict[UOp, int]], call:UOp) -> UOp|None:
+  bufs, slots = ctx
+  for s in call.src[1:]:
+    if s.op not in (Ops.PARAM, Ops.BIND) and slots.setdefault(s, len(bufs)) == len(bufs): bufs.append(s)
+  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(slots[s]) for s in call.src[1:]))
 pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
 
 # *****************
@@ -321,7 +323,7 @@ def replace_params(call:UOp) -> UOp|None:
   addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
-  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
+  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
@@ -374,7 +376,9 @@ hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
-  if input_uops is not None: linear = graph_rewrite(linear, pm_replace_buffers, ctx=input_uops, walk=True, name="replace buffer")
+  if input_uops is not None:
+    slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
 
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
     # prep
