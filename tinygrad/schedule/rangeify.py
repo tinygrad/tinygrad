@@ -584,6 +584,20 @@ pm_expand_broadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
 ])
 
+def expand_coeff(sink:UOp) -> tuple[dict[UOp,int], set[UOp]]:
+  coeff: dict[UOp,int] = {sink: 1}
+  contig: set[UOp] = set()
+  for u in reversed(list(sink.toposort())):
+    c = 1 if u.op is Ops.STORE else coeff.get(u, 0)
+    # symbolic coeffs mark on vmax, an extra CONTIGUOUS is always safe
+    if (c > 1 if isinstance(c, int) else c.vmax > 1) and u.op in (GroupOp.Elementwise | {Ops.REDUCE}) and u.device is not None:
+      contig.add(u)
+      c = 1
+    coeff[u] = c
+    mult = prod(u.shape) // prod(u.src[0].shape) if u.op is Ops.EXPAND else 1
+    for s in u.src: coeff[s] = coeff.get(s, 0) + c * (mult if s is u.src[0] else 1)
+  return coeff, contig
+
 def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp|None=None):
   if red.arg[1] == 0: return None
   if idx is None and len(red.shape) > 0: return None
@@ -626,11 +640,20 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
-  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
-
   # convert movement ops to ranges
   #tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
   tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
+
+  # mark ops that would be recomputed (expand coeff > 1) as CONTIGUOUS, like the realize map in run_rangeify
+  _, contig = expand_coeff(tsink)
+  subs: dict[UOp, UOp] = {}
+  for u in tsink.toposort():
+    u2 = u.replace(src=tuple(subs.get(s, s) for s in u.src))
+    subs[u] = u2.alu(Ops.CONTIGUOUS, u2) if u in contig else u2
+  tsink = subs[tsink]
+
+  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
+
   tsink = graph_rewrite(tsink, pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
