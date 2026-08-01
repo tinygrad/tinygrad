@@ -25,7 +25,7 @@ class VRegister:
   def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self._cons, self.width, self.alignment, self, i)
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
-  if u.op is Ops.AFTER: return rdefs(u.src[0])
+  if u.op is Ops.AFTER and len(u.src): return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
