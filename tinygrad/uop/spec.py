@@ -53,8 +53,8 @@ spec_shared = PatternMatcher([
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
 
-  # CONST is everywhere
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.val) is type(x.dtype.const(x.val))),
+  # CONST is everywhere; Invalid is a bool const
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: x.dtype is dtypes.bool if x.is_invalid else type(x.val) is type(x.dtype.const(x.val))),
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
