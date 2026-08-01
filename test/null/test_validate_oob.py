@@ -12,12 +12,12 @@ class TestValidateOOB(unittest.TestCase):
   def test_const_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(UOp.const(dtypes.int, 0)).load(dtype=dtypes.int)])  # valid
-      to_uops_list([buf.index(UOp.const(dtypes.int, 15)).load(dtype=dtypes.int)])  # valid (last element)
+      to_uops_list([buf.index(UOp.const(0)).load(dtype=dtypes.int)])  # valid
+      to_uops_list([buf.index(UOp.const(15)).load(dtype=dtypes.int)])  # valid (last element)
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(dtypes.int, 16)).load(dtype=dtypes.int)])  # off by one
+        to_uops_list([buf.index(UOp.const(16)).load(dtype=dtypes.int)])  # off by one
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(dtypes.int, 42)).load(dtype=dtypes.int)])  # way out
+        to_uops_list([buf.index(UOp.const(42)).load(dtype=dtypes.int)])  # way out
 
   def test_variable_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
@@ -138,11 +138,19 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])  # oob
 
+  def test_load_from_shrink_as_index(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf0 = UOp.param(0, dtypes.int, (16,))
+      buf1 = UOp.param(1, dtypes.int, (64,))
+      shrink = UOp(Ops.SHRINK, src=(buf0, UOp.const(0, dtypes.int), UOp.const(4)))
+      ld0 = shrink.load(dtype=dtypes.int).index(0)
+      to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])
+
   def test_load_bool_as_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, (16,))
       buf_int = UOp.param(1, dtypes.int, (8,))
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.weakint, 16),), arg="gidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(16),), arg="gidx0")
       ld_bool = buf_bool.index(gidx).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool)).load()])  # gidx 0..15, buf_int size 8
@@ -156,12 +164,12 @@ class TestValidateOOB(unittest.TestCase):
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
 
       # Define indices, valids and barrier
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 416),), arg="gidx0")
-      lidx = UOp(Ops.SPECIAL, src=(UOp.const(dtypes.int, 10),), arg="lidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(416),), arg="gidx0")
+      lidx = UOp(Ops.SPECIAL, src=(UOp.const(10),), arg="lidx0")
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(dtypes.uint, 1))
+      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(1))
 
       barrier = UOp(Ops.BARRIER, src=(local_store,))
       if_barrier = UOp(Ops.IF, src=(gate, barrier))
@@ -179,7 +187,7 @@ class TestValidateOOB(unittest.TestCase):
       glbl0 = UOp.param(0, dtypes.int, (16,))
       mask = UOp.param(0, dtypes.bool, (16,))
       ridx = UOp.range(20, 0)
-      ld0 = UOp(Ops.LOAD, src=(glbl0.index(UOp.const(ridx, ridx<16&mask))))
+      ld0 = UOp(Ops.LOAD, src=(glbl0.index(UOp.const(ridx<16&mask, ridx))))
       to_uops_list([ld0])
 
 if __name__ == "__main__":

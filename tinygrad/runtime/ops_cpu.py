@@ -28,20 +28,20 @@ def wait_prog():
   return (v:=UOp.param(0, dtypes.uint32, (1,), volatile=True).after(l:=UOp.loop(0))[0].load()).end(l, v < val.cast(dtypes.uint32))
 
 def timestamp_prog():
-  if WIN: val = UOp.const(dtypes.uint64, 0)
+  if WIN: val = UOp.const(0, dtypes.uint64)
   else:
     fn, ts = UOp.param(1, dtypes.uint64, (1,)), UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
-    call = fn[0].load().call(UOp.const(dtypes.int, 6 if OSX else 1), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
+    call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, (1,))[0].store(val)
 
 def quit_prog():
   fn = UOp.param(0, dtypes.uint64, (1 if WIN else 3,))
-  if WIN: return fn[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # ExitThread(0)
+  if WIN: return fn[0].load().call(UOp.const(0, dtypes.uint64), ret_dtype=dtypes.void) # ExitThread(0)
   sem = UOp.param(1, dtypes.uint64, (1,))
 
   close = fn[2].load().call(sem[0], ret_dtype=dtypes.void) # sem_close(sem)
-  return fn.after(close)[0].load().call(UOp.const(dtypes.uint64, 0), ret_dtype=dtypes.void) # pthread_exit(0)
+  return fn.after(close)[0].load().call(UOp.const(0, dtypes.uint64), ret_dtype=dtypes.void) # pthread_exit(0)
 
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
@@ -56,7 +56,7 @@ def worker_prog():
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
 
 def host_wait(ctx, dst:UOp, val:UOp) -> UOp:
-  return (cur:=dst.after(loop:=UOp.loop(next(ctx))).index(UOp.const(dtypes.int, 0)).load()).end(loop, cur < val)
+  return (cur:=dst.after(loop:=UOp.loop(next(ctx))).index(UOp.const(0, dtypes.int)).load()).end(loop, cur < val)
 
 pm_host_opsel = PatternMatcher([(UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), host_wait)])
 
@@ -64,7 +64,7 @@ def encode_host_queue(q:UOp) -> UOp:
   # TODO: subset of hcq2 for now
   spins, (store,) = partition(graph_rewrite(q, pm_host_opsel, ctx=itertools.count(), walk=True, name="host opsel").src, lambda u: u.op is Ops.END)
   assert store.op is Ops.INS and store.arg == "store", f"host queue cannot encode {store.op} {store.arg}"
-  return store.src[0].after(*spins).index(UOp.const(dtypes.int, 0)).store(store.src[1])
+  return store.src[0].after(*spins).index(UOp.const(0, dtypes.int)).store(store.src[1])
 
 class CPUComputeQueue(HWQueue):
   def __init__(self, dev):

@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.ptx import PTXRenderer
@@ -340,7 +341,7 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_partial_invalid_store_keeps_uncovered_reads(self):
     x = Tensor([10., 20., 30., 40.])
-    after = x.uop.after(x.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float, Invalid, shape=(2,))))
+    after = x.uop.after(x.uop.shrink(((0, 2),)).store(Invalid))
     self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
 
   def test_multi_after_invalid_store_dep_removed(self):
@@ -526,6 +527,77 @@ class TestUnshardIndex(unittest.TestCase):
       return C[ty + ir, j].store(frag[ty + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
     with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
       self._run(kernel, (64, 8))
+
+def _run_fragment_kernel(testcase, kernel, out_shape, inputs=()):
+  c = Tensor.empty(*out_shape)
+  out = Tensor.custom_kernel(c, *inputs, fxn=kernel)[0]
+  try: return out.numpy()
+  except RuntimeError as e:
+    if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) and "dynamic register indexing" in str(e):
+      testcase.skipTest("PTX does not support dynamic register indexing")
+    raise
+
+class TestUnshardAlu(unittest.TestCase):
+  """Tests for ALU on (fragment) UNSHARD values in schedule/multi.py's alu_multi.
+
+  An ALU with UNSHARD srcs lowers to per-shard ops when every src is one of:
+    same sharding:  peel the UNSHARD, keep the layout
+    scalar:         broadcast to every shard
+    whole unsharded same-shape value: takes its per-shard sub-view (shard_subview)
+  """
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_alu_scalar_broadcast(self):
+    # scalar srcs broadcast to every shard: frag*2.0 where frag is 1.5 per thread -> 3.0 everywhere
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      # 8 values per thread, 8 threads -> 64-value full view
+      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      v = frag.after(frag.store(1.5)) * 2.0
+      return C.store(v).end(ty).sink(arg=KernelInfo(name="alu_scalar", opts_to_apply=()))
+    out = _run_fragment_kernel(self, kernel, (64,))
+    np.testing.assert_allclose(out, 3.0)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_alu_whole_value_subview(self):
+    # UNSHARD + whole unsharded same-shape value: each shard adds its own sub-view of A.
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      v = frag.after(frag.store(0.0)) + A
+      return C.store(v).end(ty).sink(arg=KernelInfo(name="alu_subview", opts_to_apply=()))
+    a = Tensor(np.arange(64, dtype=np.float32))
+    out = _run_fragment_kernel(self, kernel, (64,), inputs=(a,))
+    np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
+
+class TestUnshardStore(unittest.TestCase):
+  """Tests for STORE of a sharded value into an unsharded dest (store_value_multi in schedule/multi.py).
+
+  Every shard stores its value into its own contiguous sub-view of the dest, one SHRINK per sharded axis.
+  """
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_unshard_value(self):
+    # single-axis: 8 threads each own 8 values of the 64-value output tile
+    def kernel(C:UOp) -> UOp:
+      ty = UOp.range(8, 0, AxisType.LOCAL)
+      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
+      v = frag.after(frag.store(0.0)) + 2.5
+      return C.store(v).end(ty).sink(arg=KernelInfo(name="store_unshard", opts_to_apply=()))
+    out = _run_fragment_kernel(self, kernel, (64,))
+    np.testing.assert_allclose(out, 2.5)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
+  def test_store_unshard_value_2axis(self):
+    # two sharded axes (the gemm fragment layout): thread (ty, tx) owns the (2, 1, 1, 2) sub-view of the
+    # (2, 4, 2, 2) output tile; the store must SHRINK dest on both sharded axes
+    def kernel(C:UOp, A:UOp) -> UOp:
+      ty = UOp.range(4, 0, AxisType.LOCAL)
+      tx = UOp.range(2, 1, AxisType.LOCAL)
+      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
+      v = frag.after(frag.store(0.0)) + A
+      return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis", opts_to_apply=()))
+    a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
+    out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
+    np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
