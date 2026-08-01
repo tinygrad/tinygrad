@@ -1,7 +1,10 @@
 from __future__ import annotations
 import functools, itertools, math, string
 from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
+from mypy_extensions import mypyc_attr, trait
 from tinygrad.mixin.elementwise import ElementwiseMixin
+from tinygrad.mixin.creation import CreationMixin
+from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
@@ -16,7 +19,9 @@ if TYPE_CHECKING:
 ReductionStr = Literal["mean", "sum", "none"]
 
 
-class OpMixin(ElementwiseMixin, ReduceMixin):
+@mypyc_attr(allow_interpreted_subclasses=True)
+@trait
+class OpMixin(ElementwiseMixin, ReduceMixin, CreationMixin, DTypeMixin, MovementMixin):
   def data(self) -> memoryview: raise NotImplementedError("data requires Tensor realization to host memory")
 
   def item(self) -> PyConst:
@@ -1124,7 +1129,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
     if reduce == "amin": return mask.where(src, m := src.dtype.max).min(-1).minimum(self if include_self else _inv_mask(self, m))
     if reduce == "mean":
-      count = mask.where(1, 0).sum(-1).add(1 if include_self else _inv_mask(1, 0))
+      count = mask.where(1, 0).sum(-1).add(self.const_like(1) if include_self else _inv_mask(1, 0))
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
@@ -1539,7 +1544,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # prepare input
-    x = x.permute(0,3,4,5,1,2).pad(padding_pos)._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
+    x = x.permute(0,3,4,5,1,2).pad(tuple(padding_pos))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *group_shape, 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights

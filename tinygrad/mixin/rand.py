@@ -1,13 +1,34 @@
 from __future__ import annotations
 import math
-from typing import Self, cast
+from typing import Self, cast, Any
+from mypy_extensions import mypyc_attr
 from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
 from tinygrad.mixin.op import OpMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
+from tinygrad.mixin.reduce import ReduceMixin
+from tinygrad.mixin.creation import CreationMixin
+from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.movement import MovementMixin
 from tinygrad.device import canonicalize_device
 
 
-class RandMixin(OpMixin):
+@mypyc_attr(allow_interpreted_subclasses=True)
+class RandMixin(OpMixin, ElementwiseMixin, ReduceMixin, CreationMixin, DTypeMixin, MovementMixin):
+  @property
+  def _uop(self) -> Any: return self.uop  # type: ignore[attr-defined]
+  @classmethod
+  def _wrap_uop(cls, u:Any) -> Self: return cls(u)  # type: ignore[call-arg]
+  @property
+  def shape(self) -> Any: return self.uop.shape  # type: ignore[attr-defined]
+  @property
+  def device(self) -> Any: return self.uop.device  # type: ignore[attr-defined]
+  @property
+  def dtype(self) -> Any: return self.uop.dtype  # type: ignore[attr-defined]
+  def alu(self, op, *src:Self) -> Self: return self._wrap_uop(self._uop.alu(op, *(x._uop for x in src)))
+  def _mop(self, op, arg) -> Self: return self._wrap_uop(self._uop._mop(op, arg))
+  def _rop(self, op, axis) -> Self: return self._wrap_uop(self._uop._rop(op, axis))
+
   @staticmethod
   def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
@@ -205,7 +226,7 @@ class RandMixin(OpMixin):
     return cls.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   @classmethod
-  def kaiming_uniform(cls, *shape, a:float = 0.01, **kwargs) -> Self:
+  def kaiming_uniform(cls, *shape, **kwargs) -> Self:
     """
     <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_>
 
@@ -217,11 +238,12 @@ class RandMixin(OpMixin):
     print(Tensor.kaiming_uniform(2, 3).numpy())
     ```
     """
+    a:float = kwargs.pop("a", 0.01)
     bound = (6 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
     return cls.uniform(*shape, low=-bound, high=bound, **kwargs)
 
   @classmethod
-  def kaiming_normal(cls, *shape, a:float = 0.01, **kwargs) -> Self:
+  def kaiming_normal(cls, *shape, **kwargs) -> Self:
     """
     <https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_>
 
@@ -233,6 +255,7 @@ class RandMixin(OpMixin):
     print(Tensor.kaiming_normal(2, 3).numpy())
     ```
     """
+    a:float = kwargs.pop("a", 0.01)
     std = (2 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
     return cls.normal(*shape, mean=0.0, std=std, **kwargs)
 

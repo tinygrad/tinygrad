@@ -11,7 +11,7 @@ def flatten_range(r:UOp) -> UOp|None:
   if not len(rngs): return None
   # ranges in the cond should not be ended
   backedge = tuple(x for x in rngs if x.dtype in (dtypes.void, dtypes.bool))
-  return r.replace(src=r.src[:off]+tuple(UOp.sink(*[x for x in rngs if x not in backedge]).ranges)+backedge)
+  return r.replace(src=r.src[:off]+tuple(UOp(Ops.SINK, src=tuple(x for x in rngs if x not in backedge)).ranges)+backedge)
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -51,12 +51,19 @@ def mark_gated(ctx, idx):
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
+  ctx.clear()
+  return None if ret is x else ret.simplify()
+
+def protect_reduce_ranges(ctx, red): return ctx.update({r:r.src[0] for r in red.src[1:]})
+def substitute_simplified_ranges(ctx, x, _do=do_substitute, _replace=lambda r,c: r.replace(src=(c,))): return _do(ctx, x, _replace)
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
   # reduce ranges can't be shrunk
-  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
+  (UPat(Ops.REDUCE, name="red"), protect_reduce_ranges),
+  (UPat(Ops.SINK, name="x"), substitute_simplified_ranges),
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
@@ -64,15 +71,12 @@ def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
-  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
-  ctx.clear()
-  return None if ret is x else ret.simplify()
-
+def substitute_split_ranges(ctx, x, _do=do_substitute,
+    _replace=lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v +
+      k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))): return _do(ctx, x, _replace)
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
+  (UPat(Ops.SINK, name="x"), substitute_split_ranges),
 ])
 
 # **** reduce simplification ****

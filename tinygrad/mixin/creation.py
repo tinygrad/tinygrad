@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Callable, Self
+from mypy_extensions import mypyc_attr, trait
 from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
@@ -7,6 +8,8 @@ from tinygrad.mixin.movement import MovementMixin
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint, UOp
 
+@mypyc_attr(allow_interpreted_subclasses=True)
+@trait
 class CreationMixin(DTypeMixin, MovementMixin):
   @staticmethod
   def const(b, dtype=None): raise NotImplementedError

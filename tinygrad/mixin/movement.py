@@ -1,6 +1,7 @@
 # mixins add syntactic sugar to Tensor and UOp
 from __future__ import annotations
 from typing import TYPE_CHECKING, Self, Sequence
+from mypy_extensions import mypyc_attr, trait
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
 from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
@@ -9,6 +10,8 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
 
 
+@mypyc_attr(allow_interpreted_subclasses=True)
+@trait
 class MovementMixin:
   # required to implement
   def _mop(self, op: Ops, arg) -> Self:

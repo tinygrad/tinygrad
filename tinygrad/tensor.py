@@ -53,7 +53,7 @@ class Tensor(RandMixin):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "uop", "is_param", "grad"
+  __slots__ = "uop", "is_param", "grad", "__weakref__"
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None):

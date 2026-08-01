@@ -127,7 +127,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
+    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint)+dtypes.fp8s and not is_image_shape(buf._shape):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass

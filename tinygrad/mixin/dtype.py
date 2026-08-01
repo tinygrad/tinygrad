@@ -1,10 +1,13 @@
 from typing import TYPE_CHECKING, Self
+from mypy_extensions import mypyc_attr, trait
 from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype, Invalid
 from tinygrad.uop import Ops
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
+@mypyc_attr(allow_interpreted_subclasses=True)
+@trait
 class DTypeMixin:
   @property
   def dtype(self) -> DType: raise NotImplementedError
