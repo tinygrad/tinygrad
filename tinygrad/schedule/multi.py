@@ -209,7 +209,7 @@ def index_multi(root:UOp, multi:UOp):
       continue
     # strided ownership: idx ≡ rng (mod shard_sz), intra-shard position is (idx - rng) // shard_sz
     diff = (idxs[ax] - rng).simplify()
-    if (mod:=(diff % shard_sz).simplify()).op is Ops.CONST and mod.arg == 0:
+    if (mod:=(diff % shard_sz).simplify()).op is Ops.CONST and mod.val == 0:
       local = (diff // shard_sz).simplify()
       if local.vmin >= 0 and local.vmax < shard_sz:
         idxs[ax] = local

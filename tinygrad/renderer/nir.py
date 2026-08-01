@@ -122,7 +122,7 @@ class NIRRenderer(Renderer):
 
   extra_matcher = PatternMatcher([
     # handle negative unsigned CONST
-    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype.max+x.arg+1, x.dtype) if x.arg < 0 else None),
+    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype.max+x.val+1, x.dtype) if x.val < 0 else None),
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
     # load/store bool -> uint8
@@ -144,7 +144,7 @@ class NIRRenderer(Renderer):
   ])
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
+    (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.val, x.dtype)),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val"))),

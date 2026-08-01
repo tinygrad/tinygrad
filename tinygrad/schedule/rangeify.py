@@ -283,7 +283,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
-  replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
+  replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.val is Invalid)}
   return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
@@ -304,7 +304,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
    remove_noop_bufferize),
   # no buffers for const (ranges don't matter for const - it's the same value everywhere)
-  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
+  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # indexing an after with all fully invalid stores is invalid
