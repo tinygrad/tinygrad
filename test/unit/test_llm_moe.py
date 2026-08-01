@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.llm.model import TransformerBlock, TransformerConfig
+from tinygrad.llm.model import MXFP4ExpertWeights, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
   return TransformerConfig(
@@ -12,6 +12,12 @@ def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=
     num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
 
 class TestMoEFeedForward(unittest.TestCase):
+  def test_mxfp4_expert_weights(self):
+    experts = MXFP4ExpertWeights(1, 32, 1)
+    experts.weight = Tensor(np.array([0x80]+[0x11]*16, dtype=np.uint8).reshape(1, 1, 1, 17))
+    out = experts(Tensor([[[0]]]), Tensor.ones(1, 1, 1, 32))
+    np.testing.assert_equal(out.numpy(), [[[[32.]]]])
+
   def test_moe_feed_forward(self):
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2

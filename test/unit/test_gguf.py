@@ -46,6 +46,7 @@ class TestGGUF(unittest.TestCase):
     block = np.array([0x80] + list(range(16)), dtype=np.uint8)  # E=128, nibbles 0-15 in low, zeros in high
     expected = np.array([0., 1., 2., 3., 4., 6., 8., 12., -0., -1., -2., -3., -4., -6., -8., -12.] + [0.]*16, dtype=np.float32)
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value).numpy().flatten(), expected)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value, dequantize=False).numpy(), block[None])
 
   def test_dequantization_q4_0(self): self._test_dequantization(GGMLQuantizationType.Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(GGMLQuantizationType.Q4_1)
@@ -137,6 +138,13 @@ class TestGGUF(unittest.TestCase):
     buf += b"\x00" * ((32 - len(buf) % 32) % 32)
     for _, _, _, data in tensors: buf += data
     return bytes(buf)
+
+  def test_preserve_quantized(self):
+    block = np.arange(17, dtype=np.uint8)
+    buf = self._build_gguf([("experts", (1, 1, 32), GGMLQuantizationType.MXFP4.value, block.tobytes())], [])
+    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)), preserve_quantized=lambda name, typ: name == "experts")
+    self.assertEqual(tensors["experts"].shape, (1, 1, 1, 17))
+    np.testing.assert_equal(tensors["experts"].numpy().flatten(), block)
 
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:

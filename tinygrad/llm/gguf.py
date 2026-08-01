@@ -20,9 +20,10 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
-def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int, dequantize:bool=True) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
+  When dequantize is false, quantized data is returned as packed uint8 blocks.
 
   Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 24),
   int16 (id: 25), int32 (id: 26), int64 (id: 27), float64 (id: 28), bfloat16 (id: 30)
@@ -43,6 +44,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
+    if not dequantize: return blocks
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -129,7 +131,7 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+def _gguf_parse(tensor: Tensor, preserve_quantized:Callable[[str, int], bool]|None=None) -> tuple[dict, dict[str, Tensor]]:
   # TODO: remove the need for copy to default device
   tensor = tensor.to(None).realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
@@ -145,7 +147,13 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  def load_tensor(name:str, dims:tuple[int, ...], typ:int, off:int) -> Tensor:
+    packed = preserve_quantized is not None and preserve_quantized(name, typ)
+    data = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ, dequantize=not packed)
+    if not packed: return data.reshape(*reversed(dims))
+    block_size = prod(dims)//data.shape[0]
+    return data.reshape(*reversed(dims[1:]), dims[0]//block_size, data.shape[1])
+  state_dict = {name:load_tensor(name, dims, typ, off) for name, dims, typ, off in t_infos}
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
@@ -154,7 +162,7 @@ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
   return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
 
-def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
+def gguf_load(fn: Tensor|str|pathlib.Path, preserve_quantized:Callable[[str, int], bool]|None=None) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
 
@@ -169,8 +177,8 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), preserve_quantized)
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), preserve_quantized)[1])
   return kv, sd

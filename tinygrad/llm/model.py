@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Tensor, nn, UOp, TinyJit, dtypes, getenv, function
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve, smax
 
@@ -25,6 +25,20 @@ class ExpertWeights:
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+
+class MXFP4ExpertWeights:
+  def __init__(self, num_experts:int, in_features:int, out_features:int):
+    self.weight = Tensor.zeros(num_experts, out_features, in_features//32, 17, dtype="uint8")
+  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
+    blocks = self.weight[sel]
+    e = blocks[..., 0].cast(dtypes.uint32)
+    d = (e < 2).where(Tensor([0x00200000, 0x00400000], dtype=dtypes.uint32, device=blocks.device)[e.clip(0, 1)],
+                      (e - 1) * 0x00800000).bitcast(dtypes.float32).unsqueeze(-1)
+    codes = blocks[..., 1:].unsqueeze(-1).div(Tensor.const((1, 16), dtypes.uint8), rounding_mode="trunc").bitwise_and(15)
+    codes = codes.transpose(-1, -2).flatten(-2)
+    values = Tensor([0., 1., 2., 3., 4., 6., 8., 12., -0., -1., -2., -3., -4., -6., -8., -12.],
+                    device=blocks.device)[codes]
+    return (x.unsqueeze(-2)*(values*d).flatten(-2).cast(x.dtype)).sum(-1)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False, inverse:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -114,6 +128,7 @@ class TransformerConfig:
   routed_scaling_factor: float = 1.0
   qkv_bias: bool = False
   expert_bias: bool = False
+  mxfp4_experts: bool = False
   deepseek4: DeepSeek4Config|None = None
 
 class FFNBlock:
@@ -126,11 +141,12 @@ class FFNBlock:
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
+      expert_weights = MXFP4ExpertWeights if config.mxfp4_experts else ExpertWeights
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      self.ffn_gate_exps = expert_weights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_up_exps = expert_weights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_down_exps = expert_weights(config.num_experts, config.hidden_dim, config.dim)
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
@@ -604,7 +620,9 @@ class Transformer:
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
                 realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    expert_weights = ("ffn_gate_exps.weight", "ffn_up_exps.weight", "ffn_down_exps.weight")
+    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf,
+                               preserve_quantized=lambda name, typ: typ == 39 and name.endswith(expert_weights))
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) and v.is_floating_point() else v for k,v in state_dict.items()}
@@ -694,6 +712,7 @@ class Transformer:
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
+      mxfp4_experts=any(v.dtype == dtypes.uint8 and k.endswith("ffn_gate_exps.weight") for k,v in state_dict.items()),
       deepseek4=dsv4)
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
