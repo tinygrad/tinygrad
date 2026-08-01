@@ -620,3 +620,5 @@ class count:
     cur = self.n
     self.n += self.step
     return cur
+
+# test change for the szdiff bot
