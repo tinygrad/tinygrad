@@ -321,7 +321,7 @@ def replace_params(call:UOp) -> UOp|None:
   addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
-  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=u.device, volatile=b.op is Ops.PARAM and b.arg.volatile)
+  sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
