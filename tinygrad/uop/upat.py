@@ -118,7 +118,7 @@ pm_renderer = PatternMatcher([
     lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=x.arg.format(*[y.arg for y in x.src]))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.val}]"))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:

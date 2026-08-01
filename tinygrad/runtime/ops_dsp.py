@@ -13,7 +13,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat
 
 # NOTE: this just increases readability of the generated code
 dsp_string = PatternMatcher([
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.arg)),
+  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.val)),
 ])
 
 class DSPRenderer(ClangRenderer):
