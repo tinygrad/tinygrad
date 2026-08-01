@@ -175,6 +175,8 @@ class TestBFloat16DType(unittest.TestCase):
 
   def test_float_to_bf16(self):
     _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
+    a = Tensor([0.5, 0.25, 0.75, 1.0], dtype=dtypes.float32).cast(dtypes.bfloat16)
+    np.testing.assert_equal(a.bitcast(dtypes.uint8).numpy(), [0, 63, 128, 62, 64, 63, 128, 63]) # needs to have exact raw bytes. No tolerance
 
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
