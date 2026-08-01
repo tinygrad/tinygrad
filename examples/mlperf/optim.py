@@ -2,7 +2,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer, OptimizerGroup
 from tinygrad.helpers import FUSE_OPTIM, getenv
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, AxisType
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
@@ -42,8 +42,8 @@ class GradAccClipAdamW(Optimizer):
       self.master_params = None
 
   def _zero_shard(self, t:Tensor) -> Tensor:
-    if not self.zero or (t.shape[0] % len(self.device)) != 0: return t
-    return Tensor(t.uop._shard(0, len(self.device)).unshard(0)).clone()
+    if not self.zero or t.ndim < 2 or (t.shape[0] % len(self.device)) != 0: return t
+    return Tensor(t.uop._shard(0, UOp.range(len(self.device), -1, AxisType.DEVICE)).unshard(0)).clone()
 
   def _zero_gather(self, t:Tensor) -> Tensor:
     if not isinstance(t.device, tuple) or t.uop.axis != 0: return t
