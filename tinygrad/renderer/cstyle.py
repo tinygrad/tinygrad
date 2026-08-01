@@ -320,7 +320,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
     # bfloat16 constants need to be rendered as their bit pattern since bf16 is stored as ushort
     (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
-      lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0] >> 16)}u"),
+      lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.val)))[0] >> 16)}u"),
     # load/store image (OpenCL)
     (UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), lambda ctx,buf,idx_y,idx_x: f"IMAGE<{ctx[buf]}, {ctx[idx_y]}, {ctx[idx_x]}>"),
     (UPat(Ops.LOAD, dtype=dtypes.float, src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), UPat.var("var"), UPat.var("gate"))),

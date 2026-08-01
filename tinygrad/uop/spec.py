@@ -54,7 +54,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.NOOP), lambda: True),
 
   # CONST is everywhere
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.val) is type(x.dtype.const(x.val))),
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),

@@ -129,9 +129,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # (x&mask)>>k -> x>>k when mask only clears bits below k
   # TODO: combine this with "# rules for threefry" below
   ((UPat.var("x") & UPat.cvar("mask")) >> UPat.cvar("k"),
-   lambda x,mask,k: x >> k.arg if mask.arg | ((1 << k.arg) - 1) == -1 else None),
+   lambda x,mask,k: x >> k.val if mask.val | ((1 << k.val) - 1) == -1 else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
-   lambda x,mask,c: x // c.arg if c.arg > 0 and c.arg & (c.arg-1) == 0 and mask.arg | (c.arg-1) == -1 else None),
+   lambda x,mask,c: x // c.val if c.val > 0 and c.val & (c.val-1) == 0 and mask.val | (c.val-1) == -1 else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
@@ -265,10 +265,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** lt **
   # c0*x<c1 -> sign(c0)*x < ceil(c1/abs(c0))
   ((UPat.cvar("c0")*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1"),
-   lambda x,c0,c1: (x if c0.arg > 0 else -x)<-(-c1.arg//abs(c0.arg)) if abs(c0.arg) > 1 else None),
+   lambda x,c0,c1: (x if c0.val > 0 else -x)<-(-c1.val//abs(c0.val)) if abs(c0.val) > 1 else None),
   # x//d<c -> x<c*d for d>0, and -> c*d<x for d<0
   ((UPat.var("x", dtype=dtypes.weakint)//UPat.cvar("d"))<UPat.cvar("c"),
-   lambda x,d,c: (x<c.arg*d.arg) if d.arg > 0 else (x>c.arg*d.arg) if d.arg < 0 else None),
+   lambda x,d,c: (x<c.val*d.val) if d.val > 0 else (x>c.val*d.val) if d.val < 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1 if y.op is not Ops.CONST else None),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1 if y.op is not Ops.CONST else None),
