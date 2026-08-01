@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, quantize_mxfp4
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -149,6 +149,45 @@ class TestAsmGEMM(unittest.TestCase):
   def test_unsupported_n(self):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
+
+class TestMXFP4(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("requires real amd machine")
+
+  def test_quantize(self):
+    import numpy as np
+    block = np.array([0, .26, .74, .75, 1.26, 1.75, 2.51, 3.5, 5.1, 6, -6] + [0] * 21, dtype=np.float32)
+    x = Tensor(np.tile(block, (32, 8)), dtype=dtypes.bfloat16)
+    packed, scale, _ = quantize_mxfp4(x)
+    p = packed.numpy()
+    codes = np.stack((p & 0xF, p >> 4), axis=-1).reshape(32, 256)
+    np.testing.assert_array_equal(codes[0, :11], [0, 1, 1, 2, 3, 4, 5, 6, 7, 7, 15])
+    np.testing.assert_array_equal(scale.numpy(), np.full((32, 8), 127, dtype=np.uint8))
+
+  def test_correctness(self):
+    import numpy as np
+    M = N = K = 256
+    rng = np.random.default_rng(1)
+    a = Tensor(rng.standard_normal((M, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    b = Tensor(rng.standard_normal((N, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    out = asm_gemm(a, b.T, mxfp4=True).realize()
+    # reference gemm
+    a_packed, scale_a, _ = quantize_mxfp4(a)
+    b_packed, scale_b, _ = quantize_mxfp4(b)
+    def unpack(x): return np.stack((x & 0xF, x >> 4), axis=-1).reshape(x.shape[0], -1)
+    code_a, code_b = unpack(a_packed.numpy()), unpack(b_packed.numpy())
+    lut = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6], dtype=np.float32)
+    a_dequant = lut[code_a] * np.repeat(np.exp2(scale_a.numpy().astype(np.int16)-127), 32, axis=1)
+    b_dequant = lut[code_b] * np.repeat(np.exp2(scale_b.numpy().astype(np.int16)-127), 32, axis=1)
+    ref = Tensor(a_dequant @ b_dequant.T, dtype=dtypes.bfloat16).realize().numpy()
+    np.testing.assert_array_equal(out.numpy(), ref)
+
+  def test_empty(self):
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
+    b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
+    asm_gemm(a, b.T, mxfp4=True).realize()
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 

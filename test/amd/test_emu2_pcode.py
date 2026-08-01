@@ -11,8 +11,8 @@ from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp
 
 def _srcs():
   """Create minimal source variables for pcode parsing."""
-  def u32(v=0): return UOp.const(dtypes.uint32, v)
-  return {'S0': u32(), 'S1': u32(), 'S2': u32(), 'SCC': u32(), 'VCC': UOp.const(dtypes.uint64, 0), 'laneId': u32()}
+  def u32(v=0): return UOp.const(v, dtypes.uint32)
+  return {'S0': u32(), 'S1': u32(), 'S2': u32(), 'SCC': u32(), 'VCC': UOp.const(0, dtypes.uint64), 'laneId': u32()}
 
 class TestBasicParsing(unittest.TestCase):
   """Test basic pcode parsing for common instruction patterns."""
@@ -44,8 +44,8 @@ class TestWithSources(unittest.TestCase):
 
   def test_v_add_f32_with_sources(self):
     """Test V_ADD_F32 with actual float constants."""
-    s0 = UOp.const(dtypes.uint32, 0x3f800000)  # 1.0f
-    s1 = UOp.const(dtypes.uint32, 0x40000000)  # 2.0f
+    s0 = UOp.const(0x3f800000, dtypes.uint32)  # 1.0f
+    s1 = UOp.const(0x40000000, dtypes.uint32)  # 2.0f
     _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_F32_E32], {'S0': s0, 'S1': s1})
     self.assertEqual(len(assigns), 1)
     dest, val = assigns[0]
@@ -55,8 +55,8 @@ class TestWithSources(unittest.TestCase):
 
   def test_v_mul_f32_with_sources(self):
     """Test V_MUL_F32 with actual float constants."""
-    s0 = UOp.const(dtypes.uint32, 0x40000000)  # 2.0f
-    s1 = UOp.const(dtypes.uint32, 0x40400000)  # 3.0f
+    s0 = UOp.const(0x40000000, dtypes.uint32)  # 2.0f
+    s1 = UOp.const(0x40400000, dtypes.uint32)  # 3.0f
     _, assigns = parse_pcode(PCODE[VOP2Op.V_MUL_F32_E32], {'S0': s0, 'S1': s1})
     self.assertEqual(len(assigns), 1)
     dest, val = assigns[0]
@@ -67,36 +67,36 @@ class TestParseExpr(unittest.TestCase):
 
   def test_integer_literals(self):
     """Test parsing integer literals."""
-    self.assertEqual(parse_expr('0', {}).arg, 0)
-    self.assertEqual(parse_expr('42', {}).arg, 42)
-    self.assertEqual(parse_expr('42U', {}).arg, 42)
+    self.assertEqual(parse_expr('0', {}).val, 0)
+    self.assertEqual(parse_expr('42', {}).val, 42)
+    self.assertEqual(parse_expr('42U', {}).val, 42)
 
   def test_negative_integers(self):
     """Test parsing negative integer literals."""
     result = parse_expr('-1', {})
-    self.assertEqual(result.arg, -1)
+    self.assertEqual(result.val, -1)
     self.assertEqual(result.dtype, dtypes.int)
 
   def test_float_literals(self):
     """Test parsing float literals."""
     result = parse_expr('1.0F', {})
-    self.assertEqual(result.arg, 1.0)
+    self.assertEqual(result.val, 1.0)
     self.assertEqual(result.dtype, dtypes.float32)
 
   def test_hex_literals(self):
     """Test parsing hex literals."""
     result = parse_expr('0xFF', {})
-    self.assertEqual(result.arg, 255)
+    self.assertEqual(result.val, 255)
 
   def test_variable_lookup(self):
     """Test variable lookup in parse_expr."""
-    vrs = {'x': UOp.const(dtypes.uint32, 42)}
+    vrs = {'x': UOp.const(42, dtypes.uint32)}
     result = parse_expr('x', vrs)
-    self.assertEqual(result.arg, 42)
+    self.assertEqual(result.val, 42)
 
   def test_binary_ops(self):
     """Test parsing binary operations."""
-    vrs = {'a': UOp.const(dtypes.uint32, 10), 'b': UOp.const(dtypes.uint32, 5)}
+    vrs = {'a': UOp.const(10, dtypes.uint32), 'b': UOp.const(5, dtypes.uint32)}
 
     # Addition
     result = parse_expr('a + b', vrs)
@@ -105,11 +105,11 @@ class TestParseExpr(unittest.TestCase):
     # Subtraction with constant folding
     result = parse_expr('10 - 5', {})
     self.assertEqual(result.op, Ops.CONST)
-    self.assertEqual(result.arg, 5)
+    self.assertEqual(result.val, 5)
 
   def test_ternary(self):
     """Test parsing ternary expressions."""
-    vrs = {'cond': UOp.const(dtypes.bool, True), 'a': UOp.const(dtypes.uint32, 1), 'b': UOp.const(dtypes.uint32, 0)}
+    vrs = {'cond': UOp.const(True), 'a': UOp.const(1, dtypes.uint32), 'b': UOp.const(0, dtypes.uint32)}
     result = parse_expr('cond ? a : b', vrs)
     self.assertEqual(result.op, Ops.WHERE)
 
@@ -127,7 +127,7 @@ class TestForLoopParsing(unittest.TestCase):
   def test_clz_parsing(self):
     """Test CLZ pcode parsing produces correct structure."""
     pcode = PCODE[VOP1Op.V_CLZ_I32_U32_E32]
-    S0 = UOp.const(dtypes.uint32, 0xFFFFFFFF)  # All ones - CLZ should be 0
+    S0 = UOp.const(0xFFFFFFFF, dtypes.uint32)  # All ones - CLZ should be 0
     _vrs, assigns = parse_pcode(pcode, {'S0': S0})
 
     self.assertEqual(len(assigns), 1)
@@ -139,7 +139,7 @@ class TestForLoopParsing(unittest.TestCase):
   def test_clz_with_zero(self):
     """Test CLZ with input 0 - should return -1."""
     pcode = PCODE[VOP1Op.V_CLZ_I32_U32_E32]
-    S0 = UOp.const(dtypes.uint32, 0)
+    S0 = UOp.const(0, dtypes.uint32)
     _vrs, assigns = parse_pcode(pcode, {'S0': S0})
 
     # Check that the innermost value (default) is -1 (may be wrapped in CAST)
@@ -150,7 +150,7 @@ class TestForLoopParsing(unittest.TestCase):
     # Unwrap CAST if present
     while val.op == Ops.CAST:
       val = val.src[0]
-    self.assertEqual(val.arg, -1)
+    self.assertEqual(val.val, -1)
 
   def test_ctz_parsing(self):
     """Test CTZ pcode parsing."""
@@ -158,7 +158,7 @@ class TestForLoopParsing(unittest.TestCase):
     if pcode is None:
       self.skipTest("V_CTZ_I32_B32_E32 pcode not available")
 
-    S0 = UOp.const(dtypes.uint32, 1)  # LSB set - CTZ should be 0
+    S0 = UOp.const(1, dtypes.uint32)  # LSB set - CTZ should be 0
     _vrs, assigns = parse_pcode(pcode, {'S0': S0})
     self.assertEqual(len(assigns), 1)
 
@@ -169,8 +169,8 @@ class TestDSPcodePatterns(unittest.TestCase):
     """Test GLOBAL_ATOMIC_ADD_F32 keeps memory values in float dtype."""
     vmem = UOp.param(2, dtypes.uint32, (1024,))
     srcs = {
-      'ADDR': UOp.const(dtypes.uint64, 0),
-      'DATA': UOp.const(dtypes.uint32, 0x3f800000),
+      'ADDR': UOp.const(0, dtypes.uint64),
+      'DATA': UOp.const(0x3f800000, dtypes.uint32),
       '_vmem': vmem,
     }
 
@@ -199,8 +199,8 @@ class TestDSPcodePatterns(unittest.TestCase):
     """Test MEM[addr].type read expression parsing."""
     # Create a mock LDS buffer
     lds = UOp.param(3, dtypes.uint32, (16384,))
-    addr = UOp.const(dtypes.uint32, 0)
-    vrs = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(dtypes.uint32, 0)}
+    addr = UOp.const(0, dtypes.uint32)
+    vrs = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(0, dtypes.uint32)}
 
     result = parse_expr('MEM[ADDR + OFFSET].b32', vrs)
     # Should be an INDEX operation into LDS
@@ -212,13 +212,13 @@ class TestDSPcodePatterns(unittest.TestCase):
     self.assertIsNotNone(pcode)
     assert pcode is not None
     srcs = {
-      'ADDR': UOp.const(dtypes.uint32, 0),
-      'OFFSET0': UOp.const(dtypes.uint32, 0),
-      'OFFSET1': UOp.const(dtypes.uint32, 1),
-      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
-      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+      'ADDR': UOp.const(0, dtypes.uint32),
+      'OFFSET0': UOp.const(0, dtypes.uint32),
+      'OFFSET1': UOp.const(1, dtypes.uint32),
+      'DATA': UOp.const(0xAAAAAAAA, dtypes.uint32),
+      'DATA2': UOp.const(0xBBBBBBBB, dtypes.uint32),
     }
-    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    srcs['laneId'] = UOp.const(0, dtypes.uint32)
     _, assigns = parse_pcode(pcode, srcs)
     # Should have 2 MEM write assignments
     self.assertEqual(len(assigns), 2)
@@ -235,12 +235,12 @@ class TestDSPcodePatterns(unittest.TestCase):
     assert pcode is not None
     lds = UOp.param(3, dtypes.uint32, (16384,))
     srcs = {
-      'ADDR': UOp.const(dtypes.uint32, 0),
-      'OFFSET0': UOp.const(dtypes.uint32, 0),
-      'OFFSET1': UOp.const(dtypes.uint32, 1),
+      'ADDR': UOp.const(0, dtypes.uint32),
+      'OFFSET0': UOp.const(0, dtypes.uint32),
+      'OFFSET1': UOp.const(1, dtypes.uint32),
       '_lds': lds,
     }
-    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    srcs['laneId'] = UOp.const(0, dtypes.uint32)
     _, assigns = parse_pcode(pcode, srcs)
     # Should have 2 RETURN_DATA assignments
     self.assertEqual(len(assigns), 2)
@@ -252,36 +252,36 @@ class TestDSPcodePatterns(unittest.TestCase):
     pcode = PCODE.get(DSOp.DS_STORE_2ADDR_B32)
     assert pcode is not None
     srcs = {
-      'ADDR': UOp.const(dtypes.uint32, 100),
-      'OFFSET0': UOp.const(dtypes.uint32, 2),
-      'OFFSET1': UOp.const(dtypes.uint32, 5),
-      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
-      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+      'ADDR': UOp.const(100, dtypes.uint32),
+      'OFFSET0': UOp.const(2, dtypes.uint32),
+      'OFFSET1': UOp.const(5, dtypes.uint32),
+      'DATA': UOp.const(0xAAAAAAAA, dtypes.uint32),
+      'DATA2': UOp.const(0xBBBBBBBB, dtypes.uint32),
     }
-    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    srcs['laneId'] = UOp.const(0, dtypes.uint32)
     _, assigns = parse_pcode(pcode, srcs)
     # Check addresses: 100 + 2*4 = 108, 100 + 5*4 = 120
     # assigns[i][1] is (addr, val) tuple for MEM writes; mypy sees UOp
-    self.assertEqual(assigns[0][1][0].simplify().arg, 108)  # type: ignore[index]
-    self.assertEqual(assigns[1][1][0].simplify().arg, 120)  # type: ignore[index]
+    self.assertEqual(assigns[0][1][0].simplify().val, 108)  # type: ignore[index]
+    self.assertEqual(assigns[1][1][0].simplify().val, 120)  # type: ignore[index]
 
   def test_ds_store_data_values(self):
     """Test DS_STORE_2ADDR_B32 uses correct data values."""
     pcode = PCODE.get(DSOp.DS_STORE_2ADDR_B32)
     assert pcode is not None
     srcs = {
-      'ADDR': UOp.const(dtypes.uint32, 0),
-      'OFFSET0': UOp.const(dtypes.uint32, 0),
-      'OFFSET1': UOp.const(dtypes.uint32, 1),
-      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
-      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+      'ADDR': UOp.const(0, dtypes.uint32),
+      'OFFSET0': UOp.const(0, dtypes.uint32),
+      'OFFSET1': UOp.const(1, dtypes.uint32),
+      'DATA': UOp.const(0xAAAAAAAA, dtypes.uint32),
+      'DATA2': UOp.const(0xBBBBBBBB, dtypes.uint32),
     }
-    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    srcs['laneId'] = UOp.const(0, dtypes.uint32)
     _, assigns = parse_pcode(pcode, srcs)
     # assigns[i][1] is (addr, val) tuple for MEM writes; mypy sees UOp
     # DATA[31:0] should preserve the value
-    self.assertEqual(assigns[0][1][1].simplify().arg, 0xAAAAAAAA)  # type: ignore[index]
-    self.assertEqual(assigns[1][1][1].simplify().arg, 0xBBBBBBBB)  # type: ignore[index]
+    self.assertEqual(assigns[0][1][1].simplify().val, 0xAAAAAAAA)  # type: ignore[index]
+    self.assertEqual(assigns[1][1][1].simplify().val, 0xBBBBBBBB)  # type: ignore[index]
 
 class TestConditionalParsing(unittest.TestCase):
   """Test conditional (if/elsif/else) pcode parsing."""
@@ -290,9 +290,9 @@ class TestConditionalParsing(unittest.TestCase):
     """Test parsing ternary expression (which becomes WHERE)."""
     # S_CSELECT_B32: D0.u32 = SCC ? S0.u32 : S1.u32
     pcode = PCODE[SOP2Op.S_CSELECT_B32]
-    s0 = UOp.const(dtypes.uint32, 10)
-    s1 = UOp.const(dtypes.uint32, 20)
-    scc = UOp.const(dtypes.uint32, 1)
+    s0 = UOp.const(10, dtypes.uint32)
+    s1 = UOp.const(20, dtypes.uint32)
+    scc = UOp.const(1, dtypes.uint32)
     _vrs, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1, 'SCC': scc})
     self.assertEqual(len(assigns), 1)
     dest, val = assigns[0]
@@ -305,26 +305,26 @@ class TestConcatWidthParsing(unittest.TestCase):
 
   def test_permlanex16_altrow_concat(self):
     for row, expected in [(0, 1), (1, 0), (2, 3), (3, 2)]:
-      parsed = parse_expr('{ row[1], ~row[0] }', {'row': UOp.const(dtypes.uint32, row)})
-      self.assertEqual(parsed.simplify().arg, expected)
+      parsed = parse_expr('{ row[1], ~row[0] }', {'row': UOp.const(row, dtypes.uint32)})
+      self.assertEqual(parsed.simplify().val, expected)
 
   def test_permlane64_altlane_concat(self):
     for lane, expected in [(0, 32), (1, 33), (31, 63), (32, 0), (63, 31)]:
-      parsed = parse_expr('{ ~lane[5], lane[4:0] }', {'lane': UOp.const(dtypes.uint32, lane)})
-      self.assertEqual(parsed.simplify().arg, expected)
+      parsed = parse_expr('{ ~lane[5], lane[4:0] }', {'lane': UOp.const(lane, dtypes.uint32)})
+      self.assertEqual(parsed.simplify().val, expected)
 
   def test_permlane64_wave64_pcode_indices(self):
     vgpr = UOp.param(0, dtypes.uint32, (256,))
     srcs = {
-      'SRC0': UOp.const(dtypes.uint32, 0),
-      'VDST': UOp.const(dtypes.uint32, 1),
-      'EXEC_LO': UOp.const(dtypes.uint32, 0xFFFFFFFF),
-      'EXEC': UOp.const(dtypes.uint64, 0xFFFFFFFFFFFFFFFF),
+      'SRC0': UOp.const(0, dtypes.uint32),
+      'VDST': UOp.const(1, dtypes.uint32),
+      'EXEC_LO': UOp.const(0xFFFFFFFF, dtypes.uint32),
+      'EXEC': UOp.const(0xFFFFFFFFFFFFFFFF, dtypes.uint64),
       '_vgpr': vgpr,
       '_wave_size': 64,
-      'S0': UOp.const(dtypes.uint32, 0),
-      'S1': UOp.const(dtypes.uint32, 0),
-      'S2': UOp.const(dtypes.uint32, 0),
+      'S0': UOp.const(0, dtypes.uint32),
+      'S1': UOp.const(0, dtypes.uint32),
+      'S2': UOp.const(0, dtypes.uint32),
     }
 
     def load_idx(v: UOp) -> int:
@@ -333,12 +333,12 @@ class TestConcatWidthParsing(unittest.TestCase):
       self.assertEqual(simp.src[0].op, Ops.INDEX)
       idx = simp.src[0].src[1].simplify()
       self.assertEqual(idx.op, Ops.CONST)
-      return idx.arg
+      return idx.val
 
     _, assigns = parse_pcode(PCODE[VOP1Op.V_PERMLANE64_B32_E32], srcs)
     self.assertEqual(len(assigns), 64)
     for lane, (dst_idx, src_idx) in {0: (64, 32), 31: (95, 63), 32: (96, 0), 63: (127, 31)}.items():
-      self.assertEqual(assigns[lane][1][0].simplify().arg, dst_idx)  # type: ignore[index]
+      self.assertEqual(assigns[lane][1][0].simplify().val, dst_idx)  # type: ignore[index]
       self.assertEqual(load_idx(assigns[lane][1][1]), src_idx)  # type: ignore[index]
 
 class TestAllPcode(unittest.TestCase):
@@ -346,7 +346,7 @@ class TestAllPcode(unittest.TestCase):
 
   def _make_srcs(self):
     """Create dummy source variables for pcode parsing."""
-    u32, u64 = lambda v=0: UOp.const(dtypes.uint32, v), lambda v=0: UOp.const(dtypes.uint64, v)
+    u32, u64 = lambda v=0: UOp.const(v, dtypes.uint32), lambda v=0: UOp.const(v, dtypes.uint64)
     lds = UOp.param(3, dtypes.uint32, (16384,))
     return {'laneId': u32(), 'laneID': u32(), 'S0': u32(), 'S1': u32(), 'S2': u32(), 'S3': u32(), 'SRC0': u32(),
             'D0': u32(), 'D1': u32(), 'DST': u32(), 'VDST': u32(), 'SDST': u32(),
@@ -358,7 +358,7 @@ class TestAllPcode(unittest.TestCase):
             'M0': u32(), 'PC': u64(), 'DENORM': u32(1), 'ROUND_MODE': u32(), 'ROUND_TOWARD_ZERO': u32(),
             'ROUND_NEAREST_EVEN': u32(), 'WAVE_STATUS': u32(),
             'MAX_FLOAT_F32': u32(0x7f7fffff), 'Unsigned': u32(1), 'clampedLOD': u32(),
-            '_lds': lds, '_vmem': lds, '_active': UOp.const(dtypes.bool, True)}
+            '_lds': lds, '_vmem': lds, '_active': UOp.const(True)}
 
   def _parse_all_pcode(self, pcode_dict, arch: str, min_pct: float):
     """Parse all pcode. RuntimeError = parser limitation (ok), other exceptions = real bugs."""

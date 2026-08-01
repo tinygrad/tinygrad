@@ -34,7 +34,7 @@ def _ggather_fwd_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
 
 def _ggather_zero_kernel(out:UOp) -> UOp:
   i = UOp.range(out.numel(), 0)
-  return out.flatten().index(i).store(UOp.const(out.dtype, 0.0)).end(i).sink(arg=KernelInfo(name="ggather_zero"))
+  return out.flatten().index(i).store(UOp.const(0.0, out.dtype)).end(i).sink(arg=KernelInfo(name="ggather_zero"))
 
 def _sharded_zeros(shape:tuple[int, ...], dtype, device) -> Tensor:
   return Tensor.custom_kernel(_sharded_invalids(shape, dtype, device), fxn=_ggather_zero_kernel)[0]
