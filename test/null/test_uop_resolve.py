@@ -7,12 +7,16 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(4, dtypes.int)
     self.assertEqual(int(u), 4)
 
+  def test_weak_const(self):
+    self.assertEqual(int(UOp.const(5)), 5)
+    self.assertEqual(float(UOp.const(1.5)), 1.5)
+
   def test_int_add(self):
     u = UOp.const(4, dtypes.int) + 7
     self.assertEqual(int(u), 11)
 
   def test_lt(self):
-    u = UOp.const(4, dtypes.int) < 7
+    u = UOp.const(4) < 7
     self.assertTrue(u)
 
   def test_rfloordiv(self):
@@ -24,24 +28,24 @@ class TestUOpResolve(unittest.TestCase):
     self.assertEqual(float(u), 2.25)
 
   def test_leq(self):
-    u = UOp.const(4, dtypes.int) <= 4
+    u = UOp.const(4) <= 4
     self.assertTrue(u)
 
   def test_ne(self):
-    u = UOp.const(4, dtypes.int) != 7
+    u = UOp.const(4) != 7
     self.assertTrue(u)
 
   def test_ne_f(self):
-    u = UOp.const(4, dtypes.int) != 4
+    u = UOp.const(4) != 4
     self.assertFalse(u)
 
   def test_ngt(self):
-    u = UOp.const(4, dtypes.int) > 7
+    u = UOp.const(4) > 7
     self.assertFalse(u)
 
   def test_ssimplify(self):
-    self.assertEqual((8 % UOp.const(4, dtypes.int)).ssimplify(), 0)
-    self.assertEqual((8 * UOp.const(4, dtypes.int)).ssimplify(), 32)
+    self.assertEqual((8 % UOp.const(4)).ssimplify(), 0)
+    self.assertEqual((8 * UOp.const(4)).ssimplify(), 32)
 
   def test_ambiguous_less_than(self):
     u = UOp.variable("i", 1, 10)

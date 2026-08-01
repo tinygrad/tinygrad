@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
@@ -124,8 +124,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.CALL:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.INS | Ops.PYLITERAL:
+    case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
       return dtypes.void
+    case Ops.INS:
+      return None
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
@@ -187,13 +189,12 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if op is Ops.CONST and arg is Invalid: dtype = dtypes.bool
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     # CONST derives its dtype by value only when the constructor omits one
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
     # an INDEX presents its access dtype, which a still-weak source matches up to weakness
     if SPEC == 2 and op is not Ops.CONST and \
-       not any(s.base.arg is Invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
+       not any(s.base.is_invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
        not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
@@ -230,7 +231,6 @@ class recursive_property(property):
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
-UOP_CACHE:dict[tuple, UOp] = {}
 UOP_CONST_CACHE:dict[tuple[DType, ConstType], UOp] = {}
 FLOAT_CONST_DTYPES = frozenset(dtypes.floats + (dtypes.weakfloat,))
 
@@ -239,54 +239,24 @@ from tinygrad.mixin.op import OpMixin
 from tinygrad.mixin.rand import RandMixin
 
 # NOTE: this should be frozen, but frozen is slower
-class UOp(RandMixin):
+@dataclass(eq=False, slots=True)
+class UOp(RandMixin, metaclass=UOpMetaClass):
   op:Ops
-  _dtype:DType
-  src:tuple[UOp, ...]
-  arg:Any
-  tag:Any
-  _cache:dict[str, Any]
+  dtype:DType = dtypes.void
+  src:tuple[UOp, ...] = tuple()
+  arg:Any = None
+  tag:Any = None
+  _cache:dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
-  def __new__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
-              metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if op is Ops.CONST and arg is Invalid: dtype = dtypes.bool
-    if dtype is None:
-      dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    if (ret:=UOP_CACHE.get(key:=(op, dtype, src, arg, tag))) is not None:
-      if metadata is not None: all_metadata[ret] = metadata
-      if _buffer is not None: buffers[ret] = _buffer
-      return ret
-    ret = super().__new__(cls)
-    UOP_CACHE[key] = ret
-    ret.op, ret._dtype, ret.src, ret.arg, ret.tag = op, dtype, src, arg, tag
-    ret._cache = {}
-    if metadata is not None: all_metadata[ret] = metadata
-    if _buffer is not None:
-      assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
-      buffers[ret] = _buffer
-    if SPEC == 2 and op is not Ops.CONST and not any(s.base.arg is Invalid for s in src) and \
-       (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
-       not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
-      raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
-    if SPEC > 1:
-      from tinygrad.uop.spec import spec_full, test_pyrender
-      if SPEC > 2:
-        _ = ret._shape
-        if SPEC > 3: test_pyrender(ret)
-      with Context(CHECK_OOB=0): fret = cast(bool|None, spec_full.rewrite(ret))
-      if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {ret}")
-    return ret
-
-  def __init__(self, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
-               metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    pass
+  def __del__(self):
+    if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
+    try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
+    except AttributeError: pass
 
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
     return UOp, tuple(args)
-  @property
-  def dtype(self) -> DType: return self._dtype
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
                 kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
@@ -294,6 +264,12 @@ class UOp(RandMixin):
     if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
   def rtag(self, tag=True): return self.replace(tag=tag)
+  @property
+  def val(self):
+    assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
+    return self.arg
+  @property
+  def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @property
   def key(self) -> bytes: return self._get_recursive_cached("key", UOp._key_uncached)
   def _key_uncached(self) -> bytes:
@@ -588,7 +564,7 @@ class UOp(RandMixin):
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
       return graph_rewrite(self, symbolic, name="simplify")
-  def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
+  def ssimplify(self) -> UOp|ConstType: return ret.val if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = (simple_self:=self.simplify())._min_max
@@ -596,8 +572,8 @@ class UOp(RandMixin):
     assert isinstance(vmin, expected_type), f"vmin is wrong dtype {type(vmin)} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
-  def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return float(self._eval(dtypes.floats, float))
+  def __int__(self): return self._eval(dtypes.ints+(dtypes.weakint,), int)
+  def __float__(self): return float(self._eval(dtypes.floats+(dtypes.weakfloat,), float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False, enter_calls:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
@@ -630,7 +606,7 @@ class UOp(RandMixin):
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
-    if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].arg]
+    if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
     return UOp(Ops.INDEX, src=(self,)+tuple(new_srcs), **kwargs)
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
@@ -679,7 +655,7 @@ class UOp(RandMixin):
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
-    if dtype is None: dtype = dtypes.from_py(b)
+    if dtype is None or b is Invalid: dtype = dtypes.from_py(b)
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
@@ -722,10 +698,10 @@ class UOp(RandMixin):
     return cond.where(self, self.const_like(Invalid))
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
-    return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
+    return self.src[1] if self.op is Ops.WHERE and self.src[2].is_invalid else self
   def get_valid(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
-    return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(self.arg is not Invalid)
+    return self.src[0] if self.op is Ops.WHERE and self.src[2].is_invalid else UOp.const(not self.is_invalid)
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
     if isinstance(arg, Ops): arg = (arg, 0)
@@ -843,9 +819,9 @@ class UOp(RandMixin):
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
-    if self.op is Ops.CONST: return (self.arg,)
+    if self.op is Ops.CONST: return (self.val,)
     if self.op is not Ops.STACK: return (ssimplify(self),)
-    return tuple(s.arg if s.op is Ops.CONST else ssimplify(s) for s in self.src)
+    return tuple(s.val if s.op is Ops.CONST else ssimplify(s) for s in self.src)
 
   @property
   def marg(self) -> Any: return self._get_cached("marg", UOp._marg_uncached)
@@ -976,7 +952,7 @@ class UOp(RandMixin):
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
-    return out.arg if out.op is Ops.CONST and isinstance(out.arg, int) else None
+    return out.val if out.op is Ops.CONST and isinstance(out.val, int) else None
 
   def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/UNSHARD -> BUFFER chain)."""
@@ -1008,7 +984,7 @@ class UOp(RandMixin):
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
-      offset = self.src[1].arg
+      offset = self.src[1].val
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
@@ -1065,30 +1041,29 @@ class UOp(RandMixin):
     return UOp(Ops.BIND, src=(self, uval))
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.PARAM and self.src[1].op is Ops.CONST, f"can't unbind {self}"
-    return self.src[0], self.src[1].arg
+    return self.src[0], self.src[1].val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
-  @property
-  def val(self) -> int: return self.unbind()[1]
   def variables(self) -> list[Variable]:
-    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU},
-                  key=lambda v: v.expr)
+    return sorted({x if x.op is Ops.PARAM else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype)
+                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or x.op is Ops.PARAM
+                   and x.arg.addrspace is AddrSpace.ALU}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
   def const_factor(self) -> int:
     """largest known int that divides self"""
     # TODO: for negatives it's not the largest
-    if self.op is Ops.CONST: return self.arg
+    if self.op is Ops.CONST: return self.val
     if self.op is Ops.STACK: return math.gcd(*[x.const_factor() for x in self.src])
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-    if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
+    if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
     if self.op is Ops.PARAM and self.arg.multiple_of is not None: return self.arg.multiple_of
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
-    if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
+    if self.op is Ops.CONST: return self.const_like(self.val//v) if self.val%v == 0 else None
     if self.op is Ops.STACK:
       srcs = tuple(s.divides(v) for s in self.src)
       return None if any(s is None for s in srcs) else UOp(Ops.STACK, src=cast(tuple[UOp, ...], srcs))
@@ -1099,7 +1074,7 @@ class UOp(RandMixin):
     if self.op is Ops.PARAM and self.arg.multiple_of is not None: return self // v if self.arg.multiple_of%v == 0 else None
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
-    return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
+    return (self.src[0], self.src[1].val) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
   def gcd(*uops: UOp) -> UOp:
     terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in uops])
@@ -1107,7 +1082,7 @@ class UOp(RandMixin):
     return math.prod([*count.elements(), terms[0].const_like(math.gcd(*factors))])  # put the const at the top
   def divide_exact(self, v:UOp) -> UOp|None:
     if self is v: return self.const_like(1)
-    if v.op is Ops.CONST: return self.divides(v.arg)
+    if v.op is Ops.CONST: return self.divides(v.val)
     if self.op is Ops.ADD: return None if (s0:=self.src[0].divide_exact(v)) is None or (s1:=self.src[1].divide_exact(v)) is None else s0+s1
     if self.op is Ops.MUL:
       (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
@@ -1166,7 +1141,7 @@ class UOp(RandMixin):
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
+    if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
       # a cast to unsigned keeps exact bounds when the source fits
@@ -1750,37 +1725,6 @@ class RewriteContext:
         self.replace[n] = new_n
     return self.replace.get(root, root)
 
-  def _recursive_rewrite(self, n:UOp, active:set[UOp]) -> UOp:
-    if (cached:=self.replace.get(n)) is not None: return cached
-    if n in active: raise RuntimeError("infinite loop in graph_rewrite")
-    active.add(n)
-    new_n = n
-    if self.bpm is not None:
-      test_n: UOp|None = n
-      seen:set[UOp] = set()
-      try:
-        while test_n is not None:
-          if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-          seen.add(test_n)
-          new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
-      except BottomUpGate:
-        ret = unwrap(test_n)
-        self.replace[n] = ret
-        active.remove(n)
-        return ret
-    if not self.enter_calls and (new_n.op is Ops.FUNCTION or (new_n.op is Ops.CALL and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
-      self.replace[new_n.src[0]] = new_n.src[0]
-    new_src = tuple(self._recursive_rewrite(x, active) for x in new_n.src)
-    if new_src != new_n.src:
-      # A rebuilt parent is a new UOp and must go through the complete pipeline,
-      # including bottom-up rules, just like stage 0 in the iterative driver.
-      new_n = self._recursive_rewrite(UOp(new_n.op, _rebuild_dtype(new_n, new_src), new_src, new_n.arg, new_n.tag), active)
-    elif self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None:
-      new_n = self._recursive_rewrite(rewritten, active)
-    self.replace[n] = new_n
-    active.remove(n)
-    return new_n
-
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
@@ -1851,19 +1795,20 @@ class RewriteContext:
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
-  # Context-free rewrites are pure functions of the interned UOp. Reuse their node
-  # results across kernels within this process; nothing is persisted between runs.
-  cache = None if ctx is not None or walk or bpm is not None else pm.rewrite_caches.setdefault((bottom_up, enter_calls), {})
+  cacheable_codegen = {"early movement ops", "load collapse", "initial symbolic", "postopt symbolic", "*** expand broadcast / add loads",
+                       "simplify load/store indexing", "early symbolic", "extra symbolic", "final symbolic", "cast float alu operands",
+                       "early decompositions", "move gates from index", "add implicit barriers"}
+  # Limit cross-kernel memoization to context-free codegen passes; schedule rewrites can depend on surrounding CALL/device state.
+  cache = None if ctx is not None or walk or bpm is not None or name not in cacheable_codegen \
+    else pm.rewrite_caches.setdefault((bottom_up, enter_calls), {})
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, cache)
-  if walk: return rewrite_ctx.walk_rewrite(sink)
-  if ctx is None and bpm is None: return rewrite_ctx._recursive_rewrite(sink, set())
-  return rewrite_ctx.unified_rewrite(sink)
+  return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
   # TODO: these ops keep their stored dtype until dtype_from_uop works
-  if n.op in {Ops.INS, Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
-     all(a.dtype is b.dtype or b.base.arg is Invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if n.op in {Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
+     all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
@@ -1904,7 +1849,7 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
 
 def commit_weak(s:UOp, dt:DType) -> UOp:
   # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
-  return UOp.const(s.arg, dt) if s.op is Ops.CONST else s.cast(dt)
+  return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None

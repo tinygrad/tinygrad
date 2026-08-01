@@ -22,7 +22,7 @@ class TestLinearizerFailure(unittest.TestCase):
     c8 = UOp.range(UOp.const(16), 2007, AxisType.GROUP_REDUCE)
     c9 = UOp.param(2, dtypes.uchar, (47040000,))
     c10 = c9.index((((c3*UOp.const(4704000))+c2)+(c6*UOp.const(784))).valid(UOp.const(True)))
-    c11 = c5.alu(Ops.CMPNE, ((((c3*UOp.const(6000))+c6)+((c7*UOp.const(16))+c8)).alu(Ops.CMPLT, UOp.const(59999)).where(UOp.const(0, dtypes.int), UOp.const(1, dtypes.int)).reduce(c7, c8, arg=Ops.ADD)+UOp.const(-1, dtypes.int))).where(UOp.const(0, dtypes.uchar), c10).reduce(c6, arg=Ops.ADD)
+    c11 = c5.alu(Ops.CMPNE, ((((c3*UOp.const(6000))+c6)+((c7*UOp.const(16))+c8)).alu(Ops.CMPLT, UOp.const(59999)).where(UOp.const(0).cast(dtypes.int), UOp.const(1).cast(dtypes.int)).reduce(c7, c8, arg=Ops.ADD)+UOp.const(-1).cast(dtypes.int))).where(UOp.const(0).cast(dtypes.uchar), c10).reduce(c6, arg=Ops.ADD)
     c12 = c0.index((((c1*UOp.const(7840))+(c2*UOp.const(10)))+c3).valid(UOp.const(True))).store(c11).end(c1, c2, c3)
     ast = c12.sink(arg=KernelInfo(name='test', axis_types=(), dont_use_locals=False, applied_opts=(Opt(op=OptOps.GROUP, axis=1, arg=16),), opts_to_apply=None))
     _ = to_program(ast, Device["METAL"].renderer)

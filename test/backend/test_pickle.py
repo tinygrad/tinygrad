@@ -13,7 +13,7 @@ class TestPickle(unittest.TestCase):
 
   def test_pickle_pattern_matcher(self):
     pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
-    sink = UOp.const(2, dtypes.int)
+    sink = UOp.const(2)
     tt = pm.rewrite(sink)
     pm_str = pickle.dumps(pm)
     pm2 = pickle.loads(pm_str)

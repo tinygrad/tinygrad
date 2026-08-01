@@ -1,7 +1,6 @@
 import functools, time
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
@@ -22,8 +21,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
   # invalids() returns fresh write-only scratch: a clone storing CONST(Invalid)
   # don't capture it as an input; only skip fresh buffers, not realized ones
   return {u.src[0].buf_uop for u in uret.backward_slice_with_self
-          if u.op is Ops.STORE and u.src[1].base.op is Ops.CONST and u.src[1].base.arg is Invalid
-          and not u.src[0].buf_uop.is_realized}
+          if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):

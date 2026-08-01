@@ -81,6 +81,13 @@ class TestTensorCores(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_nested_reduce(self):
+    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
+    a, b = Tensor.empty(tc.dims[1]*2, tc.dims[2], dtype=tc.dtype_in), Tensor.empty(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
+    ast = replace_opts(a.matmul(b, dtype=tc.dtype_out).sum(0).schedule_linear().src[-1].src[0], [Opt(OptOps.TC, 0, (-1, 0, 1))])
+    with self.assertRaises(KernelOptError): to_program(ast, Device[Device.DEFAULT].renderer)
+
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")

@@ -5,15 +5,15 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
 
 class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):
-    self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(1.0, dtypes.float32), UOp.const(1.0, dtypes.float16)), None), dtypes.float32)
-    self.assertEqual(dtype_from_uop(Ops.MUL, (UOp.const(1, dtypes.int8), UOp.const(1, dtypes.int32)), None), dtypes.int32)
+    self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(1.0).cast(dtypes.float32), UOp.const(1.0).cast(dtypes.float16)), None), dtypes.float32)
+    self.assertEqual(dtype_from_uop(Ops.MUL, (UOp.const(1).cast(dtypes.int8), UOp.const(1).cast(dtypes.int32)), None), dtypes.int32)
 
   def test_same_dtype_fast_path(self):
     src = (UOp.const(1), UOp.const(2))
@@ -21,7 +21,8 @@ class TestDTypeFromUOp(unittest.TestCase):
 
   def test_where_promotion(self):
     cond = UOp.const(True)
-    self.assertEqual(dtype_from_uop(Ops.WHERE, (cond, UOp.const(1.0, dtypes.float32), UOp.const(1.0, dtypes.float16)), None), dtypes.float32)
+    srcs = (cond, UOp.const(1.0).cast(dtypes.float32), UOp.const(1.0).cast(dtypes.float16))
+    self.assertEqual(dtype_from_uop(Ops.WHERE, srcs, None), dtypes.float32)
     idx = UOp.range(4, 0)
     self.assertEqual(idx.valid(idx < 4).dtype, dtypes.weakint)
 
@@ -44,6 +45,12 @@ class TestDTypeFromUOp(unittest.TestCase):
       with self.assertRaises(RuntimeError): type_verify(UOp.const(value, weak).sink(), spec_program)
       type_verify(UOp.const(value, concrete).sink(), spec_program)
 
+  def test_invalid_stated_dtype(self):
+    # UOp.const normalizes a stated dtype away (const_like/full pass their position's); the core constructor does not,
+    # and the spec is what rejects a non-bool Invalid
+    self.assertIs(UOp.const(Invalid, dtypes.float32), UOp.invalid())
+    with self.assertRaises(RuntimeError): type_verify(UOp(Ops.CONST, dtypes.float32, arg=Invalid), spec_shared)
+
   def test_invalid_dtype_and_consumers(self):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
@@ -51,7 +58,7 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
-      if u.arg is Invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
+      if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
     for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
@@ -110,6 +117,20 @@ class TestSafeCast(unittest.TestCase):
     a = UOp.variable("a", -10, 10, dtype=dtypes.int32)
     self.assertEqual(a.cast(dtypes.int8).cast(dtypes.int64).simplify(), a.cast(dtypes.int64))
     self.assertEqual(a.cast(dtypes.int8).cast(dtypes.float).simplify(), a.cast(dtypes.float))
+
+class TestConstFloatEq(unittest.TestCase):
+  def test_nan_eq_ne_agree(self):
+    nan = dtypes.float32.const(math.nan)
+    self.assertTrue(nan == math.nan)
+    self.assertFalse(nan != math.nan)  # float.__ne__ would say True here
+    self.assertFalse(nan == Invalid)
+    self.assertTrue(nan != Invalid)    # __ne__ must defer to the reflected eq, not swallow NotImplemented
+
+  def test_matchers_agree_on_nan(self):
+    n = UOp.const(math.nan, dtypes.float32)
+    for compiled in (False, True):
+      pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
+      self.assertTrue(pm.rewrite(n), f"{compiled=}")
 
 class TestExecALU(unittest.TestCase):
   def test_sqrt(self):
@@ -200,7 +221,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gidx0 = UOp.special(4, 'gidx0')
     gate = gidx0<UOp.const(1)
     idx = UOp(Ops.INDEX, src=(gmem, (gidx0 * UOp.const(2)).valid(gate)))
-    val = UOp.const(42.0, dtypes.float)
+    val = UOp.const(42.0).cast(dtypes.float)
     store = UOp(Ops.STORE, src=(idx, val))
     uops = to_uops_list([store])
     if_uop = next(u for u in uops if u.op is Ops.IF)
@@ -218,7 +239,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx = gidx0 * UOp.const(2)
     idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gidx0<UOp.const(1))))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx))
-    val = UOp.const(42.0, dtypes.float)
+    val = UOp.const(42.0).cast(dtypes.float)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
     if_uop = next(u for u in uops if u.op is Ops.IF)
@@ -239,7 +260,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gate = gidx0<UOp.const(1)
     idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
     idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
-    val = UOp.const(42.0, dtypes.float)
+    val = UOp.const(42.0).cast(dtypes.float)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
     ifs = [u for u in uops if u.op is Ops.IF]
@@ -257,7 +278,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, (3,))
-      c = UOp.const(2, dt)
+      c = UOp.const(2).cast(dt)
       l = g.index(c)
       a = UOp(Ops.CDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -270,7 +291,7 @@ class TestFastIdiv(unittest.TestCase):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, (9,))
-      c = UOp.const(8, dt)
+      c = UOp.const(8).cast(dt)
       a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
@@ -282,7 +303,7 @@ class TestFastIdiv(unittest.TestCase):
     # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
     for dt in (dtypes.uint32, dtypes.uint64):
       g = UOp.param(0, dt, (3,))
-      c = UOp.const(2, dt)
+      c = UOp.const(2).cast(dt)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
@@ -294,7 +315,7 @@ class TestFastIdiv(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3, dtypes.uint)
+    c = UOp.const(3).cast(dtypes.uint)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -314,7 +335,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_bounded_numerator_zero(self):
     x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
     for val in range(2):
-      self.assertEqual(eval_uop(x.alu(Ops.CDIV, x.const_like(3)), vals=(val,)), cdiv(val, 3))
+      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3).cast(x.dtype)), vals=(val,)), cdiv(val, 3))
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
@@ -329,7 +350,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
     g = UOp.param(0, dtypes.uint32, (8,))
-    c = UOp.const(7, dtypes.uint)
+    c = UOp.const(7).cast(dtypes.uint)
     l = UOp(Ops.LOAD, src=(g.index(c),))
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -340,7 +361,7 @@ class TestFastIdiv(unittest.TestCase):
 
   def test_disable_fast_idiv(self):
     g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3, dtypes.uint)
+    c = UOp.const(3).cast(dtypes.uint)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
@@ -352,8 +373,8 @@ class TestFastIdiv(unittest.TestCase):
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
-    a = UOp.const(2.0, dtypes.float)
-    b = UOp.const(3.0, dtypes.float)
+    a = UOp.const(2.0)
+    b = UOp.const(3.0)
 
     add = UOp(Ops.ADD, src=(a, b))
     mul = UOp(Ops.MUL, src=(a, b))
@@ -368,8 +389,8 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
-    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(8, dtypes.int),), arg='gidx0')
-    self.assertEqual(UOp.const(17, dtypes.int).const_factor(), 17)
+    gidx0 = UOp(Ops.SPECIAL, src=(UOp.const(8),), arg='gidx0')
+    self.assertEqual(UOp.const(17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
@@ -388,26 +409,26 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_const_zero_neg_zero_different(self):
     # -0.0 and 0.0 must be different UOps (for IEEE754 correctness, e.g. 1/-0.0 = -inf)
-    pos_zero = UOp.const(0.0, dtypes.float)
-    neg_zero = UOp.const(-0.0, dtypes.float)
+    pos_zero = UOp.const(0.0)
+    neg_zero = UOp.const(-0.0)
     self.assertIsNot(pos_zero, neg_zero)
     self.assertNotEqual(hash(pos_zero.arg), hash(neg_zero.arg))
 
   def test_const_nan_same(self):
     # nan constants should be deduplicated
-    nan1 = UOp.const(float('nan'), dtypes.float)
-    nan2 = UOp.const(float('nan'), dtypes.float)
+    nan1 = UOp.const(float('nan'))
+    nan2 = UOp.const(float('nan'))
     self.assertIs(nan1, nan2)
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
-    a = UOp.const(2.0, dtypes.float) + UOp.const(3.0, dtypes.float)
+    a = UOp.const(2.0) + UOp.const(3.0)
     for _ in range(20): a = a + a
     assert len(str(a)) < 10_000, "exponential string growth"
     assert str(eval(str(a))) == str(a)
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.STACK, src=tuple(UOp.const(x, dtypes.int) for x in range(4)))
+    vec = UOp(Ops.STACK, src=tuple(UOp.const(x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
   def test_reduceop_arg(self):
@@ -442,16 +463,16 @@ class TestUOpRender(unittest.TestCase):
     u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(0, dtypes.int), UOp.const(0, dtypes.int), UOp.const(0, dtypes.int)))
+    u = UOp(Ops.STACK, src=(UOp.const(0),)*3)
     self.assertEqual(u.render(simplify=False), "{0,0,0}")
   def test_render_vectorize_different(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(0, dtypes.int), UOp.const(1, dtypes.int), UOp.const(2, dtypes.int)))
+    u = UOp(Ops.STACK, src=tuple(UOp.const(i) for i in range(3)))
     self.assertEqual(u.render(simplify=False), "{0,1,2}")
   def test_render_vectorize_same_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(0, dtypes.int), UOp.const(0, dtypes.int), UOp.const(0, dtypes.int)))
+    u = UOp(Ops.STACK, src=(UOp.const(0),)*3)
     self.assertEqual(u.render(), "{0,0,0}")
   def test_render_vectorize_different_simplified(self):
-    u = UOp(Ops.STACK, dtype=dtypes.int, src=(UOp.const(0, dtypes.int), UOp.const(1, dtypes.int), UOp.const(2, dtypes.int)))
+    u = UOp(Ops.STACK, src=tuple(UOp.const(i) for i in range(3)))
     self.assertEqual(u.render(), "{0,1,2}")
 
 class TestContiguousViewOffset(unittest.TestCase):

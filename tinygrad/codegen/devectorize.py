@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.dtype import Invalid, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, GroupOp, shape_to_shape_arg
 
 def _index_scalar(x:UOp, idx_c:tuple[UOp, ...]) -> UOp:
@@ -30,7 +30,7 @@ def _index_scalar(x:UOp, idx_c:tuple[UOp, ...]) -> UOp:
 def do_devectorize_fast(b:UOp) -> UOp|None:
   if (shape:=b._shape) is None: raise RuntimeError(f"shape requested, but {b.op} doesn't have a shape")
   if shape == (): return None
-  if not all(x._shape == shape or x.base.arg is Invalid for x in b.src): return None
+  if not all(x._shape == shape or x.base.is_invalid for x in b.src): return None
   src_info:list[tuple[UOp, UOp]] = []
   for x in b.src: src_info.append((x, x.base))
   src:list[UOp] = []
@@ -38,13 +38,13 @@ def do_devectorize_fast(b:UOp) -> UOp|None:
     for i in range(int(shape[0])):
       idx_c_1:tuple[UOp, ...] = tuple([UOp.const(i, dtypes.int)])
       new_src:list[UOp] = []
-      for x,base in src_info: new_src.append(base if base.arg is Invalid else _index_scalar(x, idx_c_1))
-      src.append(UOp(b.op, None, tuple(new_src), b.arg, b.tag))
+      for x,base in src_info: new_src.append(base if base.is_invalid else _index_scalar(x, idx_c_1))
+      src.append(b.replace(dtype=None, src=tuple(new_src)))
   else:
     for idx in itertools.product(*map(range, shape)):
       idx_c_n:tuple[UOp, ...] = tuple(UOp.const(i, dtypes.int) for i in idx)
       new_src = []
-      for x,base in src_info: new_src.append(base if base.arg is Invalid else _index_scalar(x, idx_c_n))
-      src.append(UOp(b.op, None, tuple(new_src), b.arg, b.tag))
+      for x,base in src_info: new_src.append(base if base.is_invalid else _index_scalar(x, idx_c_n))
+      src.append(b.replace(dtype=None, src=tuple(new_src)))
   if b.op is Ops.STORE: return UOp.group(*src)
   return UOp(Ops.RESHAPE, b.dtype, (UOp(Ops.STACK, b.dtype, tuple(src)), shape_to_shape_arg(shape)))
