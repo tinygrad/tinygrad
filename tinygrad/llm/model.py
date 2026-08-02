@@ -178,9 +178,6 @@ class FFNBlock:
     gate, up = self.ffn_gate(x, prepared), self.ffn_up(x, prepared)
     return self.ffn_down(gate.silu() * up)
 
-  def _normalized_feed_forward(self, x:Tensor) -> Tensor:
-    return self._feed_forward(self.ffn_norm(x))
-
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
   def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
@@ -194,7 +191,7 @@ class FFNBlock:
       @function(precompile=True, allow_implicit=True)
       def _run_stateful(x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None):
         h = x + self._attention(self.attn_norm(x), start_pos, use_flash, kv_len, valid_len)
-        out = (h + self._normalized_feed_forward(h)).contiguous()
+        out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
         assert self.pending_state is not None
         return (out, self.pending_state[0]) if self.pending_recurrent_inplace else (out, *self.pending_state)
       stateful_out = _run_stateful(x, start_pos, valid_len)
@@ -205,7 +202,7 @@ class FFNBlock:
       return Tensor(out.uop.after(recurrent_state.uop.after(*stores)))
     def _run(x:Tensor, start_pos:int|UOp):
       h = x + self._attention(self.attn_norm(x), start_pos, use_flash, kv_len)
-      return (h + self._normalized_feed_forward(h)).contiguous()
+      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return function(precompile=True, allow_implicit=True)(_run)(x, start_pos)
 
 class TransformerBlock(FFNBlock):
@@ -228,9 +225,7 @@ class TransformerBlock(FFNBlock):
     prepared:tuple[Tensor, ...]|None
     prepared = self.attn_q.prepare(x, any(layer.ggml_type in (12, 13) for layer in (self.attn_q, self.attn_k, self.attn_v)))
     q = self.attn_q(x, prepared)
-    if prepared is not None and self.attn_k.ggml_type == self.attn_v.ggml_type == 8:
-      k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
-    else: k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
+    k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
@@ -713,22 +708,11 @@ class Transformer:
   @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
     device = self.token_embd.weight.device
-    direct_capture = not self.has_recurrent_block and all(isinstance(block, TransformerBlock) for block in self.blk)
-    if direct_capture:
-      device = str(self.token_embd.weight.device)
-      direct_capture = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
-
     # Recurrent prefill has one fixed padded shape with symbolic valid length.
     recurrent_chunk = min(chunk_size, 256)
     warm_len = min(recurrent_chunk if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
     if warm_len > 0:
-      if direct_capture:
-        x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=device)
-        for block in self.blk: block._init_state(x)
-        Tensor.realize(*[state for block in self.blk for state in (getattr(block, "cache_kv"), getattr(block, "freqs_cis"))])
-        self.flash_prefill_jit.cnt = 1
-        next(self.generate([0] * warm_len, chunk_size=chunk_size))
-      elif self.has_recurrent_block:
+      if self.has_recurrent_block:
         # State creation must happen outside JIT capture: capturing _init_state makes the first real request
         # reuse initialization buffers instead of the persistent recurrent/KV state.
         x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=device)
@@ -764,10 +748,7 @@ class Transformer:
       v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
       token, temperature = Tensor([[0]], dtype="int32", device=device), Tensor([0.0], device=device)
       for bucket, pos in sorted(bucket_positions.items()):
-        if direct_capture:
-          self.rollout_jits[bucket] = TinyJit(functools.partial(self.forward, kv_len=bucket))
-          self.rollout_jits[bucket].cnt = 1
-        for _ in range(1 if direct_capture else 2):
+        for _ in range(2):
           result = self(token, v_start_pos.bind(pos), temperature)
           assert isinstance(result, Tensor)
           result.realize()
