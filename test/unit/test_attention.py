@@ -2,15 +2,25 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.llm.model import (
-  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
+  GatedDeltaNetBlock, Linear, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
+from tinygrad.llm.gguf import ggml_data_to_tensor
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
   precompute_freqs_cis.cache_clear()
   freqs_cis = precompute_freqs_cis(Hd, start_pos+T)[start_pos:start_pos+T]
   return apply_rope_new(x, freqs_cis)
+
+class TestLinear(unittest.TestCase):
+  def test_recovers_packed_ggml_weight(self):
+    for ggml_type,packed_size in ((13, 176), (14, 210), (23, 136)):
+      packed = Tensor.empty(packed_size+1, dtype=dtypes.uint8, device="CPU")[1:]
+      decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
+      linear = Linear(256, 1, bias=False)
+      self.assertTrue(linear.set_quantized(decoded))
+      self.assertEqual((linear.ggml_type, linear.weight.shape), (ggml_type, (packed_size,)))
 
 class TestAttention(unittest.TestCase):
   def test_apply_rope(self):

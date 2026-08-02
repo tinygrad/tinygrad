@@ -1,8 +1,7 @@
-import functools, io, pathlib, re, struct, weakref
+import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
-from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
@@ -21,13 +20,7 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
-_quantized_tensors:weakref.WeakKeyDictionary[UOp, tuple[UOp, int]] = weakref.WeakKeyDictionary()
-
-def get_ggml_quantization(tensor:Tensor) -> tuple[Tensor, int]|None:
-  if (meta:=_quantized_tensors.get(tensor.uop)) is None: return None
-  return Tensor(meta[0]), meta[1]
-
-def ggml_data_to_tensor(t:Tensor, n:int, ggml_type:int) -> Tensor:
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
@@ -152,14 +145,7 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  state_dict = {}
-  for name, dims, typ, off in t_infos:
-    n, data = prod(dims), tensor[data_start + off:]
-    decoded = ggml_data_to_tensor(data, n, typ).reshape(*reversed(dims))
-    if typ in _GGML_QUANT:
-      block_size, type_size = _GGML_QUANT[typ]
-      _quantized_tensors[decoded.uop] = (data[:n//block_size*type_size].uop, typ)
-    state_dict[name] = decoded
+  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
   return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:

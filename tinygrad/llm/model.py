@@ -4,7 +4,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
 from tinygrad.llm.kernels import amd as llm_amd
-from tinygrad.llm.gguf import get_ggml_quantization, gguf_load
+from tinygrad.llm.gguf import gguf_load
+from tinygrad.helpers import prod
 from tinygrad.uop.ops import resolve, Ops
 
 class Linear(nn.Linear):
@@ -12,10 +13,20 @@ class Linear(nn.Linear):
   ggml_type:int|None
   _raw_uop:UOp|None
   _raw_offset_uop:UOp|None
-  def set_quantized(self, packed:Tensor, ggml_type:int):
+  def set_quantized(self, decoded:Tensor) -> bool:
+    packed = ggml_type = None
+    for typ,(block_size, type_size) in {13:(256, 176), 14:(256, 210), 23:(256, 136)}.items():
+      packed_size = decoded.numel() // block_size * type_size
+      raw = next((u for u in decoded.uop.toposort()
+                  if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) == packed_size), None)
+      if raw is not None:
+        packed, ggml_type = Tensor(raw), typ
+        break
+    if packed is None or ggml_type is None: return False
     self.weight, self.ggml_type = packed.flatten(), ggml_type
     self._raw_uop = self._raw_offset_uop = None
     if ggml_type == 23 and str(packed.device).startswith("AMD"): llm_amd.iq4_half_lut(str(packed.device))
+    return True
   def _packed_offset(self) -> Tensor:
     raw, raw_offset = self.weight.uop, 0
     while raw.op in (Ops.BITCAST, Ops.RESHAPE): raw = raw.src[0]
@@ -592,13 +603,10 @@ class Transformer:
       return functools.reduce(lambda obj, part: obj[int(part)] if isinstance(obj, list) else getattr(obj, part), path, model)
     for name, weight in state_dict.items():
       parts = name.split('.')
-      quantization = get_ggml_quantization(weight)
       owner = resolve_owner(parts[:-1]) if parts[-1] == "weight" else None
-      packed = quantization is not None and str(load_device).startswith("AMD") and \
-        isinstance(owner, Linear) and quantization[1] in (13, 14, 23)
+      packed = str(load_device).startswith("AMD") and isinstance(owner, Linear) and owner.set_quantized(weight)
       if packed:
-        assert quantization is not None and isinstance(owner, Linear)
-        owner.set_quantized(*quantization)
+        assert isinstance(owner, Linear)
         packed_layers.append(owner)
         state_dict[name], packed_weights = owner.weight, packed_weights | {name}
 
