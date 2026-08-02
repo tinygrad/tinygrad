@@ -54,7 +54,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
   return freqs.cos().cat(freqs.sin(), dim=-1).clone(device)
 
 class ExpertWeights:
-  """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
+  """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   def __init__(self, num_experts:int, in_features:int, out_features:int):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
@@ -123,15 +123,15 @@ class FFNBlock:
     self.pending_state:tuple[Tensor, Tensor]|None = None
     self.attn_norm, self.ffn_norm = nn.RMSNorm(config.dim, config.norm_eps), nn.RMSNorm(config.dim, config.norm_eps)
     if config.num_experts > 0:
-      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)
+      self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=False)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
       if config.shared_expert_dim > 0:
-        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
+        self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = Linear(config.shared_expert_dim, config.dim, bias=False)
         if config.shared_expert_gate: self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
     else:
       self.ffn_gate, self.ffn_up = Linear(config.dim, config.hidden_dim, bias=False), Linear(config.dim, config.hidden_dim, bias=False)
@@ -283,16 +283,16 @@ class MLATransformerBlock(FFNBlock):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
     if config.q_lora_rank > 0:
-      self.attn_q_a = nn.Linear(config.dim, config.q_lora_rank, bias=False)
+      self.attn_q_a = Linear(config.dim, config.q_lora_rank, bias=False)
       self.attn_q_a_norm = nn.RMSNorm(config.q_lora_rank, config.norm_eps)
-      self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
+      self.attn_q_b = Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
     else:
-      self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
-    self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
+      self.attn_q = Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+    self.attn_kv_a_mqa = Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
-    self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+    self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
                  valid_len:int|UOp|None=None) -> Tensor:
