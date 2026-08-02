@@ -97,7 +97,7 @@ class TestViz(unittest.TestCase):
     # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
       assert x.val <= 3
-      return x.replace(arg=x.val+1)
+      return UOp.const(x.val+1, x.dtype)
     err_pm = PatternMatcher([(UPat.cvar("x"), count_3),])
     a = UOp.const(1)
     with save_viz() as viz:
@@ -202,8 +202,8 @@ class TestViz(unittest.TestCase):
     a = UOp.const(3)
     b = UOp.const(4)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with save_viz() as viz:
       # use smaller stack limit for faster test (default is 250000)
@@ -224,7 +224,7 @@ class TestViz(unittest.TestCase):
     list(viz.get_details(0, 0))
 
   def test_enter_calls_rewrite(self):
-    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
+    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
     with save_viz() as viz:
       inner = UOp.const(3)
       call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))

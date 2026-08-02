@@ -27,7 +27,7 @@ class InvalidType:
   def __new__(cls):
     if cls._instance is None: cls._instance = object.__new__(cls)
     return cls._instance
-  def __eq__(self, other): return self is other
+  def __eq__(self, other): return self is other if isinstance(other, InvalidType) else NotImplemented  # foreign types get the reflected eq
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
