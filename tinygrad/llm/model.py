@@ -650,6 +650,7 @@ class Transformer:
 
   def _checkpoint_state(self, restore:bool=False):
     states = [getattr(block, name) for block in self.blk for name in ("conv_state", "recurrent_state") if hasattr(block, name)]
+    if not states: return
     if not self._state_checkpoint: self._state_checkpoint = [Tensor.zeros_like(state).contiguous().realize() for state in states]
     dst, src = (states, self._state_checkpoint) if restore else (self._state_checkpoint, states)
     Tensor.realize(*(d.assign(s) for d,s in zip(dst, src)))
