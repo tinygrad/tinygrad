@@ -1,8 +1,25 @@
 import unittest, array, time
 from tinygrad.helpers import mv_address
 from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import VirtMapping
+from tinygrad.runtime.support.system import PCIIfaceBase
 from tinygrad.runtime.support.usb import USBMMIOInterface
 from test.mockgpu.usb import MockUSB
+
+class TestPCIIface(unittest.TestCase):
+  def test_sysmem_mapping_respects_uncached(self):
+    class MM:
+      def alloc_vaddr(self, size, align): return 0x10000
+      def map_range(self, vaddr, size, paddrs, aspace, uncached=False, snooped=False):
+        return VirtMapping(vaddr, size, paddrs, aspace, uncached, snooped)
+    class PCI:
+      def bar_info(self, bar): return 0, 256 << 20
+      def alloc_sysmem(self, size, **kwargs): return memoryview(bytearray(size)), [0x20000]
+    iface = PCIIfaceBase.__new__(PCIIfaceBase)
+    iface.dev, iface.vram_bar, iface.pci_dev = None, 0, PCI()
+    iface.dev_impl = type("DevImpl", (), {"mm": MM()})()
+    for uncached in (False, True):
+      with self.subTest(uncached=uncached): self.assertEqual(iface.alloc(4096, host=True, uncached=uncached).meta.mapping.uncached, uncached)
 
 class TestHCQIface(unittest.TestCase):
   def setUp(self):

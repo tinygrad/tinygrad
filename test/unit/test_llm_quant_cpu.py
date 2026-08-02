@@ -3,6 +3,7 @@ import numpy as np
 
 from tinygrad import Device, Tensor, TinyJit, UOp, dtypes, nn
 from tinygrad.llm.gguf import _GGML_QUANT, ggml_data_to_tensor
+from tinygrad.llm.kernels import amd as llm_amd
 from tinygrad.llm.kernels.cpu import (attention_decode, attention_prefill, causal_conv_silu, expert_pair, expert_silu,
                               expert_weighted_sum, f16_linear,
                               f16_matvec, gated_delta, gated_delta_prefill, gated_delta_q8, gdn_qkv, iq3_repack, moe_ffn, q6_argmax, q8_batched_pair,
@@ -11,7 +12,7 @@ from tinygrad.llm.kernels.cpu import (attention_decode, attention_prefill, causa
                               silu, silu_mul, uop_attention_prefill, uop_f16_matvec, uop_linear, uop_moe_ffn, uop_q8_linear_pair,
                               uop_q8_prequant_linear, uop_expert_silu_weighted, weighted_sum)
 from tinygrad.llm.kernels.cpu import _dot_bytes_ptr, _dot_nibbles_ptr
-from tinygrad.llm.model import biased_sigmoid_topk, pairwise_topk, ExpertWeights, FFNBlock, Linear, Transformer, TransformerConfig
+from tinygrad.llm.model import biased_sigmoid_topk, pairwise_topk, Embedding, ExpertWeights, FFNBlock, Linear, Transformer, TransformerConfig
 from tinygrad.uop.ops import KernelInfo
 
 
@@ -41,6 +42,106 @@ def random_packed(rng:np.random.Generator, ggml_type:int, elements:int) -> np.nd
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires DEV=AMD")
 class TestLLMQuantAMD(unittest.TestCase):
+  @staticmethod
+  def assert_q8_equal(result:tuple[Tensor, Tensor, Tensor], expected:np.ndarray):
+    grouped = expected.reshape(expected.shape[0], -1, 32)
+    scale = np.maximum(np.max(np.abs(grouped), axis=-1) / 127, 1e-8)
+    quant = np.clip(np.rint(grouped / scale[..., None]), -127, 127).astype(np.int8)
+    np.testing.assert_equal(result[0].numpy().view(np.int8).reshape(grouped.shape), quant)
+    np.testing.assert_allclose(result[1].numpy(), scale, rtol=1e-6, atol=1e-8)
+    np.testing.assert_equal(result[2].numpy(), quant.astype(np.int32).sum(-1))
+
+  def test_gated_delta_decode_matches_reference(self):
+    rng = np.random.default_rng(39)
+    batch, heads, dim = 1, 2, 128
+    q, k, v = [rng.standard_normal((batch, heads, dim), dtype=np.float32) for _ in range(3)]
+    beta, alpha = rng.random((batch, heads), dtype=np.float32), rng.uniform(0.9, 1, (batch, heads)).astype(np.float32)
+    state = rng.standard_normal((batch, heads, dim, dim), dtype=np.float32).astype(np.float16)
+    state_k, state_q = np.einsum("bhij,bhj->bhi", state, k), np.einsum("bhij,bhj->bhi", state, q)
+    delta = (v - state_k * alpha[..., None]) * beta[..., None]
+    expected_core = state_q * alpha[..., None] + delta * np.sum(k*q, axis=-1)[..., None]
+    expected_state = (state * alpha[..., None, None] + delta[..., None] * k[..., None, :]).astype(np.float16)
+    core, next_state = llm_amd.gated_delta_decode(
+      *(Tensor(x, device="AMD") for x in (q, k, v, beta, alpha)), Tensor(state, device="AMD"))
+    Tensor.realize(core, next_state)
+    np.testing.assert_allclose(core.numpy(), expected_core, rtol=2e-4, atol=1e-3)
+    np.testing.assert_allclose(next_state.numpy(), expected_state, rtol=1e-3, atol=4e-3)
+
+  def test_f16_matvec_matches_reference(self):
+    rng, in_features, out_features = np.random.default_rng(38), 512, 13
+    x = rng.standard_normal((1, in_features), dtype=np.float32).astype(np.float16)
+    weight = rng.standard_normal((out_features, in_features), dtype=np.float32).astype(np.float16)
+    got = llm_amd.f16_matvec(Tensor(x, device="AMD"), Tensor(weight, device="AMD")).numpy()
+    np.testing.assert_allclose(got, x.astype(np.float32) @ weight.astype(np.float32).T, rtol=2e-5, atol=2e-4)
+
+  def test_fused_rmsnorm_quantization_matches_reference(self):
+    rng, eps = np.random.default_rng(37), 1e-6
+    x = rng.standard_normal((1, 256), dtype=np.float32)
+    weight = rng.standard_normal((256,), dtype=np.float32).astype(np.float16)
+    normalized = x / np.sqrt(np.mean(x*x, axis=-1, keepdims=True) + eps) * weight
+    self.assert_q8_equal(llm_amd.q8_rmsnorm(Tensor(x, device="AMD"), Tensor(weight, device="AMD"), eps), normalized)
+
+    core = rng.standard_normal((1, 2, 128), dtype=np.float32)
+    gate = rng.standard_normal((1, 1, 2, 128), dtype=np.float32)
+    head_norm = core / np.sqrt(np.mean(core*core, axis=-1, keepdims=True) + eps) * weight[:128]
+    expected = head_norm * gate.reshape(1, 2, 128) / (1 + np.exp(-gate.reshape(1, 2, 128)))
+    self.assert_q8_equal(llm_amd.q8_gated_rmsnorm(*(Tensor(v, device="AMD") for v in (core, gate, weight[:128])), eps),
+                         expected.reshape(1, -1))
+
+  def test_gated_delta_prefill_matches_sequential_reference(self):
+    rng = np.random.default_rng(36)
+    batch, heads, tokens, dim = 1, 2, 5, 128
+    q, k, v = [rng.standard_normal((batch, heads, tokens, dim), dtype=np.float32) for _ in range(3)]
+    q = q / np.linalg.norm(q, axis=-1, keepdims=True) / np.float32(np.sqrt(dim))
+    k = k / np.linalg.norm(k, axis=-1, keepdims=True)
+    beta, alpha = rng.random((batch, heads, tokens), dtype=np.float32), rng.uniform(0.9, 1, (batch, heads, tokens)).astype(np.float32)
+    state = rng.standard_normal((batch, heads, dim, dim), dtype=np.float32).astype(np.float16)
+    expected_core, expected_state = np.empty_like(q), state.astype(np.float32)
+    for token in range(tokens):
+      state_k = np.einsum("bhij,bhj->bhi", expected_state, k[:, :, token])
+      state_q = np.einsum("bhij,bhj->bhi", expected_state, q[:, :, token])
+      delta = (v[:, :, token] - state_k * alpha[:, :, token, None]) * beta[:, :, token, None]
+      expected_core[:, :, token] = state_q * alpha[:, :, token, None] + delta * np.sum(k[:, :, token] * q[:, :, token], axis=-1)[..., None]
+      expected_state = expected_state * alpha[:, :, token, None, None] + delta[..., None] * k[:, :, token, None, :]
+    core, next_state = llm_amd.gated_delta_prefill(
+      *(Tensor(x, device="AMD") for x in (q, k, v, beta, alpha)), Tensor(state, device="AMD"))
+    np.testing.assert_allclose(core.numpy(), expected_core, rtol=2e-4, atol=1e-3)
+    np.testing.assert_allclose(next_state.numpy(), expected_state.astype(np.float16), rtol=2e-4, atol=1e-3)
+
+  def test_q8_quantize_matches_reference(self):
+    rng, tokens, in_features = np.random.default_rng(35), 3, 256
+    x = rng.standard_normal((tokens, in_features), dtype=np.float32)
+    grouped = x.reshape(tokens, -1, 32)
+    expected_scale = np.maximum(np.max(np.abs(grouped), axis=-1) / 127, 1e-8)
+    expected_quant = np.clip(np.rint(grouped / expected_scale[..., None]), -127, 127).astype(np.int8)
+    quant, scale, group_sum = llm_amd.q8_quantize_sum(Tensor(x, device="AMD"), tokens, in_features)
+    np.testing.assert_equal(quant.numpy().view(np.int8).reshape(grouped.shape), expected_quant)
+    np.testing.assert_allclose(scale.numpy(), expected_scale, rtol=1e-7, atol=0)
+    np.testing.assert_equal(group_sum.numpy(), expected_quant.astype(np.int32).sum(-1))
+
+  def test_q4_embedding_matches_reference(self):
+    rng, vocab_size, embed_size = np.random.default_rng(34), 16, 256
+    raw = random_packed(rng, 12, vocab_size * embed_size)
+    expected = ggml_data_to_tensor(Tensor(raw), vocab_size * embed_size, 12).reshape(vocab_size, embed_size).half()
+    storage = Tensor(np.concatenate((np.zeros(68, dtype=np.uint8), raw)), dtype=dtypes.uint8, device="AMD").realize()
+    embedding = Embedding(vocab_size, embed_size)
+    embedding.set_quantized(storage[68:], 12)
+    idx = np.array([[7, 1, 15], [0, 4, 7]], dtype=np.int32)
+    np.testing.assert_equal(embedding(Tensor(idx, device="AMD")).numpy(), expected.numpy()[idx])
+
+  def test_iq4_lut_is_ready_for_jit_capture(self):
+    rng, in_features, out_features = np.random.default_rng(33), 256, 16
+    raw = random_packed(rng, 23, out_features * in_features)
+    weight = ggml_data_to_tensor(Tensor(raw), out_features * in_features, 23).numpy().reshape(out_features, in_features)
+    llm_amd.iq4_half_lut.cache_clear()
+    layer = Linear(in_features, out_features, bias=False)
+    layer.set_quantized(Tensor(raw, dtype=dtypes.uint8, device="AMD").realize(), 23)
+    @TinyJit
+    def run(x:Tensor): return layer(x).realize()
+    x = rng.standard_normal((16, in_features), dtype=np.float32)
+    expected = x.astype(np.float16).astype(np.float32) @ weight.astype(np.float16).astype(np.float32).T
+    for _ in range(2): np.testing.assert_allclose(run(Tensor(x, device="AMD")).numpy(), expected, rtol=1e-5, atol=2e-3)
+
   def test_packed_linear_offset_matches_reference(self):
     rng = np.random.default_rng(32)
     for ggml_type,in_features in ((8, 256), (12, 256), (13, 256), (14, 256), (23, 256)):
