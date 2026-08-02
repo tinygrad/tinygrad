@@ -6,7 +6,7 @@ from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.llm.gguf import _GGML_QUANT
 if TYPE_CHECKING:
-  from tinygrad.llm.model import Embedding, Linear
+  from tinygrad.llm.model import Linear
 
 BLOCK_M, BLOCK_N, DECODE_HEAD_TILE, WARP_SIZE = 32, 32, 8, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
@@ -433,40 +433,6 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   return Tensor(srcs[0].after(out)), Tensor(srcs[1].after(out))
 
 @functools.cache
-def _q4_embedding_kernel(out:UOp, raw:UOp, idx:UOp, raw_offset:UOp, embed_size:int) -> UOp:
-  token_count = math.prod(idx.shape)
-  out, idx, raw_offset = out.reshape(token_count, embed_size), idx.flatten(), raw_offset.cast(dtypes.uint64)
-  token, group = UOp.range(token_count, 0), UOp.range(embed_size // 32, 1)
-  lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
-  block, subgroup = group // 8, group % 8
-  type_words, row_words = _GGML_QUANT[12][1] // 4, embed_size // 256 * (_GGML_QUANT[12][1] // 4)
-  base = raw_offset + idx[token].cast(dtypes.uint64) * row_words + block * type_words
-  def load_byte(byte_offset:UOp) -> UOp:
-    return (raw[base + byte_offset // 4] >> ((byte_offset & 3) * 8).cast(dtypes.uint32)) & 255
-  scale = (subgroup < 4).where(load_byte(4 + subgroup) & 63,
-    (load_byte(8 + subgroup) & 15) | ((load_byte(subgroup) >> 6) << 4)).float()
-  minimum = (subgroup < 4).where(load_byte(8 + subgroup) & 63,
-    (load_byte(8 + subgroup) >> 4) | ((load_byte(4 + subgroup) >> 6) << 4)).float()
-  packed = raw[base + 4 + (subgroup // 2) * 8 + lane // 4]
-  q = ((packed >> ((subgroup & 1) * 4).cast(dtypes.uint32)) >> ((lane % 4) * 8).cast(dtypes.uint32)) & 15
-  scales = raw[base]
-  d = (scales & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
-  dmin = (scales >> 16).cast(dtypes.uint16).bitcast(dtypes.float16).float()
-  value = (q.float() * d * scale - dmin * minimum).cast(dtypes.float16)
-  return out[token, group*32+lane].store(value).end(token, group, lane).sink(
-    arg=KernelInfo(name="embedding_q4_k", opts_to_apply=()))
-
-def q4_embedding(layer:Embedding, idx:Tensor) -> Tensor:
-  if layer._raw_uop is None: layer._prepare_packed()
-  assert layer._raw_uop is not None and layer._raw_offset_uop is not None
-  out = Tensor.empty(*idx.shape, layer.embed_size, dtype=dtypes.float16, device=idx.device)
-  raw = layer._raw_uop.bitcast(dtypes.uint32)
-  srcs = (out.uop, raw, idx.contiguous().uop, layer._raw_offset_uop)
-  params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-  kernel = _q4_embedding_kernel(params[0], params[1], params[2], params[3], layer.embed_size).call(*srcs)
-  return Tensor(srcs[0].after(kernel))
-
-@functools.cache
 def _qk_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xsum:UOp, out_features:int, in_features:int,
                       raw_offset:int|UOp=0) -> UOp:
   if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
@@ -725,7 +691,6 @@ def q8_linear(layer:Linear, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> 
   else:
     xq, xd = prepared[:2] if prepared is not None else q8_quantize(x, tokens, layer.in_features)
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device)
-  if layer._raw_uop is None: layer._prepare_packed()
   assert layer._raw_uop is not None and layer._raw_offset_uop is not None
   if layer.ggml_type == 13:
     raw_words = layer._raw_uop.bitcast(dtypes.uint32)

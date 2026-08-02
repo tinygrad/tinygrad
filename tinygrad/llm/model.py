@@ -10,10 +10,9 @@ from tinygrad.uop.ops import resolve, Ops
 
 class PackedWeight:
   weight:Tensor
-  def _init_packed(self):
-    self.ggml_type:int|None = None
-    self._raw_uop:UOp|None = None
-    self._raw_offset_uop:UOp|None = None
+  ggml_type:int|None
+  _raw_uop:UOp|None
+  _raw_offset_uop:UOp|None
   def set_quantized(self, packed:Tensor, ggml_type:int):
     self.weight, self.ggml_type = packed.flatten(), ggml_type
     self._raw_uop = self._raw_offset_uop = None
@@ -28,9 +27,6 @@ class PackedWeight:
     assert raw_offset % 4 == 0 and raw.dtype == dtypes.uint8
     self._raw_uop = raw
     return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
-  def _prepare_packed(self):
-    self._raw_offset_uop = self._packed_offset().realize().uop
-
 class Linear(nn.Linear, PackedWeight):
   def __init__(self, in_features:int, out_features:int, bias=True):
     # GGUF loading replaces every LLM weight. Lazy zeros avoid constructing hundreds of random-init graphs first,
@@ -38,7 +34,7 @@ class Linear(nn.Linear, PackedWeight):
     self.weight = Tensor.zeros(out_features, in_features)
     self.bias = Tensor.zeros(out_features) if bias else None
     self.in_features, self.out_features = in_features, out_features
-    self._init_packed()
+    self.ggml_type, self._raw_uop, self._raw_offset_uop = None, None, None
   def prepare(self, x:Tensor, with_sum:bool=False) -> tuple[Tensor, ...]|None:
     if (with_sum or self.ggml_type == 13) and self.ggml_type in (13, 14, 23) and \
        str(self.weight.device).startswith("AMD"):
@@ -49,15 +45,6 @@ class Linear(nn.Linear, PackedWeight):
     if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
       return llm_amd.q8_linear(self, x, prepared)
     return super().__call__(x)
-
-class Embedding(nn.Embedding, PackedWeight):
-  def __init__(self, vocab_size:int, embed_size:int):
-    self.weight = Tensor.zeros(vocab_size, embed_size)
-    self.vocab_size, self.embed_size = vocab_size, embed_size
-    self._init_packed()
-  def __call__(self, idx:Tensor) -> Tensor:
-    if self.ggml_type == 12 and str(self.weight.device).startswith("AMD"): return llm_amd.q4_embedding(self, idx)
-    return super().__call__(idx)
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -217,7 +204,7 @@ class TransformerBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
                  valid_len:int|UOp|None=None) -> Tensor:
     prepared:tuple[Tensor, ...]|None
-    prepared = self.attn_q.prepare(x, any(layer.ggml_type in (12, 13) for layer in (self.attn_q, self.attn_k, self.attn_v)))
+    prepared = self.attn_q.prepare(x, any(layer.ggml_type == 13 for layer in (self.attn_q, self.attn_k, self.attn_v)))
     q = self.attn_q(x, prepared)
     k, v = self.attn_k(x, prepared), self.attn_v(x, prepared)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
@@ -404,7 +391,7 @@ class GatedDeltaNetBlock(FFNBlock):
       return self.ssm_out((core * gate).reshape(B, 1, -1).cast(x.dtype))
     if T == 1:
       x = x.half()
-      prepared = self.attn_gate.prepare(x, self.attn_qkv.ggml_type in (12, 13))
+      prepared = self.attn_gate.prepare(x, self.attn_qkv.ggml_type == 13)
       out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
       if self.ssm_beta_alpha_weight is not None:
         beta_alpha = x @ self.ssm_beta_alpha_weight.T
@@ -439,7 +426,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
     assert str(x.device).startswith("AMD"), "batched GatedDeltaNet prefill currently requires AMD"
     x = x.half()
-    prepared = self.attn_gate.prepare(x, self.attn_qkv.ggml_type in (12, 13))
+    prepared = self.attn_gate.prepare(x, self.attn_qkv.ggml_type == 13)
     out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
     if self.ssm_beta_alpha_weight is not None: beta, alpha = (x @ self.ssm_beta_alpha_weight.T).split(self.num_v_heads, dim=-1)
     else: beta, alpha = self.ssm_beta(x, prepared), self.ssm_alpha(x, prepared)
@@ -489,7 +476,7 @@ class Transformer:
       # A full Q8 cache for 262k Qwen leaves no graph workspace on a 24 GB card. Keep two fixed layers host-mapped;
       # this avoids runtime cache growth while leaving the other attention layers resident in VRAM.
       for block in [block for block in self.blk if isinstance(block, TransformerBlock)][-2:]: block.kv_cache_host = True
-    self.token_embd  = Embedding(config.vocab_size, config.dim)
+    self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
@@ -630,8 +617,7 @@ class Transformer:
       quantization = get_ggml_quantization(weight)
       owner = resolve_owner(parts[:-1]) if parts[-1] == "weight" else None
       packed = quantization is not None and str(load_device).startswith("AMD") and \
-        (isinstance(owner, Linear) and quantization[1] in (13, 14, 23) or
-        isinstance(owner, Embedding) and quantization[1] == 12 and str(load_device).startswith("AMD"))
+        isinstance(owner, Linear) and quantization[1] in (13, 14, 23)
       if packed:
         assert quantization is not None and isinstance(owner, PackedWeight)
         owner.set_quantized(*quantization)
@@ -640,7 +626,7 @@ class Transformer:
 
     state_dict = {k:v if k in packed_weights else v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    recurrent_weights = []
+    recurrent_weights:list[Tensor] = []
     for block in model.blk:
       if isinstance(block, GatedDeltaNetBlock) and hasattr(block, "ssm_alpha"):
         if block.ssm_beta.ggml_type is None and block.ssm_alpha.ggml_type is None:
@@ -670,38 +656,28 @@ class Transformer:
 
   @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
+    assert self.has_recurrent_block
     device = self.token_embd.weight.device
-    # Recurrent prefill has one fixed padded shape with symbolic valid length.
-    recurrent_chunk = min(chunk_size, 256)
-    warm_len = min(recurrent_chunk if self.has_recurrent_block else chunk_size * 2, self.max_context - 1)
+    warm_len = min(chunk_size, 256, self.max_context - 1)
     if warm_len > 0:
-      if self.has_recurrent_block:
-        # State creation must happen outside JIT capture: capturing _init_state makes the first real request
-        # reuse initialization buffers instead of the persistent recurrent/KV state.
-        x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=device)
-        for block in self.blk: block._init_state(x)
-        states = [getattr(block, name) for block in self.blk
-                  for name in ("cache_kv", "cache_kv_scale", "freqs_cis", "conv_state", "recurrent_state")
-                  if hasattr(block, name)]
-        Tensor.realize(*states)
-        self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
-        self.recurrent_prefill_jits[(warm_len, False, False)] = self.prefill_jit
-        self.recurrent_prefill_jits[(warm_len, True, False)] = self.flash_prefill_jit
-        decode_len = self.max_context
-        self.rollout_jits[decode_len] = TinyJit(
-          functools.partial(self.forward_recurrent_decode, decode_len=decode_len, sample=False))
-        self.rollout_jits[decode_len].cnt = 1
-        warm = self.generate([0] * warm_len, chunk_size=chunk_size)
-        prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 128)
-        with Context(JIT_BATCH_SIZE=prefill_batch): next(warm)
-        with Context(JIT_BATCH_SIZE=0): next(warm)
-      else:
-        for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
+      # State creation must happen outside JIT capture so the first request uses persistent state buffers.
+      x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=device)
+      for block in self.blk: block._init_state(x)
+      states = [getattr(block, name) for block in self.blk
+                for name in ("cache_kv", "cache_kv_scale", "freqs_cis", "conv_state", "recurrent_state") if hasattr(block, name)]
+      Tensor.realize(*states)
+      self.flash_prefill_jit.cnt = 1
+      self.recurrent_prefill_jits[(warm_len, True, False)] = self.flash_prefill_jit
+      decode_len = self.max_context
+      self.rollout_jits[decode_len] = TinyJit(functools.partial(self.forward_recurrent_decode, decode_len=decode_len, sample=False))
+      self.rollout_jits[decode_len].cnt = 1
+      warm = self.generate([0] * warm_len, chunk_size=chunk_size)
+      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 128)): next(warm)
+      with Context(JIT_BATCH_SIZE=0): next(warm)
 
     if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
-    if self.has_recurrent_block:
-      self._state_checkpoint_pos = 0
-      self._checkpoint_state()
+    self._state_checkpoint_pos = 0
+    self._checkpoint_state()
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
