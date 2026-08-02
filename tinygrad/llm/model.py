@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -12,7 +13,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
   return freqs.cos().cat(freqs.sin(), dim=-1).clone(device)
 
 class ExpertWeights:
-  """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
+  """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   def __init__(self, num_experts:int, in_features:int, out_features:int):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
@@ -83,20 +84,20 @@ class FFNBlock:
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
-      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
+      self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=False)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
       if config.shared_expert_dim > 0:
-        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
+        self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = Linear(config.shared_expert_dim, config.dim, bias=False)
         if config.shared_expert_gate: self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
     else:
-      self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
-      self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
-      self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
+      self.ffn_gate    = Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_up      = Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_down    = Linear(config.hidden_dim, config.dim, bias=False)
 
   def _feed_forward(self, x:Tensor) -> Tensor:
     if hasattr(self, 'ffn_gate_exps'):
@@ -145,10 +146,10 @@ class TransformerBlock(FFNBlock):
     # --- attention projections (all linear, bias-free) ------------------
     q_proj_out       = config.head_dim * config.n_heads * (2 if config.attn_output_gate else 1)
     kv_proj_out      = config.head_dim * config.n_kv_heads
-    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=config.qkv_bias)
-    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
-    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
-    self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
+    self.attn_q      = Linear(config.dim, q_proj_out,  bias=config.qkv_bias)
+    self.attn_k      = Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
+    self.attn_v      = Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
+    self.attn_output = Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -195,16 +196,16 @@ class MLATransformerBlock(FFNBlock):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
     if config.q_lora_rank > 0:
-      self.attn_q_a = nn.Linear(config.dim, config.q_lora_rank, bias=False)
+      self.attn_q_a = Linear(config.dim, config.q_lora_rank, bias=False)
       self.attn_q_a_norm = nn.RMSNorm(config.q_lora_rank, config.norm_eps)
-      self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
+      self.attn_q_b = Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
     else:
-      self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
-    self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
+      self.attn_q = Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+    self.attn_kv_a_mqa = Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
-    self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+    self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -244,18 +245,18 @@ class GatedDeltaNetBlock(FFNBlock):
     assert self.num_v_heads % self.num_k_heads == 0
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
-    self.attn_qkv = nn.Linear(config.dim, self.conv_channels, bias=False)
+    self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
     if ssm.kda:
-      self.ssm_g_a, self.ssm_g_b = nn.Linear(config.dim, self.head_v_dim, bias=False), nn.Linear(self.head_v_dim, ssm.inner_size, bias=False)
-      self.ssm_f_a, self.ssm_f_b = nn.Linear(config.dim, self.head_k_dim, bias=False), nn.Linear(self.head_k_dim, ssm.inner_size, bias=False)
+      self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
+      self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
     else:
-      self.attn_gate = nn.Linear(config.dim, ssm.inner_size, bias=False)
-      self.ssm_alpha = nn.Linear(config.dim, self.num_v_heads, bias=False)
-    self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False)
+      self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
+      self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
+    self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
-    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -314,7 +315,7 @@ class Transformer:
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
+    self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
