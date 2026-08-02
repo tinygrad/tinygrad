@@ -593,7 +593,7 @@ class TestUOpTags(unittest.TestCase):
   def test_inc_by_one(self):
     g = UOp.const(1) + UOp.const(1)
     assert g.ssimplify() == 2
-    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x.replace(arg=x.val+1, tag=1) if x.tag is None else None)])
+    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: UOp.const(x.val+1, x.dtype).rtag(1) if x.tag is None else None)])
     pm_strip_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
     g = graph_rewrite(g, pm_plus_1)
     assert g.ssimplify() == 4
