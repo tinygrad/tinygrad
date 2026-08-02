@@ -42,13 +42,13 @@ class Linear(nn.Linear, PackedWeight):
     self.in_features, self.out_features = in_features, out_features
     self._init_packed()
   def prepare(self, x:Tensor, with_sum:bool=False) -> tuple[Tensor, ...]|None:
-    if (with_sum or self.ggml_type in (12, 13)) and self.ggml_type in (8, 12, 13, 14, 23) and \
+    if (with_sum or self.ggml_type == 13) and self.ggml_type in (13, 14, 23) and \
        str(self.weight.device).startswith("AMD"):
       return llm_amd.q8_quantize_sum(x, int(x.numel()) // self.in_features, self.in_features)
     return llm_amd.q8_quantize(x, int(x.numel()) // self.in_features, self.in_features) \
-      if self.ggml_type in (8, 14, 23) and str(self.weight.device).startswith("AMD") else None
+      if self.ggml_type in (14, 23) and str(self.weight.device).startswith("AMD") else None
   def __call__(self, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> Tensor:
-    if self.ggml_type in (8, 12, 13, 14, 23) and str(self.weight.device).startswith("AMD"):
+    if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
       return llm_amd.q8_linear(self, x, prepared)
     if self.ggml_type is not None:
       weight = ggml_data_to_tensor(self.weight, self.out_features * self.in_features, self.ggml_type,
@@ -653,7 +653,7 @@ class Transformer:
       quantization = get_ggml_quantization(weight)
       owner = resolve_owner(parts[:-1]) if parts[-1] == "weight" else None
       packed = quantization is not None and str(load_device).startswith("AMD") and \
-        (isinstance(owner, Linear) and quantization[1] in (8, 12, 13, 14, 23) or
+        (isinstance(owner, Linear) and quantization[1] in (13, 14, 23) or
         isinstance(owner, Embedding) and quantization[1] == 12 and str(load_device).startswith("AMD"))
       if packed:
         assert quantization is not None and isinstance(owner, PackedWeight)
@@ -718,6 +718,7 @@ class Transformer:
     assert self._restore_state_jit is not None
     self._restore_state_jit()
 
+  @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
     device = self.token_embd.weight.device
     direct_capture = not self.has_recurrent_block and all(isinstance(block, TransformerBlock) for block in self.blk)
