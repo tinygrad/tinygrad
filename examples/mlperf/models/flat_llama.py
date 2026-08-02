@@ -48,7 +48,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if MXFP4:
     assert x is not None, "MXFP4 matmul requires an unquantized input"
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
-    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True, mxfp4_a_prequant=x_prequant_mx),)
+    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True),)
     return (x @ w.T,)
   assert w_inv_scale is not None, "fp8 matmul requires w_inv_scale (weights must be stored in fp8 with per-tensor scale)"
   if MXFP8:
@@ -114,12 +114,6 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
                              amax_x2:Tensor, next_amax_x2:Tensor,
                              grad_amax_xw13:Tensor, next_grad_amax_xw13:Tensor,
                              grad_amax_xout:Tensor, next_grad_amax_xout:Tensor):
-  if FUSED_SILU_W13 and MXFP4:
-    from extra.llama_kernels.quantize_mxfp4_fused import silu_mul_quantize_mxfp4
-    act, packed, scale = silu_mul_quantize_mxfp4(x_w13)
-    out, *ret = matmul(act, w2, x_prequant_mx=(packed, scale), amax_x=amax_x2, w_inv_scale=s_2,
-                       grad_amax_state=grad_amax_xout, next_grad_amax_state=next_grad_amax_xout, next_amax_x=next_amax_x2)
-    return out, ret
   if FUSED_SILU_W13 and not MXFP4:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13,

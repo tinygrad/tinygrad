@@ -125,6 +125,26 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
 
+def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
+  M, half_k = a_q.shape
+  N, half_k_b = b_q.shape
+  assert half_k == half_k_b
+  is_multi = isinstance(a_q.device, tuple)
+  reduce_out = is_multi and (a_q.uop.axis == 1 or b_q.uop.axis == 1)
+  if not is_multi: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
+  elif reduce_out:
+    out = Tensor(Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(0), device=a_q.device)
+  elif a_q.uop.axis == 0:
+    out = Tensor(Tensor.invalids(1, M//len(a_q.device), N, dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(1), device=a_q.device)
+  elif b_q.uop.axis == 0:
+    out = Tensor(Tensor.invalids(1, M, N//len(a_q.device), dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(2), device=a_q.device)
+  else: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
+  tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if M % tm == N % tn == 0)
+  out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b,
+                             fxn=functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n))[0]
+  if reduce_out: out = out.sum(0)
+  return out.squeeze(0)
+
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
   *batch, K = x.shape
@@ -392,22 +412,24 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 # ** mxfp4 gemm backward
 
 def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp):
-  # The raw kernel consumes quantized buffers, while the final two inputs retain the BF16 operands for STE gradients.
-  inputs = kernel.src[1:]  # (out, a_q, b_q, scale_a, scale_b, a, w)
-  assert len(inputs) == 7
+  inputs = kernel.src[1:]  # out, row operands/scales, BF16 operands, then column operands/scales
+  assert len(inputs) == 11
   a, w = Tensor(inputs[5], device=inputs[5].device), Tensor(inputs[6], device=inputs[6].device)
+  a_col, scale_a_col = Tensor(inputs[7], device=a.device), Tensor(inputs[8], device=a.device)
+  w_col, scale_w_col = Tensor(inputs[9], device=a.device), Tensor(inputs[10], device=a.device)
   g = Tensor(gradient, device=a.device)[:a.shape[0]].cast(dtypes.bfloat16)
-  grad_a = asm_gemm(g, w, mxfp4=True)
-  a_flat, g_flat = a.reshape(-1, a.shape[-1]), g.reshape(-1, g.shape[-1])
-  grad_w = asm_gemm(g_flat.T, a_flat, mxfp4=True)
-  return (None, None, None, None, None, grad_a.uop, grad_w.uop)
+  from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_dual
+  g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4_dual(g.reshape(-1, g.shape[-1]), shuffle_scales=True)
+  grad_a = _mxfp4_gemm_quantized(g_row, w_col, scale_g_row, scale_w_col).reshape(a.shape)
+  grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
+  return (None, None, None, None, None, grad_a.uop, grad_w.uop, None, None, None, None)
 
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
-             a_pretranspose:Tensor|None=None, mxfp4:bool=False, mxfp4_a_prequant:tuple[Tensor, Tensor]|None=None) -> Tensor:
+             a_pretranspose:Tensor|None=None, mxfp4:bool=False) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   if mxfp4:
     assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
@@ -446,18 +468,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
       fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       w = b.T
-      if k_sharded:
-        assert mxfp4_a_prequant is None, "prequantized mxfp4 K-sharded input is not supported"
-        ndev = len(a.device)
-        a_q, _, scale_a = quantize_mxfp4(a.reshape(batch, M, ndev, K))
-        b_q, _, scale_b = quantize_mxfp4(w.reshape(w.shape[0], ndev, K))
-        b_q = _mxfp4_shuffle_weight(b_q.permute(1, 0, 2))
-      else:
-        if mxfp4_a_prequant is not None: a_q, scale_a = mxfp4_a_prequant
-        else: a_q, _, scale_a = quantize_mxfp4(a.reshape(batch*M, K), (batch, M, K//2), a.uop.axis)
-        b_q, _, scale_b = quantize_mxfp4(w)
-        b_q = _mxfp4_shuffle_weight(b_q)
-      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
+      from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_dual
+      a_q, scale_a, a_col, scale_a_col = quantize_mxfp4_dual(a.reshape(-1, a.shape[-1]), shuffle_col=True)
+      b_q, scale_b, b_col, scale_b_col = quantize_mxfp4_dual(w, shuffle_row=True, shuffle_col=True)
+      out = Tensor.custom_kernel(out, a_q.reshape(*a.shape[:-1], a_q.shape[-1]), b_q, scale_a, scale_b, a, w,
+                                 a_col, scale_a_col, b_col, scale_b_col, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:

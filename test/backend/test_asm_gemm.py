@@ -165,6 +165,20 @@ class TestMXFP4(unittest.TestCase):
     np.testing.assert_array_equal(codes[0, :11], [0, 1, 1, 2, 3, 4, 5, 6, 7, 7, 15])
     np.testing.assert_array_equal(scale.numpy(), np.full((32, 8), 127, dtype=np.uint8))
 
+  def test_dual_quantize(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_dual
+    rng = np.random.default_rng(5)
+    x = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16).contiguous()
+    row_q, row_s, col_q, col_s = quantize_mxfp4_dual(x, use_hadamard=False, shuffle_scales=False)
+    ref_row_q, ref_row_s, _ = quantize_mxfp4(x)
+    ref_col_q, ref_col_s, _ = quantize_mxfp4(x.T.contiguous())
+    Tensor.realize(row_q, row_s, col_q, col_s, ref_row_q, ref_row_s, ref_col_q, ref_col_s)
+    np.testing.assert_array_equal(row_q.numpy(), ref_row_q.numpy())
+    np.testing.assert_array_equal(row_s.numpy(), ref_row_s.numpy())
+    np.testing.assert_array_equal(col_q.numpy(), ref_col_q.numpy())
+    np.testing.assert_array_equal(col_s.numpy(), ref_col_s.numpy())
+
   def test_silu_quantize(self):
     import numpy as np
     from extra.llama_kernels.quantize_mxfp4_fused import silu_mul_quantize_mxfp4
@@ -191,8 +205,9 @@ class TestMXFP4(unittest.TestCase):
     b = Tensor(rng.standard_normal((N, K), dtype=np.float32), dtype=dtypes.bfloat16)
     out = asm_gemm(a, b.T, mxfp4=True).realize()
     # reference gemm
-    a_packed, scale_a, _ = quantize_mxfp4(a)
-    b_packed, scale_b, _ = quantize_mxfp4(b)
+    from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_dual
+    a_packed, scale_a, _, _ = quantize_mxfp4_dual(a, shuffle_scales=False)
+    b_packed, scale_b, _, _ = quantize_mxfp4_dual(b, shuffle_scales=False)
     def unpack(x): return np.stack((x & 0xF, x >> 4), axis=-1).reshape(x.shape[0], -1)
     code_a, code_b = unpack(a_packed.numpy()), unpack(b_packed.numpy())
     lut = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6], dtype=np.float32)

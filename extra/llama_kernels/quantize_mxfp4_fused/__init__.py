@@ -1,10 +1,75 @@
-import functools, math
+import functools, math, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, KernelInfo
-from extra.llama_kernels import alloc_like
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.renderer import Estimates
+from tinygrad.helpers import ceildiv
+from extra.llama_kernels import alloc_like, compile_hip
 
 BLK = 32
 LOG2E = 1.4426950408889634
+
+def _amd_cast_transpose_src() -> str:
+  # Keep AMD's submitted kernel body verbatim, replacing only its templated launch signature with tinygrad's fixed entry point.
+  src = (pathlib.Path(__file__).parent/"cast_transpose_mxfp4_shuffled.hip").read_text()
+  start = src.index("template<")
+  body = src.index(") {", start) + 3
+  end = src.index("\n}\n\n}  // namespace te_mxfp4", body)
+  entry = '''extern "C" __global__ __launch_bounds__(256, 8)
+void quantize_mxfp4_dual(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwise_scale,
+                         uint8_t* __restrict__ colwise_fp4, uint8_t* __restrict__ colwise_scale,
+                         const uint16_t* __restrict__ input) {
+    constexpr bool USE_ROWWISE = true;
+    constexpr bool USE_COLWISE = true;
+    constexpr bool SHUFFLE_SCALES = SHUFFLE_SCALES_VALUE;
+    constexpr bool USE_HADAMARD = USE_HADAMARD_VALUE;
+    constexpr bool SHUFFLE_ROWWISE_FP4 = SHUFFLE_ROWWISE_FP4_VALUE;
+    constexpr bool SHUFFLE_COLWISE_FP4 = SHUFFLE_COLWISE_FP4_VALUE;
+    constexpr int M = M_DIM, N = N_DIM;
+    constexpr int rowwise_scale_stride = N_DIM / 32;
+    constexpr int colwise_scale_stride = M_DIM / 32;
+    constexpr int rowwise_scale_N = N_DIM / 32;
+    constexpr int rowwise_scale_M_pad = M_DIM;
+    constexpr int rowwise_scale_N_pad = N_DIM / 32;
+    constexpr int colwise_scale_M = N_DIM;
+    constexpr int colwise_scale_N = M_DIM / 32;
+    constexpr int colwise_scale_M_pad = N_DIM;
+    constexpr int colwise_scale_N_pad = M_DIM / 32;
+'''
+  return src[:start] + entry + src[body:end] + "\n}\n\n}  // namespace te_mxfp4\n#endif\n"
+
+@functools.cache
+def _custom_quantize_mxfp4_dual(row_q:UOp, row_s:UOp, col_q:UOp, col_s:UOp, x:UOp,
+                                use_hadamard:bool, shuffle_row:bool, shuffle_col:bool, shuffle_scales:bool) -> UOp:
+  M, N = x.shape
+  assert M % 256 == 0 and N % 256 == 0, f"AMD MXFP4 cast-transpose requires multiples of 256, got {x.shape}"
+  threads = UOp.special(256, "lidx0")
+  groups_m, groups_n = UOp.special(ceildiv(M, 128), "gidx0"), UOp.special(ceildiv(N, 64), "gidx1")
+  mem = M*N*2 + M*N + M*N//16
+  sink = UOp.sink(row_q.base, row_s.base, col_q.base, col_s.base, x.base, threads, groups_m, groups_n,
+                  arg=KernelInfo(f"quantize_mxfp4_dual_{M}_{N}", estimates=Estimates(ops=M*N, mem=mem)))
+  src = _amd_cast_transpose_src()
+  defines = [f"-DM_DIM={M}", f"-DN_DIM={N}", f"-DUSE_HADAMARD_VALUE={'true' if use_hadamard else 'false'}",
+             f"-DSHUFFLE_ROWWISE_FP4_VALUE={'true' if shuffle_row else 'false'}",
+             f"-DSHUFFLE_COLWISE_FP4_VALUE={'true' if shuffle_col else 'false'}",
+             f"-DSHUFFLE_SCALES_VALUE={'true' if shuffle_scales else 'false'}"]
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+
+def quantize_mxfp4_dual(x:Tensor, *, use_hadamard:bool=True, shuffle_row:bool=False, shuffle_col:bool=False,
+                        shuffle_scales:bool=True) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+  assert x.dtype == dtypes.bfloat16 and x.ndim == 2, f"expected BF16 matrix, got {x.dtype} {x.shape}"
+  M, N = x.shape
+  assert M % 256 == 0 and N % 256 == 0, f"AMD MXFP4 cast-transpose requires multiples of 256, got {x.shape}"
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  col_axis = None if axis is None else 1-axis
+  row_q = alloc_like((M, N//2), dtypes.uint8, x.device, axis)
+  row_s = alloc_like((M, N//BLK), dtypes.uint8, x.device, axis)
+  col_q = alloc_like((N, M//2), dtypes.uint8, x.device, col_axis)
+  col_s = alloc_like((N, M//BLK), dtypes.uint8, x.device, col_axis)
+  fxn = functools.partial(_custom_quantize_mxfp4_dual, use_hadamard=use_hadamard, shuffle_row=shuffle_row,
+                          shuffle_col=shuffle_col, shuffle_scales=shuffle_scales)
+  row_q, row_s, col_q, col_s, *_ = Tensor.custom_kernel(row_q, row_s, col_q, col_s, x.contiguous(), fxn=fxn)
+  return row_q, row_s, col_q, col_s
 
 def _e2m1_code(x:UOp) -> UOp:
   mag = x.abs()
