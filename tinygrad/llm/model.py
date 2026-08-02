@@ -5,7 +5,7 @@ from typing import Any
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.llm.kernels import amd as llm_amd
-from tinygrad.llm.gguf import get_ggml_quantization, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import get_ggml_quantization, gguf_load
 from tinygrad.uop.ops import resolve, Ops
 
 class PackedWeight:
@@ -14,10 +14,9 @@ class PackedWeight:
     self.ggml_type:int|None = None
     self._raw_uop:UOp|None = None
     self._raw_offset_uop:UOp|None = None
-    self._raw_offset_words:int|None = None
   def set_quantized(self, packed:Tensor, ggml_type:int):
     self.weight, self.ggml_type = packed.flatten(), ggml_type
-    self._raw_uop = self._raw_offset_uop = self._raw_offset_words = None
+    self._raw_uop = self._raw_offset_uop = None
     # IQ4 prefill uses a device LUT. Build it with the weights, before this linear can be captured by TinyJit.
     if ggml_type == 23 and str(packed.device).startswith("AMD"): llm_amd.iq4_half_lut(str(packed.device))
   def _packed_offset(self) -> Tensor:
@@ -28,8 +27,7 @@ class PackedWeight:
       raw = raw.src[0]
     assert raw_offset % 4 == 0 and raw.dtype == dtypes.uint8
     self._raw_uop = raw
-    self._raw_offset_words = raw_offset // 4
-    return Tensor([self._raw_offset_words], dtype=dtypes.uint64, device=self.weight.device)
+    return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
   def _prepare_packed(self):
     self._raw_offset_uop = self._packed_offset().realize().uop
 
@@ -50,11 +48,6 @@ class Linear(nn.Linear, PackedWeight):
   def __call__(self, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> Tensor:
     if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
       return llm_amd.q8_linear(self, x, prepared)
-    if self.ggml_type is not None:
-      weight = ggml_data_to_tensor(self.weight, self.out_features * self.in_features, self.ggml_type,
-                                   contiguous=False).reshape(self.out_features, self.in_features)
-      if getenv("HALF", 1): weight = weight.cast('float16')
-      return x.linear(weight.transpose(), self.bias)
     return super().__call__(x)
 
 class Embedding(nn.Embedding, PackedWeight):
@@ -94,9 +87,9 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
-  vals = Tensor.arange(n).to(x.device).reshape(1,1,n).cast(x.dtype).expand(x.shape)
+  vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
   cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
-    (Tensor.arange(n).to(x.device).reshape(1,1,n,1) < Tensor.arange(n).to(x.device).reshape(1,1,1,n)))
+    (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
@@ -148,15 +141,15 @@ class FFNBlock:
     self.pending_state:tuple[Tensor, Tensor]|None = None
     self.attn_norm, self.ffn_norm = nn.RMSNorm(config.dim, config.norm_eps), nn.RMSNorm(config.dim, config.norm_eps)
     if config.num_experts > 0:
-      self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=False)
+      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
       if config.shared_expert_dim > 0:
-        self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
-        self.ffn_down_shexp = Linear(config.shared_expert_dim, config.dim, bias=False)
+        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
         if config.shared_expert_gate: self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
     else:
       self.ffn_gate, self.ffn_up = Linear(config.dim, config.hidden_dim, bias=False), Linear(config.dim, config.hidden_dim, bias=False)
@@ -323,20 +316,19 @@ class MLATransformerBlock(FFNBlock):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
     if config.q_lora_rank > 0:
-      self.attn_q_a = Linear(config.dim, config.q_lora_rank, bias=False)
+      self.attn_q_a = nn.Linear(config.dim, config.q_lora_rank, bias=False)
       self.attn_q_a_norm = nn.RMSNorm(config.q_lora_rank, config.norm_eps)
-      self.attn_q_b = Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
+      self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
     else:
-      self.attn_q = Linear(config.dim, config.n_heads * config.head_dim, bias=False)
-    self.attn_kv_a_mqa = Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
+      self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+    self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
-    self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+    self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
                  valid_len:int|UOp|None=None, input_norm:nn.RMSNorm|None=None) -> Tensor:
-    assert input_norm is None
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
@@ -354,7 +346,7 @@ class MLATransformerBlock(FFNBlock):
     k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
     v = k[..., :self.config.kv_lora_rank]
 
-    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device, buffer=False).triu(start_pos+1) \
+    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) \
       if resolve(T != 1) else None
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
     if mask is not None: attn = attn + mask
@@ -364,8 +356,8 @@ class MLATransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context+192, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context+192, self.config.rope_theta, device=x.device)
+      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):

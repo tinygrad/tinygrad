@@ -1,6 +1,5 @@
 from __future__ import annotations
 import functools, math
-from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 from tinygrad import Tensor, UOp
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -157,12 +156,12 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
     fxn=functools.partial(_amd_flash_attention_decode_reduce, valid_chunks=live_chunks))[0]
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:int|UOp|None=None,
-                         key_limit:int|UOp|None=None, kv_scale:UOp|None=None) -> UOp:
+def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:int|UOp,
+                         key_limit:int|UOp|None=None) -> UOp:
   # inputs are q=(B*H, M, D), k/v=(B*H, N, D). For causal attention q is the final M tokens of k/v.
   BH, M, D = q.shape
   physical_n = k.shape[1]
-  N = physical_n if valid_kv_len is None else valid_kv_len
+  N = valid_kv_len
   assert k.shape == v.shape and BH % k.shape[0] == 0 and k.shape[2] == D
   gqa_group = BH // k.shape[0]
   if isinstance(M, int) and isinstance(N, int):
@@ -210,7 +209,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   # ====== KV tile loop ======
   # Causal blocks never need KV tiles strictly to their right. Besides saving work, this avoids an all
   # -inf tile, whose online-softmax update would otherwise contain -inf - -inf.
-  n_tiles = (N - M + (block_m + 1) * BLOCK_M + BLOCK_N - 1) // BLOCK_N if causal else N // BLOCK_N
+  n_tiles = (N - M + (block_m + 1) * BLOCK_M + BLOCK_N - 1) // BLOCK_N
   n_tile = UOp.range(n_tiles, 100, AxisType.REDUCE)
 
   # load Q + K into LDS (Q reloaded each iteration since P overwrites slot 0)
@@ -220,7 +219,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   load_k = UOp.range(KV_ELEMS_PER_THREAD, 90, AxisType.WEAK)
   kidx = n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k
   kval = k.reshape(physical_n*D)[kidx]
-  if kv_scale is not None: kval = kval.float() * kv_scale[0, kv_head, kidx // D].float()
+  kval = kval.float() * kv_scale[0, kv_head, kidx // D].float()
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(kval).end(load_k)
   qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
   Q_lds = Q_lds.after(qk_load_barrier)
@@ -242,17 +241,14 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   # -- softmax in registers with warp shuffles --
   S_reg = S_reg.after(S_reg.store(S_reg * SCALE))
 
-  if causal:
-    # WMMA accumulator ownership: each lane owns an 8x4 fragment of the 64x64 score tile.
-    # q is aligned to the right of k, matching PyTorch's causal_lower_right mask.
-    rm = UOp.range(TM, 250, AxisType.WEAK)
-    rn = UOp.range(TN, 251, AxisType.WEAK)
-    q_idx = N - M + block_m * BLOCK_M + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
-    k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
-    valid = k_idx <= q_idx
-    if key_limit is not None: valid = valid & (k_idx < key_limit)
-    masked = valid.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))
-    S_reg = S_reg.after(S_reg[rm, rn].store(masked).end(rm, rn))
+  # WMMA accumulator ownership: each lane owns an 8x4 fragment of the 64x64 score tile.
+  # q is aligned to the right of k, matching PyTorch's causal_lower_right mask.
+  rm, rn = UOp.range(TM, 250, AxisType.WEAK), UOp.range(TN, 251, AxisType.WEAK)
+  q_idx = N - M + block_m * BLOCK_M + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
+  k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
+  valid = k_idx <= q_idx
+  if key_limit is not None: valid = valid & (k_idx < key_limit)
+  S_reg = S_reg.after(S_reg[rm, rn].store(valid.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
 
   # per-thread local row max over TN=4 elements, then warp reduce across 16 lanes
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
@@ -304,7 +300,7 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   load_v = UOp.range(KV_ELEMS_PER_THREAD, 390, AxisType.WEAK)
   vidx = n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v
   vval = v.reshape(physical_n*D)[vidx]
-  if kv_scale is not None: vval = vval.float() * kv_scale[1, kv_head, vidx // D].float()
+  vval = vval.float() * kv_scale[1, kv_head, vidx // D].float()
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
@@ -341,30 +337,18 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, causal:bool, valid_kv_len:i
   o = o.permute((0, 4, 2, 6, 1, 3, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TD)
   return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
 
-def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
-  return _amd_flash_attention(o, q, k, v, causal=False)
-
-def amd_flash_attention_causal(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
-  return _amd_flash_attention(o, q, k, v, causal=True)
-
-def amd_flash_attention_causal_cached(o:UOp, q:UOp, cache_kv:UOp, cache_scale:UOp|None, *, valid_kv_len:int|UOp,
-                                      key_limit:int|UOp|None=None) -> UOp:
-  _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
-  k = cache_kv[0].reshape(B*H_KV, N, D)
-  v = cache_kv[1].reshape(B*H_KV, N, D)
-  scale = None if cache_scale is None else cache_scale.reshape(2, B*H_KV, N)
-  return _amd_flash_attention(o, q, k, v, causal=True, valid_kv_len=valid_kv_len, key_limit=key_limit, kv_scale=scale)
-
 def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, key_limit:int|UOp|None=None,
                                   cache_scale:Tensor|None=None) -> Tensor:
+  assert cache_scale is not None
   B, H, T, D = cast(tuple[int, int, int, int], q.shape)
   q_flat = q.reshape(B*H, T, D)
   out = Tensor.empty(B*H, T, D, dtype="float32", device=q.device)
-  srcs = (out, q_flat, cache_kv) if cache_scale is None else (out, q_flat, cache_kv, cache_scale)
+  srcs = (out, q_flat, cache_kv, cache_scale)
   def flash_cached(*uops:UOp) -> UOp:
-    output, query, cache, *scale = uops
-    return amd_flash_attention_causal_cached(output, query, cache, scale[0] if scale else None,
-      valid_kv_len=valid_kv_len, key_limit=key_limit)
+    output, query, cache, scale = uops
+    _, b, h_kv, n, d = cast(tuple[int, int, int, int, int], cache.shape)
+    return _amd_flash_attention(output, query, cache[0].reshape(b*h_kv, n, d), cache[1].reshape(b*h_kv, n, d),
+                                scale.reshape(2, b*h_kv, n), valid_kv_len, key_limit)
   return Tensor.custom_kernel(*srcs, fxn=flash_cached)[0].reshape(B, H, T, D)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
@@ -790,69 +774,6 @@ def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fea
   stores = [out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)) for output,total in zip(outputs, totals)]
   return UOp.group(*stores).end(output_block, lane).sink(arg=KernelInfo(name="linear_q6", opts_to_apply=()))
 
-@functools.cache
-def _q6_linear_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
-  raw = raw.replace(dtype=dtypes.uint32, src=(raw.src[0] * raw.dtype.itemsize // 4,), arg=replace(raw.arg, dtype=dtypes.uint32))
-  raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_word(byte_offset:UOp) -> UOp:
-    word_index, half_aligned = byte_offset // 4, (byte_offset & 2).ne(0)
-    return half_aligned.where((raw[word_index] >> 16) | (raw[word_index + 1] << 16), raw[word_index])
-  def load_byte(byte_offset:UOp) -> UOp:
-    return (raw[byte_offset // 4] >> ((byte_offset & 3) * 8).cast(dtypes.uint32)) & 255
-  token_tile = 32 if out.shape[0] % 32 == 0 else 16
-  token_block, output_block = UOp.range(out.shape[0] // token_tile, 0), UOp.range(out_features // 16, 1)
-  lane = UOp.range(32, 2, axis_type=AxisType.LOCAL)
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
-  physical_col, physical_half = hw_lane % 16, hw_lane // 16
-  output = output_block * 16 + physical_col
-  input_tokens = tuple(token_block * token_tile + tile * 16 + physical_col for tile in range(token_tile // 16))
-  tokens = tuple(tuple(token_block * token_tile + tile * 16 + physical_half * 8 + i for i in range(8))
-                 for tile in range(token_tile // 16))
-  group_count, type_size = in_features // 32, _GGML_QUANT[14][1]
-  output_size = in_features // 256 * type_size
-  accs = tuple(UOp.placeholder((8,), dtypes.float32, slot=tile, addrspace=AddrSpace.REG) for tile in range(token_tile // 16))
-  accs = tuple(acc.after(acc.store(acc.const_like(0))) for acc in accs)
-  group = UOp.range(group_count, 3, AxisType.REDUCE)
-  block, subgroup = group // 8, group % 8
-  base = raw_offset + output * output_size + block * type_size
-  half_accs:list[list[UOp]] = []
-  for half in range(2):
-    kbase = half * 16 + physical_half * 8
-    ql_base = base + (subgroup // 4) * 64 + (subgroup % 2) * 32 + kbase
-    qh_base = base + 128 + (subgroup // 4) * 32 + kbase
-    ql_words, qh_words = (tuple(load_word(addr + i*4) for i in range(2)) for addr in (ql_base, qh_base))
-    values = tuple(((((ql >> (byte*8)) >> (((subgroup//2) & 1)*4).cast(dtypes.uint32)) & 15) |
-                    ((((qh >> (byte*8)) >> ((subgroup & 3)*2).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int8) - 32
-                   for ql,qh in zip(ql_words, qh_words) for byte in range(4))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.int32, (value.int(),), arg="__builtin_amdgcn_ds_swizzle({0}, 16415)") for value in values)
-    bfrag = UOp.stack(*(value.cast(dtypes.int8) for value in (*values, *swapped)))
-    tile_accs = []
-    for input_token in input_tokens:
-      awords = tuple(xq[input_token, group, kbase // 4 + i].load() for i in range(2))
-      swapped_words = tuple(UOp(Ops.CUSTOM, dtypes.uint32, (word,), arg="__builtin_amdgcn_ds_swizzle({0}, 16415)") for word in awords)
-      afrag = UOp.stack(*(((word >> (byte*8)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8)
-                          for word in (*awords, *swapped_words) for byte in range(4)))
-      tile_accs.append(UOp.wmma(afrag, bfrag, UOp.const(0, dtypes.int32).broadcast(8), (16, 16, 16), 'AMD', 32))
-    half_accs.append(tile_accs)
-
-  def logical_values(raw_acc:UOp) -> tuple[UOp, ...]:
-    vals = tuple(raw_acc[i] for i in range(8))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.int32, (value,), arg="__builtin_amdgcn_ds_swizzle({0}, 50688)") for value in vals)
-    low = physical_half.eq(0)
-    return (low.where(vals[0], swapped[4]), low.where(swapped[0], vals[4]),
-            low.where(vals[1], swapped[5]), low.where(swapped[1], vals[5]),
-            low.where(vals[2], swapped[6]), low.where(swapped[2], vals[6]),
-            low.where(vals[3], swapped[7]), low.where(swapped[3], vals[7]))
-
-  logical = [[logical_values(half_accs[half][tile]) for half in range(2)] for tile in range(len(accs))]
-  scales = tuple(load_byte(base + 192 + subgroup*2 + half).cast(dtypes.uint8).bitcast(dtypes.int8).float() for half in range(2))
-  d = (load_word(base + 208) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
-  update = UOp.group(*(acc.after(group)[i].store(acc.after(group)[i] +
-    sum((logical[tile][half][i].float() * scales[half] for half in range(2)), UOp.const(0, dtypes.float32)) * d * xd[token, group])
-    for tile,(acc,tile_tokens) in enumerate(zip(accs, tokens)) for i,token in enumerate(tile_tokens))).end(group)
-  stores = [out[token, output].store(acc.after(update)[i]) for acc,tile_tokens in zip(accs, tokens) for i,token in enumerate(tile_tokens)]
-  return UOp.group(*stores).end(token_block, output_block, lane).sink(arg=KernelInfo(name="linear_q6_wmma", opts_to_apply=()))
-
 def q8_linear(layer:Linear, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> Tensor:
   tokens = int(x.numel()) // layer.in_features
   if layer.ggml_type == 13:
@@ -894,10 +815,8 @@ def q8_linear(layer:Linear, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> 
   assert layer.ggml_type == 14
   srcs = (out.uop, layer._raw_uop, xq.uop, xd.uop, layer._raw_offset_uop)
   params = [UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs)]
-  kernel = (_q6_linear_wmma_kernel(params[0], params[1], params[2], params[3], layer.out_features,
-                                   layer.in_features, params[4][0] * 4) if tokens % 16 == 0 and layer.out_features % 16 == 0 else
-            _q6_linear_kernel(params[0], params[1], params[2], params[3], layer.out_features,
-                              layer.in_features, params[4][0] * 4)).call(*srcs)
+  kernel = _q6_linear_kernel(params[0], params[1], params[2], params[3], layer.out_features,
+                             layer.in_features, params[4][0] * 4).call(*srcs)
   out = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], layer.out_features)
   return out if layer.bias is None else out + layer.bias
 
