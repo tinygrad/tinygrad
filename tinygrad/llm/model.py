@@ -14,15 +14,11 @@ class Linear(nn.Linear):
   _raw_uop:UOp|None
   _raw_offset_uop:UOp|None
   def set_quantized(self, decoded:Tensor) -> bool:
-    packed = ggml_type = None
-    for typ,(block_size, type_size) in {13:(256, 176), 14:(256, 210), 23:(256, 136)}.items():
-      packed_size = decoded.numel() // block_size * type_size
-      raw = next((u for u in decoded.uop.toposort()
-                  if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) == packed_size), None)
-      if raw is not None:
-        packed, ggml_type = Tensor(raw), typ
-        break
-    if packed is None or ggml_type is None: return False
+    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
+    raw = next((u for u in decoded.uop.toposort()
+                if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    if raw is None: return False
+    packed, ggml_type = Tensor(raw), packed_sizes[prod(raw.shape)]
     self.weight, self.ggml_type = packed.flatten(), ggml_type
     self._raw_uop = self._raw_offset_uop = None
     if ggml_type == 23 and str(packed.device).startswith("AMD"): llm_amd.iq4_half_lut(str(packed.device))
@@ -640,7 +636,6 @@ class Transformer:
     dst, src = (states, self._state_checkpoint) if restore else (self._state_checkpoint, states)
     Tensor.realize(*(d.assign(s) for d,s in zip(dst, src)))
 
-  @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
     assert self.has_recurrent_block
     device = self.token_embd.weight.device

@@ -453,7 +453,7 @@ def _qk_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xsum:UOp, out_features:i
 def _qk_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
   x = x.reshape(out.shape[0], in_features)
   raw_offset = raw_offset.cast(dtypes.uint64)
-  token_tile, output_tiles = (64, 1) if out_features <= 1024 and out.shape[0] % 64 == 0 else \
+  token_tile, output_tiles = (64, 1) if (out_features <= 1024 or out_features > 6144) and out.shape[0] % 64 == 0 else \
     (64, 2) if out.shape[0] % 64 == 0 else (32 if out.shape[0] % 32 == 0 else 16, 2)
   _, token_block, output_block, lane, wave, _, physical_half, outputs, input_tokens, tokens = \
     _wmma_layout(out, out_features, token_tile, output_tiles)
@@ -539,7 +539,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
       halves.append(tuple(values))
     return tuple(halves)  # type: ignore[return-value]
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else \
-    128 if out_features == 5120 and in_features > 8192 and out.shape[0] % 128 == 0 else \
+    64 if out_features == 5120 and in_features > 8192 and out.shape[0] % 64 == 0 else \
     64 if out_features <= 6144 and out.shape[0] % 64 == 0 else \
     128 if out.shape[0] % 128 == 0 else \
     64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
