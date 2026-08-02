@@ -125,7 +125,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   # alloc/dealloc stack
   if ctx.stack_size > 0:
     sp = ctx.ren.stack_pointer()
-    offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
+    offset = UOp.const(ctx.stack_size, sp.dtype)
     if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag))] + before
     elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag))]
 
