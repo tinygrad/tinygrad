@@ -164,13 +164,13 @@ class CPUDevice(HCQCompiled):
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_host_queue)])
 
   pm_bufferize = PatternMatcher([
-    (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].timeline("sentinel", (1 << 64) - 1)),
-    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_signal"), lambda ctx: ctx[0].timeline("signal", 0)),
-    (UPat(Ops.PARAM, tag="COMPUTE:0_timeline_value"), lambda ctx: ctx[0].timeline("value", 1)),
+    (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].signal("sentinel", (1 << 64) - 1)),
+    (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].signal("timeline", 0)),
+    (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].signal("value", 1)),
   ])
 
   @functools.cache
-  def timeline(self, tag:str, init_value:int) -> Buffer:
+  def signal(self, name:str, init_value:int) -> Buffer:
     (buf:=Buffer(self.device, 1, dtypes.uint64, preallocate=True)).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 

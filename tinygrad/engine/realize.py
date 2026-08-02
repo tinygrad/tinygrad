@@ -287,4 +287,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  return pm_exec.rewrite(link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache).src[0], ctx)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache)
+  return max(t for c in linear.src if (t:=pm_exec.rewrite(c, ctx)) is not None)
