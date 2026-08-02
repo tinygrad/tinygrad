@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import ConstFloat, PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, weak_dtype
+from tinygrad.dtype import PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, weak_dtype
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
@@ -272,7 +272,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return pretty_print(self)
   def argstr(self):
     if self.op is Ops.REDUCE: return f'({", ".join(map(str, self.arg))})'
-    return f"ConstFloat({float.__repr__(self.arg)})" if isinstance(self.arg, ConstFloat) else repr(self.arg)
+    return repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
