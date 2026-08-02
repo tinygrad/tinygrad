@@ -74,40 +74,50 @@ class Handler(HTTPRequestHandler):
     stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
-    yield chunk({"role":"assistant", "content":""})
     out: list[int] = []
     finish_reason = "stop"
-    st = time.perf_counter()
+    st = pt = time.perf_counter()
     dec = tok.stream_decoder()
     router = StreamRouter(reasoning)
-    for next_id in model.generate(ids, temperature=temperature):
-      if len(out) == 0: stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if tok.is_end(next_id): break
-      out.append(next_id)
-      for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
-      if max_tokens is not None and len(out) >= max_tokens:
-        finish_reason = "length"
-        break
-    for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
-    tool_calls: list[dict] = []
-    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
-      if (parsed := parse_tool_call(m.group(1))) is None:
-        stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-        yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
-      else:
-        name, args = parsed
-        tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
-    if tool_calls:
-      yield chunk({"tool_calls":tool_calls})
-      if finish_reason == "stop": finish_reason = "tool_calls"
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-    if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                      "total_tokens": prompt_tokens + len(out)}, **tmpl}
-    et = time.perf_counter()
-    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
+    def log_stats(interrupted:bool=False):
+      et = time.perf_counter()
+      total = f"total:{et-st:6.2f}s"
+      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
+    completed = False
+    try:
+      yield chunk({"role":"assistant", "content":""})
+      for next_id in model.generate(ids, temperature=temperature):
+        if len(out) == 0:
+          stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+        if tok.is_end(next_id): break
+        out.append(next_id)
+        for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+        if max_tokens is not None and len(out) >= max_tokens:
+          finish_reason = "length"
+          break
+      for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
+      tool_calls: list[dict] = []
+      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+        if (parsed := parse_tool_call(m.group(1))) is None:
+          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
+          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+        else:
+          name, args = parsed
+          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+      if tool_calls:
+        yield chunk({"tool_calls":tool_calls})
+        if finish_reason == "stop": finish_reason = "tool_calls"
+      completed = True
+      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
+      if include_usage:
+        yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
+                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
+      log_stats()
+    except GeneratorExit:
+      if not completed: log_stats(interrupted=True)
+      raise
 
   def do_POST(self):
     request_st = time.perf_counter()
