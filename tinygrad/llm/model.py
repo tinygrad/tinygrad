@@ -158,47 +158,46 @@ class FFNBlock:
       self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
 
   def _feed_forward(self, x:Tensor, tokens:Tensor|None=None) -> Tensor:
-    if not hasattr(self, 'ffn_gate_exps'):
-      # TODO: remove the need for this contiguous
-      return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
-
-    h, logits = x.unsqueeze(2), self.ffn_gate_inp(x)
-    if dsv4 := self.config.deepseek4:
-      scores = logits.float().softplus().sqrt()
-      if hasattr(self, "ffn_gate_tid2eid"):
-        assert tokens is not None
-        sel = self.ffn_gate_tid2eid["weight"][tokens]
-      else: _, sel = pairwise_topk(scores+self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-      probs = scores.gather(-1, sel)
-      probs = probs / probs.sum(-1, keepdim=True)
-    elif hasattr(self, 'exp_probs_b'):
-      probs = logits.sigmoid()
-      _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-      probs = probs.gather(-1, sel)
-      if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
-    else:
-      vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
-      probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
-    probs = probs * self.config.routed_scaling_factor
-
-    if dsv4:
-      clamp = dsv4.swiglu_clamp[getattr(self, "layer_id")]
-      gate, up = self.ffn_gate_exps(sel, h).float(), self.ffn_up_exps(sel, h).float()
-      hidden = (gate.minimum(clamp).silu()*up.clamp(-clamp, clamp)).cast(x.dtype)
-    else: hidden = (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous()
-    out = (self.ffn_down_exps(sel, hidden) * probs.unsqueeze(-1)).sum(axis=2)
-
-    if hasattr(self, 'ffn_gate_shexp'):
+    if hasattr(self, 'ffn_gate_exps'):
+      h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+      logits = self.ffn_gate_inp(x)
+      if dsv4 := self.config.deepseek4:
+        scores = logits.float().softplus().sqrt()
+        if hasattr(self, "ffn_gate_tid2eid"):
+          assert tokens is not None
+          sel = self.ffn_gate_tid2eid["weight"][tokens]
+        else: _, sel = pairwise_topk(scores+self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+        probs = scores.gather(-1, sel)
+        probs = probs / probs.sum(-1, keepdim=True)
+      elif hasattr(self, 'exp_probs_b'):
+        probs = logits.sigmoid()
+        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+        probs = probs.gather(-1, sel)
+        if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+      else:
+        vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
+        probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+      probs = probs * self.config.routed_scaling_factor
       if dsv4:
-        clamp = dsv4.shared_swiglu_clamp[getattr(self, "layer_id")]
-        gate, up = self.ffn_gate_shexp(x).float(), self.ffn_up_shexp(x).float()
+        clamp = dsv4.swiglu_clamp[getattr(self, "layer_id")]
+        gate, up = self.ffn_gate_exps(sel, h).float(), self.ffn_up_exps(sel, h).float()
         hidden = (gate.minimum(clamp).silu()*up.clamp(-clamp, clamp)).cast(x.dtype)
-      else: hidden = self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x)
-      shexp = self.ffn_down_shexp(hidden)
-      if not dsv4 and hasattr(self, 'ffn_gate_inp_shexp'):
-        shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
-      out = out + shexp
-    return out
+        x_down = self.ffn_down_exps(sel, hidden)
+      else: x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      if hasattr(self, 'ffn_gate_shexp'):
+        if dsv4:
+          clamp = dsv4.shared_swiglu_clamp[getattr(self, "layer_id")]
+          gate, up = self.ffn_gate_shexp(x).float(), self.ffn_up_shexp(x).float()
+          hidden = (gate.minimum(clamp).silu()*up.clamp(-clamp, clamp)).cast(x.dtype)
+          shexp = self.ffn_down_shexp(hidden)
+        else:
+          shexp = self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x))
+          if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+        out = out + shexp
+      return out
+    # TODO: remove the need for this contiguous
+    return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -215,7 +214,6 @@ class FFNBlock:
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, tokens:Tensor|None):
       return self._feed_forward_residual(self._attention_residual(x, start_pos), tokens).contiguous()
-    if self.config.deepseek4: assert tokens is not None
     return _run(x, start_pos, tokens if self.config.deepseek4 else None)
 
 class TransformerBlock(FFNBlock):
@@ -400,20 +398,19 @@ def _hyper_connection(mixes:Tensor, scale:Tensor, base:Tensor, eps:float, iters:
 
 class DeepSeek4Compressor:
   def __init__(self, config:TransformerConfig, ratio:int, head_dim:int, rotate:bool=False):
-    self.ratio, self.head_dim, self.rope_dim, self.max_context, self.rotate = ratio, head_dim, config.rope_dim, config.max_context, rotate
+    self.ratio, self.head_dim, self.rope_dim, self.rotate = ratio, head_dim, config.rope_dim, rotate
     self.overlap = ratio == 4
     channels = head_dim * (1+self.overlap)
     self.kv, self.gate = nn.Linear(config.dim, channels, bias=False), nn.Linear(config.dim, channels, bias=False)
     self.ape, self.norm = {"weight": Tensor.zeros(ratio, channels)}, nn.RMSNorm(head_dim, config.norm_eps)
 
   def init_state(self, x:Tensor):
-    if hasattr(self, "cache"): return
+    if hasattr(self, "kv_state"): return
     mult = 1+self.overlap
     self.kv_state = Tensor.zeros(x.shape[0], mult*self.ratio, mult*self.head_dim, device=x.device).clone()
     self.score_state = Tensor.full(self.kv_state.shape, float("-inf"), device=x.device).clone()
-    self.cache = Tensor.zeros(x.shape[0], max(1, self.max_context//self.ratio), self.head_dim, dtype=x.dtype, device=x.device).clone()
 
-  def __call__(self, x:Tensor, start_pos:int|UOp, freqs_cis:Tensor) -> Tensor:
+  def __call__(self, x:Tensor, start_pos:int|UOp, freqs_cis:Tensor, kv_cache:Tensor, cache_offset:int=0) -> Tensor:
     ratio, state, score_state = self.ratio, self.kv_state, self.score_state
     kv, score = self.kv(x).float(), self.gate(x).float()+self.ape["weight"][start_pos % ratio]
     slot = ratio + start_pos % ratio if self.overlap else start_pos % ratio
@@ -433,10 +430,10 @@ class DeepSeek4Compressor:
     compressed = compressed[..., :-self.rope_dim].cat(
       apply_rope(compressed[..., -self.rope_dim:], freqs_cis[compress_pos:compress_pos+1], interleaved=True), dim=-1)
     if self.rotate: compressed = hadamard_transform(compressed)
-    cache_pos = start_pos//ratio
-    old = self.cache[:, cache_pos:cache_pos+1]
-    cache = Tensor(self.cache.uop.after(old.uop.store(should_compress.where(compressed.cast(self.cache.dtype), old).uop)))
-    return Tensor(cache.uop.after(self.kv_state.uop.store(updated.uop), self.score_state.uop.store(updated_score.uop)))
+    cache_pos = cache_offset + start_pos//ratio
+    old = kv_cache[:, cache_pos:cache_pos+1]
+    kv_cache = Tensor(kv_cache.uop.after(old.uop.store(should_compress.where(compressed.cast(kv_cache.dtype), old).uop)))
+    return Tensor(kv_cache.uop.after(self.kv_state.uop.store(updated.uop), self.score_state.uop.store(updated_score.uop)))
 
   def reset_ops(self) -> list[Tensor]:
     return [self.kv_state.assign(self.kv_state.const_like(0)), self.score_state.assign(self.score_state.const_like(float("-inf")))]
@@ -444,13 +441,18 @@ class DeepSeek4Compressor:
 class DeepSeek4Indexer:
   def __init__(self, config:TransformerConfig, dsv4:DeepSeek4Config, ratio:int):
     self.n_heads, self.head_dim, self.topk = dsv4.index_n_heads, dsv4.index_head_dim, dsv4.index_topk
-    self.rope_dim, self.ratio = config.rope_dim, ratio
+    self.rope_dim, self.ratio, self.max_context = config.rope_dim, ratio, config.max_context
     self.proj = nn.Linear(config.dim, self.n_heads, bias=False)
     self.attn_q_b = nn.Linear(config.q_lora_rank, self.n_heads*self.head_dim, bias=False)
     self.compressor = DeepSeek4Compressor(config, ratio, self.head_dim, rotate=True)
 
+  def init_state(self, x:Tensor):
+    if hasattr(self, "kv_cache"): return
+    self.kv_cache = Tensor.zeros(x.shape[0], max(1, self.max_context//self.ratio), self.head_dim, dtype=x.dtype, device=x.device).clone()
+    self.compressor.init_state(x)
+
   def __call__(self, qr:Tensor, x:Tensor, start_pos:int|UOp, freqs_cis:Tensor) -> Tensor:
-    cache = self.compressor(x, start_pos, freqs_cis)
+    cache = self.compressor(x, start_pos, freqs_cis, self.kv_cache)
     B, T, _ = x.shape
     q = self.attn_q_b(qr).reshape(B, T, self.n_heads, self.head_dim)
     q = q[..., :-self.rope_dim].cat(apply_rope(q[..., -self.rope_dim:], freqs_cis[start_pos:start_pos+T], interleaved=True), dim=-1)
@@ -501,11 +503,11 @@ class DeepSeek4Block(FFNBlock):
   def _hc_post(x:Tensor, residual:Tensor, post:Tensor, comb:Tensor) -> Tensor:
     return (post.unsqueeze(-1)*x.unsqueeze(-2) + (comb.unsqueeze(-1)*residual.unsqueeze(-2)).sum(2)).cast(x.dtype)
 
-  def _compressed_indices(self, qr:Tensor, x:Tensor, start_pos:int|UOp) -> tuple[Tensor, Tensor]:
-    cache = self.compressor(x, start_pos, self.freqs_cis)
+  def _compressed_indices(self, qr:Tensor, x:Tensor, start_pos:int|UOp, cache:Tensor) -> tuple[Tensor, Tensor]:
+    cache = self.compressor(x, start_pos, self.freqs_cis, cache, self.dsv4.window_size)
     if hasattr(self, "indexer"): return cache, self.indexer(qr, x, start_pos, self.freqs_cis)
     count = (Tensor(start_pos).to(x.device)+1)//self.compress_ratio
-    idx = Tensor.arange(cache.shape[1]).to(x.device).reshape(1, 1, -1)
+    idx = Tensor.arange(cache.shape[1]-self.dsv4.window_size).to(x.device).reshape(1, 1, -1)
     return cache, (idx < count).where(idx, -1)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -522,15 +524,15 @@ class DeepSeek4Block(FFNBlock):
       apply_rope(kv[..., -self.config.rope_dim:], self.freqs_cis[start_pos:start_pos+T], interleaved=True), dim=-1)
     position = Tensor(start_pos).to(x.device)
     window_pos = start_pos % self.dsv4.window_size
-    window_cache = Tensor(self._window_cache.uop.after(self._window_cache[:, window_pos:window_pos+1].uop.store(kv.uop)))
+    cache = Tensor(self.kv_cache.uop.after(self.kv_cache[:, window_pos:window_pos+1].uop.store(kv.uop)))
     window_idx = position-self.dsv4.window_size+1+Tensor.arange(self.dsv4.window_size).to(x.device)
     window_idx = (window_idx >= 0).where(window_idx % self.dsv4.window_size, -1).reshape(1, 1, -1)
 
     if self.compress_ratio:
-      compressed_cache, compressed_idx = self._compressed_indices(qr, x, start_pos)
-      compressed_idx = (compressed_idx >= 0).where(compressed_idx+int(window_cache.shape[1]), -1)
-      cache, indices = window_cache.cat(compressed_cache, dim=1), window_idx.cat(compressed_idx, dim=-1)
-    else: cache, indices = window_cache, window_idx
+      cache, compressed_idx = self._compressed_indices(qr, x, start_pos, cache)
+      compressed_idx = (compressed_idx >= 0).where(compressed_idx+self.dsv4.window_size, -1)
+      indices = window_idx.cat(compressed_idx, dim=-1)
+    else: indices = window_idx
     indices = indices.expand(B, T, indices.shape[-1])
     valid, safe_indices = indices >= 0, indices.maximum(0)
     selected = cache.unsqueeze(1).expand(B, T, cache.shape[1], cache.shape[2]).gather(
@@ -559,17 +561,18 @@ class DeepSeek4Block(FFNBlock):
     return self._hc_post(self._feed_forward(self.ffn_norm(h), tokens), x, post, comb)
 
   def _init_state(self, x:Tensor):
-    if hasattr(self, "_window_cache"): return
-    self._window_cache = Tensor.empty(x.shape[0], self.dsv4.window_size, self.config.head_dim, dtype=x.dtype, device=x.device)
+    if hasattr(self, "kv_cache"): return
+    cache_size = self.dsv4.window_size + (max(1, self.config.max_context//self.compress_ratio) if self.compress_ratio else 0)
+    self.kv_cache = Tensor.zeros(x.shape[0], cache_size, self.config.head_dim, dtype=x.dtype, device=x.device).clone()
     rope_theta = self.dsv4.compress_rope_theta if self.compress_ratio else self.config.rope_theta
     yarn = self.dsv4.yarn if self.compress_ratio else None
     self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, rope_theta, device=x.device, yarn=yarn)
     if not self.compress_ratio: return
     self.compressor.init_state(x)
-    if hasattr(self, "indexer"): self.indexer.compressor.init_state(x)
+    if hasattr(self, "indexer"): self.indexer.init_state(x)
 
   def _state_reset_ops(self) -> list[Tensor]:
-    if not hasattr(self, "_window_cache") or not self.compress_ratio: return []
+    if not hasattr(self, "kv_cache") or not self.compress_ratio: return []
     return self.compressor.reset_ops() + (self.indexer.compressor.reset_ops() if hasattr(self, "indexer") else [])
 
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
