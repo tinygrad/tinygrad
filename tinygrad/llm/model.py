@@ -255,14 +255,16 @@ class TransformerBlock(FFNBlock):
     # TODO: this if statement should be removed and it shouldn't generate extra kernels
     flash_decode = resolve(T == 1) and kv_len is not None and str(x.device).startswith("AMD") and self.config.head_dim == 256
     if flash_decode:
+      assert assigned_scale is not None
       decode_len = kv_len if isinstance(kv_len, int) else self.config.max_context
       decode_pos = (start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos) + 1
-      attn = llm_amd.amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, decode_len, assigned_scale)
+      attn = llm_amd.amd_flash_attention_decode(q.half(), assigned_kv, decode_pos, assigned_scale, decode_len)
     elif use_flash:
+      assert assigned_scale is not None
       start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
       valid = valid_len.unbind()[0] if isinstance(valid_len, UOp) else valid_len
       valid_kv_len, key_limit = start + T, start + valid if valid is not None else None
-      attn = llm_amd.flash_attention_causal_cached(q.half(), assigned_kv, valid_kv_len, key_limit, assigned_scale)
+      attn = llm_amd.flash_attention_causal_cached(q.half(), assigned_kv, valid_kv_len, assigned_scale, key_limit)
     else:
       mask:Tensor|None
       if kv_len is not None:
