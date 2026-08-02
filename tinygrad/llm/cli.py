@@ -167,7 +167,6 @@ def main():
     with Context(DEBUG=max(DEBUG.value, 1)):
       if model.has_recurrent_block: model.warmup()
       else:
-        # run 2 tokens through the model twice to capture the JIT before serving
         for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server

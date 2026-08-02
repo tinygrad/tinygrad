@@ -25,10 +25,9 @@ _quantized_tensors:weakref.WeakKeyDictionary[UOp, tuple[UOp, int]] = weakref.Wea
 
 def get_ggml_quantization(tensor:Tensor) -> tuple[Tensor, int]|None:
   if (meta:=_quantized_tensors.get(tensor.uop)) is None: return None
-  packed, ggml_type = meta
-  return Tensor(packed), ggml_type
+  return Tensor(meta[0]), meta[1]
 
-def ggml_data_to_tensor(t:Tensor, n:int, ggml_type:int, contiguous:bool=True) -> Tensor:
+def ggml_data_to_tensor(t:Tensor, n:int, ggml_type:int) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
@@ -50,8 +49,7 @@ def ggml_data_to_tensor(t:Tensor, n:int, ggml_type:int, contiguous:bool=True) ->
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
-    if contiguous: blocks = blocks.contiguous()
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -156,8 +154,8 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
   state_dict = {}
   for name, dims, typ, off in t_infos:
-    n, shape = prod(dims), tuple(reversed(dims))
-    decoded = ggml_data_to_tensor(data:=tensor[data_start + off:], n, typ).reshape(*shape)
+    n, data = prod(dims), tensor[data_start + off:]
+    decoded = ggml_data_to_tensor(data, n, typ).reshape(*reversed(dims))
     if typ in _GGML_QUANT:
       block_size, type_size = _GGML_QUANT[typ]
       _quantized_tensors[decoded.uop] = (data[:n//block_size*type_size].uop, typ)

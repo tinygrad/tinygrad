@@ -132,26 +132,21 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   live_chunks = (valid_kv_len+block_n-1)//block_n
   live_chunks = min(live_chunks, chunks) if isinstance(live_chunks, int) else live_chunks.minimum(chunks)
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device)
-  return Tensor.custom_kernel(out, partial, stats,
-    fxn=functools.partial(_amd_flash_attention_decode_reduce, valid_chunks=live_chunks))[0]
+  return Tensor.custom_kernel(out, partial, stats, fxn=functools.partial(_amd_flash_attention_decode_reduce, valid_chunks=live_chunks))[0]
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:int|UOp,
-                         key_limit:int|UOp|None=None) -> UOp:
-  # inputs are q=(B*H, M, D), k/v=(B*H, N, D). For causal attention q is the final M tokens of k/v.
+def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:int|UOp, key_limit:int|UOp|None=None) -> UOp:
   BH, M, D = q.shape
   physical_n = k.shape[1]
   N = valid_kv_len
   assert k.shape == v.shape and BH % k.shape[0] == 0 and k.shape[2] == D
   gqa_group = BH // k.shape[0]
   if isinstance(M, int) and isinstance(N, int):
-    assert M % BLOCK_M == 0 and N % BLOCK_N == 0, \
-      f"M={M} and N={N} must be divisible by BLOCK_M={BLOCK_M} and BLOCK_N={BLOCK_N}"
+    assert M % BLOCK_M == 0 and N % BLOCK_N == 0, f"M={M} and N={N} must be divisible by BLOCK_M={BLOCK_M} and BLOCK_N={BLOCK_N}"
   assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0, \
     f"D={D} must be divisible by WMMA_K={WMMA_K} and LANES_PER_WAVE_N={LANES_PER_WAVE_N}"
   assert BLOCK_M % (WAVES_M * WMMA_M) == 0 and BLOCK_N % LANES_PER_WAVE_N == 0
   TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
-  # Each N wave computes the same score tile, then owns a disjoint slice of D for P@V.
   TN = BLOCK_N // LANES_PER_WAVE_N
   TD = D // (WAVES_N * LANES_PER_WAVE_N)
   SCALE = 1.0 / math.sqrt(D)
@@ -167,28 +162,22 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
   lane_m = lane // LANES_PER_WAVE_N
   lane_n = lane % LANES_PER_WAVE_N
-  # LDS allocation: slot 0 = Q then P (shared), slot 1 = K then V
-  # TODO: the memory planner should be able to find this reuse
   Q_ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
   KV_ELEMS_PER_THREAD = BLOCK_N * D // THREADS_PER_BLOCK
   QP_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
   KV_lds = UOp.placeholder((BLOCK_N, D + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :D]
-  # register state
   acc = UOp.placeholder((TM, TD), dtypes.float, slot=2, addrspace=AddrSpace.REG)
   m_i = UOp.placeholder((TM,), dtypes.float, slot=3, addrspace=AddrSpace.REG)
   l_i = UOp.placeholder((TM,), dtypes.float, slot=4, addrspace=AddrSpace.REG)
   acc = acc.after(acc.store(acc.const_like(0)))
   m_i = m_i.after(m_i.store(m_i.const_like(-math.inf)))
   l_i = l_i.after(l_i.store(l_i.const_like(0)))
-  # ====== KV tile loop ======
   # Causal blocks never need KV tiles strictly to their right. Besides saving work, this avoids an all
   # -inf tile, whose online-softmax update would otherwise contain -inf - -inf.
   n_tiles = (N - M + (block_m + 1) * BLOCK_M + BLOCK_N - 1) // BLOCK_N
   n_tile = UOp.range(n_tiles, 100, AxisType.REDUCE)
-  # load Q + K into LDS (Q reloaded each iteration since P overwrites slot 0)
   Q_lds = QP_lds[:, :D]
-  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(
-    q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
+  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
   load_k = UOp.range(KV_ELEMS_PER_THREAD, 90, AxisType.WEAK)
   kidx = n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k
   kval = k.reshape(physical_n*D)[kidx]
@@ -197,7 +186,6 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
   Q_lds = Q_lds.after(qk_load_barrier)
   KV_lds_k = KV_lds.after(qk_load_barrier)
-  # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
   S_reg = S_reg.after(S_reg.after(n_tile).store(S_reg.const_like(0)))
   k_qk = UOp.range(D // WMMA_K, 101, AxisType.REDUCE)
@@ -209,7 +197,6 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   qk = UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), *WMMA_ARG)
   qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
   S_reg = S_reg.after(qk_done)
-  # -- softmax in registers with warp shuffles --
   S_reg = S_reg.after(S_reg.store(S_reg * SCALE))
   # WMMA accumulator ownership: each lane owns an 8x4 fragment of the 64x64 score tile.
   # q is aligned to the right of k, matching PyTorch's causal_lower_right mask.
@@ -219,40 +206,30 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   valid = k_idx <= q_idx
   if key_limit is not None: valid = valid & (k_idx < key_limit)
   S_reg = S_reg.after(S_reg[rm, rn].store(valid.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
-  # per-thread local row max over TN=4 elements, then warp reduce across 16 lanes
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
   m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
-  # warp reduce max (in-place)
   ri_w = UOp.range(TM, 270)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], lane, maximum=True)).end(ri_w))
-  # compute P = exp(S - m_ij) in S_reg
   S_reg = S_reg.after(S_reg.store(((S_reg - m_ij.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2()))
   p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   ri_ws = UOp.range(TM, 295, AxisType.WEAK)
-  # Reduce contiguous 16-key groups independently, matching the ordinary softmax reduction tree.
-  p_sum = p_local.after(p_local[ri_ws].store(
-    sum((warp_reduce(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
-  # Store softmax weights in half for the WMMA P@V product; accumulation remains float.
+  p_sum = p_local.after(p_local[ri_ws].store(sum((warp_reduce(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
   P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
   P_write = P_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
   P_write = P_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
   P_store = P_write[tid].store(S_reg.cast(dtypes.half))
-  # -- online softmax correction --
   beta_i = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
   ri4 = UOp.range(TM, 330, AxisType.WEAK)
   m_new_val = m_i[ri4].maximum(m_ij[ri4])
   alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
   beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
   rj4 = UOp.range(TD, 331)
-  correction = UOp.group(
-    acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
-    l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
-    m_i[ri4].store(m_new_val),
-    beta_i[ri4].store(beta_val),
-  ).end(ri4)
+  correction = UOp.group(acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
+                         l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
+                         m_i[ri4].store(m_new_val), beta_i[ri4].store(beta_val)).end(ri4)
   acc = acc.after(correction)
   l_i = l_i.after(correction)
   m_i = m_i.after(correction)
@@ -269,7 +246,6 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
   V_lds = V_lds.after(pv_barrier)
-  # -- acc += beta * (P @ V) via WMMA --
   pv_acc = UOp.placeholder((TM, TD), dtypes.float, slot=10, addrspace=AddrSpace.REG)
   pv_acc = pv_acc.after(pv_acc.after(n_tile).store(pv_acc.const_like(0))).after(pv_barrier)
   k_pv = UOp.range(BLOCK_N // WMMA_K, 400, AxisType.REDUCE)
@@ -284,14 +260,11 @@ def _amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp, kv_scale:UOp, valid_kv_len:
   ri5 = UOp.range(TM, 410, AxisType.WEAK)
   rj5 = UOp.range(TD, 411, AxisType.WEAK)
   accumulate = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5)
-  # end KV tile loop
   n_tile_end = accumulate.barrier().end(n_tile)
   acc = acc.after(n_tile_end)
   l_i = l_i.after(n_tile_end)
   m_i = m_i.after(n_tile_end)
-  # normalize: acc /= l_i
   acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
-  # store output
   o = o.reshape(WAVES_M, TM, LANES_PER_WAVE_M, 1, WAVES_N, TD, LANES_PER_WAVE_N, 1)
   o = o.permute((0, 4, 2, 6, 1, 3, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TD)
   return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
@@ -311,8 +284,7 @@ def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UO
   return Tensor.custom_kernel(*srcs, fxn=flash_cached)[0].reshape(B, H, T, D)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c),
-             arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
+  return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c), arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, dtypes.uint32, (a.cast(dtypes.uint32), b.cast(dtypes.uint32), selectors.cast(dtypes.uint32)),
@@ -328,33 +300,21 @@ def _amd_stream_load(ptr:UOp) -> UOp:
   assert ptr.op is Ops.INDEX
   return UOp(Ops.CUSTOMI, ptr.dtype, (ptr,), arg="__builtin_nontemporal_load({0})")
 
+def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp:
+  return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
+
 def _iq4_bytes(packed:UOp, shift:int) -> UOp:
   selectors = (packed >> shift) & 0x0f0f0f0f
   low = _amd_byte_perm(UOp.const(0xf6eaddcf, dtypes.uint32), UOp.const(0xbfad9881, dtypes.uint32), selectors)
   high = _amd_byte_perm(UOp.const(0x71594535, dtypes.uint32), UOp.const(0x26190d01, dtypes.uint32), selectors & 0x07070707)
   return _amd_byte_perm(high, low, 0x03020100 | ((selectors & 0x08080808) >> 1))
 
-def _amd_wave_sum(value:UOp, lane:UOp, lane_count:int, wave:UOp|None=None) -> UOp:
-  assert lane_count in (8, 16, 32)
-  for offset in (16, 8, 4, 2, 1)[{32:0, 16:1, 8:2}[lane_count]:]:
-    source_lane = (lane ^ offset) + (wave * lane_count if wave is not None else 0)
-    value = value + UOp(Ops.CUSTOM, dtypes.float32, ((source_lane * 4).int(), value),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
-  return value
-
-def _amd_wave_max(value:UOp, lane:UOp) -> UOp:
-  for offset in (16, 8, 4, 2, 1):
-    value = value.maximum(UOp(Ops.CUSTOM, dtypes.float32, (((lane ^ offset) * 4).int(), value),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))"))
-  return value
-
 def _q8_pack(raw_value:UOp, lane:UOp) -> tuple[UOp, UOp]:
-  d = (_amd_wave_max(raw_value.abs(), lane) / 127).maximum(1e-8)
+  d = (warp_reduce(raw_value.abs(), lane, maximum=True, full_wave=True) / 127).maximum(1e-8)
   quantized = (raw_value / d).round().maximum(-127).minimum(127).cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32)
   word = UOp.const(0, dtypes.uint32)
   for byte_idx in range(4):
-    byte = UOp(Ops.CUSTOM, dtypes.uint32, (((lane * 4 + byte_idx) * 4).int(), quantized),
-               arg="__builtin_amdgcn_ds_bpermute({0}, {1})")
+    byte = UOp(Ops.CUSTOM, dtypes.uint32, (((lane * 4 + byte_idx) * 4).int(), quantized), arg="__builtin_amdgcn_ds_bpermute({0}, {1})")
     word = word | (byte << (8 * byte_idx))
   return d, word
 
@@ -410,8 +370,8 @@ def _gated_delta_prefill_kernel(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, b
   updates, stores = [], []
   for row_idx,row in enumerate(rows):
     previous = tuple(current.after(token)[row_idx*dim//32+i].load() for i in range(dim//32))
-    state_k = _amd_wave_sum(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), lane, 32)
-    state_q = _amd_wave_sum(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), lane, 32)
+    state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
+    state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
     delta = (v[bh, token, row].load() - state_k*av) * bv
     updates += [x*av + delta*y for x,y in zip(previous, keys)]
     stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q*av + delta*kq[bh, token]))
@@ -422,8 +382,7 @@ def _gated_delta_prefill_kernel(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, b
 
 def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> tuple[Tensor, Tensor]:
   batch, heads, tokens, dim = q.shape
-  assert q.shape == k.shape == v.shape and beta.shape == alpha.shape == (batch, heads, tokens) and \
-         state.shape == (batch, heads, dim, dim)
+  assert q.shape == k.shape == v.shape and beta.shape == alpha.shape == (batch, heads, tokens) and state.shape == (batch, heads, dim, dim)
   core, next_state = Tensor.empty_like(q), Tensor.empty_like(state)
   kq = (q*k).sum(-1).contiguous()
   srcs = (core.uop, next_state.uop, q.contiguous().uop, k.contiguous().uop, v.contiguous().uop,
@@ -432,16 +391,45 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   out = _gated_delta_prefill_kernel(*params).call(*srcs)
   return Tensor(srcs[0].after(out)), Tensor(srcs[1].after(out))
 
+def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
+  output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
+  token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
+  lane, wave = UOp.range(32, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
+  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
+  col, half = hw_lane % 16, hw_lane // 16
+  outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
+  inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
+  tokens = tuple(tuple(token_block*token_tile + tile*16 + half*8 + i for i in range(8)) for tile in range(token_tile//16))
+  return output_waves, token_block, output_block, lane, wave, col, half, outputs, inputs, tokens
+
+def _wmma_stores(out:UOp, outputs:tuple[UOp, ...], tokens:tuple[tuple[UOp, ...], ...], accs:tuple[tuple[UOp, ...], ...],
+                 update:UOp, half:UOp) -> list[UOp]:
+  def values(acc:UOp) -> tuple[UOp, ...]:
+    vals = tuple(acc.after(update)[i].load() for i in range(8))
+    swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
+      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
+    low = half.eq(0)
+    return tuple(low.where(vals[i], swapped[i+4]) if j == 0 else low.where(swapped[i], vals[i+4]) for i in range(4) for j in range(2))
+  return [out[token, output].store(value) for output,output_accs in zip(outputs, accs)
+          for tile_tokens,acc in zip(tokens, output_accs) for token,value in zip(tile_tokens, values(acc))]
+
+def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str) -> UOp:
+  output, lane = UOp.range(out_features, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
+  acc = UOp.placeholder((1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.store(acc.const_like(0)))
+  chunk = UOp.range((group_count+31)//32, 2, AxisType.REDUCE)
+  group = (lane+chunk*32).valid(lane+chunk*32 < group_count)
+  update = acc.store(acc.after(chunk) + group_dot(output, group)).end(chunk)
+  total = warp_reduce(acc.after(update)[0].load(), lane, full_wave=True)
+  return out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)).end(output, lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+
 @functools.cache
 def _qk_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xsum:UOp, out_features:int, in_features:int,
                       raw_offset:int|UOp=0) -> UOp:
   if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_byte(base:UOp, byte_offset:UOp) -> UOp:
-    return (raw[base + byte_offset // 4] >> ((byte_offset & 3) * 8).cast(dtypes.uint32)) & 255
-  output, lane = UOp.range(out_features, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   group_count = in_features // 32
   type_words, output_words = _GGML_QUANT[13][1] // 4, in_features // 256 * _GGML_QUANT[13][1] // 4
-  def group_dot(group:UOp) -> UOp:
+  def group_dot(output:UOp, group:UOp) -> UOp:
     block, subgroup = group // 8, group % 8
     base = raw_offset + output * output_words + block * type_words
     qs_base = base + 12 + (subgroup // 2) * 8
@@ -451,42 +439,24 @@ def _qk_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xsum:UOp, out_features:i
       word = (raw[qs_base + word_idx] >> ((subgroup & 1) * 4).cast(dtypes.uint32)) & 0x0f0f0f0f
       word = word | (((raw[base + 4 + word_idx] >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4)
       dot = _amd_dp4a(word, xwords[word_idx], dot)
-    scale = (subgroup < 4).where(load_byte(base, 4 + subgroup) & 63,
-      (load_byte(base, 8 + subgroup) & 15) | ((load_byte(base, subgroup) >> 6) << 4))
-    minimum = (subgroup < 4).where(load_byte(base, 8 + subgroup) & 63,
-      (load_byte(base, 8 + subgroup) >> 4) | ((load_byte(base, 4 + subgroup) >> 6) << 4))
+    scale = (subgroup < 4).where(_load_byte(raw, base, 4 + subgroup) & 63,
+      (_load_byte(raw, base, 8 + subgroup) & 15) | ((_load_byte(raw, base, subgroup) >> 6) << 4))
+    minimum = (subgroup < 4).where(_load_byte(raw, base, 8 + subgroup) & 63,
+      (_load_byte(raw, base, 8 + subgroup) >> 4) | ((_load_byte(raw, base, 4 + subgroup) >> 6) << 4))
     scales = raw[base]
     dbits, dminbits = (scales & 0xffff).cast(dtypes.uint16), (scales >> 16).cast(dtypes.uint16)
     return (dot.float() * dbits.bitcast(dtypes.float16).float() * scale.float() -
             xsum[0, group].float() * dminbits.bitcast(dtypes.float16).float() * minimum.float()) * xd[0, group]
-  acc = UOp.placeholder((1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  acc = acc.after(acc.store(acc.const_like(0)))
-  chunk = UOp.range((group_count + 31) // 32, 2, AxisType.REDUCE)
-  group = (lane + chunk*32).valid(lane + chunk*32 < group_count)
-  update = acc.store(acc.after(chunk) + group_dot(group)).end(chunk)
-  total = _amd_wave_sum(acc.after(update)[0].load(), lane, 32)
-  return out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)).end(output, lane).sink(
-    arg=KernelInfo(name="linear_q5_k", opts_to_apply=()))
+  return _decode_linear(out, out_features, group_count, group_dot, "linear_q5_k")
 
 @functools.cache
-def _qk_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int,
-                               raw_offset:UOp) -> UOp:
+def _qk_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, raw_offset:UOp) -> UOp:
   x = x.reshape(out.shape[0], in_features)
   raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_byte(base:UOp, byte_offset:UOp) -> UOp:
-    return (raw[base + byte_offset // 4] >> ((byte_offset & 3)*8).cast(dtypes.uint32)) & 255
   token_tile, output_tiles = (64, 1) if out_features <= 1024 and out.shape[0] % 64 == 0 else \
     (64, 2) if out.shape[0] % 64 == 0 else (32 if out.shape[0] % 32 == 0 else 16, 2)
-  output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
-  token_block = UOp.range(out.shape[0] // token_tile, 0)
-  output_block = UOp.range(out_features // (16*output_tiles*output_waves), 1)
-  lane, wave = UOp.range(32, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
-  physical_col, physical_half = hw_lane % 16, hw_lane // 16
-  outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + output_tile*16 + physical_col for output_tile in range(output_tiles))
-  input_tokens = tuple(token_block*token_tile + tile*16 + physical_col for tile in range(token_tile // 16))
-  tokens = tuple(tuple(token_block*token_tile + tile*16 + physical_half*8 + i for i in range(8))
-                 for tile in range(token_tile // 16))
+  _, token_block, output_block, lane, wave, _, physical_half, outputs, input_tokens, tokens = \
+    _wmma_layout(out, out_features, token_tile, output_tiles)
   group_count, type_words = in_features // 32, _GGML_QUANT[13][1] // 4
   output_words = in_features // 256 * type_words
   accs = tuple(tuple(UOp.placeholder((8,), dtypes.float32, slot=output_tile*(token_tile//16)+tile, addrspace=AddrSpace.REG)
@@ -500,10 +470,10 @@ def _qk_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
                    for input_token in input_tokens)
     for output_tile,output in enumerate(outputs):
       base = raw_offset + output*output_words + block*type_words
-      scale = (subgroup < 4).where(load_byte(base, 4 + subgroup) & 63,
-        (load_byte(base, 8 + subgroup) & 15) | ((load_byte(base, subgroup) >> 6) << 4)).float()
-      minimum = (subgroup < 4).where(load_byte(base, 8 + subgroup) & 63,
-        (load_byte(base, 8 + subgroup) >> 4) | ((load_byte(base, 4 + subgroup) >> 6) << 4)).float()
+      scale = (subgroup < 4).where(_load_byte(raw, base, 4 + subgroup) & 63,
+        (_load_byte(raw, base, 8 + subgroup) & 15) | ((_load_byte(raw, base, subgroup) >> 6) << 4)).float()
+      minimum = (subgroup < 4).where(_load_byte(raw, base, 8 + subgroup) & 63,
+        (_load_byte(raw, base, 8 + subgroup) >> 4) | ((_load_byte(raw, base, 4 + subgroup) >> 6) << 4)).float()
       scales = raw[base]
       d = (scales & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
       dmin = (scales >> 16).cast(dtypes.uint16).bitcast(dtypes.float16).float()
@@ -519,34 +489,15 @@ def _qk_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, (16, 16, 16), 'AMD', 32)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  logical_values = []
-  for output_accs in accs:
-    output_values = []
-    for acc in output_accs:
-      vals = tuple(acc.after(update)[i].load() for i in range(8))
-      swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
-        arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
-      low = physical_half.eq(0)
-      output_values.append((low.where(vals[0], swapped[4]), low.where(swapped[0], vals[4]),
-                            low.where(vals[1], swapped[5]), low.where(swapped[1], vals[5]),
-                            low.where(vals[2], swapped[6]), low.where(swapped[2], vals[6]),
-                            low.where(vals[3], swapped[7]), low.where(swapped[3], vals[7])))
-    logical_values.append(output_values)
-  stores = [out[token, output].store(value) for output,output_values in zip(outputs, logical_values)
-            for tile_tokens,logical in zip(tokens, output_values) for token,value in zip(tile_tokens, logical)]
-  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
-    arg=KernelInfo(name="linear_q5_k_f16_wmma", opts_to_apply=()))
+  stores = _wmma_stores(out, outputs, tokens, accs, update, physical_half)
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name="linear_q5_k_f16_wmma", opts_to_apply=()))
 
 @functools.cache
-def _iq4_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int,
-                       raw_offset:int|UOp=0) -> UOp:
+def _iq4_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
   if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_byte(base:UOp, byte_offset:UOp) -> UOp:
-    return (raw[base + byte_offset // 4] >> ((byte_offset & 3) * 8).cast(dtypes.uint32)) & 255
-  output, lane = UOp.range(out_features, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   group_count = in_features // 32
   type_words, output_words = _GGML_QUANT[23][1] // 4, in_features // 256 * _GGML_QUANT[23][1] // 4
-  def group_dot(group:UOp) -> UOp:
+  def group_dot(output:UOp, group:UOp) -> UOp:
     block, subgroup = group // 8, group % 8
     base = raw_offset + output * output_words + block * type_words
     xwords = _amd_vector_load(xq[0, group, 0], 8)
@@ -554,29 +505,20 @@ def _iq4_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_fe
     for word_idx in range(8):
       packed, shift = _amd_stream_load(raw[base + 2 + subgroup*4 + word_idx % 4]), 4 * (word_idx // 4)
       dot = _amd_dp4a(_iq4_bytes(packed, shift), xwords[word_idx], dot)
-    low_byte = load_byte(base, 4 + subgroup // 2)
+    low_byte = _load_byte(raw, base, 4 + subgroup // 2)
     scale = ((low_byte >> (4*(subgroup % 2)).cast(dtypes.uint32)) & 15) | \
             ((((raw[base] >> 16) >> (2*subgroup).cast(dtypes.uint32)) & 3) << 4)
     d = (raw[base] & 0xffff).cast(dtypes.uint16).bitcast(dtypes.float16).float()
     return dot.float() * xd[0, group] * d * (scale.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float()
-  acc = UOp.placeholder((1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  acc = acc.after(acc.store(acc.const_like(0)))
-  chunk = UOp.range((group_count + 31) // 32, 2, AxisType.REDUCE)
-  group = (lane + chunk*32).valid(lane + chunk*32 < group_count)
-  update = acc.store(acc.after(chunk) + group_dot(group)).end(chunk)
-  total = _amd_wave_sum(acc.after(update)[0].load(), lane, 32)
-  return out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)).end(output, lane).sink(
-    arg=KernelInfo(name="linear_iq4_xs", opts_to_apply=()))
+  return _decode_linear(out, out_features, group_count, group_dot, "linear_iq4_xs")
 
 @functools.cache
 def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int,
                                 raw_offset:UOp) -> UOp:
   x = x.reshape(out.shape[0], in_features)
   raw_offset = raw_offset.cast(dtypes.uint64)
-  def load_byte(base:UOp, byte_offset:UOp) -> UOp:
-    return (raw[base + byte_offset // 4] >> ((byte_offset & 3) * 8).cast(dtypes.uint32)) & 255
   def dequant(base:UOp, subgroup:UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
-    low_byte = load_byte(base, 4 + subgroup // 2)
+    low_byte = _load_byte(raw, base, 4 + subgroup // 2)
     scale_bits = ((low_byte >> (4*(subgroup % 2)).cast(dtypes.uint32)) & 15) | \
                  ((((raw[base] >> 16) >> (2*subgroup).cast(dtypes.uint32)) & 3) << 4)
     scale = (scale_bits.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float() * \
@@ -602,21 +544,14 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     128 if out.shape[0] % 128 == 0 else \
     64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
-  output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
+  output_waves, token_block, output_block, lane, wave, _, physical_half, outputs, input_tokens, tokens = \
+    _wmma_layout(out, out_features, token_tile, output_tiles)
   assert out_features % (16*output_tiles*output_waves) == 0
-  token_block = UOp.range(out.shape[0] // token_tile, 0)
-  output_block = UOp.range(out_features // (16*output_tiles*output_waves), 1)
-  lane, wave = UOp.range(32, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
   local_lut = UOp.placeholder((256,), dtypes.uint32, slot=32, addrspace=AddrSpace.LOCAL)
   tid = wave*32+lane
   lut_items = 256 // (32*output_waves)
   lut_ready = UOp.group(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items))).barrier()
   lut = local_lut.after(lut_ready)
-  physical_col, physical_half = hw_lane % 16, hw_lane // 16
-  outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + output_tile*16 + physical_col for output_tile in range(output_tiles))
-  input_tokens = tuple(token_block*token_tile + tile*16 + physical_col for tile in range(token_tile // 16))
-  tokens = tuple(tuple(token_block*token_tile + tile*16 + physical_half*8 + i for i in range(8)) for tile in range(token_tile // 16))
   type_words = _GGML_QUANT[23][1] // 4
   output_words = in_features // 256 * type_words
   accs = tuple(tuple(UOp.placeholder((8,), dtypes.float32, slot=output_tile*(token_tile//16)+tile, addrspace=AddrSpace.REG)
@@ -636,53 +571,33 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, (16, 16, 16), 'AMD', 32)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  def logical_values(acc:UOp) -> tuple[UOp, ...]:
-    vals = tuple(acc.after(update)[i].load() for i in range(8))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
-    low = physical_half.eq(0)
-    return (low.where(vals[0], swapped[4]), low.where(swapped[0], vals[4]),
-            low.where(vals[1], swapped[5]), low.where(swapped[1], vals[5]),
-            low.where(vals[2], swapped[6]), low.where(swapped[2], vals[6]),
-            low.where(vals[3], swapped[7]), low.where(swapped[3], vals[7]))
-  stores = [out[token, output].store(value) for output,output_accs in zip(outputs, accs)
-            for tile_tokens,acc in zip(tokens, output_accs) for token,value in zip(tile_tokens, logical_values(acc))]
-  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(
-    arg=KernelInfo(name="linear_iq4_xs_f16_wmma", opts_to_apply=()))
+  stores = _wmma_stores(out, outputs, tokens, accs, update, physical_half)
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name="linear_iq4_xs_f16_wmma", opts_to_apply=()))
 
 @functools.cache
 def _q6_linear_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, raw_offset:int|UOp=0) -> UOp:
   if isinstance(raw_offset, UOp): raw_offset = raw_offset.cast(dtypes.uint64)
-  output, lane = UOp.range(out_features, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   group_count, type_size = in_features // 32, _GGML_QUANT[14][1]
   output_size = in_features // 256 * type_size
-  acc = UOp.placeholder((1,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  acc = acc.after(acc.store(acc.const_like(0)))
-  chunk = UOp.range((group_count + 31) // 32, 2, AxisType.REDUCE)
-  group = (lane + chunk * 32).valid(lane + chunk * 32 < group_count)
-  block, subgroup = group // 8, group % 8
-  xwords = _amd_vector_load(xq[0, group, 0], 8)
-  base = raw_offset + output * output_size + block * type_size
-  dots = [UOp.const(0, dtypes.int32), UOp.const(0, dtypes.int32)]
-  for word_idx in range(8):
-    word = UOp.const(0, dtypes.uint32)
-    for byte_idx in range(4):
-      pos = subgroup * 32 + word_idx * 4 + byte_idx
-      within = pos % 128
-      low_byte = raw[base + (pos // 128) * 64 + within % 64]
-      low = (low_byte >> ((within // 64) * 4).cast(dtypes.uint8)) & 15
-      high_byte = raw[base + 128 + (pos // 128) * 32 + within % 32]
-      high = (high_byte >> ((within // 32) * 2).cast(dtypes.uint8)) & 3
-      q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
-      word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8 * byte_idx))
-    dots[word_idx // 4] = _amd_dp4a(word, xwords[word_idx], dots[word_idx // 4])
-  scales = [raw[base + 192 + subgroup * 2 + i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
-  dbits = raw[base + 208].cast(dtypes.uint16) | (raw[base + 209].cast(dtypes.uint16) << 8)
-  value = (dots[0].float() * scales[0] + dots[1].float() * scales[1]) * xd[0, group] * dbits.bitcast(dtypes.float16).float()
-  update = acc.store(acc.after(chunk) + value).end(chunk)
-  total = _amd_wave_sum(acc.after(update)[0].load(), lane, 32)
-  return out[0, output.valid(lane.eq(0))].store(total.cast(out.dtype)).end(output, lane).sink(
-    arg=KernelInfo(name="linear_q6", opts_to_apply=()))
+  def group_dot(output:UOp, group:UOp) -> UOp:
+    block, subgroup = group//8, group%8
+    xwords, base = _amd_vector_load(xq[0, group, 0], 8), raw_offset + output*output_size + block*type_size
+    dots = [UOp.const(0, dtypes.int32), UOp.const(0, dtypes.int32)]
+    for word_idx in range(8):
+      word = UOp.const(0, dtypes.uint32)
+      for byte_idx in range(4):
+        pos, within = subgroup*32 + word_idx*4 + byte_idx, (subgroup*32 + word_idx*4 + byte_idx)%128
+        low_byte = raw[base + (pos//128)*64 + within%64]
+        low = (low_byte >> ((within//64)*4).cast(dtypes.uint8)) & 15
+        high_byte = raw[base + 128 + (pos//128)*32 + within%32]
+        high = (high_byte >> ((within//32)*2).cast(dtypes.uint8)) & 3
+        q = (low | (high << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32
+        word = word | (q.cast(dtypes.int8).bitcast(dtypes.uint8).cast(dtypes.uint32) << (8*byte_idx))
+      dots[word_idx//4] = _amd_dp4a(word, xwords[word_idx], dots[word_idx//4])
+    scales = [raw[base + 192 + subgroup*2+i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
+    dbits = raw[base+208].cast(dtypes.uint16) | (raw[base+209].cast(dtypes.uint16) << 8)
+    return (dots[0].float()*scales[0] + dots[1].float()*scales[1]) * xd[0, group] * dbits.bitcast(dtypes.float16).float()
+  return _decode_linear(out, out_features, group_count, group_dot, "linear_q6")
 
 def q8_linear(layer:Linear, x:Tensor, prepared:tuple[Tensor, ...]|None=None) -> Tensor:
   tokens = int(x.numel()) // layer.in_features
