@@ -3,7 +3,6 @@ import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from typing import Any
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
-from tinygrad.device import Buffer, BufferSpec
 from tinygrad.llm.kernels import amd as llm_amd
 from tinygrad.llm.gguf import get_ggml_quantization, gguf_load
 from tinygrad.uop.ops import resolve, Ops
@@ -189,7 +188,6 @@ class FFNBlock:
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
-    self.kv_cache_host = False
     assert config.v_head_dim == config.head_dim, "TransformerBlock requires v_head_dim == head_dim"
 
     # --- attention projections (all linear, bias-free) ------------------
@@ -273,15 +271,7 @@ class TransformerBlock(FFNBlock):
       # uninitialized by Tensor.empty can inject NaNs before the mask is applied.
       cache_dtype = dtypes.int8 if self.config.max_context > 8192 and str(x.device).startswith("AMD") else dtypes.float16
       cache_shape = (2, x.shape[0], self.config.n_kv_heads, self.config.max_context+192, self.config.head_dim)
-      if self.kv_cache_host and str(x.device).startswith("AMD"):
-        cache_size = 1
-        for dim in cache_shape:
-          assert isinstance(dim, int)
-          cache_size *= dim
-        storage = Buffer(str(x.device), cache_size, cache_dtype, options=BufferSpec(host=True))
-        self.cache_kv = Tensor(UOp.from_buffer(storage).reshape(cache_shape))
-        self.cache_kv.assign(self.cache_kv.const_like(0)).realize()
-      else: self.cache_kv = Tensor.zeros(*cache_shape, dtype=cache_dtype, device=x.device).contiguous()
+      self.cache_kv = Tensor.zeros(*cache_shape, dtype=cache_dtype, device=x.device).contiguous()
       if cache_dtype == dtypes.int8:
         self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context+192,
                                            dtype=dtypes.float16, device=x.device).contiguous()
@@ -472,10 +462,6 @@ class Transformer:
     self.blk:list[FFNBlock] = [GatedDeltaNetBlock(dense_config if i < config.leading_dense_blocks else config, config.ssm)
                                if config.ssm and config.ssm_layers[i] else
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
-    if config.max_context > 8192:
-      # A full Q8 cache for 262k Qwen leaves no graph workspace on a 24 GB card. Keep two fixed layers host-mapped;
-      # this avoids runtime cache growth while leaving the other attention layers resident in VRAM.
-      for block in [block for block in self.blk if isinstance(block, TransformerBlock)][-2:]: block.kv_cache_host = True
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
