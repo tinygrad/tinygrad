@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from typing import Any
-from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.llm.kernels import amd as llm_amd
 from tinygrad.llm.gguf import get_ggml_quantization, gguf_load
@@ -500,11 +500,6 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
-    self._state_checkpoints: list[Tensor] = []
-    self._state_checkpoint_pos = 0
-    self._save_state_jit:Any = None
-    self._restore_state_jit:Any = None
-    self._warming_up = False
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.flash_prefill_jit = TinyJit(functools.partial(self.forward, use_flash=True))
@@ -669,41 +664,7 @@ class Transformer:
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
-    # Recurrent state has no token dimension to slice. Roll back to its latest aligned checkpoint so resumed flash
-    # prefill uses the same global chunk boundaries as a full prompt.
-    if self.has_recurrent_block:
-      return self._state_checkpoint_pos if prefix_len >= self._state_checkpoint_pos else 0
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
-
-  def _recurrent_states(self) -> list[Tensor]:
-    return [getattr(block, name) for block in self.blk for name in ("conv_state", "recurrent_state") if hasattr(block, name)]
-
-  def _init_state_checkpoints(self):
-    if not self._state_checkpoints:
-      states = self._recurrent_states()
-      if not states: return
-      self._state_checkpoints = [Tensor.zeros_like(state).contiguous().realize() for state in states]
-      def copy_jit(pairs:list[tuple[Tensor, Tensor]]) -> Any:
-        def copy_states() -> Tensor:
-          copies = [dest.assign(src) for dest,src in pairs]
-          Tensor.realize(*copies)
-          return copies[-1]
-        jit = TinyJit(copy_states)
-        jit()
-        jit()
-        return jit
-      self._save_state_jit = copy_jit(list(zip(self._state_checkpoints, states)))
-      self._restore_state_jit = copy_jit(list(zip(states, self._state_checkpoints)))
-
-  def _save_state_checkpoint(self, pos:int):
-    self._init_state_checkpoints()
-    if self._save_state_jit is None: return
-    self._save_state_jit()
-    self._state_checkpoint_pos = pos
-
-  def _restore_state_checkpoint(self):
-    assert self._restore_state_jit is not None
-    self._restore_state_jit()
 
   @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
@@ -721,7 +682,6 @@ class Transformer:
                   for name in ("cache_kv", "cache_kv_scale", "freqs_cis", "conv_state", "recurrent_state")
                   if hasattr(block, name)]
         Tensor.realize(*states)
-        self._init_state_checkpoints()
         self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
         self.recurrent_prefill_jits[(warm_len, False, False)] = self.prefill_jit
         self.recurrent_prefill_jits[(warm_len, True, False)] = self.flash_prefill_jit
@@ -729,36 +689,14 @@ class Transformer:
         self.rollout_jits[decode_len] = TinyJit(
           functools.partial(self.forward_recurrent_decode, decode_len=decode_len, sample=False))
         self.rollout_jits[decode_len].cnt = 1
-        self._warming_up = True
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
         prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 128)
         with Context(JIT_BATCH_SIZE=prefill_batch): next(warm)
         with Context(JIT_BATCH_SIZE=0): next(warm)
-        self._warming_up = False
       else:
         for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
 
-    # Rollout uses fixed power-of-two KV shapes. Capture every shape up front so requests never pay a JIT transition.
-    if not self.has_recurrent_block:
-      min_bucket = max(1, getenv("DECODE_BUCKET", 256))
-      bucket_positions:dict[int, int] = {}
-      for pos in [0] + [1 << i for i in range(self.max_context.bit_length())]:
-        bucket = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
-        bucket_positions.setdefault(bucket, pos)
-      v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-      token, temperature = Tensor([[0]], dtype="int32", device=device), Tensor([0.0], device=device)
-      for bucket, pos in sorted(bucket_positions.items()):
-        for _ in range(2):
-          result = self(token, v_start_pos.bind(pos), temperature)
-          assert isinstance(result, Tensor)
-          result.realize()
-
-    if self._state_checkpoints:
-      # Recurrent warmup starts from the zero checkpoint. Restore it directly instead of scheduling state clears and
-      # then copying the same zeros back into the checkpoint.
-      self._restore_state_checkpoint()
-      self._state_checkpoint_pos = 0
-    elif resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
+    if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
@@ -775,28 +713,17 @@ class Transformer:
     t = None if self.has_recurrent_block else \
       Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32", device=device).reshape(1, self.max_context + chunk_size)
     # start_pos describes what's currently valid in the caches
-    if start_pos < len(self._cached_tokens):
-      if self.has_recurrent_block and self._state_checkpoints and start_pos == self._state_checkpoint_pos:
-        self._restore_state_checkpoint()
-      elif resets := [r for b in self.blk for r in b._state_reset_ops()]:
-        Tensor.realize(*resets)
-        if self._state_checkpoints: self._save_state_checkpoint(0)
+    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       remaining = len(tokens) - start_pos
       recurrent_prefill = self.has_recurrent_block and start_pos < prompt_len
-      can_flash = bool(getenv("AMD_FLASH_ATTENTION", 1)) and chunk_size % 64 == 0 and \
-                  (recurrent_prefill if self.has_recurrent_block else start_pos > 0)
-      if can_flash:
-        device = str(self.token_embd.weight.device)
-        can_flash = device.startswith("AMD") and Device[device].renderer.target.arch.startswith("gfx11")
-      use_flash = can_flash and (self.has_recurrent_block or start_pos % 64 == 0)
+      use_flash = recurrent_prefill and bool(getenv("AMD_FLASH_ATTENTION", 1)) and chunk_size % 64 == 0
       sp = v_start_pos.bind(start_pos)
       # Dense attention aligns cache reuse to a 64-token flash tile. Recurrent prefill always uses its fixed,
       # padded chunk shape, and key_limit excludes the padding from attention.
       actual_nt = min(chunk_size, remaining)
-      nt = chunk_size if use_flash or self.has_recurrent_block and start_pos < prompt_len else 1 if self.has_recurrent_block else \
-           v_toks.bind(min(64 - start_pos % 64, remaining) if can_flash else actual_nt)
+      nt = chunk_size if recurrent_prefill else 1 if self.has_recurrent_block else v_toks.bind(actual_nt)
       if self.has_recurrent_block and (start_pos < prompt_len or out is None):
         assert isinstance(nt, int)
         inp = Tensor(tokens[start_pos:start_pos+actual_nt] + [0] * (nt-actual_nt), dtype="int32", device=device).reshape(1, nt)
@@ -805,19 +732,11 @@ class Transformer:
         inp = t[:, sp:sp+nt]
       else: inp = out
       valid_len = v_toks.bind(actual_nt) if recurrent_prefill or use_flash and actual_nt < chunk_size else None
-      # Save once immediately before a short final chunk. This is the nearest globally aligned state that can be
-      # reused without changing flash-attention's numerical tile layout.
-      if not self._warming_up and recurrent_prefill and remaining < chunk_size and start_pos % chunk_size == 0:
-        self._save_state_checkpoint(start_pos)
       if use_flash: result = self(inp, sp, temp, use_flash=True, valid_len=valid_len)
       elif valid_len is not None: result = self(inp, sp, temp, valid_len=valid_len)
       else: result = self(inp, sp, temp)
       out = result.realize()
       start_pos += actual_nt
-      # Generated tool calls are reconstructed by clients and are not guaranteed token-identical on the next request.
-      # Keep the reusable checkpoint at the stable prompt boundary instead of overwriting it inside generated output.
-      if not self._warming_up and self.has_recurrent_block and start_pos == prompt_len and start_pos % chunk_size == 0:
-        self._save_state_checkpoint(start_pos)
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
