@@ -180,7 +180,7 @@ pm_float_decomp = PatternMatcher([
    f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype == ctx[0] else None),
   # a CONST has no srcs to cast, it restates its value at the emulating dtype
   (UPat(Ops.CONST, dtypes.floats, name="x"), lambda ctx,x: UOp.const(x.val, ctx[1]) if x.dtype == ctx[0] else None),
-  (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
+  (UPat(GroupOp.All-GroupOp.Defines-{Ops.CAST, Ops.BITCAST, Ops.CONST}, dtypes.floats, name="x"), lambda ctx,x:
    x.replace(dtype=ctx[1], src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src))
    if x.dtype == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
