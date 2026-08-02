@@ -61,15 +61,9 @@ class Embedding(nn.Embedding, PackedWeight):
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
-  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2).to(device)[:(dim // 2)] / dim))
-  freqs = Tensor.arange(end).to(device).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  table = freqs.cos().cat(freqs.sin(), dim=-1)
-  if device is not None and str(device).startswith("AMD") and end > 8192:
-    size = table.numel()
-    assert isinstance(size, int)
-    storage = Buffer(str(device), size, table.dtype, options=BufferSpec(host=True))
-    return Tensor(UOp.from_buffer(storage).reshape(table.shape)).assign(table).realize()
-  return table.clone(device)
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  return freqs.cos().cat(freqs.sin(), dim=-1).clone(device)
 
 class ExpertWeights:
   """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
