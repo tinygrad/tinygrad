@@ -81,8 +81,7 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
-    wd = self.wd if t.ndim >= 3 else 0.0
-    up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
+    up = up.float().shard_like(w) + self.lr.to(w.device) * self.wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
     if self.zero and not (MXFP8 and t.dtype in dtypes.fp8s): new_w = self._zero_gather(new_w)

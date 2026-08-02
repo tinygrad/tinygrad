@@ -114,7 +114,12 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
                              amax_x2:Tensor, next_amax_x2:Tensor,
                              grad_amax_xw13:Tensor, next_grad_amax_xw13:Tensor,
                              grad_amax_xout:Tensor, next_grad_amax_xout:Tensor):
-  if FUSED_SILU_W13 and not MXFP4:
+  if FUSED_SILU_W13 and MXFP4:
+    from extra.llama_kernels.quantize_mxfp4_fused import swiglu
+    out, *ret = matmul(swiglu(x_w13), w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout,
+                       next_grad_amax_state=next_grad_amax_xout, next_amax_x=next_amax_x2)
+    return out, ret
+  if FUSED_SILU_W13:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13,
                                                  next_grad_amax_state=next_grad_amax_xw13, amax_out=next_amax_x2)

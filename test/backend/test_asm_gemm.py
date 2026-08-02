@@ -169,32 +169,30 @@ class TestMXFP4(unittest.TestCase):
     import numpy as np
     from extra.llama_kernels.quantize_mxfp4_fused import quantize_mxfp4_dual
     rng = np.random.default_rng(5)
-    x = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16).contiguous()
+    x = Tensor(rng.standard_normal((2, 128, 256), dtype=np.float32), dtype=dtypes.bfloat16).contiguous()
     row_q, row_s, col_q, col_s = quantize_mxfp4_dual(x, use_hadamard=False, shuffle_scales=False)
-    ref_row_q, ref_row_s, _ = quantize_mxfp4(x)
-    ref_col_q, ref_col_s, _ = quantize_mxfp4(x.T.contiguous())
+    ref_row_q, ref_row_s, _ = quantize_mxfp4(x.reshape(256, 256))
+    ref_col_q, ref_col_s, _ = quantize_mxfp4(x.reshape(256, 256).T.contiguous())
     Tensor.realize(row_q, row_s, col_q, col_s, ref_row_q, ref_row_s, ref_col_q, ref_col_s)
     np.testing.assert_array_equal(row_q.numpy(), ref_row_q.numpy())
     np.testing.assert_array_equal(row_s.numpy(), ref_row_s.numpy())
     np.testing.assert_array_equal(col_q.numpy(), ref_col_q.numpy())
     np.testing.assert_array_equal(col_s.numpy(), ref_col_s.numpy())
 
-  def test_silu_quantize(self):
+  def test_swiglu(self):
     import numpy as np
-    from extra.llama_kernels.quantize_mxfp4_fused import silu_mul_quantize_mxfp4
+    from extra.llama_kernels.quantize_mxfp4_fused import swiglu
     rng = np.random.default_rng(4)
     x = Tensor(rng.standard_normal((32, 512), dtype=np.float32), dtype=dtypes.bfloat16)
     x_ref = Tensor(x.numpy(), dtype=dtypes.bfloat16)
     Tensor.realize(x, x_ref)
-    act, packed, scale = silu_mul_quantize_mxfp4(x)
-    ref = x_ref[..., :256].silu() * x_ref[..., 256:]
-    ref_packed, _, ref_scale = quantize_mxfp4(ref)
+    act = swiglu(x)
+    x1, x3 = x_ref[..., :256].float(), x_ref[..., 256:].float()
+    ref = (x1.silu() * x3).cast(dtypes.bfloat16)
     act.sum().backward()
     ref.sum().backward()
-    Tensor.realize(act, packed, scale, ref, ref_packed, ref_scale, x.grad, x_ref.grad)
-    np.testing.assert_array_equal(act.numpy(), ref.numpy())
-    np.testing.assert_array_equal(packed.numpy(), ref_packed.numpy())
-    np.testing.assert_array_equal(scale.numpy(), ref_scale.numpy())
+    Tensor.realize(act, ref, x.grad, x_ref.grad)
+    np.testing.assert_allclose(act.numpy(), ref.numpy(), rtol=2e-2, atol=2e-2)
     np.testing.assert_allclose(x.grad.numpy(), x_ref.grad.numpy(), rtol=0, atol=2e-2)
 
   def test_correctness(self):
