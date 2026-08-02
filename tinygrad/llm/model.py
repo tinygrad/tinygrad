@@ -499,50 +499,40 @@ class Transformer:
     self._state_checkpoint_pos = 0
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
+    self.rollout_jit = TinyJit(self.forward)
     self.flash_prefill_jit = TinyJit(functools.partial(self.forward, use_flash=True))
-    self.sample_prefill_jit = TinyJit(functools.partial(self.forward, sample=True))
-    self.recurrent_prefill_jits:dict[tuple[int, bool, bool], Any] = {}
+    self.recurrent_prefill_jits:dict[tuple[int, bool], Any] = {}
     self.rollout_jits:dict[int, Any] = {}
-    self.sample_rollout_jits:dict[int, Any] = {}
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, use_flash:bool=False, kv_len:int|UOp|None=None,
-              valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
+              valid_len:int|UOp|None=None) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos, use_flash, kv_len, valid_len)
     last = x[:, tokens.shape[1]-1:tokens.shape[1]] if valid_len is None else x[:, valid_len-1:valid_len]
     normalized = self.output_norm(last)
     logits = self.output(normalized)[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    if not sample: return logits.argmax(-1, keepdim=True)
-    return (logits / temperature - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
+    return (logits / temperature.maximum(1e-12) -
+            (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def forward_recurrent_decode(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, decode_len:int,
-                               valid_len:int|UOp|None=None, sample:bool=False) -> Tensor:
-    return tokens.assign(self.forward(tokens, start_pos, temperature, kv_len=decode_len, valid_len=valid_len, sample=sample))
+                               valid_len:int|UOp|None=None) -> Tensor:
+    return tokens.assign(self.forward(tokens, start_pos, temperature, kv_len=decode_len, valid_len=valid_len))
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, use_flash:bool=False,
-               valid_len:int|UOp|None=None, sample:bool|None=None) -> Tensor:
-    if sample is None: sample = getattr(self, "_sample", False)
+               valid_len:int|UOp|None=None) -> Tensor:
+    if not self.has_recurrent_block:
+      return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
     jit_kwargs = {"valid_len":valid_len}
     if resolve(tokens.shape[1] == 1):
-      if self.has_recurrent_block:
-        key = self.max_context
-      else:
-        pos = start_pos.unbind()[1] if isinstance(start_pos, UOp) else start_pos
-        min_bucket = max(1, getenv("DECODE_BUCKET", 256))
-        kv_len = key = min(self.max_context, max(min_bucket, 1 << pos.bit_length()))
-      rollout_jits = self.sample_rollout_jits if sample else self.rollout_jits
-      if key not in rollout_jits:
-        rollout_jits[key] = TinyJit(functools.partial(self.forward_recurrent_decode, decode_len=key, sample=sample) if self.has_recurrent_block else
-                                    functools.partial(self.forward, kv_len=kv_len, sample=sample))
-      jit = rollout_jits[key]
-    elif self.has_recurrent_block:
-      prefill_key = (int(tokens.shape[1]), use_flash, sample)
-      if prefill_key not in self.recurrent_prefill_jits:
-        self.recurrent_prefill_jits[prefill_key] = TinyJit(functools.partial(self.forward, use_flash=use_flash, sample=sample))
-      jit = self.recurrent_prefill_jits[prefill_key]
+      key = self.max_context
+      if key not in self.rollout_jits: self.rollout_jits[key] = TinyJit(functools.partial(self.forward_recurrent_decode, decode_len=key))
+      jit = self.rollout_jits[key]
     else:
-      jit = self.sample_prefill_jit if sample else self.flash_prefill_jit if use_flash else self.prefill_jit
+      prefill_key = (int(tokens.shape[1]), use_flash)
+      if prefill_key not in self.recurrent_prefill_jits:
+        self.recurrent_prefill_jits[prefill_key] = TinyJit(functools.partial(self.forward, use_flash=use_flash))
+      jit = self.recurrent_prefill_jits[prefill_key]
     ret = jit(tokens.contiguous(), start_pos, temperature, **jit_kwargs)
     return ret[0] if isinstance(ret, tuple) else ret
 
@@ -687,11 +677,11 @@ class Transformer:
                   if hasattr(block, name)]
         Tensor.realize(*states)
         self.prefill_jit.cnt = self.flash_prefill_jit.cnt = 1
-        self.recurrent_prefill_jits[(warm_len, False, False)] = self.prefill_jit
-        self.recurrent_prefill_jits[(warm_len, True, False)] = self.flash_prefill_jit
+        self.recurrent_prefill_jits[(warm_len, False)] = self.prefill_jit
+        self.recurrent_prefill_jits[(warm_len, True)] = self.flash_prefill_jit
         decode_len = self.max_context
         self.rollout_jits[decode_len] = TinyJit(
-          functools.partial(self.forward_recurrent_decode, decode_len=decode_len, sample=False))
+          functools.partial(self.forward_recurrent_decode, decode_len=decode_len))
         self.rollout_jits[decode_len].cnt = 1
         warm = self.generate([0] * warm_len, chunk_size=chunk_size)
         prefill_batch = getenv("PREFILL_JIT_BATCH_SIZE", 128)
@@ -708,7 +698,6 @@ class Transformer:
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
     start_pos = self.get_start_pos(tokens)
-    self._sample = temperature > 0
     chunk_size = min(chunk_size or 256, 256) if self.has_recurrent_block else chunk_size or 32
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
