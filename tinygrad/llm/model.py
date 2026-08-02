@@ -495,6 +495,8 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._state_checkpoint: list[Tensor] = []
+    self._state_checkpoint_pos = 0
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.flash_prefill_jit = TinyJit(functools.partial(self.forward, use_flash=True))
@@ -659,7 +661,14 @@ class Transformer:
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+    if self.has_recurrent_block: return self._state_checkpoint_pos if prefix_len >= self._state_checkpoint_pos else 0
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+
+  def _checkpoint_state(self, restore:bool=False):
+    states = [getattr(block, name) for block in self.blk for name in ("conv_state", "recurrent_state") if hasattr(block, name)]
+    if not self._state_checkpoint: self._state_checkpoint = [Tensor.zeros_like(state).contiguous().realize() for state in states]
+    dst, src = (states, self._state_checkpoint) if restore else (self._state_checkpoint, states)
+    Tensor.realize(*(d.assign(s) for d,s in zip(dst, src)))
 
   @Context(PARALLEL_COMPILE=getenv("PARALLEL_COMPILE", 12))
   def warmup(self, chunk_size:int=256):
@@ -692,6 +701,9 @@ class Transformer:
         for salt in range(2): next(self.generate([salt] + [0] * (warm_len - 1), chunk_size=chunk_size))
 
     if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
+    if self.has_recurrent_block:
+      self._state_checkpoint_pos = 0
+      self._checkpoint_state()
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
@@ -708,7 +720,9 @@ class Transformer:
     t = None if self.has_recurrent_block else \
       Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32", device=device).reshape(1, self.max_context + chunk_size)
     # start_pos describes what's currently valid in the caches
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
+    if start_pos < len(self._cached_tokens):
+      if self._state_checkpoint and start_pos == self._state_checkpoint_pos: self._checkpoint_state(restore=True)
+      elif resets := [r for b in self.blk for r in b._state_reset_ops()]: Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       remaining = len(tokens) - start_pos
@@ -727,11 +741,17 @@ class Transformer:
         inp = t[:, sp:sp+nt]
       else: inp = out
       valid_len = v_toks.bind(actual_nt) if recurrent_prefill or use_flash and actual_nt < chunk_size else None
+      if recurrent_prefill and remaining < chunk_size and start_pos % chunk_size == 0:
+        self._checkpoint_state()
+        self._state_checkpoint_pos = start_pos
       if use_flash: result = self(inp, sp, temp, use_flash=True, valid_len=valid_len)
       elif valid_len is not None: result = self(inp, sp, temp, valid_len=valid_len)
       else: result = self(inp, sp, temp)
       out = result.realize()
       start_pos += actual_nt
+      if self.has_recurrent_block and start_pos == prompt_len and start_pos % chunk_size == 0:
+        self._checkpoint_state()
+        self._state_checkpoint_pos = start_pos
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
