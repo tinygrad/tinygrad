@@ -122,6 +122,9 @@ def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
+def f2f_round(val:UOp, dt:DType) -> UOp:
+  return shl(rne(val.bitcast(f2f_dt[val.dtype]), (s:=dtypes.finfo(val.dtype)[1] - dtypes.finfo(dt)[1])), s).bitcast(val.dtype)
+
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.max_numel()) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
   return UOp(Ops.STACK, src=tuple(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0], i, 1),)), fr, to) for i in range(n)))
@@ -177,7 +180,7 @@ pm_float_decomp = PatternMatcher([
   (UPat(Ops.BITCAST, src=(UPat.var("x"),), name="bc"), lambda ctx,bc,x:
    f2f(x.bitcast(f2f_dt[ctx[0]]), ctx[0], ctx[1]) if bc.dtype == ctx[0] else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
-   f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype == ctx[0] else None),
+   f2f_round(f2f_clamp(val.cast(ctx[1]), ctx[0]), ctx[0]) if x.dtype == ctx[0] else None),
   (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
    x.replace(dtype=ctx[1], src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src))
    if x.dtype == ctx[0] else None),
