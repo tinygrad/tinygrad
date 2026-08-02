@@ -176,7 +176,7 @@ class FFNBlock:
   def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
-                 valid_len:int|UOp|None=None, input_norm:nn.RMSNorm|None=None) -> Tensor: raise NotImplementedError
+                 valid_len:int|UOp|None=None) -> Tensor: raise NotImplementedError
 
   def __call__(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None, valid_len:int|UOp|None=None):
     self._init_state(x)
@@ -215,7 +215,7 @@ class TransformerBlock(FFNBlock):
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
-                 valid_len:int|UOp|None=None, input_norm:nn.RMSNorm|None=None) -> Tensor:
+                 valid_len:int|UOp|None=None) -> Tensor:
     prepared:tuple[Tensor, ...]|None
     prepared = self.attn_q.prepare(x, any(layer.ggml_type in (12, 13) for layer in (self.attn_q, self.attn_k, self.attn_v)))
     q = self.attn_q(x, prepared)
@@ -317,7 +317,7 @@ class MLATransformerBlock(FFNBlock):
     self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
-                 valid_len:int|UOp|None=None, input_norm:nn.RMSNorm|None=None) -> Tensor:
+                 valid_len:int|UOp|None=None) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
@@ -377,7 +377,7 @@ class GatedDeltaNetBlock(FFNBlock):
     return Tensor(self.recurrent_state.uop.after(*stores))
 
   def _attention(self, x:Tensor, start_pos:int|UOp, use_flash:bool=False, kv_len:int|UOp|None=None,
-                 valid_len:int|UOp|None=None, input_norm:nn.RMSNorm|None=None) -> Tensor:
+                 valid_len:int|UOp|None=None) -> Tensor:
     B, T, _ = x.shape
     conv_state, initial_state = self.conv_state, self.recurrent_state
     if hasattr(self, "ssm_g_a"):
@@ -403,7 +403,7 @@ class GatedDeltaNetBlock(FFNBlock):
       gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim).sigmoid()
       return self.ssm_out((core * gate).reshape(B, 1, -1).cast(x.dtype))
     if T == 1:
-      if input_norm is None: x = x.half()
+      x = x.half()
       prepared = self.attn_gate.prepare(x, self.attn_qkv.ggml_type in (12, 13))
       out_gate, qkv = self.attn_gate(x, prepared), self.attn_qkv(x, prepared)
       if self.ssm_beta_alpha_weight is not None:
@@ -482,7 +482,8 @@ class Transformer:
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-    self.blk:list[FFNBlock] = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and config.ssm_layers[i] else
+    self.blk:list[FFNBlock] = [GatedDeltaNetBlock(dense_config if i < config.leading_dense_blocks else config, config.ssm)
+                               if config.ssm and config.ssm_layers[i] else
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     if config.max_context > 8192:
       # A full Q8 cache for 262k Qwen leaves no graph workspace on a 24 GB card. Keep two fixed layers host-mapped;
