@@ -3,7 +3,7 @@ import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, Timing, GlobalCounters, fetch, profile_marker, getenv
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv
 from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
@@ -166,7 +166,9 @@ def main():
   if args.warmup or args.serve:
     if model.has_recurrent_block: model.warmup()
     else:
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+      # run 2 tokens through the model twice to capture the JIT before serving
+      with Context(DEBUG=max(DEBUG.value, 1)):
+        for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

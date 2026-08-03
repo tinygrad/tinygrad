@@ -23,7 +23,7 @@ if __name__ == "__main__":
             if hasattr(block, name)]
   assert all(str(state.device).startswith("AMD") and state.uop.is_realized for state in states)
   assert all(block.cache_kv.shape[3] >= args.max_context for block in model.blk if hasattr(block, "cache_kv"))
-  assert model.prefill_jit.cnt >= 2 and model.recurrent_rollout_jit.cnt >= 2
+  assert model.prefill_jit.cnt >= 2 and model.rollout_jit.cnt >= 2
   print(f"preallocated {sum(state.nbytes() for state in states)/2**30:.3f} GiB state on AMD", flush=True)
 
   prompt = [257] + [1000+i%1000 for i in range(args.prompt_tokens-1)]

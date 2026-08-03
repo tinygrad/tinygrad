@@ -47,18 +47,19 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, cache_scale, va
   groups_per_chunk, offset = CHUNK // decode_group, UOp.range(((valid_chunks+group_count-1)//group_count)*(CHUNK//decode_group), 100, AxisType.REDUCE)
   chunk = block_n + (offset // groups_per_chunk) * group_count
   keys = tuple(chunk*CHUNK + (offset % groups_per_chunk)*decode_group + i for i in range(decode_group))
-  kvals, vvals = (tuple(tuple(cache_kv[kv, b, kv_head, key, d].float() * cache_scale[kv, b, kv_head, key].float() for d in dims)
-    for key in keys) for kv in range(2))
+  valid = tuple(key < valid_kv_len for key in keys)
+  kvals, vvals = (tuple(tuple(cache_kv[kv, b, kv_head, key, d].float() *
+    is_valid.where(cache_scale[kv, b, kv_head, key].float(), UOp.const(0, dtypes.float)) for d in dims)
+    for key,is_valid in zip(keys, valid)) for kv in range(2))
   q_heads = tuple(kv_head*G + head_group*head_tile + wave*heads_per_wave + head for head in range(heads_per_wave))
   updates:list[UOp] = []
   for head,q_head in enumerate(q_heads):
     scores = tuple(warp_reduce(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, key_kvals)),
                                    UOp.const(0, dtypes.float)), lane + wave*WARP_SIZE, full_wave=True) / math.sqrt(D) for key_kvals in kvals)
     prev_acc, prev_max, prev_sum = acc.after(offset)[head], row_max.after(offset)[head], row_sum.after(offset)[head]
-    new_max = functools.reduce(lambda a,ks:a.maximum((ks[0] < valid_kv_len).where(ks[1], UOp.const(-math.inf, dtypes.float))),
-                               zip(keys, scores), prev_max)
+    new_max = functools.reduce(lambda a,vs:a.maximum(vs[0].where(vs[1], UOp.const(-math.inf, dtypes.float))), zip(valid, scores), prev_max)
     alpha = ((prev_max-new_max)*LOG2E).exp2()
-    betas = tuple((key < valid_kv_len).where(((score-new_max)*LOG2E).exp2(), UOp.const(0, dtypes.float)) for key,score in zip(keys, scores))
+    betas = tuple(is_valid.where(((score-new_max)*LOG2E).exp2(), UOp.const(0, dtypes.float)) for is_valid,score in zip(valid, scores))
     updates += [acc[head].store(prev_acc*alpha + sum((UOp.stack(*value)*beta for value,beta in zip(vvals, betas)), acc[head].const_like(0))),
                 row_sum[head].store(prev_sum*alpha + sum(betas, UOp.const(0, dtypes.float))), row_max[head].store(new_max)]
   update = UOp.group(*updates).end(offset)
@@ -83,7 +84,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   return ((partial*weights.unsqueeze(-1)).sum(2) / (stats[..., 1]*weights).sum(2, keepdim=True)).unsqueeze(2)
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int|UOp, key_limit:int|UOp|None=None) -> UOp:
+def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int|UOp) -> UOp:
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
@@ -128,7 +129,6 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int
   q_idx = valid_kv_len - M + block_m * BLOCK_M + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
   k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
   valid = k_idx <= q_idx
-  if key_limit is not None: valid = valid & (k_idx < key_limit)
   S_reg = S_reg.after(S_reg[rm, rn].store(valid.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
   m_ij, rm2 = _reg((TM,), 7, -math.inf, n_tile), UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
@@ -173,10 +173,10 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int
   o = o.permute((0, 4, 2, 6, 1, 3, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TD)
   return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
 
-def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, cache_scale:Tensor, key_limit:int|UOp|None=None) -> Tensor:
+def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, cache_scale:Tensor) -> Tensor:
   B, H, T, D = cast(tuple[int, int, int, int], q.shape)
   out = Tensor.empty(B*H, T, D, dtype="float32", device=q.device)
-  flash_cached = functools.partial(_amd_flash_attention, valid_kv_len=valid_kv_len, key_limit=key_limit)
+  flash_cached = functools.partial(_amd_flash_attention, valid_kv_len=valid_kv_len)
   return Tensor.custom_kernel(out, q.reshape(B*H, T, D), cache_kv, cache_scale, fxn=flash_cached)[0].reshape(B, H, T, D)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
