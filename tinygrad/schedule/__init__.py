@@ -26,13 +26,6 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
     raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
 
-def _kernel_writes(k:UOp, buf:UOp) -> bool:
-  call = k.src[0] if k.op is Ops.END else k
-  stores = [s for s in call.src[0].toposort()
-            if s.op is Ops.STORE and s.src[0].buf_uop.op is Ops.PARAM and s.src[0].buf_uop.arg.slot >= 0]
-  if not stores: return True  # opaque kernels do not expose their writes
-  return any(a.buf_uop is b.buf_uop for s in stores for a in _states(call.src[s.src[0].buf_uop.arg.slot+1]) for b in _states(buf))
-
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
@@ -45,7 +38,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(u.buf_uop, []).append((u, prev_state, tuple(k for k in kernels if k not in prev_kernels and _kernel_writes(k, u.buf_uop))))
+      writes.setdefault(u.buf_uop, []).append((u, prev_state, tuple(k for k in kernels if k not in prev_kernels)))
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"

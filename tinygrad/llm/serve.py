@@ -1,9 +1,8 @@
 from __future__ import annotations
 import json, pathlib, re, time, typing, uuid
-from http.server import BaseHTTPRequestHandler
-from socketserver import TCPServer
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, START_TIME, colored, stderr_log
+from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
@@ -61,22 +60,7 @@ class StreamRouter:
     if emit: yield "content", emit
     if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
 
-class Handler(BaseHTTPRequestHandler):
-  def start_response(self, content_type:str, status_code:int=200, **headers:str):
-    self.send_response(status_code)
-    for key,value in {"Content-Type":content_type, **headers}.items(): self.send_header(key.replace("_", "-"), value)
-    self.end_headers()
-  def send_data(self, data:bytes, content_type="application/json", status_code=200):
-    self.start_response(content_type, status_code, Content_Length=str(len(data)))
-    return self.wfile.write(data)
-  def stream_json(self, source:typing.Generator):
-    try:
-      self.start_response("text/event-stream", Cache_Control="no-cache")
-      for response in source:
-        self.wfile.write(f"data: {json.dumps(response)}\n\n".encode())
-        self.wfile.flush()
-      self.wfile.write(b"data: [DONE]\n\n")
-    except (BrokenPipeError, ConnectionResetError): source.close()
+class Handler(HTTPRequestHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
@@ -177,8 +161,7 @@ class Handler(BaseHTTPRequestHandler):
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
-class LLMServer(TCPServer):
-  allow_reuse_address = True
+class LLMServer(TCPServerWithReuse):
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
     print(f"*** started server on http://127.0.0.1:{server_address[1]} at {time.perf_counter()-START_TIME:.2f} s")

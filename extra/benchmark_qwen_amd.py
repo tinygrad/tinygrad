@@ -18,6 +18,12 @@ if __name__ == "__main__":
   st = time.perf_counter()
   with Context(BEAM=0): model.warmup(args.chunk_size)
   print(f"warm {time.perf_counter()-st:.3f}s", flush=True)
+  states = [getattr(block, name) for block in model.blk for name in ("cache_kv", "cache_kv_scale", "conv_state", "recurrent_state")
+            if hasattr(block, name)]
+  assert all(str(state.device).startswith("AMD") and state.uop.is_realized for state in states)
+  assert all(block.cache_kv.shape[3] >= args.max_context for block in model.blk if hasattr(block, "cache_kv"))
+  assert model.flash_prefill_jit.cnt >= 2 and model.recurrent_rollout_jit.cnt >= 2
+  print(f"preallocated {sum(state.nbytes() for state in states)/2**30:.3f} GiB state on AMD", flush=True)
 
   prompt = [257] + [1000+i%1000 for i in range(args.prompt_tokens-1)]
   gen, st = model.generate(prompt, chunk_size=args.chunk_size), time.perf_counter()

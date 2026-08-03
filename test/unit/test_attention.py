@@ -77,7 +77,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    return block._attention(x_norm, start_pos).realize().numpy()
+    out = block._attention(x_norm, start_pos).realize()
+    if block.pending_state is not None:
+      Tensor.realize(block.conv_state.assign(block.pending_state[0]), block.recurrent_state.assign(block.pending_state[1]))
+    return out.numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
@@ -96,7 +99,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x_float = x.astype(np.float32)
     return (x_float / np.sqrt((x_float * x_float).mean(axis=-1, keepdims=True) + eps)) * weight.astype(np.float32)
 
-  def _normalize_np(self, x:np.ndarray, eps:float=1e-12) -> np.ndarray:
+  def _normalize_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:
     return x / np.maximum(np.sqrt((x * x).sum(axis=-1, keepdims=True)), eps)
 
   def _softplus_np(self, x:np.ndarray) -> np.ndarray:
