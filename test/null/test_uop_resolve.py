@@ -7,6 +7,10 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(4, dtypes.int)
     self.assertEqual(int(u), 4)
 
+  def test_weak_const(self):
+    self.assertEqual(int(UOp.const(5)), 5)
+    self.assertEqual(float(UOp.const(1.5)), 1.5)
+
   def test_int_add(self):
     u = UOp.const(4, dtypes.int) + 7
     self.assertEqual(int(u), 11)
