@@ -12,7 +12,7 @@ class RandMixin(OpMixin):
   def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
     x = x.threefry((key[1].cast(dtypes.uint64) << 32) | key[0].cast(dtypes.uint64))
-    return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
+    return x.cast(dtypes.uint32).cat((x >> 32).cast(dtypes.uint32))
 
   @classmethod
   def random_bits(cls, key:Self, counter:Self, num:int) -> Self:
