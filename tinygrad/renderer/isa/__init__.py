@@ -23,9 +23,11 @@ class VRegister:
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
   def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self._cons, self.width, self.alignment, self, i)
+  def candidates(self) -> list[tuple[Register,...]]:
+    return [self._cons[i:i+self.width] for i in range(len(self._cons) - self.width + 1) if self._cons[i].index % self.alignment == 0]
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
-  if u.op is Ops.AFTER and len(u.src): return rdefs(u.src[0])
+  if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
@@ -51,10 +53,13 @@ class ISARenderer(Renderer):
   post_regalloc_ctx: any|None = None
   do_asm: bool = False
   mem2reg_alloc = None
+  spill_alignment: int = 1
+  spill_size: int = 0
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
+  def stack_alloc(self, uops:list[UOp]) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

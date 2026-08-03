@@ -817,6 +817,7 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
+  spill_alignment: 16
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
     if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
@@ -833,18 +834,25 @@ class X86Renderer(ISARenderer):
     assert ret is not None, f"failed to copy {x}"
     return ret
 
-  def spill(self, spill_offset:int, x:UOp) -> UOp:
-    disp = UOp.const(dtypes.uint32, spill_offset)
+  def spill(self, spill_offset:int, x:UOp, reg:Register) -> UOp:
+    disp = UOp.const(spill_offset, dtypes.uint32)
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
-    is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
+    is_xmm = reg.size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
-    return UOp(Ops.INS, dtypes.void, fold_address(self.stack_pointer().index(disp)) + (x,), op, x.tag)
+    return UOp(Ops.INS, dtypes.void, fold_address(self.spill_pointer().index(disp)) + (x,), op, x.tag)
 
-  def fill(self, spill_offset:int, x:UOp) -> UOp:
-    is_xmm = reg.const[0].size == 16
+  def fill(self, spill_offset:int, x:UOp, reg:Register) -> UOp:
+    is_xmm = reg.size == 16
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
-    disp = UOp.const(dtypes.uint32, spill_offset)
-    return UOp(Ops.INS, dt, fold_address(self.stack_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, (rdef(x),))
+    disp = UOp.const(spill_offset, dtypes.uint32)
+    return UOp(Ops.INS, dt, fold_address(self.spill_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, (reg,))
+
+  def stack_alloc(self, uops:list[UOp]):
+    sp = self.spill_pointer()
+    offset = UOp.const(self.spill_size, sp.dtype)
+    uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag)))
+    uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag)))
+    return uops
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"

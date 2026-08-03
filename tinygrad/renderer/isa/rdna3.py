@@ -578,6 +578,7 @@ class RDNA3Renderer(ISARenderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
+  def stack_alloc(self, uops:list[UOp]): return uops
   def copy(self, u:UOp, r:VRegister|Register) -> UOp:
     if u.dtype.itemsize == 8:
       return multireg(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype).replace(tag=(r,))

@@ -5,13 +5,13 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 
-PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK, Ops.INDEX}
+REGALLOC_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL}
 
 class LinearScanRegallocContext:
+  def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v][0]]
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = uops, ren, itertools.count()
-    self.prgpts: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.uops = [u for u in uops if u.op not in PSEUDO_OPS]
+    self.uops = [u for u in uops if u.op in REGALLOC_OPS]
     self.live_intervals: dict[VRegister, list[int]] = {}
 
     lis = self.live_intervals
@@ -19,10 +19,11 @@ class LinearScanRegallocContext:
     def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return _live_units(u.src[0]) # hack
       return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
-    for u in reversed(self.uops):
-      pt, defs, uses = self.prgpts[u], _live_units(u), []
+    for i, u in enumerate(reversed(self.uops)):
+      defs, uses = _live_units(u), []
       for s in dedup(u.src): uses.extend(_live_units(s))
-      for v in defs + tuple(uses): lis.setdefault(v, []).insert(0, pt)
+      for v in defs + tuple(uses):
+        lis.setdefault(v, []).insert(0, len(self.uops) - i - 1)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
         if (n := max((lis[rv][-1] for rv in range_vars if lis[rv][0] <= lis[v][-1] < lis[rv][-1]), default=None)): lis[v].append(n)
       if u.op is Ops.RANGE: range_vars.extend(defs)
@@ -34,28 +35,54 @@ class LinearScanRegallocContext:
 
     self.pmap: dict[VRegister, tuple[Register,...]] = {}
     vmap: dict[Register, list[VRegister]] = {}
-    physical_slots: dict[Register, list[tuple[int, int], ...]] = {}
-    spill_offset = 0
 
+    spill_size = 0
+    self.spills: dict[int, list[tuple[int, VRegister]]] = {}
+    self.fills: dict[int, list[tuple[int, VRegister]]] = {}
+    self.fmap: dict[int, list[tuple[VRegister, VRegister]]] = {}
+    fidx = itertools.count()
     # greedy allocate, pick first block of width w in constraints that is free for whole live range
-    def _inside(a:VRegister, b:VRegister): return lis[a][0] <= lis[b][-1] and lis[a][-1] >= lis[b][0]
-    def _isfree(v:VRegister, block:list[Register,...]) -> bool: return all(not _inside(v,bv) for r in block if r in vmap for bv in vmap[r])
-    for v in vregs:
-      candidates: list[tuple[Register,...]] = [v._cons[i:i+v.width] for i in range(len(v._cons) - v.width + 1) if v._cons[i].index % v.alignment == 0]
-      if (block := next((b for b in candidates if _isfree(v, b)), None)):
+    def overlaps(a:VRegister, b:VRegister): return lis[a][0] <= lis[b][-1] and lis[a][-1] >= lis[b][0]
+    def itfrs(v:VRegister, block:tuple[Register,...]): return set(vr for r in block if r in vmap for vr in vmap[r] if overlaps(v, vr))
+    def alloc(v:VRegister):
+      nonlocal spill_size
+      candidates = v.candidates()
+      if (block := next((b for b in candidates if not any(overlaps(v, bv) for r in b if r in vmap for bv in vmap[r])), None)):
         self.pmap[v] = block
         for r in block: vmap.setdefault(r, []).append(v)
       else:
-        raise NotImplementedError(f"spilling not implemented: {v}")
+        evicted = max(candidates, key=lambda b: min(next(i for i in lis[vr] if i >= lis[v][0]) for vr in itfrs(v,b)))
+        news = []
+        for ev in itfrs(v, evicted):
+          j = next(j for j,p in enumerate(lis[ev]) if p >= lis[v][0])
+          fr = VRegister(f"fr{next(fidx)}", ev._cons, ev.width, ev.alignment)
+          lis[fr] = lis[ev][j:]
+          lis[ev] = lis[ev][:j]
+          # TODO: remove the buffer condition for x86
+          sz = ev._cons[0].size if self.vdef(ev).op is not Ops.BUFFER else 8
+          offset = spill_size + (sz - spill_size % sz) % sz
+          self.spills.setdefault(lis[ev][0], []).append((offset,ev))
+          self.fills.setdefault(lis[fr][0], []).append((offset,fr))
+          spill_size += sz
+          for i in lis[fr]: self.fmap.setdefault(i, []).append((ev,fr))
+          news.append(fr)
+        self.pmap[v] = evicted
+        for r in evicted: vmap[r].append(v)
+        return news
+
+    for v in vregs:
+      if (fills := alloc(v)) is not None: vregs.extend(fills)
+    ren.spill_size = spill_size
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  if x.op in PSEUDO_OPS: return None
-  nsrc, ndefs, before, after = [], [], [], []
-  i = next(ctx.idx)
+  i, nsrc, ndefs, = next(ctx.idx), [], []
+  alias = {ctx.pmap[vr][0]:ctx.pmap[fr][0] for (vr,fr) in ctx.fmap[i]} if i in ctx.fmap else {}
 
+  # ew
+  def _view(u:UOp): return rdefs(u) if u.op is not Ops.INDEX else (rdefs(u.src[0])[u.src[1].arg],)
   for s in x.src:
-    if s.op is Ops.INDEX: nsrc.append(s.replace(tag=(rdefs(s.src[0])[s.src[1].arg],)))
-    else: nsrc.append(s)
+    s = s.replace(tag=tuple(alias.get(r,r) for r in _view(s)))
+    nsrc.append(s)
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): ndefs.append(v)
@@ -63,10 +90,14 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     else: ndefs.extend(ctx.pmap[v])
 
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
+
+  after = [ctx.ren.spill(slot,nx,*ctx.pmap[vr]) for slot,vr in ctx.spills[i]] if i in ctx.spills else []
+  before = [ctx.ren.fill(slot,nx,*ctx.pmap[vr]) for slot,vr in ctx.fills[i]] if i in ctx.fills else []
+
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat(REGALLOC_OPS, name="x"), regalloc_rewrite),
 ])
 
 def gbuf(idx:UOp):
