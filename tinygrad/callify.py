@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, ParamArg, graph_rewrite, track_rewrites
 from tinygrad.helpers import VIZ, pluralize, all_int, count
 

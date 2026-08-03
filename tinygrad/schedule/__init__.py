@@ -1,6 +1,6 @@
 import time, inspect
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 
@@ -138,8 +138,9 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, off:UOp|None=None, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  if off is not None: src = UOp(Ops.SLICE, dst.dtype, (src, off, UOp.const(dst.numel())))
   return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
@@ -156,12 +157,9 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
   # replace this with a copy if it's a copy
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.PARAM, name="dst").index(r:=UPat(Ops.RANGE, name="r")).store(UPat.any(
+    data:=UPat(Ops.PARAM, name="src").index(UPat.any(r, UPat(Ops.PARAM, name="off")+r)), UPat(Ops.BITCAST, src=(data,))))
+   .end(r).sink().f(Ops.CALL, name="call", allow_any_len=True), copy_kernel_to_copy_uop),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
