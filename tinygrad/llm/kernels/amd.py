@@ -1,10 +1,10 @@
 from __future__ import annotations
 import functools, math
-from typing import TYPE_CHECKING, Callable, cast
-from tinygrad import Tensor, UOp
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops
+from typing import Callable, cast
+from tinygrad import Tensor, UOp, nn
+from tinygrad.helpers import prod
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.dtype import AddrSpace, dtypes
-if TYPE_CHECKING: from tinygrad.llm.model import Linear
 
 BLOCK_M, BLOCK_N, DECODE_HEAD_TILE, WARP_SIZE = 32, 32, 8, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
@@ -12,6 +12,24 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32), math.log2(math.e)
 Q5_K, Q6_K, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 13, 14, 23, 256, 32, 44, 210, 34
+
+class Linear(nn.Linear):
+  ggml_type:int|None = None
+  def __init__(self, in_features:int, out_features:int, bias=True):
+    super().__init__(in_features, out_features, bias)
+    self.in_features, self.out_features = in_features, out_features
+    self._raw_offset_uop:UOp|None = None
+  def set_quantized(self, decoded:Tensor) -> Tensor|None:
+    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((Q5_K, 176), (Q6_K, 210), (IQ4_XS, 136))}
+    raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    if raw is None: return None
+    self.weight, self.ggml_type = Tensor(raw).flatten(), packed_sizes[prod(raw.shape)]
+    raw_offset = self.weight.uop.contiguous_view_offset()
+    assert raw_offset is not None and raw_offset % 4 == 0 and self.weight.uop.buf_uop.dtype == dtypes.uint8
+    if self.ggml_type == IQ4_XS and str(self.weight.device).startswith("AMD"): iq4_half_lut(str(self.weight.device))
+    return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
+  def __call__(self, x:Tensor) -> Tensor:
+    return q8_linear(self, x) if self.ggml_type in (Q5_K, Q6_K, IQ4_XS) and str(self.weight.device).startswith("AMD") else super().__call__(x)
 
 def warp_reduce(val:UOp, lane:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ([16, 8, 4, 2, 1] if full_wave else [8, 4, 2, 1]):
@@ -178,6 +196,18 @@ def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UO
   out = Tensor.empty(B*H, T, D, dtype="float32", device=q.device)
   flash_cached = functools.partial(_amd_flash_attention, valid_kv_len=valid_kv_len)
   return Tensor.custom_kernel(out, q.reshape(B*H, T, D), cache_kv, cache_scale, fxn=flash_cached)[0].reshape(B, H, T, D)
+
+def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor,
+                        start_pos:int|UOp, max_context:int) -> Tensor:
+  T = q.shape[2]
+  scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
+  packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
+  stores = (cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop),
+            cache_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop))
+  assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(*stores)), Tensor(cache_scale.uop.after(*stores))
+  start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
+  return amd_flash_attention_decode(q.half(), assigned_kv, start+1, assigned_scale, max_context) if resolve(T == 1) else \
+    flash_attention_causal_cached(q.half(), assigned_kv, start+T, assigned_scale)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c), arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
