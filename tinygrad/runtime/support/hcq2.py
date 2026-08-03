@@ -42,18 +42,15 @@ def unwrap_mstack(u):
   return unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
-  def store(ps:Sequence[tuple[sint, UOp]], tag:str|None) -> UOp:
-    offsets = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps))
-    return buf.index(offsets).store(UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in ps))).rtag(tag)
-
-  # a store is resolved as a whole, so the values known at link time get their own and are patched there
-  static, dynamic = partition(patches, lambda p: is_value_known_at_link(p[1]))
-  return tuple(store(ps, tag) for ps, tag in ((static, "link"), (dynamic, None)) if ps)
+  # a store is patched as a whole, so the values known at link time get their own
+  return tuple(buf.index(UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps)))
+               .store(UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in ps))).rtag(tag)
+               for ps, tag in zip(partition(patches, lambda p: is_value_known_at_link(p[1])), ("link", None)) if ps)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
   r = UOp.range(len(blob) // buf.dtype.itemsize, 0, dtype=dtypes.int, src=(buf, data))
-  return buf.index(r).store(data.index(r).load()).end(r)
+  return buf.index(r).store(data.index(r).load()).end(r).rtag("link")
 
 def make_cmdbuf(lin, devs, buf:UOp|None=None):
   blob, patches = bytearray(), []
@@ -269,20 +266,13 @@ def is_value_known_at_link(val:UOp) -> bool:
   # addr of input params is not known at link time
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
-def is_link_patch(p:UOp, jit:bool) -> bool:
-  store = p.src[0] if p.op is Ops.END else p
-  blob_fill = p.op is Ops.END and store.op is Ops.STORE and any(u.op is Ops.BINARY for u in store.src[1].toposort()) # other ENDs are runtime loops
-  if p.tag == "link" or blob_fill: return True
-  if not jit: return store.buf_uop.tag == "program" # only programs are fixed before execution without JIT
-  return store.op is Ops.STORE and is_value_known_at_link(store.src[1]) # JIT values without inputs or runtime reads
-
-def trim_link_patches(ctx:tuple[bool, list[UOp], list[UOp]], a:UOp) -> UOp|None:
-  links, kept = partition(a.src[1:], lambda p: is_link_patch(p, ctx[0]))
-  ctx[1].extend(kept)
+def trim_link_patches(ctx:tuple[list[UOp], list[UOp]], a:UOp) -> UOp|None:
+  links, kept = partition(a.src[1:], lambda p: p.tag == "link")
+  ctx[0].extend(kept)
 
   # keep all patches from the link-time patches' subtrees in the C code
   afters = [u for u in UOp.sink(*links).toposort() if u.op is Ops.AFTER]
-  ctx[2].extend(UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src)
+  ctx[1].extend(UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src)
   return a.src[0].after(*kept, *[d for p in afters for d in p.src[1:]]) if links else None
 pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat((Ops.PARAM, Ops.MSTACK)),), allow_any_len=True, name="a"), trim_link_patches)])
 
@@ -316,10 +306,10 @@ def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
 
-def split_patches(ctx:bool, call:UOp) -> UOp|None:
+def split_patches(call:UOp) -> UOp|None:
   rt_patches:list[UOp] = []
   lt_patches:list[UOp] = []
-  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(ctx, rt_patches, lt_patches), name=f"trim link-time patches ({call.arg.aux.name})")
+  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(rt_patches, lt_patches), name=f"trim link-time patches ({call.arg.aux.name})")
 
   # split patches
   inputs, internals = partition(dedup(g for p in rt_patches for g in get_getaddrs(p)), is_input_addr)
@@ -400,15 +390,15 @@ def callify_hcq(call:UOp, cf:UOp) -> UOp:
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
-hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
+hcq_compile_cache:dict[bytes, UOp] = {}
 
-@track_rewrites(lambda linear,input_uops,jit,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
+@track_rewrites(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   if input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
 
-  if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, jit)))) is None:
+  if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
     # prep
     linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
     linear = graph_rewrite(linear, pm_insert_copy_staging+pm_flatten_linear, name="insert copy staging")
@@ -421,7 +411,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
 
     # patches and runtime uops
     linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
-    linear = graph_rewrite(linear, pm_split_patches, walk=True, ctx=jit, name="split patches")
+    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
 
     # and compile it
     linear = graph_rewrite(linear, pm_replace_params, name="replace params")
@@ -484,11 +474,11 @@ pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: pani
 
 def link_buf_key(a:UOp): return a.key, to_tuple(a.device)
 link_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
-link_linear_cache:dict[tuple[bytes, bool], UOp] = {}
+link_linear_cache:dict[bytes, UOp] = {}
 
-@track_rewrites(lambda _,jit,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, jit=False, cache=True) -> UOp:
-  if (linked:=link_linear_cache.get(linear_key:=(linear.key, jit))) is not None: return linked
+@track_rewrites(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, cache=True) -> UOp:
+  if (linked:=link_linear_cache.get(linear_key:=linear.key)) is not None: return linked
 
   bufs = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
           if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
