@@ -4,7 +4,7 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_cmdbuf
-from tinygrad.runtime.support.hcq2 import make_binary_patch, make_patches
+from tinygrad.runtime.support.hcq2 import make_binary_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -152,19 +152,12 @@ def pm4_submit(ctx, lin):
   ring, wptr, doorbell, put_ptr = (UOp.placeholder((b.size,), b.dtype, 0, device=devs).rtag(f"COMPUTE:0_{name}")
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
-  # two tail dwords coordinate safe IB reuse: GPU completions and host submits
-  size_dw = sum(len(ins.src) for ins in lin.src) + len(release_mem(ctx, 0, 0).src)
+  # the host fence at the start of the batch guarantees the ib is free to reuse
+  size_dw = sum(len(ins.src) for ins in lin.src)
   assert size_dw < (1 << 20), f"indirect buffer of {size_dw} dwords doesn't fit one packet"
 
-  ib = UOp.placeholder((size_dw + 2,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
-  done_idx, submit_idx = UOp.const(size_dw + 0, dtypes.int), UOp.const(size_dw + 1, dtypes.int)
-  init_counters = make_patches(ib, [((size_dw + i) * 4, UOp.const(0, dtypes.uint32)) for i in range(2)]).rtag("link")
-  submitted = (counter:=ib.after(init_counters).index(submit_idx)).load()
-  completed = ib.after(loop:=UOp.loop(0)).index(done_idx).load()
-  ib_free = completed.end(loop, completed != submitted)
-
-  bump_fence = pm4_store(ctx, UOp(Ops.SLICE, dtypes.uint32, (ib, UOp.const(size_dw)), 2), (submitted + 1).cast(dtypes.uint64))
-  cmdbuf = make_cmdbuf(lin.replace(src=lin.src + (bump_fence,)), devs, buf=ib, dep=ib_free)
+  ib = UOp.placeholder((size_dw,), dtypes.uint32, next(UOp.unique_num), device=devs, volatile=True).rtag("cmdbuf")
+  cmdbuf = make_cmdbuf(lin, devs, buf=ib)
 
   # the ring itself only carries a packet pointing at the ib, wrapping the ring
   put = put_ptr.index(zero:=UOp.const(0, dtypes.int))
@@ -174,7 +167,7 @@ def pm4_submit(ctx, lin):
   # advance the put/write pointers past the packet
   bump_put_ptr = put_ptr.index(zero).store(put + len(pkt))
   bump_wptr = wptr.index(zero).store(put + len(pkt))
-  flush = UOp.barrier(write_pkt, bump_put_ptr, bump_wptr, counter.store(submitted + 1))
+  flush = UOp.barrier(write_pkt, bump_put_ptr, bump_wptr)
   return doorbell.after(flush).index(zero).store(put + len(pkt))
 
 pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"), pm4_submit)])
@@ -518,8 +511,7 @@ class PCIIface(PCIIfaceBase):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.timeline_signal('COMPUTE:0')._buf.cpu_view().mv.cast('Q')[0] = \
-        d.timeline_value('COMPUTE:0').as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.signal('timeline')._buf.cpu_view().mv.cast('Q')[0] = d.signal('value', 1).as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -639,9 +631,6 @@ class AMDDevice(HCQ2Compiled):
     qname = f"{'COPY' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag=f"{qname}_{name}"), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
-    ] + [
-      (UPat(Ops.PARAM, tag=f"{qname}_timeline_signal"), lambda ctx, q=qname: ctx[0].timeline_signal(q)),
-      (UPat(Ops.PARAM, tag=f"{qname}_timeline_value"), lambda ctx, q=qname: ctx[0].timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue
