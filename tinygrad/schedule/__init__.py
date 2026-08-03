@@ -161,6 +161,10 @@ pm_copy_from_store = PatternMatcher([
     data:=UPat(Ops.PARAM, name="src").index(UPat.any(r, UPat(Ops.PARAM, name="off")+r)), UPat(Ops.BITCAST, src=(data,))))
    .end(r).sink().f(Ops.CALL, name="call", allow_any_len=True), copy_kernel_to_copy_uop),
 
+  (UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0)).store(UPat.any(
+    data:=UPat(Ops.PARAM, name="src").index(UPat.any(UPat(Ops.CONST, arg=0), UPat(Ops.PARAM, name="off"))), UPat(Ops.BITCAST, src=(data,))))
+   .sink().f(Ops.CALL, name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
