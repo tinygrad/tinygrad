@@ -161,39 +161,33 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if dsv4 := self.config.deepseek4:
-        scores = logits.float().softplus().sqrt()
+      if (dsv4 := self.config.deepseek4) or hasattr(self, 'exp_probs_b'):
+        probs = logits.float().softplus().sqrt() if dsv4 else logits.sigmoid()
         if hasattr(self, "ffn_gate_tid2eid"):
           assert tokens is not None
           sel = self.ffn_gate_tid2eid["weight"][tokens]
-        else: _, sel = pairwise_topk(scores+self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-        probs = scores.gather(-1, sel)
-        probs = probs / probs.sum(-1, keepdim=True)
-      elif hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+        else: _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
       else:
         vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
         probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
+      gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       if dsv4:
         clamp = dsv4.swiglu_clamp[getattr(self, "layer_id")]
-        gate, up = self.ffn_gate_exps(sel, h).float(), self.ffn_up_exps(sel, h).float()
-        hidden = (gate.minimum(clamp).silu()*up.clamp(-clamp, clamp)).cast(x.dtype)
-        x_down = self.ffn_down_exps(sel, hidden)
-      else: x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
+        gate, up = gate.float().minimum(clamp), up.float().clamp(-clamp, clamp)
+      hidden = gate.silu() * up
+      x_down = self.ffn_down_exps(sel, hidden.contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
+        gate, up = self.ffn_gate_shexp(x), self.ffn_up_shexp(x)
         if dsv4:
           clamp = dsv4.shared_swiglu_clamp[getattr(self, "layer_id")]
-          gate, up = self.ffn_gate_shexp(x).float(), self.ffn_up_shexp(x).float()
-          hidden = (gate.minimum(clamp).silu()*up.clamp(-clamp, clamp)).cast(x.dtype)
-          shexp = self.ffn_down_shexp(hidden)
-        else:
-          shexp = self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x))
-          if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+          gate, up = gate.float().minimum(clamp), up.float().clamp(-clamp, clamp)
+        gate = gate.silu().contiguous()
+        shexp = self.ffn_down_shexp(gate * up)
+        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
     # TODO: remove the need for this contiguous
