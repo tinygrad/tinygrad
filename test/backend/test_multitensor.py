@@ -76,7 +76,6 @@ class TestMultiTensor(unittest.TestCase):
     run_linear(linear)
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
-  @unittest.expectedFailure
   def test_shard_beam(self):
     cpu_2 = ("CPU:1", "CPU:2")
     src = Tensor.ones(16).shard(cpu_2, 0).realize()

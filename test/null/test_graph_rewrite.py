@@ -15,13 +15,13 @@ def apply_rewrite(expr):
 def apply_rewrite_values(expr):
   srcs = full_rewrite(expr.sink()).src
   if len(srcs) == 1:
-    if srcs[0].op is Ops.CONST: return (srcs[0].arg,) if not isinstance(srcs[0].arg, tuple) else srcs[0].arg
-    if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
-  return tuple(s.arg for s in srcs)
+    if srcs[0].op is Ops.CONST: return (srcs[0].val,)
+    if srcs[0].op is Ops.STACK: return tuple(s.val for s in srcs[0].src)
+  return tuple(s.val for s in srcs)
 
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
-    return uop.arg
+    return uop.val
   elif uop.op == Ops.PARAM and uop.arg.addrspace is AddrSpace.ALU:
     return variables[uop.expr]
   elif uop.op in GroupOp.ALU:
@@ -34,12 +34,12 @@ class TestArithmeticSimplifications(unittest.TestCase):
   def test_full_graph_rewrite_division_by_zero(self):
     optimized_div_uop = apply_rewrite(UOp.const(10.0) / UOp.const(0.0))
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
-    self.assertTrue(math.isinf(optimized_div_uop.arg) or math.isnan(optimized_div_uop.arg))
+    self.assertTrue(math.isinf(optimized_div_uop.val) or math.isnan(optimized_div_uop.val))
 
   def test_full_graph_rewrite_redundant_operations(self):
     optimized_uop = apply_rewrite((UOp.const(10.0) + UOp.const(0.0)) * UOp.const(1.0))
     self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 10.0)
+    self.assertEqual(optimized_uop.val, 10.0)
 
   def test_full_graph_rewrite_large_graph(self):
     prev_uop = UOp.const(0)
@@ -47,17 +47,17 @@ class TestArithmeticSimplifications(unittest.TestCase):
       prev_uop += UOp.const(i)
     optimized_uop = apply_rewrite(prev_uop)
     self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, sum(range(1, 101)))
+    self.assertEqual(optimized_uop.val, sum(range(1, 101)))
 
   def test_full_graph_rewrite_division_by_one(self):
     optimized_uop = apply_rewrite(UOp.const(42.0) / UOp.const(1.0))
     self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 42.0)
+    self.assertEqual(optimized_uop.val, 42.0)
 
   def test_full_graph_rewrite_modulo_by_one(self):
     optimized_uop = apply_rewrite(UOp.const(42) % UOp.const(1))
     self.assertEqual(optimized_uop.op, Ops.CONST)
-    self.assertEqual(optimized_uop.arg, 0)
+    self.assertEqual(optimized_uop.val, 0)
 
 
 class TestFoldingAndReduction(unittest.TestCase):
@@ -68,7 +68,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     const3 = UOp.const(20)
     optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(Ops.ADD))
     expected_sum = 5 + 10 + 20
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(optimized_sink.val, expected_sum)
 
   @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_reduction_with_unused_range(self):
@@ -77,14 +77,14 @@ class TestFoldingAndReduction(unittest.TestCase):
     rng = UOp.range(10, idx=0)
     optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(optimized_sink.val, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_range_reduction(self):
     simple_range = UOp.range(5, idx=0)
     optimized_sink = apply_rewrite(simple_range.reduce(Ops.ADD, simple_range))
     expected_sum = sum(range(5))
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(optimized_sink.val, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_simple_reduction_folding(self):
@@ -92,7 +92,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     add_uop = simple_range + UOp.const(1)
     optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
-    self.assertEqual(optimized_sink.arg, expected_sum)
+    self.assertEqual(optimized_sink.val, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_nested_loop_collapse(self):
@@ -101,7 +101,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     expr = (outer_range * 10) + inner_range
     optimized_reduce_uop = apply_rewrite(expr.reduce(Ops.ADD, outer_range, inner_range))
     self.assertEqual(optimized_reduce_uop.op, Ops.CONST)
-    self.assertEqual(optimized_reduce_uop.arg, sum((i * 10) + j for i in range(8) for j in range(4)))
+    self.assertEqual(optimized_reduce_uop.val, sum((i * 10) + j for i in range(8) for j in range(4)))
 
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
@@ -110,21 +110,21 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     x_var_uop = UOp.variable('x', 0, 100).cast(dtypes.weakint)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, Ops.CONST)
-    self.assertEqual(optimized_mod_uop.arg, 2)
+    self.assertEqual(optimized_mod_uop.val, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     # index dtype because div-mod rules only work on index
     n_var_uop = UOp.variable('n', 1, 1000).cast(dtypes.weakint)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
-    self.assertEqual(optimized_div_uop.src[1].arg, 2)
+    self.assertEqual(optimized_div_uop.src[1].val, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
     # index dtype because div-mod rules only work on index
     k_var_uop = UOp.variable('k', 0, 50).cast(dtypes.weakint)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
-    self.assertEqual(optimized_div_uop.arg, 1)
+    self.assertEqual(optimized_div_uop.val, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, src=(
@@ -161,9 +161,9 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
     optimized_sink = full_rewrite(UOp.const(-1.0).log2().sink(UOp.const(0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
-    self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
-    self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
-                    f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.arg}")
+    self.assertTrue(math.isnan(optimized_log2_neg.val), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.val}")
+    self.assertTrue(math.isinf(optimized_recip_zero.val) and optimized_recip_zero.val > 0,
+                    f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.val}")
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
@@ -183,7 +183,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
     # GEP on a vector dtype to extract a single element
     base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(base_vector.index(2)).arg, 3.0)
+    self.assertEqual(apply_rewrite(base_vector.index(2)).val, 3.0)
 
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
@@ -193,7 +193,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_on_const_stack(self):
     # GEP on a const STACK to extract a single element
     const_stack = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(const_stack.index(2)).arg, 3.0)
+    self.assertEqual(apply_rewrite(const_stack.index(2)).val, 3.0)
 
   def test_gep_tuple_on_const_stack(self):
     # GEP on a const STACK using a tuple to extract multiple elements
@@ -307,8 +307,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop(self):
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
@@ -316,13 +316,13 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop_bottom_up(self):
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
 
-def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
+def bidir_append(ctx, x, b): ctx.append((x.val if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
     a = UOp.const(1)
@@ -342,8 +342,8 @@ class TestStopEarly(unittest.TestCase):
     cn = UOp.const(7)
     d = UOp.const(2)
     def visit_const(c:UOp):
-      print(f"visit {c.arg}")
-      assert c.arg not in (3,4)
+      print(f"visit {c.val}")
+      assert c.val not in (3,4)
     pm_cvisit = PatternMatcher([(UPat(Ops.CONST, name="c"), visit_const),])
     ret = (c+d).substitute({c:cn}, extra_pm=pm_cvisit)
     assert ret == cn+d
@@ -378,8 +378,8 @@ class TestWalkRewrite(unittest.TestCase):
     """A bouncing pattern applies once and stops instead of looping."""
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
@@ -418,7 +418,7 @@ class TestWalkRewrite(unittest.TestCase):
     """Top-down walk fires pm after children are processed (post-order)."""
     visited = []
     def track_visit(ctx, x):
-      ctx.append(x.arg if x.op is Ops.CONST else x.op)
+      ctx.append(x.val if x.op is Ops.CONST else x.op)
       return None
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), track_visit)])
     a = UOp.const(1)
@@ -456,8 +456,8 @@ class TestWalkRewrite(unittest.TestCase):
     """Bottom-up walk also applies once per node, no fixed-point iteration."""
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     ret = graph_rewrite(a, pm, bottom_up=True, walk=True)
     self.assertIs(ret, UOp.const(4))
@@ -466,7 +466,7 @@ class TestWalkRewrite(unittest.TestCase):
     """Bottom-up walk fires bpm before descending (pre-order)."""
     visited = []
     def track_visit(ctx, x):
-      ctx.append(x.arg if x.op is Ops.CONST else x.op)
+      ctx.append(x.val if x.op is Ops.CONST else x.op)
       return None
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), track_visit)])
     a = UOp.const(1)
@@ -490,10 +490,10 @@ class TestWalkRewrite(unittest.TestCase):
     """Bidirectional walk: bpm fires pre-order, pm fires post-order."""
     visited = []
     def bpm_visit(ctx, x):
-      ctx.append((x.arg if x.op is Ops.CONST else x.op, "bpm"))
+      ctx.append((x.val if x.op is Ops.CONST else x.op, "bpm"))
       return None
     def pm_visit(ctx, x):
-      ctx.append((x.arg if x.op is Ops.CONST else x.op, "pm"))
+      ctx.append((x.val if x.op is Ops.CONST else x.op, "pm"))
       return None
     bpm = PatternMatcher([(UPat(GroupOp.All, name="x"), bpm_visit)])
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), pm_visit)])
@@ -509,12 +509,12 @@ class TestWalkRewrite(unittest.TestCase):
     """If bpm matches, children are skipped and pm never fires on that node."""
     visited = []
     def bpm_match(ctx, x):
-      ctx.append((x.arg if x.op is Ops.CONST else x.op, "bpm"))
+      ctx.append((x.val if x.op is Ops.CONST else x.op, "bpm"))
       # rewrite const(1) -> const(10), short-circuiting its subtree
-      if x.op is Ops.CONST and x.arg == 1: return x.replace(arg=10)
+      if x.op is Ops.CONST and x.val == 1: return UOp.const(10, x.dtype)
       return None
     def pm_match(ctx, x):
-      ctx.append((x.arg if x.op is Ops.CONST else x.op, "pm"))
+      ctx.append((x.val if x.op is Ops.CONST else x.op, "pm"))
       return None
     bpm = PatternMatcher([(UPat(GroupOp.All, name="x"), bpm_match)])
     pm = PatternMatcher([(UPat(GroupOp.All, name="x"), pm_match)])

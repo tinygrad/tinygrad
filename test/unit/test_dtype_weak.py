@@ -55,7 +55,7 @@ class TestWeakPromotion(unittest.TestCase):
     x, y = Tensor([1], dtype=dtypes.int8)._broadcasted(0.5)
     self.assertEqual((y._uop.base.op, y.dtype, x.dtype), (Ops.CONST, dtypes.weakfloat, dtypes.weakfloat))
     x, y = Tensor.const(1).reshape(1)._broadcasted(Tensor([1.0], dtype=dtypes.float32))
-    self.assertEqual((x._uop.base.op, x._uop.base.arg, x.dtype, x.shape, y.dtype),
+    self.assertEqual((x._uop.base.op, x._uop.base.val, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
 
   def test_uop_scalar_const_lifts_kind(self):
@@ -68,7 +68,7 @@ class TestWeakPromotion(unittest.TestCase):
     # the kind lift converts the VALUE too (the arg is the only dtype carrier once UOp.const loses its dtype arg),
     # and a bare weak const UOp is the same spelling as the python scalar: both lift to the same node
     x = UOp.variable("x", 0.0, 1.0, dtypes.float32)
-    self.assertIsInstance((x + 2).src[1].arg, float)
+    self.assertIsInstance((x + 2).src[1].val, float)
     self.assertIs(x + UOp.const(2), x + 2)
 
   def test_index_dtype_ignores_weakness(self):
