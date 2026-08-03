@@ -25,6 +25,9 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self: ctx[src] = None
 
+def realize_call_srcs(ctx:dict[UOp, None], call:UOp):
+  for s in call.src[1:]: realize(ctx, s)
+
 pm_generate_realize_map = PatternMatcher([
   # always realize
   (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
@@ -32,6 +35,8 @@ pm_generate_realize_map = PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
+  # ensure CALL sources are contiguous
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="call"), realize_call_srcs),
 ])
 
 @dataclass(frozen=True)
