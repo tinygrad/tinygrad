@@ -126,6 +126,12 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(nan == Invalid)
     self.assertTrue(nan != Invalid)    # __ne__ must defer to the reflected eq, not swallow NotImplemented
 
+  def test_invalid_eq_defers_to_reflected(self):
+    class HoldsInvalid:  # a carrier that knows it holds Invalid. returning False for foreign types would silence its eq
+      def __eq__(self, other): return other is Invalid
+    self.assertTrue(Invalid == HoldsInvalid())
+    self.assertFalse(Invalid != HoldsInvalid())
+
   def test_matchers_agree_on_nan(self):
     n = UOp.const(math.nan, dtypes.float32)
     for compiled in (False, True):
@@ -447,7 +453,7 @@ class TestUPatHelpers(unittest.TestCase):
 
 class TestUopsObject(unittest.TestCase):
   def test_timing(self):
-    with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
+    with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000
 
   def test_nested(self):
