@@ -41,8 +41,14 @@ def unwrap_mstack(u):
   if u.op is Ops.MSTACK: return tuple(x for s in u.src for x in unwrap_mstack(s))
   return unwrap_mstack(u.src[0]) if u.op in {Ops.MSELECT, Ops.SLICE} else (u,)
 
+def is_value_known_at_link(val:UOp) -> bool:
+  runtime_reads = [u for u in val.toposort() if u.op in (Ops.LOAD, Ops.INDEX)]
+  addressed_bufs = [b for g in val.toposort() if g.op is Ops.GETADDR for b in unwrap_mstack(g.buf_uop)]
+
+  # addr of input params is not known at link time
+  return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
+
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
-  # a store is patched as a whole, so the values known at link time get their own
   return tuple(buf.index(UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps)))
                .store(UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in ps))).rtag(tag)
                for ps, tag in zip(partition(patches, lambda p: is_value_known_at_link(p[1])), ("link", None)) if ps)
@@ -132,7 +138,6 @@ def _build_wait_cmds(slots:dict[str, int], dep_lanes:list[tuple[tuple, int, int]
   return waits, {dtag for _, _, dtag in deps}
 
 def make_fence(timeline:UOp, prev:UOp, sigs:list[UOp]) -> UOp:
-  # the timeline passes prev only once the last run of this batch is done, so its signals are free to reset
   free = (cur:=timeline.after(loop:=UOp.loop(0)).index(0).load()).end(loop, cur < prev.index(0).load())
   return UOp.sink(*[s.after(free).index(0).store(0) for s in sigs])
 
@@ -172,7 +177,7 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
 def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
   batch_info = [(devices, "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0") for call, devices in batch]
 
-  # schedule deps. queue signals are per batch, so their values are constants and the fence resets them before each run
+  # schedule deps
   waited:set[int] = set()
   slots:dict[str, int] = collections.defaultdict(lambda: next(UOp.unique_num))
   deps_tracker = HCQDepsTracker()
@@ -258,13 +263,6 @@ pm_encode_cmdbufs = PatternMatcher([
 # *****************
 
 def get_getaddrs(p:UOp) -> list[UOp]: return [u for u in p.toposort(gate=lambda u: u.op is not Ops.AFTER) if u.op is Ops.GETADDR]
-
-def is_value_known_at_link(val:UOp) -> bool:
-  runtime_reads = [u for u in val.toposort() if u.op in (Ops.LOAD, Ops.INDEX)]
-  addressed_bufs = [b for g in val.toposort() if g.op is Ops.GETADDR for b in unwrap_mstack(g.buf_uop)]
-
-  # addr of input params is not known at link time
-  return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def trim_link_patches(ctx:tuple[list[UOp], list[UOp]], a:UOp) -> UOp|None:
   links, kept = partition(a.src[1:], lambda p: p.tag == "link")

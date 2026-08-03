@@ -288,5 +288,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache)
-  # hcq splits the call into a fence, the submit and a finalizer. the submit is the one that waits for the device
   return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)
