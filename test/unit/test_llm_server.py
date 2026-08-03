@@ -17,6 +17,19 @@ class TestTransformerGenerate(unittest.TestCase):
     with patch.object(Transformer, '__call__', return_value=Tensor([[42]])):
       self.assertEqual(next(model.generate([0])), 42)
 
+  def test_recurrent_live_state_reuse(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    model._cached_tokens = [1, 2, 3, 4, 5]
+    self.assertEqual(model.get_start_pos([1, 2, 3, 4, 5, 42, 10]), 5)
+    calls = []
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      calls.append((tokens.shape, start_pos))
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call):
+      next(model.generate([1, 2, 3, 4, 5, 42, 10]))
+    self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
+
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)
     self.assertEqual(list(router.route("reasoning</think>answer")),
@@ -27,7 +40,7 @@ class TestTransformerGenerate(unittest.TestCase):
     model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       captured_inputs.append((tokens.shape, start_pos))
       return Tensor([[42]])
 
@@ -52,7 +65,7 @@ class TestTransformerGenerate(unittest.TestCase):
     model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       captured_inputs.append((tokens.shape, start_pos))
       return Tensor([[42]])
 
@@ -100,7 +113,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
     def get_prefill_flags(tokens, chunk_size):
       is_prefill = []
-      def mock_call(self, tokens, start_pos, temperature):
+      def mock_call(self, tokens, start_pos, temperature, **kwargs):
         is_prefill.append(resolve(tokens.shape[1] != 1))
         return Tensor([[42]])
       with patch.object(Transformer, '__call__', mock_call):
@@ -161,7 +174,7 @@ class TestTransformerGenerate(unittest.TestCase):
     """Temperature from generate should be passed through to __call__."""
     model = Transformer(TEST_CONFIG)
     captured_temps = []
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       captured_temps.append(float(temperature.item()))
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):
