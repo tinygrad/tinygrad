@@ -81,6 +81,20 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
 
+def scalar_alu_index_kernel(out: UOp) -> UOp:
+  val = UOp.param(1, dtypes.int, (1,), vmin_vmax=(0, 100), addrspace=AddrSpace.ALU, name="val")
+  idx = UOp(Ops.INDEX, dtypes.int, (val, UOp.const(0, dtypes.int)))
+  return out[0].store(idx + 1).sink(arg=KernelInfo(name="scalar_alu_index"))
+
+class TestScalarALUIndex(unittest.TestCase):
+  def test_scalar_alu_index(self):
+    # regression: indexing a scalar (1,)-shaped ALU param must render the variable
+    # directly, not as data.x (which is a compile error on a scalar int)
+    out = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize()
+    result = Tensor.custom_kernel(out, fxn=scalar_alu_index_kernel)[0]
+    run_linear(result.schedule_linear(), var_vals={"val": 42})
+    self.assertEqual(result.item(), 43)
+
 class TestWaitLoop(unittest.TestCase):
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
