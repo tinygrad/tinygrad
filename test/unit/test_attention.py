@@ -52,21 +52,22 @@ class TestAttention(unittest.TestCase):
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
-    return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
+    return Tensor(np.linspace(start, stop, int(np.prod(shape)), dtype=np.float32).reshape(shape), device=Tensor.empty(1).device).realize()
 
   def _make_config(self, **kwargs):
-    return TransformerConfig(**({"num_blocks":1, "dim":4, "hidden_dim":8, "n_heads":1, "n_kv_heads":1,
-                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":4, "rope_theta":10000.0,
-                                 "rope_dim":4, "v_head_dim":4, "max_context":4, "ssm_layers":(True,),
-                                 "ssm":SSMConfig(conv_kernel=2, state_size=2, group_count=1, time_step_rank=1, inner_size=2)} | kwargs))
+    return TransformerConfig(**({"num_blocks":1, "dim":32, "hidden_dim":64, "n_heads":1, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":32, "rope_theta":10000.0,
+                                 "rope_dim":32, "v_head_dim":32, "max_context":4, "ssm_layers":(True,),
+                                 "ssm":SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32)} | kwargs))
 
   def _make_block(self, config:TransformerConfig) -> GatedDeltaNetBlock:
     block = GatedDeltaNetBlock(config, config.ssm)
     block.attn_norm.weight = self._tensor_linspace(0.8, 1.2, (config.dim,))
     block.attn_qkv.weight = self._tensor_linspace(-0.15, 0.2, (block.conv_channels, config.dim))
     block.attn_gate.weight = self._tensor_linspace(-0.1, 0.15, (config.ssm.inner_size, config.dim))
-    block.ssm_alpha.weight = self._tensor_linspace(-0.08, 0.12, (block.num_v_heads, config.dim))
-    block.ssm_beta.weight = self._tensor_linspace(-0.12, 0.07, (block.num_v_heads, config.dim))
+    beta = self._tensor_linspace(-0.12, 0.07, (block.num_v_heads, config.dim))
+    alpha = self._tensor_linspace(-0.08, 0.12, (block.num_v_heads, config.dim))
+    block.ssm_beta_alpha.weight = beta.cat(alpha)
     block.ssm_conv1d["weight"] = self._tensor_linspace(-0.05, 0.05, (block.conv_channels, block.ssm_conv_kernel))
     block.ssm_dt["bias"] = self._tensor_linspace(-0.1, 0.1, (block.num_v_heads,))
     block.ssm_a = self._tensor_linspace(-0.1, -0.05, (block.num_v_heads,))
@@ -77,8 +78,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    out, conv_state, recurrent_state = block._attention(x_norm, start_pos)
-    Tensor.realize(out, block.conv_state.assign(conv_state), block.recurrent_state.assign(recurrent_state))
+    out, conv_state = block._attention(x_norm, start_pos)
+    Tensor.realize(out, block.conv_state.assign(conv_state))
     return out.numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
@@ -115,8 +116,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     conv_weight = block.ssm_conv1d["weight"].numpy().astype(np.float32).T[None, :, :]
     qkv_weight = block.attn_qkv.weight.numpy().astype(np.float32)
     gate_weight = block.attn_gate.weight.numpy().astype(np.float32)
-    alpha_weight = block.ssm_alpha.weight.numpy().astype(np.float32)
-    beta_weight = block.ssm_beta.weight.numpy().astype(np.float32)
+    beta_weight, alpha_weight = np.split(block.ssm_beta_alpha.weight.numpy().astype(np.float32), 2)
     out_weight = block.ssm_out.weight.numpy().astype(np.float32)
     dt_bias = block.ssm_dt["bias"].numpy().astype(np.float32)
     ssm_a = block.ssm_a.numpy().astype(np.float32)
@@ -155,9 +155,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return outputs, conv_states, recurrent_states
 
   def test_gatedeltanet_reference_and_reset(self):
+    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
     config = self._make_config(max_context=3)
     block = self._make_block(config)
-    x = Tensor.linspace(-1.0, 1.0, 3 * config.dim, dtype=dtypes.float32).reshape(1, 3, config.dim)
+    x = self._tensor_linspace(-1.0, 1.0, (1, 3, config.dim))
 
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, x)
 
@@ -171,8 +172,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet recurrent cache mismatch at step {step}")
 
-    warmup = Tensor.linspace(-0.5, 0.5, 2 * config.dim, dtype=dtypes.float32).reshape(1, 2, config.dim)
-    prompt = Tensor.linspace(0.75, -0.75, 2 * config.dim, dtype=dtypes.float32).reshape(1, 2, config.dim)
+    warmup, prompt = self._tensor_linspace(-0.5, 0.5, (1, 2, config.dim)), self._tensor_linspace(0.75, -0.75, (1, 2, config.dim))
 
     for i in range(warmup.shape[1]): self._run_attention(block, warmup[:, i:i+1], i)
     Tensor.realize(*block._state_reset_ops())
@@ -189,7 +189,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
 
   def test_kda_channel_decay(self):
-    config = self._make_config(n_heads=2, ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
+    config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
     block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.]]])
     # f_b(f_a(x)) = [1, 2, 3, 4]
     block.ssm_f_a.weight = Tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])

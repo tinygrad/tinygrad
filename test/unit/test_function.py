@@ -63,16 +63,6 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), [12,15,18])
     np.testing.assert_equal(d.numpy(), [12,15,19])
 
-  def test_precompile_cross_buffer_stores(self):
-    a, b = Tensor.zeros(8).contiguous().realize(), Tensor.zeros(8).contiguous().realize()
-    @function(precompile=True, allow_implicit=True)
-    def f(x:Tensor, start:UOp):
-      a[start:start+2].assign(x)
-      b[start:start+2].assign(x+1)
-      return a+b
-    out = f(Tensor([2., 3.]).realize(), UOp.variable("start", 0, 6).bind(1))
-    np.testing.assert_equal(out.numpy(), [0, 5, 7, 0, 0, 0, 0, 0])
-
   def test_implicit_unrealized(self):
     inp = Tensor([1,2,3]) + Tensor([4,5,6])
     @function(allow_implicit=True)

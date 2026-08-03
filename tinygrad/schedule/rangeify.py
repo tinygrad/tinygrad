@@ -412,16 +412,7 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
   return None
 
-def close_after_stores(after:UOp):
-  def close(store:UOp) -> UOp:
-    if store.op is not Ops.STORE: return store
-    kernel = store.end(*sorted([r for r in store.ranges if r.arg[-1] is not AxisType.DEVICE], key=lambda r:r.arg))
-    target = store.src[0].src[0].base
-    return kernel if target.buf_uop is after.buf_uop else target.after(kernel)
-  if (src := (after.src[0], *map(close, after.src[1:]))) != after.src: return after.replace(src=src)
-
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
-  (UPat(Ops.AFTER, name="after"), close_after_stores),
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
