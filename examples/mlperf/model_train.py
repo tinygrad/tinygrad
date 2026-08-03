@@ -1434,9 +1434,9 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
-  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts] if hasattr(model, "_fp8_next_amax") else []
-  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts] if hasattr(model, "_fp8_next_grad_amax") else []
+  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
+  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts]
   fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
 
   from tinygrad.nn.state import get_state_dict
@@ -1462,8 +1462,7 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
-    for nxt in fp8_next_amax: nxt.assign(0)
-    for nxt in fp8_next_grad_amax: nxt.assign(0)
+    model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
@@ -1487,8 +1486,7 @@ def train_llama3():
     scheduler.step()
 
     for g in grads: g.assign(0)
-    for cur, nxt in zip(fp8_amax, fp8_next_amax): cur.assign(nxt)
-    for cur, nxt in zip(fp8_grad_amax, fp8_next_grad_amax): cur.assign(nxt)
+    model.update_amax()
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
