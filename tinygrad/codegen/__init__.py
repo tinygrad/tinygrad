@@ -150,9 +150,6 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
-  # INDEX of a scalar ALU param is the param itself
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),), allow_any_len=True),
-   lambda v: v if v.addrspace == AddrSpace.ALU and v.max_numel() == 1 else None),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # stacked INDEX is many INDEX
