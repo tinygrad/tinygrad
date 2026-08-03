@@ -294,8 +294,8 @@ def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp
   # plan entry: dst word offset << 32 | addr table slot
   plan = UOp.placeholder((len(data),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
   entry = plan.index(ridx:=UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, dst))).load()
-  address, widx = table.index(entry.cast(dtypes.int)).load(), (entry >> 32).cast(dtypes.int)
-  loop = UOp.group(*[dst.index(widx+i).store((address >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
+  slot, widx = ((entry & 0xffffffff) % table.max_numel()).cast(dtypes.int), ((entry >> 32) % (dst.max_numel()-1)).cast(dtypes.int) # CHECK_OOB bounds
+  loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
   lt_patches.append(make_binary_patch(plan, struct.pack(f'<{len(data)}Q', *data)))
   subs[patches[0]] = UOp.group(loop, subs[patches[0]])
   return subs
