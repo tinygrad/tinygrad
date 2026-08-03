@@ -246,6 +246,8 @@ pm_encode_cmdbufs = PatternMatcher([
 
 # *****************
 
+def get_getaddrs(p:UOp) -> list[UOp]: return [u for u in p.toposort(gate=lambda u: u.op is not Ops.AFTER) if u.op is Ops.GETADDR]
+
 def is_value_known_at_link(val:UOp) -> bool:
   runtime_reads = [u for u in val.toposort() if u.op in (Ops.LOAD, Ops.INDEX)]
   addressed_bufs = [b for g in val.toposort() if g.op is Ops.GETADDR for b in unwrap_mstack(g.buf_uop)]
@@ -254,32 +256,23 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def is_link_patch(p:UOp, jit:bool) -> bool:
-  store = p.src[0] if (is_binary_patch:=(p.op is Ops.END and p.src[0].op is Ops.STORE)) else p
-  if p.tag == "link" or is_binary_patch: return True
-  if not jit: return store.buf_uop.tag == "program"
-  return store.op is Ops.STORE and is_value_known_at_link(store.src[1])
+  store = p.src[0] if p.op is Ops.END else p
+  if p.tag == "link": return True # explicitly marked link-time patch
+  if p.op is Ops.END and store.op is Ops.STORE and any(u.op is Ops.BINARY for u in store.src[1].toposort()): return True # binary fill
+  if not jit: return store.buf_uop.tag == "program" # only programs are fixed before execution without JIT
+  return store.op is Ops.STORE and is_value_known_at_link(store.src[1]) # JIT values without inputs or runtime reads
 
-def trim_link_patches(ctx:tuple[bool, list[UOp]], a:UOp) -> UOp|None:
+def trim_link_patches(ctx:tuple[bool, list[UOp], list[UOp]], a:UOp) -> UOp|None:
   links, kept = partition(a.src[1:], lambda p: is_link_patch(p, ctx[0]))
+  ctx[1].extend(kept)
 
   # keep all patches from the link-time patches' subtrees in the C code
   afters = [u for u in UOp.sink(*links).toposort() if u.op is Ops.AFTER]
-  ctx[1].extend(UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src)
+  ctx[2].extend(UOp.sink(*links).substitute({p: p.src[0] for p in afters}).src)
   return a.src[0].after(*kept, *[d for p in afters for d in p.src[1:]]) if links else None
 pm_trim_link_patches = PatternMatcher([(UPat(Ops.AFTER, src=(UPat((Ops.PARAM, Ops.MSTACK)),), allow_any_len=True, name="a"), trim_link_patches)])
 
-def split_patches(ctx:bool, call:UOp) -> UOp|None:
-  lt_patches:list[UOp] = []
-  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(ctx, lt_patches), name=f"trim link-time patches ({call.arg.aux.name})")
-
-  lt_srcs = collections.defaultdict(list)
-  for p in lt_patches: lt_srcs[p.buf_uop].append(p)
-  return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()]))
-pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
-
-# *****************
-
-def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[dict[UOp, UOp], tuple[UOp, ...]]:
+def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp, UOp], tuple[UOp, ...], dict[UOp, int]]:
   bare = {g: g.replace(src=(g.src[0].without_after,)) for g in gaddrs}
 
   order = sorted(dedup(bare.values()), key=lambda g: ((b:=unwrap_mstack(g.buf_uop)[0]).arg.slot, repr(b.tag)))
@@ -287,20 +280,53 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[dict[UOp, UOp
   table = UOp.placeholder((len(order),), dtypes.uint64, next(UOp.unique_num), device=call.arg.aux.device).rtag(name)
 
   reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
-  return reads, (table.after(make_patches(table, [(i * table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
+  fills = (table.after(make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
+  return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
-def rm_rt_uops(call:UOp) -> UOp|None:
-  if not (gaddrs:=[u for u in call.src[0].toposort() if u.op is Ops.GETADDR]): return None
-  inputs, internals = partition(gaddrs, lambda g: all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop)))
+def make_scatter_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
+  dst = patches[0].buf_uop
+
+  # collect patches
+  words = [(p, off, val, get_getaddrs(val)) for p in patches for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
+  data = [off.val << 32 | slots[gaddr] for off,gaddr in [(off, gaddrs[0]) for _,off,_,gaddrs in words if gaddrs][::2]]
+  subs = {}
+  for p in patches:
+    scalars = [(off.val*dst.dtype.itemsize, val) for patch,off,val,gaddrs in words if patch is p and not gaddrs]
+    subs[p] = make_patches(dst, scalars) if scalars else UOp(Ops.NOOP)
+
+  # build scatter loop
+  plan = UOp.placeholder((len(data),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
+  entry = plan.index(ridx:=UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, dst))).load()
+  address = table.index(entry.cast(dtypes.int)).load()
+  write_low = dst.index((entry >> 32).cast(dtypes.int)).store(address.cast(dtypes.uint32))
+  write_high = dst.index((entry >> 32).cast(dtypes.int)+1).store((address >> 32).cast(dtypes.uint32))
+
+  lt_patches.append(make_binary_patch(plan, struct.pack(f'<{len(data)}Q', *data)))
+  subs[patches[0]] = UOp.group(UOp.group(write_low, write_high).end(ridx), subs[patches[0]])
+  return subs
+
+def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
+
+def split_patches(ctx:bool, call:UOp) -> UOp|None:
+  rt_patches:list[UOp] = []
+  lt_patches:list[UOp] = []
+  body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(ctx, rt_patches, lt_patches), name=f"trim link-time patches ({call.arg.aux.name})")
+
+  # split patches
+  gaddrs = dedup(g for p in rt_patches for g in get_getaddrs(p))
+  inputs, internals = partition(gaddrs, is_input_addr)
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
+  (input_table, input_reads, _, input_slots), (_, runtime_reads, runtime_fills, _), (_, system_reads, system_fills, _) = \
+    [make_addr_table(call, gs, name) for gs,name in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
+  input_patches = [p for p in rt_patches if bool(gs:=get_getaddrs(p)) and all(is_input_addr(g) for g in gs)]
+  scatter = make_scatter_loop(input_patches, input_table, input_slots, lt_patches) if input_patches else {}
+  body = body.substitute({p:p.substitute(scatter | input_reads | runtime_reads | system_reads) for p in rt_patches})
 
-  # exec fills the inputs table with the input addresses every run, so it has no fill patches
-  (reads, _), *tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
-  reads, fills = reads | {k:v for r,_ in tables for k,v in r.items()}, [f for _,fs in tables for f in fs]
-  return call.replace(src=(call.src[0].substitute(reads), *call.src[1:], *fills),
-                      arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(g.buf_uop.arg.slot for g in inputs))))))
-pm_rm_rt_uops = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), rm_rt_uops)])
+  lt_srcs = collections.defaultdict(list)
+  for p in lt_patches: lt_srcs[p.buf_uop].append(p)
+  return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *runtime_fills, *system_fills),
+    arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop)))))))
+pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
 # *****************
 
@@ -385,11 +411,12 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None, jit=False) -> UOp:
     # lowering to hcq ir
     linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
 
-    # patches
-    linear = graph_rewrite(linear, pm_split_patches+pm_early_simplify+symbolic, ctx=jit, bottom_up=False, name="simplify patches", enter_calls=True)
+    # patches and runtime uops
+    linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
+    linear = graph_rewrite(linear, pm_split_patches, walk=True, ctx=jit, name="split patches")
 
     # and compile it
-    linear = graph_rewrite(linear, pm_replace_params, bpm=pm_rm_rt_uops, name="replace rt uops and params")
+    linear = graph_rewrite(linear, pm_replace_params, name="replace params")
     final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
 
   return final_linear
