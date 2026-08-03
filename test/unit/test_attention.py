@@ -16,10 +16,10 @@ def apply_rope(x:Tensor, start_pos:int):
 class TestLinear(unittest.TestCase):
   def test_recovers_packed_ggml_weight(self):
     for ggml_type,packed_size in ((13, 176), (14, 210), (23, 136)):
-      packed = Tensor.empty(packed_size+1, dtype=dtypes.uint8, device="CPU")[1:]
+      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8, device="CPU")[4:]
       decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
       linear = Linear(256, 1, bias=False)
-      self.assertTrue(linear.set_quantized(decoded))
+      self.assertIsNotNone(linear.set_quantized(decoded))
       self.assertEqual((linear.ggml_type, linear.weight.shape), (ggml_type, (packed_size,)))
 
 class TestAttention(unittest.TestCase):
@@ -77,9 +77,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    out = block._attention(x_norm, start_pos).realize()
-    if block.pending_state is not None:
-      Tensor.realize(block.conv_state.assign(block.pending_state[0]), block.recurrent_state.assign(block.pending_state[1]))
+    out, conv_state, recurrent_state = block._attention(x_norm, start_pos)
+    Tensor.realize(out, block.conv_state.assign(conv_state), block.recurrent_state.assign(recurrent_state))
     return out.numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:

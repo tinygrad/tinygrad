@@ -67,8 +67,9 @@ class TestFunction(unittest.TestCase):
     a, b = Tensor.zeros(8).contiguous().realize(), Tensor.zeros(8).contiguous().realize()
     @function(precompile=True, allow_implicit=True)
     def f(x:Tensor, start:UOp):
-      stores = (a[start:start+2].uop.store(x.uop), b[start:start+2].uop.store((x+1).uop))
-      return Tensor(a.uop.after(*stores)) + Tensor(b.uop.after(*stores))
+      a[start:start+2].assign(x)
+      b[start:start+2].assign(x+1)
+      return a+b
     out = f(Tensor([2., 3.]).realize(), UOp.variable("start", 0, 6).bind(1))
     np.testing.assert_equal(out.numpy(), [0, 5, 7, 0, 0, 0, 0, 0])
 

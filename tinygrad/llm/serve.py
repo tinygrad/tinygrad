@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json, pathlib, re, time, typing, uuid
 from typing import TYPE_CHECKING
-from tinygrad.helpers import DEBUG, START_TIME, colored, stderr_log
+from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -164,5 +164,4 @@ class Handler(HTTPRequestHandler):
 class LLMServer(TCPServerWithReuse):
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
-    print(f"*** started server on http://127.0.0.1:{server_address[1]} at {time.perf_counter()-START_TIME:.2f} s")
     super().__init__(server_address, Handler)
