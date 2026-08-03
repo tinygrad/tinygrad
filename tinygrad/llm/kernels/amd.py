@@ -313,7 +313,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, raw_offset:UOp, out_f
       low = _amd_load(raw[base + (pos//128)*64 + within%64], 4) >> ((within//64)*4).cast(dtypes.uint8)
       high = _amd_load(raw[base + 128 + (pos//128)*32 + within%32], 4) >> ((within//32)*2).cast(dtypes.uint8)
       quant = ((low & 15) | ((high & 3) << 4)).bitcast(dtypes.int8) - 32
-      word = quant.cast(dtypes.int8).bitcast(dtypes.uint8).bitcast(dtypes.uint32).squeeze(0)
+      word = sum((quant[i].cast(dtypes.uint8).cast(dtypes.uint32) << (i*8) for i in range(4)), UOp.const(0, dtypes.uint32))
       dots[word_idx//4] = _amd_dp4a(word, xwords[word_idx], dots[word_idx//4])
     scales = [raw[base + 192 + subgroup*2+i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
     dbits = raw[base+208].cast(dtypes.uint16) | (raw[base+209].cast(dtypes.uint16) << 8)

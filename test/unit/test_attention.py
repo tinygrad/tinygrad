@@ -155,12 +155,17 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return outputs, conv_states, recurrent_states
 
   def test_gatedeltanet_reference_and_reset(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
     config = self._make_config(max_context=3)
     block = self._make_block(config)
     x = self._tensor_linspace(-1.0, 1.0, (1, 3, config.dim))
 
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, x)
+    out = self._run_attention(block, x, 0)
+    conv_state, recurrent_state = self._cache_views(block)
+    np.testing.assert_allclose(out, np.concatenate(expected_outs, axis=1), rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(conv_state, expected_conv[-1], rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(recurrent_state, expected_recurrent[-1], rtol=1e-3, atol=1e-3)
+    Tensor.realize(*block._state_reset_ops())
 
     for step in range(x.shape[1]):
       out = self._run_attention(block, x[:, step:step+1], step)

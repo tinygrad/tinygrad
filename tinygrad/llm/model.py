@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Context
 from tinygrad.llm.kernels import amd as llm_amd
+from tinygrad.llm.kernels import generic as llm_generic
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import resolve, Ops
@@ -334,7 +335,8 @@ class GatedDeltaNetBlock(FFNBlock):
       active = (Tensor.arange(T).to(x.device) < Tensor(valid_len, device=x.device)).reshape(1, T, 1)
       beta, log_alpha = beta * active, log_alpha * active
     q, k, v, beta, log_alpha = [z.transpose(1, 2).float() for z in (q, k, v, beta, log_alpha)]
-    core = llm_amd.gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, log_alpha.exp(), initial_state)
+    gated_delta = llm_amd.gated_delta_prefill if str(x.device).startswith("AMD") else llm_generic.gated_delta_prefill
+    core = gated_delta(q * self.head_k_dim**-0.5, k, v, beta, log_alpha.exp(), initial_state)
     out = self.ssm_out((self.ssm_norm(core.transpose(1, 2)) * out_gate.silu()).reshape(B, T, -1).cast(x.dtype)).contiguous()
     state_pos = T if valid_len is None else valid_len
     conv_state = conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
