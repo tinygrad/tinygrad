@@ -44,6 +44,10 @@ def _prepare_quantized_weights(model:Any, state_dict:dict[str, Tensor]) -> list[
   return packed
 
 def load_state_dict(model:Any, state_dict:dict[str, Tensor]):
+  for key in nn.state.get_state_dict(model):
+    if key.endswith(".ssm_beta_alpha.weight") and key not in state_dict:
+      prefix = key.removesuffix("beta_alpha.weight")
+      state_dict[key] = state_dict.pop(prefix+"beta.weight").cat(state_dict.pop(prefix+"alpha.weight"), dim=0).contiguous()
   packed = _prepare_quantized_weights(model, state_dict)
   nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
   if packed: Tensor.realize(*(offset for _,offset in packed))

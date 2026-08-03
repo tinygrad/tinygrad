@@ -78,9 +78,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    out, conv_state = block._attention(x_norm, start_pos)
-    Tensor.realize(out, block.conv_state.assign(conv_state))
-    return out.numpy()
+    ret = block._attention(x_norm, start_pos)
+    return (block._update_state(*ret) if isinstance(ret, tuple) else ret).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
