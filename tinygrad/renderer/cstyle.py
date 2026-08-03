@@ -162,7 +162,6 @@ class CStyleLanguage(Renderer):
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
-      if buf.max_numel() == 1: return self[buf]
       # this is lane access in C
       if idx.op is not Ops.CONST: return f"({self[buf]})[{self[idx]}]"
       return self[buf]+(f"[{idx.val}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.val]}")
