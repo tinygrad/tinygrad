@@ -124,11 +124,11 @@ class TestLLMServer(unittest.TestCase):
     self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
 
   def test_stream_disconnect_closes_source(self):
-    from tinygrad.viz.serve import HTTPRequestHandler
+    from tinygrad.llm.serve import Handler
     source, handler = Mock(), Mock()
     source.__iter__ = Mock(return_value=iter([{}]))
     handler.wfile.write.side_effect = BrokenPipeError
-    HTTPRequestHandler.stream_json(handler, source)
+    Handler.stream_json(handler, source)
     source.close.assert_called_once()
 
   def test_non_streaming(self):

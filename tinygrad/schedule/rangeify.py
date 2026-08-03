@@ -368,7 +368,8 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   # AFTER: add END to the existing STORE, return buffer with kernel dependency
   if (after:=x.src[0]).op is Ops.AFTER:
     buf = after.src[0].buf_uop.base
-    if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
+    deps = [s for s in after.src[1:] if s.op is not Ops.STORE]
+    if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf.after(*deps)
     # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
     ended_stores = []
     for store in stores:
@@ -378,7 +379,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
       if store.src[1] is store_target: continue  # skip self-assign
       end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
       ended_stores.append(store_target.store(store.src[1]).end(*end_rngs))
-    return buf.after(*ended_stores)
+    return buf.after(*deps, *ended_stores)
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
@@ -412,7 +413,16 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
   return None
 
+def end_after_stores(after:UOp) -> UOp|None:
+  new_src = [after.src[0]]
+  for s in after.src[1:]:
+    if s.op is Ops.STORE: s = s.end(*sorted([r for r in s.ranges if r.arg[-1] is not AxisType.DEVICE], key=lambda r:r.arg))
+    new_src.append(s)
+  src = tuple(new_src)
+  return after.replace(src=src) if src != after.src else None
+
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
+  (UPat(Ops.AFTER, name="after"), end_after_stores),
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.

@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor, GlobalCounters, Device
+from tinygrad import Tensor, GlobalCounters, Device, dtypes
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 
@@ -62,6 +62,36 @@ class TestFunction(unittest.TestCase):
     c.realize(d)
     np.testing.assert_equal(c.numpy(), [12,15,18])
     np.testing.assert_equal(d.numpy(), [12,15,19])
+
+  def test_precompile_quantized_cache_attention(self):
+    n, t, heads, kv_heads, head_dim = 32, 4, 2, 1, 4
+    cache = Tensor.zeros(2, 1, kv_heads, n, head_dim, dtype=dtypes.int8).contiguous().realize()
+    cache_scale = Tensor.zeros(2, 1, kv_heads, n, dtype=dtypes.float16).contiguous().realize()
+    state = Tensor.zeros(4).contiguous().realize()
+
+    @function(precompile=True, allow_implicit=True)
+    def attention(q:Tensor, k:Tensor, v:Tensor, start:UOp):
+      kv = Tensor.stack(k, v)
+      scale = (kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
+      packed = (kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
+      stores = (cache[:, :, :, start:start+t, :].uop.store(packed.uop),
+                cache_scale[:, :, :, start:start+t].uop.store(scale.squeeze(-1).uop))
+      assigned, assigned_scale = Tensor(cache.uop.after(*stores)), Tensor(cache_scale.uop.after(*stores))
+      key = assigned[0, :, :, :start+t, :].float() * assigned_scale[0, :, :, :start+t, None]
+      value = assigned[1, :, :, :start+t, :].float() * assigned_scale[1, :, :, :start+t, None]
+      return q.scaled_dot_product_attention(key, value, enable_gqa=True), state+1
+
+    q = Tensor.randn(1, heads, t, head_dim).contiguous().realize()
+    k = Tensor.randn(1, kv_heads, t, head_dim).contiguous().realize()
+    v = Tensor.randn(1, kv_heads, t, head_dim).contiguous().realize()
+    kv = Tensor.stack(k, v)
+    scale = (kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
+    dequant = (kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8).float() * scale
+    expected = q.scaled_dot_product_attention(dequant[0], dequant[1], enable_gqa=True).numpy()
+    out, new_state = attention(q, k, v, UOp.variable("start", 0, n-t).bind(0))
+    out.realize(new_state)
+    np.testing.assert_allclose(out.numpy(), expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_equal(new_state.numpy(), np.ones(4))
 
   def test_implicit_unrealized(self):
     inp = Tensor([1,2,3]) + Tensor([4,5,6])

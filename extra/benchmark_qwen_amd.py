@@ -30,10 +30,11 @@ if __name__ == "__main__":
 
   if not args.skip_resume_check:
     follow = model._cached_tokens + [1234+i for i in range(8)]
-    checkpoint_pos, gen, st = model._state_checkpoint_pos, model.generate(follow, chunk_size=args.chunk_size), time.perf_counter()
+    full_prompt = list(follow)
+    resume_pos, gen, st = model.get_start_pos(follow), model.generate(follow, chunk_size=args.chunk_size), time.perf_counter()
     resumed_token = next(gen)
-    print(f"resume {len(follow)-1} tokens from {checkpoint_pos} in {time.perf_counter()-st:.3f}s token {resumed_token}", flush=True)
-    full_prompt, model._cached_tokens = follow[:-1], [-1]
+    print(f"resume {len(follow)-1} tokens from {resume_pos} in {time.perf_counter()-st:.3f}s token {resumed_token}", flush=True)
+    model._cached_tokens = [-1]
     st = time.perf_counter()
     full_token = next(model.generate(full_prompt, chunk_size=args.chunk_size))
     print(f"full {time.perf_counter()-st:.3f}s token {full_token} match {resumed_token == full_token}", flush=True)
