@@ -257,8 +257,8 @@ def is_value_known_at_link(val:UOp) -> bool:
 
 def is_link_patch(p:UOp, jit:bool) -> bool:
   store = p.src[0] if p.op is Ops.END else p
-  if p.tag == "link": return True # explicitly marked link-time patch
-  if p.op is Ops.END and store.op is Ops.STORE and any(u.op is Ops.BINARY for u in store.src[1].toposort()): return True # binary fill
+  blob_fill = p.op is Ops.END and store.op is Ops.STORE and any(u.op is Ops.BINARY for u in store.src[1].toposort()) # other ENDs are runtime loops
+  if p.tag == "link" or blob_fill: return True
   if not jit: return store.buf_uop.tag == "program" # only programs are fixed before execution without JIT
   return store.op is Ops.STORE and is_value_known_at_link(store.src[1]) # JIT values without inputs or runtime reads
 
@@ -283,26 +283,21 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   fills = (table.after(make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
-def make_scatter_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  dst = patches[0].buf_uop
-
-  # collect patches
-  words = [(p, off, val, get_getaddrs(val)) for p in patches for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
-  data = [off.val << 32 | slots[gaddr] for off,gaddr in [(off, gaddrs[0]) for _,off,_,gaddrs in words if gaddrs][::2]]
-  subs = {}
+def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
+  (table, _, _, slots), dst, data, subs = inputs_table, patches[0].buf_uop, [], {}
   for p in patches:
-    scalars = [(off.val*dst.dtype.itemsize, val) for patch,off,val,gaddrs in words if patch is p and not gaddrs]
+    words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
+    data += [off.val << 32 | slots[gaddrs[0]] for off,_,gaddrs in words if gaddrs][::2]
+    scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
     subs[p] = make_patches(dst, scalars) if scalars else UOp(Ops.NOOP)
 
-  # build scatter loop
+  # plan entry: dst word offset << 32 | addr table slot
   plan = UOp.placeholder((len(data),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
   entry = plan.index(ridx:=UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, dst))).load()
-  address = table.index(entry.cast(dtypes.int)).load()
-  write_low = dst.index((entry >> 32).cast(dtypes.int)).store(address.cast(dtypes.uint32))
-  write_high = dst.index((entry >> 32).cast(dtypes.int)+1).store((address >> 32).cast(dtypes.uint32))
-
+  address, widx = table.index(entry.cast(dtypes.int)).load(), (entry >> 32).cast(dtypes.int)
+  loop = UOp.group(*[dst.index(widx+i).store((address >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
   lt_patches.append(make_binary_patch(plan, struct.pack(f'<{len(data)}Q', *data)))
-  subs[patches[0]] = UOp.group(UOp.group(write_low, write_high).end(ridx), subs[patches[0]])
+  subs[patches[0]] = UOp.group(loop, subs[patches[0]])
   return subs
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
@@ -313,18 +308,17 @@ def split_patches(ctx:bool, call:UOp) -> UOp|None:
   body = graph_rewrite(call.src[0], pm_trim_link_patches, ctx=(ctx, rt_patches, lt_patches), name=f"trim link-time patches ({call.arg.aux.name})")
 
   # split patches
-  gaddrs = dedup(g for p in rt_patches for g in get_getaddrs(p))
-  inputs, internals = partition(gaddrs, is_input_addr)
+  inputs, internals = partition(dedup(g for p in rt_patches for g in get_getaddrs(p)), is_input_addr)
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
-  (input_table, input_reads, _, input_slots), (_, runtime_reads, runtime_fills, _), (_, system_reads, system_fills, _) = \
-    [make_addr_table(call, gs, name) for gs,name in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
-  input_patches = [p for p in rt_patches if bool(gs:=get_getaddrs(p)) and all(is_input_addr(g) for g in gs)]
-  scatter = make_scatter_loop(input_patches, input_table, input_slots, lt_patches) if input_patches else {}
-  body = body.substitute({p:p.substitute(scatter | input_reads | runtime_reads | system_reads) for p in rt_patches})
+  tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
+  reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
+  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))]
+  scatter = make_scatter_loop(input_patches, tables[0], lt_patches) if input_patches else {}
+  body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
-  return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *runtime_fills, *system_fills),
+  return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
     arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop)))))))
 pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
