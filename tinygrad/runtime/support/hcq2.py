@@ -286,8 +286,8 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
 def is_bare_addr(val:UOp) -> bool:
-  if (addr:=val.src[0]).op in (Ops.AND, Ops.SHR): addr = addr.src[0]
-  return addr.op is Ops.GETADDR
+  while val.op in (Ops.CAST, Ops.AND, Ops.SHR): val = val.src[0]
+  return val.op is Ops.GETADDR
 
 def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
   (table, _, _, slots), dst, data, subs = inputs_table, patches[0].buf_uop, [], {}
