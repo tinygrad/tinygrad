@@ -47,7 +47,7 @@ def _mop_index(r:UOp, idx:UOp):
       for s in ret.src[1:]:
         if s.op is Ops.WHERE and s.src[2].op is Ops.CONST and s.src[2].arg == Invalid:
           a = a & s.src[0]
-      ret = a.where(ret, 0)
+      ret = a.where(ret, ret.const_like(0))
     return ret
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
