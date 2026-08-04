@@ -5,11 +5,11 @@
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
-from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile
 from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
+from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
 def _load(m, i, dtype: DType):
@@ -102,7 +102,7 @@ class PythonProgram(Program['PythonDevice']):
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
-        elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
+        elif u.op is Ops.CONST: values[u] = [u.val] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:

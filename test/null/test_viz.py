@@ -96,10 +96,10 @@ class TestViz(unittest.TestCase):
   def test_exceptions(self):
     # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
-      assert x.arg <= 3
-      return x.replace(arg=x.arg+1)
+      assert x.val <= 3
+      return UOp.const(x.val+1, x.dtype)
     err_pm = PatternMatcher([(UPat.cvar("x"), count_3),])
-    a = UOp.const(1, dtypes.int)
+    a = UOp.const(1)
     with save_viz() as viz:
       with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
     lst = viz.list_items()
@@ -199,11 +199,11 @@ class TestViz(unittest.TestCase):
     self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
 
   def test_inf_loop(self):
-    a = UOp.const(3, dtypes.int)
-    b = UOp.const(4, dtypes.int)
+    a = UOp.const(3)
+    b = UOp.const(4)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with save_viz() as viz:
       # use smaller stack limit for faster test (default is 250000)
@@ -224,9 +224,9 @@ class TestViz(unittest.TestCase):
     list(viz.get_details(0, 0))
 
   def test_enter_calls_rewrite(self):
-    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4))])
+    pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
     with save_viz() as viz:
-      inner = UOp.const(3, dtypes.int)
+      inner = UOp.const(3)
       call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
       func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
       graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
@@ -253,7 +253,7 @@ class TestViz(unittest.TestCase):
 
   def test_const_reshape_expand_folded(self):
     # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
-    c = UOp.const(1.0, dtypes.float).expand((3,4))  # creates CONST->EXPAND chain
+    c = UOp.const(1.0).expand((3,4))  # creates CONST->EXPAND chain
     a = UOp.variable("a", 0.0, 10.0, dtypes.float)
     alu = a + c
     with save_viz() as viz:
@@ -267,13 +267,13 @@ class TestViz(unittest.TestCase):
 
   def test_stack_movement_not_folded_unless_all_const(self):
     a = UOp.variable("a", 0, 10, dtype=dtypes.int)
-    c = UOp.const(1, dtypes.int)
+    c = UOp.const(1)
     stack = a.stack(c)
     reshaped = stack.reshape((1, 2))
     graph = uop_to_json(VizData(), reshaped)
     self.assertFalse(graph[id(stack)]["exclude"])
 
-    const_stack = c.stack(UOp.const(2, dtypes.int))
+    const_stack = c.stack(UOp.const(2))
     const_reshaped = const_stack.reshape((1, 2))
     const_graph = uop_to_json(VizData(), const_reshaped)
     self.assertTrue(const_graph[id(const_stack)]["exclude"])
@@ -401,7 +401,7 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       def test(root):
         return graph_rewrite(root, sym)
-      test(c:=UOp.const(1, dtypes.int))
+      test(c:=UOp.const(1))
       test(c+1)
     ls = viz.list_items()
     self.assertEqual(len(ls), 1)
@@ -414,7 +414,7 @@ class TestVizIntegration(unittest.TestCase):
       @track_rewrites()
       def test(root):
         return graph_rewrite(root, sym)
-      test(c:=UOp.const(1, dtypes.int))
+      test(c:=UOp.const(1))
       test(c+1)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
@@ -425,14 +425,15 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       def default_test(root): return graph_rewrite(root, sym)
       tracked_test = track_rewrites()(default_test)
-      c = UOp.const(1, dtypes.int)
+      c = UOp.const(1)
       default_test(c+1) # goes to the default group
       tracked_test(c)   # all rewrites after this go inside the second group.
       default_test(c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
     graph = next(viz.get_details(0, 0))["graph"]
-    self.assertEqual(list(graph), [id(c), id((c+1).src[1]), id(c+1)])
+    # both operands of c+1 are the same bare weak CONST, so the graph has two nodes
+    self.assertEqual(list(graph), [id(c), id(c+1)])
     self.assertTrue(graph[id(c)]["exclude"])
     self.assertFalse(graph[id(c+1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])

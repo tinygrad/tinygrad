@@ -109,6 +109,28 @@ class TestLLMServer(unittest.TestCase):
 
     self.assertGreater(len(contents), 0)
 
+  def test_interrupted_stream_logs_tokens(self):
+    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
+         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+      next(stream)
+      next(stream)
+      stream.close()
+    interrupt = log.call_args.args[0]
+    self.assertFalse(interrupt.startswith("\n"))
+    self.assertTrue(interrupt.endswith("\n"))
+    self.assertIn("gen:", interrupt)
+    self.assertIn("out:    1", interrupt)
+    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+
+  def test_stream_disconnect_closes_source(self):
+    from tinygrad.llm.serve import Handler
+    source, handler = Mock(), Mock()
+    source.__iter__ = Mock(return_value=iter([{}]))
+    handler.wfile.write.side_effect = BrokenPipeError
+    Handler.stream_json(handler, source)
+    source.close.assert_called_once()
+
   def test_non_streaming(self):
     resp = self.client.chat.completions.create(
       model="test-model",

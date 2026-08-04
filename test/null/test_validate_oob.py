@@ -12,12 +12,12 @@ class TestValidateOOB(unittest.TestCase):
   def test_const_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(UOp.const(0, dtypes.int)).load(dtype=dtypes.int)])  # valid
-      to_uops_list([buf.index(UOp.const(15, dtypes.int)).load(dtype=dtypes.int)])  # valid (last element)
+      to_uops_list([buf.index(UOp.const(0)).load(dtype=dtypes.int)])  # valid
+      to_uops_list([buf.index(UOp.const(15)).load(dtype=dtypes.int)])  # valid (last element)
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(16, dtypes.int)).load(dtype=dtypes.int)])  # off by one
+        to_uops_list([buf.index(UOp.const(16)).load(dtype=dtypes.int)])  # off by one
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(42, dtypes.int)).load(dtype=dtypes.int)])  # way out
+        to_uops_list([buf.index(UOp.const(42)).load(dtype=dtypes.int)])  # way out
 
   def test_variable_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
@@ -164,12 +164,12 @@ class TestValidateOOB(unittest.TestCase):
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
 
       # Define indices, valids and barrier
-      gidx = UOp(Ops.SPECIAL, src=(UOp.const(416, dtypes.int),), arg="gidx0")
-      lidx = UOp(Ops.SPECIAL, src=(UOp.const(10, dtypes.int),), arg="lidx0")
+      gidx = UOp(Ops.SPECIAL, src=(UOp.const(416),), arg="gidx0")
+      lidx = UOp(Ops.SPECIAL, src=(UOp.const(10),), arg="lidx0")
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(1, dtypes.uint))
+      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(1))
 
       barrier = UOp(Ops.BARRIER, src=(local_store,))
       if_barrier = UOp(Ops.IF, src=(gate, barrier))

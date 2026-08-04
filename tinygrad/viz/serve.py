@@ -37,7 +37,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
       self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
     # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
+    except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo
@@ -129,7 +129,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     with soft_err():
       if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
-    if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.arg:g}"
+    if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     wrap_len = 200 if u.op is Ops.SOURCE else 80
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''), wrap=wrap_len)) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
@@ -138,7 +138,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         # walk through excluded movement ops to find the underlying CONST
         cx = x
         while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
-        arg = f"{cx.arg:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK else f"{cx.arg}"
+        arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK else f"{cx.arg}"
         label += f"\n{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else "")
     try:
       if len(rngs:=u.ranges):
