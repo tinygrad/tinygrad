@@ -484,7 +484,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
-  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x) if not any(isinstance(v,Register) for v in rdefs(x)) else None),
+  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
+    if not any(isinstance(v,Register) for v in rdefs(x)) else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
@@ -502,7 +503,8 @@ pre_regalloc_matcher = PatternMatcher([
 ])
 
 post_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.INDEX, name="x"), lambda x: (nx := x.replace(tag=(rdefs(x.src[0])[x.src[1].val],)), [nx])),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c")), name="x"), lambda x,buf,c:
+    ((nx := x.replace(tag=(rdefs(buf)[c.val],))), [nx]) if c.val < len(rdefs(buf)) else None),
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),

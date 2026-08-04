@@ -73,13 +73,14 @@ class LinearScanRegallocContext:
       # allocate defs
       for j,v in enumerate(rdefs(u)):
         if not isinstance(v, VRegister): continue
-        # parents can be defined by premature subregister op ex. collect then store
         if v.is_sub() and (vp := v.parent) in live:
           self.reals.setdefault(i, {})[v] = (live[vp][v.pos],)
           continue
         # NOTE: ignoring 2 addr coalesce hint for now
         vv = v.parent if v.is_sub() else v
-        live[vv] = alloc(vv, None, i+1 if u.op is not Ops.RANGE else i)
+        # parents can be defined by premature subregister op ex. collect then store
+        if vv not in live:
+          live[vv] = alloc(vv, None, i+1 if u.op is not Ops.RANGE else i)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[v]
 
       # loop prologue, avoid loading inside the loop
