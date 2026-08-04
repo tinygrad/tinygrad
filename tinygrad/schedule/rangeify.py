@@ -624,8 +624,10 @@ def index_on_stack(stack:UOp, idx:UOp):
   return ret
 
 pm_simple_rangeify = PatternMatcher([
-  # INDEX and STAGE without src is nothing
-  (UPat((Ops.INDEX, Ops.STAGE), src=(UPat.var('x'),)), lambda x: x),
+  # INDEX without src is nothing
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # STAGE on shape () is nothing
+  (UPat(Ops.STAGE, src=(UPat.var('x'),)), lambda x: x if x.shape == () else None),
   # if INDEX is on STAGE with the same ranges, remove the pair
   (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
    lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
@@ -669,7 +671,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # simple rangeify
-  tsink = graph_rewrite(tsink, pm_simple_rangeify+pm_range_creation, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
+  tsink = graph_rewrite(tsink, pm_range_creation+pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
   # for each index on a stage without children
   while 1:
