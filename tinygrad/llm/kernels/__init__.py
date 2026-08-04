@@ -11,6 +11,7 @@ class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
+    self.use_custom_quant = True
   def set_quantized(self, decoded:Tensor):
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
     raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
@@ -20,8 +21,10 @@ class Linear(nn.Linear):
     self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(raw.max_numel(), dtypes.uint8, raw_offset)))
     self.ggml_type = packed_sizes[prod(raw.shape)]
   def __call__(self, x:Tensor) -> Tensor:
-    if self.ggml_type is None and str(self.weight.device).startswith("AMD"): self.set_quantized(self.weight)
-    if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
+    static = isinstance(x.numel(), int)
+    if self.ggml_type is None and not static: self.use_custom_quant = False
+    if self.ggml_type is None and self.use_custom_quant and str(self.weight.device).startswith("AMD"): self.set_quantized(self.weight)
+    if self.ggml_type in (13, 14, 23) and self.use_custom_quant and str(self.weight.device).startswith("AMD"):
       from tinygrad.llm.kernels.amd import q8_linear
       return q8_linear(self, x)
     return super().__call__(x)

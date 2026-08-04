@@ -26,6 +26,29 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertTrue(np.isfinite(linear(Tensor.randn(1, 256)).realize().item()))
     self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
 
+  def test_q6_linear_multiple_tokens(self):
+    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    rng = np.random.default_rng(42)
+    in_features, blocks = 2048, 16*2048//256
+    packed = rng.integers(0, 256, blocks*210, dtype=np.uint8)
+    for i in range(blocks): packed[i*210+208:i*210+210] = np.array([0.01], dtype=np.float16).view(np.uint8)
+    raw = Tensor(np.pad(packed, (4, 0))).contiguous().realize()[4:]
+    decoded = ggml_data_to_tensor(raw, 16*in_features, 14).reshape(16, in_features)
+    weight = decoded.numpy()
+    linear = Linear(in_features, 16, bias=False)
+    nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
+    x = rng.normal(size=(3, in_features)).astype(np.float32)
+    scale = np.maximum(np.abs(x).reshape(3, in_features//32, 32).max(-1, keepdims=True) / 127, 1e-8)
+    xq = np.clip(np.rint(x.reshape(3, in_features//32, 32) / scale), -127, 127) * scale
+    np.testing.assert_allclose(linear(Tensor(x)).numpy(), xq.reshape(3, in_features) @ weight.T, rtol=2e-3, atol=2e-2)
+    self.assertEqual(linear.ggml_type, 14)
+
+    generic = Linear(in_features, 16, bias=False)
+    nn.state.load_state_dict(generic, {"weight":decoded}, verbose=False, realize=False)
+    generic(Tensor.randn(4, in_features)[:UOp.variable("tokens", 1, 4).bind(2)])
+    self.assertFalse(generic.use_custom_quant)
+    self.assertIsNone(generic.ggml_type)
+
   def test_attention_uses_physical_cache_length(self):
     if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
     q, k, v = Tensor.zeros(1, 2, 1, 32), Tensor.randn(1, 1, 1, 32), Tensor.randn(1, 1, 1, 32)
