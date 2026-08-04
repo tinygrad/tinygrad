@@ -293,16 +293,15 @@ def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp
   (table, _, _, slots), dst, data, subs = inputs_table, patches[0].buf_uop, [], {}
   for p in patches:
     words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
-    data += [off.val << 32 | slots[gaddrs[0]] for off,_,gaddrs in words if gaddrs][::2]
+    data += [(off.val, slots[gaddrs[0]]) for off,_,gaddrs in words if gaddrs][::2]
     scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
     subs[p] = UOp.group(*make_patches(dst, scalars)) if scalars else UOp(Ops.NOOP)
 
-  # plan entry: dst word offset << 32 | addr table slot
-  plan = UOp.placeholder((len(data),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
-  entry = plan.index(ridx:=UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, dst))).load()
-  slot, widx = ((entry & 0xffffffff) % table.max_numel()).cast(dtypes.int), ((entry >> 32) % (dst.max_numel()-1)).cast(dtypes.int) # CHECK_OOB bounds
+  plans = tuple(UOp.placeholder((len(data),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems") for _ in range(2))
+  ridx = UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(*plans, dst))
+  widx, slot = ((p.index(ridx).load() % bound).cast(dtypes.int) for p,bound in zip(plans, (dst.max_numel()-1, table.max_numel())))
   loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
-  lt_patches.append(make_binary_patch(plan, struct.pack(f'<{len(data)}Q', *data)))
+  lt_patches += [make_binary_patch(buf, struct.pack(f'<{len(data)}I', *vals)) for buf,vals in zip(plans, zip(*data))]
   subs[patches[0]] = UOp.group(loop, subs[patches[0]])
   return subs
 
