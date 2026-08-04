@@ -82,8 +82,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block.attn_norm.weight = self._tensor_linspace(0.8, 1.2, (config.dim,))
     block.attn_qkv.weight = self._tensor_linspace(-0.15, 0.2, (block.conv_channels, config.dim))
     block.attn_gate.weight = self._tensor_linspace(-0.1, 0.15, (config.ssm.inner_size, config.dim))
-    block.ssm_beta.weight = self._tensor_linspace(-0.12, 0.07, (block.num_v_heads, config.dim))
     block.ssm_alpha.weight = self._tensor_linspace(-0.08, 0.12, (block.num_v_heads, config.dim))
+    block.ssm_beta.weight = self._tensor_linspace(-0.12, 0.07, (block.num_v_heads, config.dim))
     block.ssm_conv1d["weight"] = self._tensor_linspace(-0.05, 0.05, (block.conv_channels, block.ssm_conv_kernel))
     block.ssm_dt["bias"] = self._tensor_linspace(-0.1, 0.1, (block.num_v_heads,))
     block.ssm_a = self._tensor_linspace(-0.1, -0.05, (block.num_v_heads,))
@@ -131,8 +131,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     conv_weight = block.ssm_conv1d["weight"].numpy().astype(np.float32).T[None, :, :]
     qkv_weight = block.attn_qkv.weight.numpy().astype(np.float32)
     gate_weight = block.attn_gate.weight.numpy().astype(np.float32)
-    beta_weight = block.ssm_beta.weight.numpy().astype(np.float32)
     alpha_weight = block.ssm_alpha.weight.numpy().astype(np.float32)
+    beta_weight = block.ssm_beta.weight.numpy().astype(np.float32)
     out_weight = block.ssm_out.weight.numpy().astype(np.float32)
     dt_bias = block.ssm_dt["bias"].numpy().astype(np.float32)
     ssm_a = block.ssm_a.numpy().astype(np.float32)
@@ -193,7 +193,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet recurrent cache mismatch at step {step}")
 
-    warmup, prompt = self._tensor_linspace(-0.5, 0.5, (1, 2, config.dim)), self._tensor_linspace(0.75, -0.75, (1, 2, config.dim))
+    warmup = self._tensor_linspace(-0.5, 0.5, (1, 2, config.dim))
+    prompt = self._tensor_linspace(0.75, -0.75, (1, 2, config.dim))
 
     for i in range(warmup.shape[1]): self._run_attention(block, warmup[:, i:i+1], i)
     Tensor.realize(*block._state_reset_ops())

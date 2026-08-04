@@ -28,12 +28,11 @@ class Linear(nn.Linear):
       return q8_linear(self, x)
     return super().__call__(x)
 
-def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor|None,
-                     start_pos:int|UOp, max_context:int) -> Tensor:
+def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor|None, start_pos:int|UOp) -> Tensor:
   if cache_kv.dtype == dtypes.int8:
     from tinygrad.llm.kernels.amd import quantized_attention
     assert cache_scale is not None
-    return quantized_attention(q, stacked_kv, cache_kv, cache_scale, start_pos, max_context)
+    return quantized_attention(q, stacked_kv, cache_kv, cache_scale, start_pos)
   T = q.shape[2]
   assigned_kv = Tensor(cache_kv.uop.after(cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(stacked_kv.uop)))
   k, v = assigned_kv[0, :, :, 0:start_pos+T, :], assigned_kv[1, :, :, 0:start_pos+T, :]

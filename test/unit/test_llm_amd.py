@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
+from tinygrad.llm.kernels import cached_attention
 from tinygrad.llm.kernels.amd import q8_quantize
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import Linear
@@ -26,5 +27,13 @@ class TestQ8Quantize(unittest.TestCase):
     assert offset is not None
     linear._raw_offset_uop = offset.realize().uop
     self.assertTrue(np.isfinite(linear(Tensor.randn(1, 256)).realize().item()))
+
+  def test_attention_uses_physical_cache_length(self):
+    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    q, k, v = Tensor.zeros(1, 2, 1, 32), Tensor.randn(1, 1, 1, 32), Tensor.randn(1, 1, 1, 32)
+    cache = Tensor.empty(2, 1, 1, 256, 32, dtype=dtypes.int8).contiguous()
+    scale = Tensor.empty(2, 1, 1, 256, dtype=dtypes.float16).contiguous()
+    out = cached_attention(q, Tensor.stack(k, v), cache, scale, 0).realize()
+    np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
 if __name__ == "__main__": unittest.main()

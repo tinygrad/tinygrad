@@ -179,8 +179,7 @@ def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UO
   flash_cached = functools.partial(_amd_flash_attention, valid_kv_len=valid_kv_len)
   return Tensor.custom_kernel(out, q.reshape(B*H, T, D), cache_kv, cache_scale, fxn=flash_cached)[0].reshape(B, H, T, D)
 
-def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor,
-                        start_pos:int|UOp, max_context:int) -> Tensor:
+def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor, start_pos:int|UOp) -> Tensor:
   T = q.shape[2]
   scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
   packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
@@ -188,7 +187,7 @@ def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scal
             cache_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop))
   assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(*stores)), Tensor(cache_scale.uop.after(*stores))
   start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
-  return amd_flash_attention_decode(q.half(), assigned_kv, start+1, assigned_scale, max_context) if resolve(T == 1) else \
+  return amd_flash_attention_decode(q.half(), assigned_kv, start+1, assigned_scale, cast(int, cache_kv.shape[3])) if resolve(T == 1) else \
     flash_attention_causal_cached(q.half(), assigned_kv, start+T, assigned_scale)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
