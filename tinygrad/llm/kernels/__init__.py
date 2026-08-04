@@ -10,7 +10,7 @@ class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
-    self._raw_offset_uop:UOp|None = None
+    self._raw_offset:Tensor|None = None
   def set_quantized(self, decoded:Tensor) -> Tensor|None:
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
     raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
@@ -21,8 +21,10 @@ class Linear(nn.Linear):
     if self.ggml_type == 23 and str(self.weight.device).startswith("AMD"):
       from tinygrad.llm.kernels.amd import iq4_half_lut
       iq4_half_lut(str(self.weight.device))
-    return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
+    self._raw_offset = Tensor([raw_offset//4], dtype=dtypes.uint64, device=self.weight.device).realize()
+    return self._raw_offset
   def __call__(self, x:Tensor) -> Tensor:
+    if self.ggml_type is None and str(self.weight.device).startswith("AMD"): self.set_quantized(self.weight)
     if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
       from tinygrad.llm.kernels.amd import q8_linear
       return q8_linear(self, x)

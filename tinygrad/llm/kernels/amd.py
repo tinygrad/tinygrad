@@ -395,10 +395,10 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, raw_offset:UOp
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
-  assert layer.ggml_type in (Q5_K, Q6_K, IQ4_XS) and layer._raw_offset_uop is not None
+  assert layer.ggml_type in (Q5_K, Q6_K, IQ4_XS) and layer._raw_offset is not None
   tokens = int(x.numel()) // layer.in_features
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device).uop
-  raw, offset = layer.weight.uop.buf_uop, layer._raw_offset_uop
+  raw, offset = layer.weight.uop.buf_uop, layer._raw_offset.uop
   out_features, in_features = layer.out_features, layer.in_features
   use_wmma = tokens % 16 == 0 and layer.out_features % 16 == 0
   def run(fxn:Callable[..., UOp], *srcs:UOp) -> Tensor:

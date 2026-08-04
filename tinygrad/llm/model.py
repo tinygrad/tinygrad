@@ -1,20 +1,10 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
 from tinygrad.llm.kernels import Linear, cached_attention, gated_delta_prefill
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
-
-def load_state_dict(model:Transformer, state_dict:dict[str, Tensor]):
-  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
-  layers = cast(dict[str, Linear], nn.state.get_state_dict(model, tensor_type=Linear)).values()
-  packed:list[tuple[Linear, Tensor]] = []
-  for layer in layers:
-    if str(layer.weight.device).startswith("AMD") and (offset:=layer.set_quantized(layer.weight)) is not None: packed.append((layer, offset))
-  if packed: Tensor.realize(*(offset for _,offset in packed))
-  for layer,offset in packed: layer._raw_offset_uop = offset.uop
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -408,7 +398,7 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
-    load_state_dict(model, state_dict)  # NOTE: rope_freqs.weight (32,) is unused
+    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
