@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, weak_dtype
+from tinygrad.dtype import PyConst, InvalidType, weak_dtype, bitcast
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
@@ -125,7 +125,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
-      return dtypes.void
+      return None
     case Ops.INS:
       return None
     case Ops.NOOP:
@@ -1292,12 +1292,6 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
   return alu
 
-def bitcast(x, in_dtype:DType, out_dtype:DType):
-  assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
-  packed = struct.pack(storage_fmt_for_dtype(in_dtype), to_storage_scalar(x, in_dtype))
-  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype), packed)[0]
-  return from_storage_scalar(out_val, out_dtype)
-
 # ***** pattern matcher *****
 
 def get_location() -> tuple[str, int]:
@@ -1386,7 +1380,6 @@ class UPat(OpMixin):
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
 
-  def const_like(self, b:ConstLike): return UPat.const(cast(ConstType, b), self.match_dtype)
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)
@@ -1747,8 +1740,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
   # TODO: these ops keep their stored dtype until dtype_from_uop works
-  if n.op in {Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
-     all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if n.op is Ops.INDEX or all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)

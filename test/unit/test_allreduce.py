@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops
 
@@ -42,6 +42,13 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertEqual(len(pairs), N*(N-1))
     self.assertEqual(len(sinks), 2)
     self.assertTrue(all(dst != src for dst, src in pairs))
+
+  def test_symbolic_shape(self):
+    rows = UOp.variable("rows", 1, 4).bind(3)
+    t = Tensor.ones(4, 4).shard(("CPU:0", "CPU:1"), axis=1).realize()
+    out = t[:rows].sum(1).realize()
+    self.assertEqual(out.shape, (rows,))
+    self.assertTrue((out == 4).all().item())
 
   def test_correct_ring(self):
     with Context(RING=2):

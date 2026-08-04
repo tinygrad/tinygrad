@@ -1,8 +1,8 @@
 # all of symbolic lives here now
-import math, struct
+import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
+from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid, bitcast
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -20,10 +20,8 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if (from_fmt:=c.dtype.fmt) is None or (to_fmt:=root.dtype.fmt) is None: return None
-  if c.dtype.itemsize != root.dtype.itemsize: return None
-  def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
-  return root.const_like(convert(c.val))
+  if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
+  return root.const_like(bitcast(c.val, c.dtype, root.dtype))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.val
@@ -127,7 +125,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
   (UPat.var("x") & 0, lambda x: x.const_like(0)), # x&0 -> 0
   # (x&mask)>>k -> x>>k when mask only clears bits below k
-  # TODO: combine this with "# rules for threefry" below
   ((UPat.var("x") & UPat.cvar("mask")) >> UPat.cvar("k"),
    lambda x,mask,k: x >> k.val if mask.val | ((1 << k.val) - 1) == -1 else None),
   ((UPat.var("x") & UPat.cvar("mask")) // UPat.cvar("c"),
@@ -168,13 +165,10 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
   # positive const ** x
   (UPat.cvar("c").alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.val == 1 else (x*math.log2(c.val)).exp2() if c.val > 0 else None),
-  # rules for threefry
-  ((UPat.var('x', dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast(dtypes.uint32)),
-  (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
-  (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
-  (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
-  (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
-  (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32, lambda x: x),
+  # unpack a uint64 packed from two uint32 (threefry)
+  (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y', dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
+  (((UPat.var('x', dtypes.uint32).cast(dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32,
+   lambda x: x.cast(dtypes.uint64)),
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
