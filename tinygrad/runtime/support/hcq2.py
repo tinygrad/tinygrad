@@ -285,25 +285,24 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   fills = (table.after(*make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
+def is_bare_addr(val:UOp) -> bool:
+  if (addr:=val.src[0]).op in (Ops.AND, Ops.SHR): addr = addr.src[0] # data64_le masks the low half and shifts the high
+  return addr.op is Ops.GETADDR
+
 def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  (table, _, _, slots), dst, data, offsets, subs = inputs_table, patches[0].buf_uop, [], [], {}
+  (table, _, _, slots), dst, data, subs = inputs_table, patches[0].buf_uop, [], {}
   for p in patches:
     words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
-    addr_words = [(off, val, gaddrs[0]) for off,val,gaddrs in words if gaddrs][::2]
-    data += [off.val << 32 | slots[gaddr] for off,_,gaddr in addr_words]
-    offsets += [next((x.val for x in val.src[0].src if x.op is Ops.CONST), 0) & 0xffffffffffffffff for _,val,_ in addr_words]
+    data += [off.val << 32 | slots[gaddrs[0]] for off,_,gaddrs in words if gaddrs][::2]
     scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
     subs[p] = UOp.group(*make_patches(dst, scalars)) if scalars else UOp(Ops.NOOP)
 
   # plan entry: dst word offset << 32 | addr table slot
   plan = UOp.placeholder((len(data),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
-  offset_table = UOp.placeholder((len(offsets),), dtypes.uint64, next(UOp.unique_num), device=dst.device).rtag("systems")
-  ridx = UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, offset_table, dst))
-  entry, offset = plan.index(ridx).load(), offset_table.index(ridx).load()
+  entry = plan.index(ridx:=UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(plan, dst))).load()
   slot, widx = ((entry & 0xffffffff) % table.max_numel()).cast(dtypes.int), ((entry >> 32) % (dst.max_numel()-1)).cast(dtypes.int) # CHECK_OOB bounds
-  addr = table.index(slot).load() + offset
-  loop = UOp.group(*[dst.index(widx+i).store((addr >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
-  lt_patches += [make_binary_patch(buf, struct.pack(f'<{len(vals)}Q', *vals)) for buf,vals in ((plan, data), (offset_table, offsets))]
+  loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
+  lt_patches.append(make_binary_patch(plan, struct.pack(f'<{len(data)}Q', *data)))
   subs[patches[0]] = UOp.group(loop, subs[patches[0]])
   return subs
 
@@ -319,7 +318,8 @@ def split_patches(call:UOp) -> UOp|None:
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
-  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))]
+  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))
+    and all(is_bare_addr(v) for v in p.src[1].src if get_getaddrs(v))]
   scatter = make_scatter_loop(input_patches, tables[0], lt_patches) if input_patches else {}
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
