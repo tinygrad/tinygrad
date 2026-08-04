@@ -94,7 +94,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    return block._attention(x_norm, start_pos, start_pos+x.shape[1] if x.shape[1] > 1 else None).realize().numpy()
+    return block._attention(x_norm, start_pos).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
@@ -241,6 +241,14 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(prefill, decode, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
+
+  def test_start_zero_resets_realized_state(self):
+    config, x = self._make_config(max_context=3), self._tensor_linspace(-1, 1, (1, 3, 32))
+    block = self._make_block(config)
+    self._run_attention(block, x, 0)
+    restarted = self._run_attention(block, x[:, :2], 0)
+    fresh = self._run_attention(self._make_block(config), x[:, :2], 0)
+    np.testing.assert_allclose(restarted, fresh, rtol=1e-3, atol=1e-3)
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):

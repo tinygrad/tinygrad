@@ -38,19 +38,14 @@ class TestTransformerGenerate(unittest.TestCase):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
     self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
 
-  def test_recurrent_prompt_checkpoint(self):
-    model = Transformer(TEST_CONFIG)
-    model.has_recurrent_block = True
-    model.blk[0].conv_state, model.blk[0].recurrent_state = Tensor([1.0]).contiguous(), Tensor([2.0]).contiguous()
-    model._checkpoint_state([1, 2])
-    Tensor.realize(model.blk[0].conv_state.assign(Tensor([3.0])), model.blk[0].recurrent_state.assign(Tensor([4.0])))
-    model._cached_tokens = [1, 2, 9]
-    seen = []
-    def mock_call(self, tokens, start_pos, temperature, **kwargs):
-      seen.append((self.blk[0].conv_state.item(), self.blk[0].recurrent_state.item(), start_pos))
+  def test_recurrent_divergent_prompt_restarts(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    model.has_recurrent_block, model._cached_tokens = True, [1, 2, 9]
+    def mock_call(self, tokens, start_pos, temperature):
+      calls.append(start_pos)
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call): next(model.generate([1, 2, 10, 11]))
-    self.assertEqual(seen[0], (1.0, 2.0, V_START_POS.bind(2)))
+    self.assertEqual(calls[0], V_START_POS.bind(0))
 
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)
