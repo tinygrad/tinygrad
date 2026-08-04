@@ -611,6 +611,11 @@ def rangeify_on_store(ctx, x:UOp):
   rngs = [UOp.range(s, next(ctx)) for s in x.shape]
   return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
 
+def rangeify_on_stage(ctx, x:UOp):
+  if x.src[0].shape == (): return None
+  rngs = [UOp.range(s, next(ctx)) for s in x.shape]
+  return x.replace(src=(x.src[0].index(*rngs), *rngs))
+
 def index_on_stack(stack:UOp, idx:UOp):
   srcs = [s.index(*idx.src[2:]) for s in stack.src]
   r0 = idx.src[1]
@@ -629,10 +634,17 @@ pm_simple_rangeify = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+  # if INDEX is on STAGE with the same ranges, remove the pair
+  (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
+   lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
+])
+
+pm_range_creation = PatternMatcher([
   # reduce/store are what creates ranges
   (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red").index(name="idx", allow_any_len=True), rangeify_on_reduce),
   (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red"), rangeify_on_reduce),
   (UPat(Ops.STORE, name="x"), rangeify_on_store),
+  (UPat(Ops.STAGE, name="x"), rangeify_on_stage),
 ])
 
 @profile_matches
@@ -650,12 +662,29 @@ def get_kernel_graph(sink:UOp) -> UOp:
   subs: dict[UOp, UOp] = {}
   for u in tsink.toposort():
     u2 = u.replace(src=tuple(subs.get(s, s) for s in u.src))
-    subs[u] = u2.alu(Ops.CONTIGUOUS) if u in contig else u2
+    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device)) if u in contig else u2
   tsink = subs[tsink]
 
+  # add buffers on copy
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
-  tsink = graph_rewrite(tsink, pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
+  # simple rangeify
+  tsink = graph_rewrite(tsink, pm_simple_rangeify+pm_range_creation, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
+
+  # for each index on a stage without children
+  while 1:
+    indexes = {}
+    for u in tsink.toposort():
+      if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
+        indexes.setdefault(u.src[0], []).append(u)
+    subs = {}
+    for k,v in indexes.items():
+      if len(v) == 1:
+        for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
+          subs[old_r] = new_r
+    if not len(subs): break
+    tsink = tsink.substitute(subs)
+    tsink = graph_rewrite(tsink, pm_simple_rangeify, bottom_up=True, name=f"merge kernels ({len(subs)})")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   #tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
