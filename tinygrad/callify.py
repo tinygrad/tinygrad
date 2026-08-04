@@ -196,6 +196,10 @@ pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
+  # replace CALL input views
+  (UPat(Ops.CALL, name="c"), lambda ctx, c:
+   c.replace(src=tuple(replace_input_buffer(ctx, s.replace(src=(b, off.src[1], s.src[2])))
+                       if s.op is Ops.SHRINK and (b:=s.src[0]).op is Ops.BUFFER and (off:=s.src[1]).op is Ops.BIND else s for s in c.src))),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
