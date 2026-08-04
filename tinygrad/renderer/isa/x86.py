@@ -590,10 +590,17 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
+def rewrite_buffer(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
+  offset = UOp.const(ctx.ren.spill_size, dtypes.uint32)
+  ctx.ren.spill_size += x.max_numel() * x.dtype.itemsize
+  return (nx := ctx.ren.isel_matcher.rewrite(ctx.spill_pointer().index(offset, tag=x.tag))), [nx]
+
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
+  # rewrite BUFFER to stack ptr now that the stack size is known
+  (UPat(Ops.BUFFER, name="x"), rewrite_buffer),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.stack_size + x.tag), [nx])),
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.ren.spill_size + x.tag), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
@@ -834,10 +841,10 @@ class X86Renderer(ISARenderer):
     assert ret is not None, f"failed to copy {x}"
     return ret
 
-  def spill(self, spill_offset:int, x:UOp, reg:Register) -> UOp:
+  def spill(self, spill_offset:int, x:UOp) -> UOp:
     disp = UOp.const(spill_offset, dtypes.uint32)
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
-    is_xmm = reg.size == 16
+    is_xmm = x.tag[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
     return UOp(Ops.INS, dtypes.void, fold_address(self.spill_pointer().index(disp)) + (x,), op, x.tag)
 

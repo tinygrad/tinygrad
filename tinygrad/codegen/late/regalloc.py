@@ -33,13 +33,12 @@ class LinearScanRegallocContext:
     for u in uops: vregs.update(_live_units(u))
     vregs = sorted(vregs, key=lambda v: (-v.width, len(v._cons), lis[v][0], lis[v][-1]))
 
-    self.pmap: dict[VRegister, tuple[Register,...]] = {}
     vmap: dict[Register, list[VRegister]] = {}
-
-    spill_size = 0
-    self.spills: dict[int, list[tuple[int, VRegister]]] = {}
-    self.fills: dict[int, list[tuple[int, VRegister]]] = {}
+    self.pmap: dict[VRegister, tuple[Register,...]] = {}
+    self.spills: dict[int, int] = {}
+    self.fills: dict[int, list[tuple[int, VRegister, VRegister]]] = {}
     self.fmap: dict[int, list[tuple[VRegister, VRegister]]] = {}
+    spill_size = 0
     fidx = itertools.count()
     # greedy allocate, pick first block of width w in constraints that is free for whole live range
     def overlaps(a:VRegister, b:VRegister): return lis[a][0] <= lis[b][-1] and lis[a][-1] >= lis[b][0]
@@ -58,12 +57,12 @@ class LinearScanRegallocContext:
           fr = VRegister(f"fr{next(fidx)}", ev._cons, ev.width, ev.alignment)
           lis[fr] = lis[ev][j:]
           lis[ev] = lis[ev][:j]
-          # TODO: remove the buffer condition for x86
-          sz = ev._cons[0].size if self.vdef(ev).op is not Ops.BUFFER else 8
+          # TODO: make this isa agnostic
+          sz = 16 if ev._cons[0].size == 16 else (8 if self.vdef(ev).op is Ops.BUFFER else self.vdef(ev).dtype.itemsize)
           offset = spill_size + (sz - spill_size % sz) % sz
-          self.spills.setdefault(lis[ev][0], []).append((offset,ev))
-          self.fills.setdefault(lis[fr][0], []).append((offset,fr))
-          spill_size += sz
+          self.spills[lis[ev][0]] = offset
+          self.fills.setdefault(lis[fr][0], []).append((offset,ev,fr))
+          spill_size = offset + sz
           for i in lis[fr]: self.fmap.setdefault(i, []).append((ev,fr))
           news.append(fr)
         self.pmap[v] = evicted
@@ -75,14 +74,11 @@ class LinearScanRegallocContext:
     ren.spill_size = spill_size
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i, nsrc, ndefs, = next(ctx.idx), [], []
+  i, ndefs, = next(ctx.idx), []
   alias = {ctx.pmap[vr][0]:ctx.pmap[fr][0] for (vr,fr) in ctx.fmap[i]} if i in ctx.fmap else {}
 
-  # ew
   def _view(u:UOp): return rdefs(u) if u.op is not Ops.INDEX else (rdefs(u.src[0])[u.src[1].arg],)
-  for s in x.src:
-    s = s.replace(tag=tuple(alias.get(r,r) for r in _view(s)))
-    nsrc.append(s)
+  nsrc = [s.replace(tag=tuple(alias.get(r,r) for r in _view(s))) for s in x.src]
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): ndefs.append(v)
@@ -90,9 +86,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     else: ndefs.extend(ctx.pmap[v])
 
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
-
-  after = [ctx.ren.spill(slot,nx,*ctx.pmap[vr]) for slot,vr in ctx.spills[i]] if i in ctx.spills else []
-  before = [ctx.ren.fill(slot,nx,*ctx.pmap[vr]) for slot,vr in ctx.fills[i]] if i in ctx.fills else []
+  after = [ctx.ren.spill(ctx.spills[i],nx)] if i in ctx.spills else []
+  before = [ctx.ren.fill(slot,ctx.vdef(vr),*ctx.pmap[fr]) for slot,vr,fr in ctx.fills[i]] if i in ctx.fills else []
 
   return nx, before + [nx] + after
 

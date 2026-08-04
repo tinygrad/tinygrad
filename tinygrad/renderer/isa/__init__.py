@@ -53,13 +53,12 @@ class ISARenderer(Renderer):
   post_regalloc_ctx: any|None = None
   do_asm: bool = False
   mem2reg_alloc = None
-  spill_alignment: int = 1
   spill_size: int = 0
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def stack_alloc(self, uops:list[UOp]) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, spill_offset:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
