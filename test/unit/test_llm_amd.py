@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.llm.kernels import Linear, cached_attention
-from tinygrad.llm.kernels.amd import q8_quantize
+from tinygrad.llm.kernels import Linear
+from tinygrad.llm.kernels.amd import q8_quantize, quantized_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
@@ -31,7 +31,7 @@ class TestQ8Quantize(unittest.TestCase):
     q, k, v = Tensor.zeros(1, 2, 1, 32), Tensor.randn(1, 1, 1, 32), Tensor.randn(1, 1, 1, 32)
     cache = Tensor.empty(2, 1, 1, 256, 32, dtype=dtypes.int8).contiguous()
     scale = Tensor.empty(2, 1, 1, 256, dtype=dtypes.float16).contiguous()
-    out = cached_attention(q, Tensor.stack(k, v), cache, scale, 0).realize()
+    out = quantized_attention(q, Tensor.stack(k, v), cache, scale, 0).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
 if __name__ == "__main__": unittest.main()

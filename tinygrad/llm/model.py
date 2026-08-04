@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
-from tinygrad.llm.kernels import Linear, cached_attention, gated_delta_prefill
+from tinygrad.llm.kernels import Linear, gated_delta_prefill
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -127,12 +127,12 @@ class FFNBlock:
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
-  def __call__(self, x:Tensor, start_pos:int|UOp):
+  def __call__(self, x: Tensor, start_pos: int|UOp):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      h = x + self._attention(self.attn_norm(x), start_pos)
+      h =     x + self._attention(self.attn_norm(x), start_pos)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos)
 
@@ -171,8 +171,9 @@ class TransformerBlock(FFNBlock):
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     stacked_kv = Tensor.stack(k, v)
     if hasattr(self, "cache_kv_scale"):
+      from tinygrad.llm.kernels.amd import quantized_attention
       cache_pos = position if self.config.ssm is not None and resolve(T != 1) else start_pos
-      attn = cached_attention(q, stacked_kv, self.cache_kv, self.cache_kv_scale, cache_pos)
+      attn = quantized_attention(q, stacked_kv, self.cache_kv, self.cache_kv_scale, cache_pos)
     else:
       assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(stacked_kv.uop)))
       k, v = assigned_kv[0, :, :, 0:start_pos+T, :], assigned_kv[1, :, :, 0:start_pos+T, :]
@@ -210,7 +211,6 @@ class MLATransformerBlock(FFNBlock):
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
-    if self.config.ssm is not None and resolve(T != 1): start_pos = start_pos - (start_pos-1) % T - 1
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
@@ -288,7 +288,7 @@ class GatedDeltaNetBlock(FFNBlock):
     q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
     alpha = log_alpha.transpose(1, 2).float().exp()
     conv_state = conv_window[:, chunk_len:chunk_len+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
-    state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop))))
+    state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.store(conv_state.uop)))
     reset_pos = Tensor(position) if not self.recurrent_state.uop.is_realized else None
     core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, reset_pos).transpose(1, 2)
     gate = out_gate.sigmoid() if is_kda else out_gate.silu()
@@ -429,7 +429,7 @@ class Transformer:
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    chunk_size = min(chunk_size or (256 if self.has_recurrent_block else 32), 256)
+    chunk_size = min(chunk_size or 256, 256) if self.has_recurrent_block else chunk_size or 32
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported

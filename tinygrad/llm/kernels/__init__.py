@@ -26,11 +26,6 @@ class Linear(nn.Linear):
       return q8_linear(self, x)
     return super().__call__(x)
 
-def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor, start_pos:int|UOp) -> Tensor:
-  from tinygrad.llm.kernels.amd import quantized_attention
-  assert cache_kv.dtype == dtypes.int8
-  return quantized_attention(q, stacked_kv, cache_kv, cache_scale, start_pos)
-
 @functools.cache
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
