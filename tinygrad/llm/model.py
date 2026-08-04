@@ -1,6 +1,7 @@
 from __future__ import annotations
 import functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
+from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, dtypes, getenv, function
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve, smax
@@ -116,6 +117,7 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  expert_gating_func: int = 0
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -161,12 +163,13 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if (dsv4 := self.config.deepseek4) or hasattr(self, 'exp_probs_b'):
-        probs = logits.float().softplus().sqrt() if dsv4 else logits.sigmoid()
+      dsv4 = self.config.deepseek4
+      if self.config.expert_gating_func:
+        probs = logits.softplus().sqrt() if self.config.expert_gating_func == 4 else logits.sigmoid()
         if hasattr(self, "ffn_gate_tid2eid"):
           assert tokens is not None
           sel = self.ffn_gate_tid2eid["weight"][tokens]
-        else: _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+        else: _, sel = pairwise_topk(probs + self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else probs, self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
       else:
@@ -176,7 +179,7 @@ class FFNBlock:
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       if dsv4:
         clamp = dsv4.swiglu_clamp[getattr(self, "layer_id")]
-        gate, up = gate.float().minimum(clamp), up.float().clamp(-clamp, clamp)
+        gate, up = gate.minimum(clamp), up.clamp(-clamp, clamp)
       hidden = gate.silu() * up
       x_down = self.ffn_down_exps(sel, hidden.contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
@@ -184,7 +187,7 @@ class FFNBlock:
         gate, up = self.ffn_gate_shexp(x), self.ffn_up_shexp(x)
         if dsv4:
           clamp = dsv4.shared_swiglu_clamp[getattr(self, "layer_id")]
-          gate, up = gate.float().minimum(clamp), up.float().clamp(-clamp, clamp)
+          gate, up = gate.minimum(clamp), up.clamp(-clamp, clamp)
         gate = gate.silu().contiguous()
         shexp = self.ffn_down_shexp(gate * up)
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
@@ -273,37 +276,63 @@ class MLATransformerBlock(FFNBlock):
       self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
     else:
       self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+
+    if config.deepseek4: return
     self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
+  def _cache_attention(self, qr:Tensor|None, x:Tensor, start_pos:int|UOp, c_kv:Tensor, k_rope:Tensor) -> tuple[Tensor, Tensor, Tensor|None]:
+    B, T, _ = x.shape
+    k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
+    k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
+    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) \
+      if resolve(T != 1) else None
+    return k, k[..., :self.config.kv_lora_rank], mask
+
+  def _attention_probs(self, attn:Tensor) -> Tensor: return attn.softmax(-1)
+
+  def _attention_output(self, attn:Tensor, freqs_cis:Tensor) -> Tensor:
+    B, _, T, _ = attn.shape
+    attn = (attn @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+    return self.attn_output(attn)
+
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
-    q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
+    dsv4 = self.config.deepseek4
+    qr:Tensor|None = None
+    q_proj = self.attn_q_b(qr := self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
+    if dsv4:
+      assert T == 1
+      q = q * (q.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
-    q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
+    freqs_cis = self.freqs_cis[start_pos:start_pos+T]
+    if dsv4:
+      q_rope = apply_rope(q_rope.transpose(1, 2), freqs_cis, interleaved=True).transpose(1, 2)
+    else:
+      if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
+      q_nope = q_nope @ self.attn_k_b["weight"].transpose(-1, -2)
+    q = q_nope.cat(q_rope, dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
-    c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
-    k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
+    if dsv4:
+      normed = self.attn_kv_a_norm(kv_a)
+      c_kv, k_rope = normed[..., :-self.config.rope_dim], normed[..., -self.config.rope_dim:]
+      k_rope = apply_rope(k_rope, freqs_cis, interleaved=True)
+    else:
+      c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
+      k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
+      if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
 
-    k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
-    k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
-    v = k[..., :self.config.kv_lora_rank]
+    k, v, mask = self._cache_attention(qr, x, start_pos, c_kv, k_rope)
 
-    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) \
-      if resolve(T != 1) else None
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
     if mask is not None: attn = attn + mask
-    attn = attn.softmax(-1)
-    attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
-    return self.attn_output(attn)
+    return self._attention_output(self._attention_probs(attn) @ v, freqs_cis)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
@@ -377,10 +406,8 @@ class GatedDeltaNetBlock(FFNBlock):
       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
 
-def _hyper_connection(mixes:Tensor, scale:Tensor, base:Tensor, eps:float, iters:int) -> tuple[Tensor, Tensor, Tensor]:
-  B, T, N = mixes.shape
-  hc = round(math.sqrt(1+N)-1)
-  assert N == (2+hc)*hc
+def _hyper_connection(mixes:Tensor, scale:Tensor, base:Tensor, hc:int, eps:float, iters:int) -> tuple[Tensor, Tensor, Tensor]:
+  B, T, _ = mixes.shape
   pre = (mixes[..., :hc]*scale[0]+base[:hc]).sigmoid()+eps
   post = (mixes[..., hc:2*hc]*scale[1]+base[hc:2*hc]).sigmoid()*2
   comb = (mixes[..., 2*hc:]*scale[2]+base[2*hc:]).reshape(B, T, hc, hc).softmax(-1)+eps
@@ -406,7 +433,7 @@ class DeepSeek4Compressor:
 
   def __call__(self, x:Tensor, start_pos:int|UOp, freqs_cis:Tensor, kv_cache:Tensor, cache_offset:int=0) -> Tensor:
     ratio, state, score_state = self.ratio, self.kv_state, self.score_state
-    kv, score = self.kv(x).float(), self.gate(x).float()+self.ape["weight"][start_pos % ratio]
+    kv, score = self.kv(x), self.gate(x)+self.ape["weight"][start_pos % ratio]
     slot = ratio + start_pos % ratio if self.overlap else start_pos % ratio
     if self.overlap:
       rollover = (Tensor.arange(1).to(x.device) == start_pos % ratio).reshape(1, 1, 1)
@@ -459,16 +486,13 @@ class DeepSeek4Indexer:
     selected = scores.topk(min(self.topk, int(cache.shape[1])))[1]
     return (selected < count).where(selected, -1)
 
-class DeepSeek4Block(FFNBlock):
+class DeepSeek4Block(MLATransformerBlock):
   def __init__(self, layer_id:int, config:TransformerConfig, dsv4:DeepSeek4Config):
     super().__init__(config)
     self.layer_id, self.dsv4 = layer_id, dsv4
     self.compress_ratio = dsv4.compress_ratios[layer_id]
     self.attn_sinks = {"weight": Tensor.zeros(config.n_heads)}
-    self.attn_q_a = nn.Linear(config.dim, config.q_lora_rank, bias=False)
-    self.attn_q_a_norm = nn.RMSNorm(config.q_lora_rank, config.norm_eps)
-    self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads*config.head_dim, bias=False)
-    self.attn_kv = nn.Linear(config.dim, config.head_dim, bias=False)
+    self.attn_kv_a_mqa = nn.Linear(config.dim, config.head_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.head_dim, config.norm_eps)
     self.attn_output_a = nn.Linear(config.n_heads*config.head_dim//dsv4.output_groups,
                                    dsv4.output_groups*dsv4.output_lora_rank, bias=False)
@@ -487,41 +511,30 @@ class DeepSeek4Block(FFNBlock):
     else: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
 
   def _hc_pre(self, x:Tensor, name:str) -> tuple[Tensor, Tensor, Tensor]:
-    flat = x.flatten(2).float()
-    mixes = (flat @ getattr(self, name+"_fn")["weight"].float().T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
-    pre, post, comb = _hyper_connection(mixes, getattr(self, name+"_scale")["weight"].float(),
-                                        getattr(self, name+"_base")["weight"].float(), self.dsv4.hc_eps, self.dsv4.hc_sinkhorn_iters)
-    return (pre.unsqueeze(-1)*x.float()).sum(2).cast(x.dtype), post, comb
+    flat = x.flatten(2)
+    mixes = (flat @ getattr(self, name+"_fn")["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
+    pre, post, comb = _hyper_connection(mixes, getattr(self, name+"_scale")["weight"], getattr(self, name+"_base")["weight"], self.dsv4.hc_mult,
+                                        self.dsv4.hc_eps, self.dsv4.hc_sinkhorn_iters)
+    return (pre.unsqueeze(-1)*x).sum(2).cast(x.dtype), post, comb
 
   @staticmethod
   def _hc_post(x:Tensor, residual:Tensor, post:Tensor, comb:Tensor) -> Tensor:
     return (post.unsqueeze(-1)*x.unsqueeze(-2) + (comb.unsqueeze(-1)*residual.unsqueeze(-2)).sum(2)).cast(x.dtype)
 
-  def _compressed_indices(self, qr:Tensor, x:Tensor, start_pos:int|UOp, cache:Tensor) -> tuple[Tensor, Tensor]:
+  def _compressed_indices(self, qr:Tensor|None, x:Tensor, start_pos:int|UOp, cache:Tensor) -> tuple[Tensor, Tensor]:
     cache = self.compressor(x, start_pos, self.freqs_cis, cache, self.dsv4.window_size)
-    if hasattr(self, "indexer"): return cache, self.indexer(qr, x, start_pos, self.freqs_cis)
+    if hasattr(self, "indexer"): return cache, self.indexer(cast(Tensor, qr), x, start_pos, self.freqs_cis)
     count = (Tensor(start_pos).to(x.device)+1)//self.compress_ratio
     idx = Tensor.arange(cache.shape[1]-self.dsv4.window_size).to(x.device).reshape(1, 1, -1)
     return cache, (idx < count).where(idx, -1)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _cache_attention(self, qr:Tensor|None, x:Tensor, start_pos:int|UOp, c_kv:Tensor, k_rope:Tensor) -> tuple[Tensor, Tensor, Tensor|None]:
     B, T, _ = x.shape
-    assert T == 1
-    qr = self.attn_q_a_norm(self.attn_q_a(x))
-    q = self.attn_q_b(qr).reshape(B, T, self.config.n_heads, self.config.head_dim)
-    q = q * (q.float().square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
-    q = q[..., :-self.config.rope_dim].cat(
-      apply_rope(q[..., -self.config.rope_dim:], self.freqs_cis[start_pos:start_pos+T], interleaved=True), dim=-1)
-
-    kv = self.attn_kv_a_norm(self.attn_kv(x))
-    kv = kv[..., :-self.config.rope_dim].cat(
-      apply_rope(kv[..., -self.config.rope_dim:], self.freqs_cis[start_pos:start_pos+T], interleaved=True), dim=-1)
-    position = Tensor(start_pos).to(x.device)
+    kv = c_kv.cat(k_rope, dim=-1)
     window_pos = start_pos % self.dsv4.window_size
     cache = Tensor(self.kv_cache.uop.after(self.kv_cache[:, window_pos:window_pos+1].uop.store(kv.uop)))
-    window_idx = position-self.dsv4.window_size+1+Tensor.arange(self.dsv4.window_size).to(x.device)
+    window_idx = Tensor(start_pos, device=x.device)-self.dsv4.window_size+1+Tensor.arange(self.dsv4.window_size).to(x.device)
     window_idx = (window_idx >= 0).where(window_idx % self.dsv4.window_size, -1).reshape(1, 1, -1)
-
     if self.compress_ratio:
       cache, compressed_idx = self._compressed_indices(qr, x, start_pos, cache)
       compressed_idx = (compressed_idx >= 0).where(compressed_idx+self.dsv4.window_size, -1)
@@ -532,14 +545,18 @@ class DeepSeek4Block(FFNBlock):
     selected = cache.unsqueeze(1).expand(B, T, cache.shape[1], cache.shape[2]).gather(
       2, safe_indices.unsqueeze(-1).expand(B, T, indices.shape[-1], cache.shape[-1]))
     selected = valid.unsqueeze(-1).where(selected, 0.0)
-    scores = (q.unsqueeze(-2)*selected.unsqueeze(2)).sum(-1) * self.config.head_dim**-0.5
-    scores = valid.unsqueeze(2).where(scores, float("-inf"))
-    scores = scores.cat(self.attn_sinks["weight"].reshape(1, 1, self.config.n_heads, 1).expand(B, T, self.config.n_heads, 1), dim=-1)
-    probs = scores.softmax(-1)[..., :-1]
-    out = (probs.unsqueeze(-1)*selected.unsqueeze(2)).sum(-2)
-    out = out[..., :-self.config.rope_dim].cat(
-      apply_rope(out[..., -self.config.rope_dim:], self.freqs_cis[start_pos:start_pos+T], interleaved=True, inverse=True), dim=-1).contiguous()
+    return selected, selected, valid.unsqueeze(1).where(0.0, float("-inf"))
 
+  def _attention_probs(self, scores:Tensor) -> Tensor:
+    B, _, T, _ = scores.shape
+    scores = scores.cat(self.attn_sinks["weight"].reshape(1, self.config.n_heads, 1, 1).expand(B, self.config.n_heads, T, 1), dim=-1)
+    return scores.softmax(-1)[..., :-1]
+
+  def _attention_output(self, out:Tensor, freqs_cis:Tensor) -> Tensor:
+    B, _, T, _ = out.shape
+    out = out.transpose(1, 2)
+    out = out[..., :-self.config.rope_dim].cat(
+      apply_rope(out[..., -self.config.rope_dim:], freqs_cis, interleaved=True, inverse=True), dim=-1).contiguous()
     groups, rank = self.dsv4.output_groups, self.dsv4.output_lora_rank
     out = out.reshape(B, T, groups, -1)
     weight = self.attn_output_a.weight.reshape(groups, rank, -1)
@@ -602,10 +619,10 @@ class Transformer:
       x = x.unsqueeze(2).expand(*x.shape[:2], dsv4.hc_mult, x.shape[-1]).contiguous()
     for block in self.blk: x = block(x, start_pos, tokens)
     if dsv4:
-      flat = x.flatten(2).float()
-      mixes = (flat @ self.output_hc_fn["weight"].float().T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
-      pre = (mixes*self.output_hc_scale["weight"].float()+self.output_hc_base["weight"].float()).sigmoid()+dsv4.hc_eps
-      x = (pre.unsqueeze(-1)*x.float()).sum(2)
+      flat = x.flatten(2)
+      mixes = (flat @ self.output_hc_fn["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
+      pre = (mixes*self.output_hc_scale["weight"]+self.output_hc_base["weight"]).sigmoid()+dsv4.hc_eps
+      x = (pre.unsqueeze(-1)*x).sum(2)
     logits = self.output(self.output_norm(x))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
@@ -670,8 +687,8 @@ class Transformer:
         compress_rope_theta=kv[f'{arch}.attention.compress_rope_freq_base'],
         yarn=(kv[f'{arch}.rope.scaling.factor'], kv[f'{arch}.rope.scaling.original_context_length'],
               kv[f'{arch}.rope.scaling.yarn_beta_fast'], kv[f'{arch}.rope.scaling.yarn_beta_slow']))
-      state_dict = {k.replace('attn_compressor_', 'compressor.').replace('indexer_compressor_', 'indexer.compressor.'):v
-                    for k,v in state_dict.items()}
+      state_dict = {k.replace('.attn_kv.weight', '.attn_kv_a_mqa.weight').replace('attn_compressor_', 'compressor.')
+                     .replace('indexer_compressor_', 'indexer.compressor.'):v for k,v in state_dict.items()}
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
@@ -698,6 +715,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
+      expert_gating_func=kv.get(f'{arch}.expert_gating_func', 0),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
