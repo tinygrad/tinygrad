@@ -218,7 +218,7 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
   return (groups/scale.unsqueeze(-1)).round().clip(-127, 127).cast(dtypes.int8).contiguous().bitcast(dtypes.uint32), scale
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp) -> UOp:
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
   assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
@@ -232,7 +232,8 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   rows = tuple(row_base+i for i in range(row_tile))
   cols = tuple(lane + i*32 for i in range(key_dim//32))
   current = UOp.placeholder((row_tile*key_dim//32,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() for row in rows for col in cols))))
+  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if start_pos is None else
+    start_pos.eq(0).where(0, state[bh, row, col].float()) for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.REDUCE)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)
@@ -418,4 +419,4 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
 def iq4_half_lut(device:str) -> Tensor:
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
   return Tensor([x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i], kvalues_iq4nl[j])],
-                dtype=dtypes.float16, device=device).bitcast(dtypes.uint32).contiguous().realize()
+                dtype=dtypes.float16, device=device).bitcast(dtypes.uint32).contiguous()

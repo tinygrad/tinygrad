@@ -256,7 +256,10 @@ class GatedDeltaNetBlock(FFNBlock):
     out_gate = (self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)).reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
+    start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
+    initial = Tensor(start_pos).eq(0)
+    conv_state = initial.where(0, self.conv_state) if not self.conv_state.uop.is_realized else self.conv_state
+    conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
     conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
@@ -275,7 +278,8 @@ class GatedDeltaNetBlock(FFNBlock):
     state_pos = T if valid_len is None else valid_len
     conv_state = conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
     state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop))))
-    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state).transpose(1, 2)
+    reset_pos = Tensor(start_pos) if not self.recurrent_state.uop.is_realized else None
+    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, reset_pos).transpose(1, 2)
     gate = out_gate.sigmoid() if is_kda else out_gate.silu()
     return self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
 
@@ -287,8 +291,8 @@ class GatedDeltaNetBlock(FFNBlock):
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
-      self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
-      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
+      self.conv_state = Tensor.empty(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).contiguous()
+      self.recurrent_state = Tensor.empty(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).contiguous()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
@@ -410,19 +414,14 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def warmup(self, chunk_size:int=256):
-    if not self.has_recurrent_block:
-      for _ in range(2): list(zip(range(2), self.generate([0])))
-      return
-    x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
-    for block in self.blk: block._init_state(x)
-    Tensor.realize(*(getattr(block, name) for block in self.blk
-      for name in ("cache_kv", "cache_kv_scale", "freqs_cis", "conv_state", "recurrent_state") if hasattr(block, name)))
-    self.prefill_jit.cnt = self.rollout_jit.cnt = 1
-    warm = self.generate([0] * min(chunk_size, 256, self.max_context-1), chunk_size=chunk_size)
-    with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512)): next(warm)
+    prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
+    if self.has_recurrent_block:
+      x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
+      for block in self.blk: block._init_state(x)
+      self.prefill_jit.cnt = self.rollout_jit.cnt = 1
+    warm = self.generate(prompt, chunk_size=chunk_size)
+    with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
     with Context(JIT_BATCH_SIZE=0): next(warm)
-
-    if resets := [r for block in self.blk for r in block._state_reset_ops()]: Tensor.realize(*resets)
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
@@ -436,7 +435,6 @@ class Transformer:
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
     decode_resume = self.has_recurrent_block and bool(self._cached_tokens) and start_pos > 0
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       padded_prefill = self.has_recurrent_block and start_pos < prompt_len and not decode_resume

@@ -43,7 +43,7 @@ def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:T
   return q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp) -> UOp:
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
   key_dim, alpha_dim = cast(int, q.shape[-1]), cast(int, alpha.shape[-1]) if len(alpha.shape) == 4 else 1
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
@@ -52,7 +52,8 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   bh, row, cols = UOp.range(batch*heads, 0, AxisType.GLOBAL), UOp.range(value_dim, 2), tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float()) for col in cols)))
+  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if start_pos is None else
+    start_pos.eq(0).where(0, state[bh, row, col].float())) for col in cols)))
   token = UOp.range(tokens, 1, AxisType.REDUCE)
   previous = tuple(current.after(token)[col].load() for col in cols)
   keys, queries = (tuple(x[bh, token, col].load() for col in cols) for x in (k, q))
@@ -65,7 +66,7 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   stores = (state[bh, row, col].store(current.after(step)[col].load().cast(state.dtype)) for col in cols)
   return UOp.group(*stores).end(row, bh).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> Tensor:
+def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
   batch, heads, tokens, key_dim = q.shape
   value_dim = v.shape[-1]
   assert q.shape == k.shape and v.shape[:3] == q.shape[:3] and beta.shape == (batch, heads, tokens)
@@ -75,5 +76,5 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   if str(q.device).startswith("AMD") and key_dim % 32 == 0 and value_dim % 4 == 0:
     from tinygrad.llm.kernels.amd import _gated_delta_prefill_kernel as kernel
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
-  return Tensor.custom_kernel(core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq,
-                              fxn=kernel)[0]
+  srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
+  return Tensor.custom_kernel(*srcs, *((start_pos,) if start_pos is not None else ()), fxn=kernel)[0]

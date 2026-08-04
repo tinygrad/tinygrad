@@ -1157,7 +1157,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
-    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, addrspace=addrspace))
+    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot))
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
   @staticmethod
@@ -1177,8 +1177,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
     return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
+    contig_srcs = tuple(x if x.op in (Ops.AFTER, Ops.BIND) else x.contiguous() for x in srcs)
+    placeholders = [s.param_like(i) if s.op is Ops.BIND else UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
     kernel = fxn(*placeholders).call(*contig_srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in contig_srcs]
 

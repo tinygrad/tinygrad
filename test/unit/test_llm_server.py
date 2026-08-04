@@ -13,11 +13,11 @@ V_TOKS = UOp.variable("toks", 1, 32)  # 32 is the default chunk_size in generate
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
-    def generate(tokens):
+    def generate(tokens, **kwargs):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0], [0]])
+    self.assertEqual(calls, [[0]])
 
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
