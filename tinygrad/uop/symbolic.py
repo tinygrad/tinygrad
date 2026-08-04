@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, struct
+import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invalid
@@ -18,12 +18,6 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if int(c.val-0.5)+0.5 == c.val: return x.pow(c.const_like(c.val-0.5)) * x.sqrt()
   if int(c.val) == c.val: return (y := x.pow(c.const_like(c.val//2))) * y * (x if c.val%2 == 1 else 1)
   return None
-
-def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if (from_fmt:=c.dtype.fmt) is None or (to_fmt:=root.dtype.fmt) is None: return None
-  if c.dtype.itemsize != root.dtype.itemsize: return None
-  def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
-  return root.const_like(convert(c.val))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.val
@@ -157,7 +151,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # TODO: delete this once CONST has no dtype
   (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
-  (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # bitcast twice

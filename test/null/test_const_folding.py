@@ -115,6 +115,7 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
+@unittest.skip("bitcast on a const no longer folds, it lowers like any other bitcast")
 class TestBitcastConstFolding(unittest.TestCase):
   def test_scalar_bitcast(self):
     def t(cases: dict[DType, ConstType]):
