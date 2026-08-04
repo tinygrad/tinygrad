@@ -36,7 +36,7 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   bh, row, cols = UOp.range(batch*heads, 0, AxisType.GLOBAL), UOp.range(value_dim, 2), tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0) if tokens == 1 else start_pos < tokens+1
+  initial = None if start_pos is None else start_pos.eq(0)
   current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if initial is None else
     initial.where(0, state[bh, row, col].float())) for col in cols)))
   token = UOp.range(tokens, 1, AxisType.REDUCE)
@@ -63,8 +63,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=kernel)[0]
+  if start_pos.uop.op is not Ops.BIND: return Tensor.custom_kernel(*srcs, fxn=functools.partial(kernel, start_pos=start_pos.uop))[0]
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  assert start_pos.uop.op is Ops.BIND
   call = kernel(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
   return Tensor(contig[0].after(call))

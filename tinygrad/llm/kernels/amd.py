@@ -181,7 +181,6 @@ def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UO
 
 def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor, start_pos:int|UOp) -> Tensor:
   T = q.shape[2]
-  if resolve(T != 1): start_pos = start_pos - (start_pos-1) % T - 1
   scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
   packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
   stores = (cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop),
@@ -233,7 +232,7 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   rows = tuple(row_base+i for i in range(row_tile))
   cols = tuple(lane + i*32 for i in range(key_dim//32))
   current = UOp.placeholder((row_tile*key_dim//32,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0) if tokens == 1 else start_pos < tokens+1
+  initial = None if start_pos is None else start_pos.eq(0)
   current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if initial is None else
     initial.where(0, state[bh, row, col].float()) for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.REDUCE)
