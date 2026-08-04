@@ -585,19 +585,19 @@ pm_expand_broadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
 ])
 
-def expand_coeff(sink:UOp) -> tuple[dict[UOp,int], set[UOp]]:
+def expand_coeff(sink:UOp) -> tuple[dict[UOp,int], dict[UOp,int]]:
   coeff: dict[UOp,int] = {sink: 1}
-  contig: set[UOp] = set()
+  contig: dict[UOp,int] = {}
   for u in reversed(list(sink.toposort())):
     c = 1 if u.op is Ops.STORE else coeff.get(u, 0)
     # symbolic coeffs mark on vmax, an extra CONTIGUOUS is always safe
     if (c > 1 if isinstance(c, int) else c.vmax > 1) and u.op in (GroupOp.Elementwise | {Ops.REDUCE}) and u.device is not None:
-      contig.add(u)
+      contig[u] = c
       c = 1
     coeff[u] = c
     mult = prod(u.shape) // prod(u.src[0].shape) if u.op is Ops.EXPAND else 1
     for s in u.src: coeff[s] = coeff.get(s, 0) + c * (mult if s is u.src[0] else 1)
-  return coeff, contig
+  return contig
 
 def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp|None=None):
   if red.arg[1] == 0: return None
@@ -660,11 +660,11 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
 
   # mark ops that would be recomputed (expand coeff > 1) as CONTIGUOUS, like the realize map in run_rangeify
-  _, contig = expand_coeff(tsink)
+  contig = expand_coeff(tsink)
   subs: dict[UOp, UOp] = {}
   for u in tsink.toposort():
     u2 = u.replace(src=tuple(subs.get(s, s) for s in u.src))
-    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device)) if u in contig else u2
+    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device, coeff=contig[u])) if u in contig else u2
   tsink = subs[tsink]
 
   # add buffers on copy
@@ -673,7 +673,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
-  # for each index on a stage without children
+  # for each index on a stage without children and with a small coefficient
   while 1:
     indexes = {}
     for u in tsink.toposort():
@@ -681,7 +681,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
         indexes.setdefault(u.src[0], []).append(u)
     subs = {}
     for k,v in indexes.items():
-      if len(v) == 1:
+      if len(v) == 1 and k.arg.coeff <= 4:
         for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
           subs[old_r] = new_r
     if not len(subs): break
