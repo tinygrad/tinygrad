@@ -37,16 +37,16 @@ class TestQ8Quantize(unittest.TestCase):
   def test_prefill_attention_unaligned_start(self):
     if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
     rng = np.random.default_rng(42)
-    start_pos = 31
+    start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)
     old_kv = rng.normal(size=(2, 1, 1, start_pos, 128)).astype(np.float32)
     new_kv = rng.normal(size=(2, 1, 1, 32, 128)).astype(np.float32)
-    cache = Tensor.empty(2, 1, 1, 256, 128, dtype=dtypes.int8).contiguous()
-    scale = Tensor.empty(2, 1, 1, 256, dtype=dtypes.float16).contiguous()
+    cache = Tensor.empty(2, 1, 1, 2048, 128, dtype=dtypes.int8).contiguous()
+    scale = Tensor.zeros(2, 1, 1, 2048, dtype=dtypes.float16).contiguous()
     old_scale = np.maximum(np.max(np.abs(old_kv), axis=-1, keepdims=True) / 127, 1e-8).astype(np.float16)
     Tensor.realize(cache[:, :, :, :start_pos].assign(Tensor(np.rint(old_kv / old_scale).astype(np.int8))),
                    scale[:, :, :, :start_pos].assign(Tensor(old_scale.squeeze(-1))))
-    out = quantized_attention(q, Tensor(new_kv), cache, scale, UOp.variable("start_pos", 0, 255).bind(start_pos)).realize()
+    out = quantized_attention(q, Tensor(new_kv), cache, scale, UOp.variable("start_pos", 0, 2047).bind(start_pos)).realize()
     values = cache[1, 0, 0, :start_pos+32].numpy().astype(np.float32) * \
       scale[1, 0, 0, :start_pos+32].numpy().astype(np.float32)[:, None]
     expected = np.stack([values[:start_pos+i+1].mean(0) for i in range(32)])[None, None].repeat(8, axis=1)

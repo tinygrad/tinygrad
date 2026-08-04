@@ -187,7 +187,7 @@ class TransformerBlock(FFNBlock):
         (dtypes.int8 if recurrent and str(x.device).startswith("AMD") else dtypes.default_float)
       shape = (2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim)
       self.cache_kv = Tensor.empty(*shape, dtype=cache_dtype, device=x.device).contiguous()
-      if cache_dtype == dtypes.int8: self.cache_kv_scale = Tensor.empty(*shape[:-1], dtype=dtypes.float16, device=x.device).contiguous()
+      if cache_dtype == dtypes.int8: self.cache_kv_scale = Tensor.zeros(*shape[:-1], dtype=dtypes.float16, device=x.device).contiguous()
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, cache_len, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -314,6 +314,7 @@ class Transformer:
     T = tokens.shape[1]
     x = x[:, T-1:T]
     logits = self.output(self.output_norm(x))[:, -1, :]
+    # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -427,7 +428,7 @@ class Transformer:
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context-len(tokens)), dtype="int32").reshape(1, self.max_context)
+    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
