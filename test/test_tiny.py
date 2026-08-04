@@ -39,6 +39,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(N).contiguous().sum()
     self.assertEqual(out.item(), N)
 
+  def test_eye(self):
+    out = Tensor.eye(3).flatten()
+    self.assertListEqual(out.tolist(), [1.0,0.0,0.0, 0.0,1.0,0.0, 0.0,0.0,1.0])
+
   def test_gemm(self, N=getenv("GEMM_N", 64), dtype=dtypes.float):
     a = Tensor.ones(N,N, dtype=dtype).contiguous()
     b = Tensor.eye(N, dtype=dtype).clone()
