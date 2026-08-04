@@ -413,22 +413,20 @@ class Transformer:
     return model, kv
 
   def get_start_pos(self, tokens:list[int]) -> int:
-    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     if self.has_recurrent_block:
-      if prefix_len == len(self._cached_tokens): return prefix_len
-      checkpoint_prefix = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._checkpoint_tokens)))
-      return len(self._checkpoint_tokens) if checkpoint_prefix == len(self._checkpoint_tokens) else 0
+      for cached in (self._cached_tokens, self._checkpoint_tokens):
+        if cached and len(cached) < len(tokens) and tokens[:len(cached)] == cached: return len(cached)
+      return 0
+    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def _checkpoint_state(self, tokens:list[int]|None=None):
     states = [getattr(block, name) for block in self.blk for name in ("conv_state", "recurrent_state") if hasattr(block, name)]
     if not states: return
-    if not self._state_checkpoint:
-      self._state_checkpoint = [state.clone().realize() for state in states]
-      if tokens is not None: self._checkpoint_tokens = list(tokens)
-      return
-    dst, src = (self._state_checkpoint, states) if tokens is not None else (states, self._state_checkpoint)
-    Tensor.realize(*(d.assign(s) for d,s in zip(dst, src)))
+    if not self._state_checkpoint: self._state_checkpoint = [state.clone().realize() for state in states]
+    else:
+      dst, src = (self._state_checkpoint, states) if tokens is not None else (states, self._state_checkpoint)
+      Tensor.realize(*(d.assign(s) for d,s in zip(dst, src)))
     if tokens is not None: self._checkpoint_tokens = list(tokens)
 
   def warmup(self, chunk_size:int=256):
