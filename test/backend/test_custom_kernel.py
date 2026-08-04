@@ -434,6 +434,16 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
+  def test_inplace_transpose(self):
+    def custom_assign_row_max_kernel(A:UOp) -> UOp:
+      row = UOp.range(A.shape[0], 0)
+      col = UOp.range(A.shape[1], 1)
+      return A[row, col].store(A[row].max(axis=0)).end(col).end(row).sink(arg=KernelInfo(name=f"assign_row_max_{A.numel()}"))
+    a = Tensor.arange(4).clone().realize()
+    a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_assign_row_max_kernel)[0]
+    self.assertEqual(a.flatten().tolist(), [2, 2, 3, 3])
+    self.assertEqual(a.shape, (2, 2))
+
 class TestCustomKernelInput(unittest.TestCase):
   def _test_mop(self, mop_fxn, max_kernels):
     # default: input is BUFFER
