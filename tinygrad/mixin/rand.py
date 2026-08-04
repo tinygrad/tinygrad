@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Self, cast
-from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype, bitcast
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
 from tinygrad.mixin.op import OpMixin
 from tinygrad.device import canonicalize_device
@@ -33,7 +33,7 @@ class RandMixin(OpMixin):
     _, nmant = dtypes.finfo(dtype)
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     uint_bits = bits.bitcast(uint_dtype)
-    float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
+    float_one_bits = bitcast(1.0, dtype, uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   @classmethod

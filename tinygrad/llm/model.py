@@ -428,6 +428,9 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
+  def warmup(self):
+    for _ in range(2): list(zip(range(2), self.generate([0])))
+
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
