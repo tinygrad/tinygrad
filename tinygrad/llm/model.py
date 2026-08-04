@@ -137,20 +137,16 @@ class FFNBlock:
   # return writes that reset this block's state after a cache mismatch
   def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor|tuple[Tensor, ...]: raise NotImplementedError
-  def _update_state(self, out:Tensor, *state:Tensor) -> Tensor: return out
+  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor: raise NotImplementedError
 
   def __call__(self, x: Tensor, start_pos: int|UOp, valid_len:int|UOp|None=None):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      attn = self._attention(self.attn_norm(x), start_pos, valid_len)
-      h = x + (attn[0] if isinstance(attn, tuple) else attn)
-      out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
-      return (out, *attn[1:]) if isinstance(attn, tuple) else out
-    ret = _run(x, start_pos)
-    return self._update_state(*ret) if isinstance(ret, tuple) else ret
+      h = x + self._attention(self.attn_norm(x), start_pos, valid_len)
+      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+    return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -264,7 +260,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> tuple[Tensor, Tensor]:
+  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor:
     B, T, _ = x.shape
     is_kda, x = hasattr(self, "ssm_g_a"), x.half()
     out_gate = (self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)).reshape(B, T, self.num_v_heads, self.head_v_dim)
@@ -286,15 +282,12 @@ class GatedDeltaNetBlock(FFNBlock):
       beta, log_alpha = beta * active, log_alpha * (active.unsqueeze(-1) if is_kda else active)
     q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
     alpha = log_alpha.transpose(1, 2).float().exp()
-    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, self.recurrent_state).transpose(1, 2)
-    gate, state_pos = (out_gate.sigmoid() if is_kda else out_gate.silu()), T if valid_len is None else valid_len
-    out = self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
+    state_pos = T if valid_len is None else valid_len
     conv_state = conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
-    return out, conv_state
-
-  def _update_state(self, out:Tensor, *state:Tensor) -> Tensor:
-    conv_state, = state
-    return Tensor(out.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop))))
+    state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop))))
+    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state).transpose(1, 2)
+    gate = out_gate.sigmoid() if is_kda else out_gate.silu()
+    return self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
   def _state_reset_ops(self):
