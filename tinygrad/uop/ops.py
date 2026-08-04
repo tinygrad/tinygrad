@@ -1380,7 +1380,6 @@ class UPat(OpMixin):
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
 
-  def const_like(self, b:ConstLike): return UPat.const(cast(ConstType, b), self.match_dtype)
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)

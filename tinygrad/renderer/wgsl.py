@@ -6,7 +6,7 @@ from tinygrad.helpers import strip_parens
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
 def sign_extend(val:UOp, sext_am:int):
-  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff, dtypes.uint32) << sext_am, UOp.const(0, dtypes.uint32)) \
+  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff << sext_am, dtypes.uint32), UOp.const(0, dtypes.uint32)) \
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
