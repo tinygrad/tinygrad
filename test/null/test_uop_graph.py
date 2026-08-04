@@ -232,7 +232,6 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.op, Ops.CONST)
     self.assertEqual(out.val, 0)
 
-  @unittest.skip("bitcast on a const no longer folds, it lowers like any other bitcast")
   def test_const_bitcast(self):
     bf = UOp.const(1.0, dtypes.float)
     out = bf.bitcast(dtypes.uint32)
