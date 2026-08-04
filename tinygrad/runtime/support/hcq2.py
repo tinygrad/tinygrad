@@ -285,30 +285,27 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   fills = (table.after(*make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
-def is_bare_addr(val:UOp) -> bool:
-  while val.op in (Ops.CAST, Ops.AND, Ops.SHR): val = val.src[0]
-  return val.op is Ops.GETADDR
-
-def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  (table, _, _, slots), dst, data, subs = inputs_table, patches[0].buf_uop, [], {}
-  for p in patches:
-    words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
-    data += [(off.val, slots[gaddrs[0]]) for off,_,gaddrs in words if gaddrs][::2]
-    scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
-    subs[p] = UOp.group(*make_patches(dst, scalars)) if scalars else UOp(Ops.NOOP)
-
-  plans = tuple(UOp.placeholder((len(data),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems") for _ in range(2))
-  ridx = UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(*plans, dst))
-  widx, slot = ((p.index(ridx).load() % bound).cast(dtypes.int) for p,bound in zip(plans, (dst.max_numel()-1, table.max_numel())))
-  loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
-  lt_patches += [make_binary_patch(buf, struct.pack(f'<{len(data)}I', *vals)) for buf,vals in zip(plans, zip(*data))]
-  subs[patches[0]] = UOp.group(loop, subs[patches[0]])
-  return subs
+def is_bare_addr(val:UOp) -> bool: return val.op is Ops.CAST and val.src[0].op in (Ops.AND, Ops.SHR) and val.src[0].src[0].op is Ops.GETADDR
 
 def make_scatter_loops(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  by_dst:dict[UOp, list[UOp]] = collections.defaultdict(list)
+  table, _, _, slots = inputs_table
+  subs, by_dst = {}, collections.defaultdict(list)
   for p in patches: by_dst[p.buf_uop].append(p)
-  return {p:s for ps in by_dst.values() for p,s in make_scatter_loop(ps, inputs_table, lt_patches).items()}
+  for dst, patches in by_dst.items():
+    data = []
+    for p in patches:
+      words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
+      data += [(off.val, slots[gaddrs[0]]) for off,_,gaddrs in words if gaddrs][::2]
+      scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
+      subs[p] = UOp.group(*make_patches(dst, scalars)) if scalars else UOp(Ops.NOOP)
+
+    word_table, slot_table = (UOp.placeholder((len(data),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems") for _ in range(2))
+    ridx = UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(word_table, slot_table, dst))
+    widx, slot = ((p.index(ridx).load() % bound).cast(dtypes.int) for p,bound in ((word_table, dst.max_numel()-1), (slot_table, table.max_numel())))
+    loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
+    lt_patches += [make_binary_patch(buf, struct.pack(f'<{len(data)}I', *vals)) for buf,vals in zip((word_table, slot_table), zip(*data))]
+    subs[patches[0]] = UOp.group(loop, subs[patches[0]])
+  return subs
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
 
