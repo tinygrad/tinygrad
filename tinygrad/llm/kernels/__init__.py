@@ -11,18 +11,14 @@ class Linear(nn.Linear):
   def __init__(self, in_features:int, out_features:int, bias=True):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
-  def set_quantized(self, decoded:Tensor) -> bool:
+  def set_quantized(self, decoded:Tensor):
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
     raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
-    if raw is None: return False
+    if raw is None: return
     raw_offset = raw.contiguous_view_offset()
     assert raw_offset is not None and raw_offset % 4 == 0 and raw.buf_uop.dtype == dtypes.uint8
     self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(raw.max_numel(), dtypes.uint8, raw_offset)))
     self.ggml_type = packed_sizes[prod(raw.shape)]
-    if self.ggml_type == 23 and str(self.weight.device).startswith("AMD"):
-      from tinygrad.llm.kernels.amd import iq4_half_lut
-      iq4_half_lut(str(self.weight.device))
-    return True
   def __call__(self, x:Tensor) -> Tensor:
     if self.ggml_type is None and str(self.weight.device).startswith("AMD"): self.set_quantized(self.weight)
     if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):

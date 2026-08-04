@@ -124,8 +124,6 @@ class FFNBlock:
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
-  # return writes that reset this block's state after a cache mismatch
-  def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor: raise NotImplementedError
 
@@ -283,10 +281,6 @@ class GatedDeltaNetBlock(FFNBlock):
     gate = out_gate.sigmoid() if is_kda else out_gate.silu()
     return self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
 
-  # recurrent state can't be partially reused after divergence, force a full rebuild
-  def _state_reset_ops(self):
-    return [self.conv_state.assign(self.conv_state.const_like(0)),
-            self.recurrent_state.assign(self.recurrent_state.const_like(0))] if hasattr(self, "conv_state") else []
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
 
   def _init_state(self, x):
@@ -416,7 +410,7 @@ class Transformer:
   def warmup(self, chunk_size:int=256):
     prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
     if self.has_recurrent_block:
-      x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
+      x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
       self.prefill_jit.cnt = self.rollout_jit.cnt = 1
     warm = self.generate(prompt, chunk_size=chunk_size)

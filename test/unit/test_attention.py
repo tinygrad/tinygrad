@@ -2,10 +2,10 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
-  GatedDeltaNetBlock, Linear, SSMConfig, TransformerBlock, TransformerConfig,
+  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
-from tinygrad.llm.kernels import gated_delta_prefill
+from tinygrad.llm.kernels import Linear, gated_delta_prefill
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -20,7 +20,7 @@ class TestLinear(unittest.TestCase):
       packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8, device="CPU")[4:]
       decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
       linear = Linear(256, 1, bias=False)
-      self.assertIsNotNone(linear.set_quantized(decoded))
+      linear.set_quantized(decoded)
       self.assertEqual((linear.ggml_type, linear.weight.shape), (ggml_type, (packed_size,)))
 
 class TestAttention(unittest.TestCase):
@@ -106,6 +106,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       recurrent_state = cache[:, conv_flat:].reshape(cache.shape[0], block.num_v_heads, block.head_v_dim, block.head_v_dim)
       return conv_state, recurrent_state
 
+  def _reset_state(self, block:GatedDeltaNetBlock):
+    Tensor.realize(block.conv_state.assign(block.conv_state.const_like(0)),
+                   block.recurrent_state.assign(block.recurrent_state.const_like(0)))
+
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
     return x.astype(np.float32) @ weight.T.astype(np.float32)
 
@@ -180,7 +184,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(out, np.concatenate(expected_outs, axis=1), rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(conv_state, expected_conv[-1], rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(recurrent_state, expected_recurrent[-1], rtol=1e-3, atol=1e-3)
-    Tensor.realize(*block._state_reset_ops())
+    self._reset_state(block)
 
     for step in range(x.shape[1]):
       out = self._run_attention(block, x[:, step:step+1], step)
@@ -196,7 +200,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     prompt = self._tensor_linspace(0.75, -0.75, (1, 2, config.dim))
 
     for i in range(warmup.shape[1]): self._run_attention(block, warmup[:, i:i+1], i)
-    Tensor.realize(*block._state_reset_ops())
+    self._reset_state(block)
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, prompt)
 
     for step in range(prompt.shape[1]):
@@ -231,7 +235,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x = self._tensor_linspace(-0.5, 0.5, (1, 3, config.dim))
     prefill = self._run_attention(block, x, 0)
     prefill_conv, prefill_recurrent = self._cache_views(block)
-    Tensor.realize(*block._state_reset_ops())
+    self._reset_state(block)
     decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(3)], axis=1)
     decode_conv, decode_recurrent = self._cache_views(block)
     np.testing.assert_allclose(prefill, decode, rtol=1e-3, atol=1e-3)
