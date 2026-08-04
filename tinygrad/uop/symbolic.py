@@ -15,8 +15,8 @@ from tinygrad.codegen.decomp.transcendental import xpow
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.val < 0: return x.reciprocal().pow(-c)
   if c.val == 0: return x.const_like(1)
-  if int(c.val-0.5)+0.5 == c.val: return x.pow(c.const_like(c.val-0.5)) * x.sqrt()
-  if int(c.val) == c.val: return (y := x.pow(c.const_like(c.val//2))) * y * (x if c.val%2 == 1 else 1)
+  if int(c.val-0.5)+0.5 == c.val: return x.pow(c.val-0.5) * x.sqrt()
+  if int(c.val) == c.val: return (y := x.pow(c.val//2)) * y * (x if c.val%2 == 1 else 1)
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
@@ -280,9 +280,11 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
   (UPat.var('x', dtypes.ints+(dtypes.weakint,)).cast(dtypes.ints+(dtypes.weakint,), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
-  # try to do math in int instead of long
+  # try to do math in int instead of long, keep weak const weak
   (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
-    x.cast(dtypes.int).alu(u.op, y.cast(dtypes.int)).cast(u.dtype) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
+    (UOp.const(x.val) if x.op is Ops.CONST else x.cast(dtypes.int)).alu(u.op,
+     UOp.const(y.val) if y.op is Ops.CONST else y.cast(dtypes.int)).cast(u.dtype)
+    if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
   # only RANGE/IF/STORE/KERNEL have side effects
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
