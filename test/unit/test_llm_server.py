@@ -17,7 +17,7 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0]])
+    self.assertEqual(calls, [[0], [0]])
 
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)

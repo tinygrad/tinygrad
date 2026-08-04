@@ -414,33 +414,29 @@ class Transformer:
     if self.has_recurrent_block:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
-      self.prefill_jit.cnt = self.rollout_jit.cnt = 1
-    warm = self.generate(prompt, chunk_size=chunk_size)
-    with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
-    with Context(JIT_BATCH_SIZE=0): next(warm)
-    self._cached_tokens = []
+    for _ in range(2):
+      warm = self.generate(prompt, chunk_size=chunk_size)
+      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
+      with Context(JIT_BATCH_SIZE=0): next(warm)
+      self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    if self.has_recurrent_block: chunk_size = min(chunk_size or 256, 256) if str(self.token_embd.weight.device).startswith("AMD") else 1
-    else: chunk_size = chunk_size or 32
+    chunk_size = min(chunk_size or 256, 256) if self.has_recurrent_block else chunk_size or 32
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32").reshape(1, self.max_context+chunk_size)
+    t = Tensor(tokens + [0] * (self.max_context-len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    decode_resume = self.has_recurrent_block and bool(self._cached_tokens) and start_pos > 0
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       remaining = len(tokens)-start_pos
-      n_toks = 1 if self.has_recurrent_block and (decode_resume or remaining < chunk_size) else min(chunk_size, remaining)
+      n_toks = 1 if self.has_recurrent_block and remaining < chunk_size else min(chunk_size, remaining)
       sp = v_start_pos.bind(start_pos)
       nt = n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
-      if decode_resume and start_pos < prompt_len and out is not None:
-        inp = out.assign(Tensor([[tokens[start_pos]]], dtype="int32")).realize()
-      else: inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
+      inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
       out = self(inp, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
