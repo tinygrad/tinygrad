@@ -23,6 +23,9 @@ base_rewrite = PatternMatcher([
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
     if x.max_numel() > 1 and x.addrspace is AddrSpace.REG else None),
+  # a CAST over a CONST pair is one typed constant, rendered at the CAST's dtype
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, name="c"),), name="x"),
+   lambda ctx,x,c: ctx.render_const(x, x.dtype.const(c.val))),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: ctx[x.src[0]] if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
@@ -32,20 +35,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
 
   # const
-  (UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x, ctx.infinity)})"),
-  (UPat(Ops.CONST, arg=-math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x, f'-{ctx.infinity}')})"),
-  (UPat(Ops.CONST, dtype=dtypes.floats, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx.nan)})" if math.isnan(x.val) else None),
-  (UPat(Ops.CONST, dtype=dtypes.float, name="x"), lambda ctx,x: f"{x.val}f"),
-  (UPat(Ops.CONST, dtype=dtypes.int64, name="x"), lambda ctx,x: f"{x.val}l"),
-  (UPat(Ops.CONST, dtype=dtypes.uint64, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.val)}ul"),
-  (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.val)}u"),
-  (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.val else "0"),
-  # consts are rendered to larger type and casted
-  (UPat(Ops.CONST, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.val}f')})"),
-  (UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x, f'{x.val}u')})"),
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x, str(x.val))})"),
-  # default const render
-  (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.val)),
+  (UPat(Ops.CONST, name="x"), lambda ctx,x: ctx.render_const(x, x.val)),
 
   # SHRINK/INDEX
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
@@ -146,6 +136,20 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
 
+  def render_const(self, x:UOp, val) -> str:
+    if val == math.inf: return f"({self.render_cast(x, self.infinity)})"
+    if val == -math.inf: return f"({self.render_cast(x, f'-{self.infinity}')})"
+    if x.dtype in dtypes.floats and math.isnan(val): return f"({self.render_cast(x, self.nan)})"
+    if x.dtype == dtypes.float: return f"{val}f"
+    if x.dtype == dtypes.int64: return f"{val}l"
+    if x.dtype == dtypes.uint64: return f"{truncate[x.dtype](val)}ul"
+    if x.dtype == dtypes.uint32: return f"{truncate[x.dtype](val)}u"
+    if x.dtype == dtypes.bool: return "1" if val else "0"
+    if x.dtype in (*dtypes.fp8s, dtypes.bfloat16, dtypes.half): return f"({self.render_cast(x, f'{val}f')})"
+    if x.dtype in (dtypes.uint8, dtypes.uint16): return f"({self.render_cast(x, f'{val}u')})"
+    if x.dtype in (dtypes.int8, dtypes.int16): return f"({self.render_cast(x, str(val))})"
+    return str(val)
+
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
@@ -163,8 +167,10 @@ class CStyleLanguage(Renderer):
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
       # this is lane access in C
-      if idx.op is not Ops.CONST: return f"({self[buf]})[{self[idx]}]"
-      return self[buf]+(f"[{idx.val}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.val]}")
+      const_idx = idx.src[0] if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST else idx
+      if const_idx.op is not Ops.CONST: return f"({self[buf]})[{self[idx]}]"
+      idx_val = idx.dtype.const(const_idx.val)
+      return self[buf]+(f"[{idx_val}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx_val]}")
     return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
   def render_buffer(self, x:UOp):
@@ -237,6 +243,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and (u.op in {Ops.CONST, Ops.INDEX, Ops.SHRINK, Ops.CUSTOMI} or \
+        (u.op is Ops.CAST and u.src[0].op is Ops.CONST) or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op is Ops.CAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -318,9 +325,6 @@ class OpenCLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
-    # bfloat16 constants need to be rendered as their bit pattern since bf16 is stored as ushort
-    (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
-      lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.val)))[0] >> 16)}u"),
     # load/store image (OpenCL)
     (UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), lambda ctx,buf,idx_y,idx_x: f"IMAGE<{ctx[buf]}, {ctx[idx_y]}, {ctx[idx_x]}>"),
     (UPat(Ops.LOAD, dtype=dtypes.float, src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), UPat.var("var"), UPat.var("gate"))),
@@ -330,6 +334,10 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), UPat.var("var", dtypes.float))),
       lambda ctx,buf,idx_y,idx_x,var: f"write_imagef({ctx[buf]}, (int2)({ctx[idx_x]},{ctx[idx_y]}), {ctx[var]});"),
   ]) + base_rewrite
+
+  def render_const(self, x:UOp, val) -> str:
+    if x.dtype == dtypes.bfloat16: return f"{(struct.unpack('I', struct.pack('f', float_to_bf16(val)))[0] >> 16)}u"
+    return super().render_const(x, val)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
@@ -494,15 +502,20 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
           f" {fp8_index(x.src[0].dtype)}, {fp8_index(x.src[0].dtype)}, 0, 0, 0, 0)" if x.arg[0][2] == 128 else None),
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
-        (UPat(Ops.CONST, dtypes.fp8s, name="x"), lambda ctx,x: f"f32_to_fp8({ctx.nan}, {fp8_index(x.dtype)})" if math.isnan(x.val) else None),
-        (UPat(Ops.CONST, dtypes.fp8s, arg=math.inf, name="x"), lambda ctx,x: f"f32_to_fp8({ctx.infinity}, {fp8_index(x.dtype)})"),
-        (UPat(Ops.CONST, dtypes.fp8s, arg=-math.inf, name="x"), lambda ctx,x: f"f32_to_fp8(-{ctx.infinity}, {fp8_index(x.dtype)})"),
-        (UPat(Ops.CONST, dtypes.fp8s, name="x"), lambda ctx,x: f"f32_to_fp8({x.val}f, {fp8_index(x.dtype)})"),
         (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",),
           lambda ctx,x: f"f32_to_fp8({ctx[x.src[0]]}, {fp8_index(x.dtype)})"),
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
+
+  def render_const(self, x:UOp, val) -> str:
+    if self.is_cdna(self.target.arch) and x.dtype in dtypes.fp8s:
+      if math.isnan(val): val = self.nan
+      elif val == math.inf: val = self.infinity
+      elif val == -math.inf: val = f"-{self.infinity}"
+      else: val = f"{val}f"
+      return f"f32_to_fp8({val}, {fp8_index(x.dtype)})"
+    return super().render_const(x, val)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
@@ -551,8 +564,7 @@ class HIPRenderer(CStyleLanguage):
     if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#define half _Float16")
     if any(dt in dtypes.fp8s for dt, _ in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
-    if any((u.op is Ops.CAST and u.dtype in dtypes.fp8s and u.src[0].dtype == dtypes.float) or
-           (u.op is Ops.CONST and u.dtype in dtypes.fp8s) for u in uops):
+    if any(u.op in (Ops.CONST, Ops.CAST) and u.dtype in dtypes.fp8s for u in uops):
       prefix.append("""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {
   v = (((*(unsigned*)&v)&0x7F800000)!=0x7F800000)?__builtin_amdgcn_fmed3f(v,is_bf8?57344.0f:448.0f,is_bf8?-57344.0f:-448.0f) : v;
   return (unsigned char)(is_bf8?__builtin_amdgcn_cvt_pk_bf8_f32(v,v,0,false):__builtin_amdgcn_cvt_pk_fp8_f32(v,v,0,false));\n}""")

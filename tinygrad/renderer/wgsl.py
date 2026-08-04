@@ -68,10 +68,6 @@ class WGSLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
-    (UPat.cvar("x", dtype=dtypes.bool), lambda x: "true" if x.val else "false"),
-    (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"),
-     lambda x: f"bitcast<u32>({x.val})" if x.val < 0 else f"{x.val&0xFFFFFFFF}u"),
-    (UPat(Ops.CONST, dtype=dtypes.int32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.val)}"),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
      f"var{'<workgroup>' if x.addrspace == AddrSpace.LOCAL else ''} {ctx[x]}: array<{ctx.buf_map(x)},{_packed_size(x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
@@ -93,6 +89,12 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
+
+  def render_const(self, x:UOp, val) -> str:
+    if x.dtype == dtypes.bool: return "true" if val else "false"
+    if x.dtype in (dtypes.uchar, dtypes.ushort, dtypes.uint32): return f"bitcast<u32>({val})" if val < 0 else f"{val&0xFFFFFFFF}u"
+    if x.dtype == dtypes.int32: return f"{truncate[x.dtype](val)}"
+    return super().render_const(x, val)
 
   def render_cast(self, u:UOp, val: str) -> str: return f"{self.type_map[u.dtype]}({val})"
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False, shape=None): return "var"

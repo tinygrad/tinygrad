@@ -24,6 +24,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   return root.const_like(bitcast(c.val, c.dtype, root.dtype))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
+  # after decomp, a typed const is the casted weak const
+  if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return u.dtype.const(u.src[0].val)
   if u.op is Ops.CONST: return u.val
   if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.val for s in u.src)
   return None
@@ -68,7 +70,7 @@ invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
-  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
+  (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
    lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i)),
   # binary ops move inside the gate, with Invalid in the false branch
@@ -96,7 +98,8 @@ pm_remove_invalid = PatternMatcher([
    if any(x.is_invalid for x in s.src) else None),
 ])
 
-symbolic_simple = pm_data_invalid + PatternMatcher([
+# _lowered = for after pm_lower_index_dtype, where a typed const is CAST(dt, CONST). symbolic_simple/symbolic add the fold below.
+symbolic_simple_lowered = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -132,10 +135,10 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
-  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK, Ops.CAST)),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
-  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
-  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
+  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK, Ops.CAST)),)*2, name="a"), fold_const_alu),
+  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK, Ops.CAST)),)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -152,8 +155,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
                                              and isinstance(x.val, float) and (math.isnan(x.val) or math.isinf(x.val)) else 0)),
   # *** cast/bitcast ***
-  # TODO: delete this once CONST has no dtype
-  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
@@ -207,6 +208,14 @@ commutative = PatternMatcher([
     x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize and not x.src[0].tuplize < x.src[1].tuplize else None),
 ])
 
+# above the boundary every const is bare, so a CAST over one folds into the value.
+# below it that same CAST is the pair and states a width, so this must not run there.
+pm_fold_cast_const = PatternMatcher([
+  # TODO: delete this once CONST has no dtype
+  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
+])
+symbolic_simple = symbolic_simple_lowered + pm_fold_cast_const
+
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   """in cond.where(t, f), cond is True within t and False within f"""
   if cond not in t.bool_slice and cond not in f.bool_slice: return None
@@ -214,7 +223,7 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
   return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
 
-symbolic = symbolic_simple+commutative+PatternMatcher([
+symbolic_lowered = symbolic_simple_lowered+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x", dtype=dtypes.bool).logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
@@ -293,6 +302,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
 ])+div_and_mod_symbolic
+symbolic = symbolic_lowered + pm_fold_cast_const
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 

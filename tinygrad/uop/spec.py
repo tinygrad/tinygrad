@@ -202,7 +202,8 @@ spec_tensor = PatternMatcher([
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
   # index and weak dtypes are not allowed in programs
-  (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  (UPat(GroupOp.All-{Ops.CONST}, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  (UPat(GroupOp.All-{Ops.CAST}, name="x"), lambda x: False if any(s.dtype in dtypes.weaks for s in x.src) else None),
 
   # allow special SHRINK
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),

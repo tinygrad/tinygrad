@@ -80,6 +80,10 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
 
 string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.val, x.dtype)}, 0;"),
+  (UPat(Ops.CAST, dtypes.bool, src=(UPat(Ops.CONST, name="c"),), name="x"),
+   lambda ctx,x,c: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.dtype.const(c.val), x.dtype)}, 0;"),
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, name="c"),), name="x"),
+   lambda ctx,x,c: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.dtype.const(c.val), x.dtype)};"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.val, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
   (UPat(Ops.PARAM, name="x"), lambda ctx, x:
@@ -193,6 +197,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
+      if u.op is Ops.CONST and u.dtype in dtypes.weaks: continue
       if u.op is Ops.STACK:
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
@@ -201,9 +206,9 @@ class PTXRenderer(Renderer):
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
-        if u.op is not Ops.LOAD and u.src[1].op is not Ops.CONST:
+        if u.op is not Ops.LOAD and (idx:=u.src[1].src[0] if u.src[1].op is Ops.CAST else u.src[1]).op is not Ops.CONST:
           raise RuntimeError(f"PTX does not support dynamic register indexing: {u}")
-        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].val]
+        r[u] = r[u.src[0]] if u.op is Ops.LOAD else r[u.src[0]][u.src[1].dtype.const(idx.val)]
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:
@@ -218,6 +223,7 @@ class PTXRenderer(Renderer):
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
+      if u.op is Ops.CAST and u.src[0].op is Ops.CONST: prefix = "const"
       if u.op is Ops.RANGE and u.dtype == dtypes.void: prefix = None  # loop headers don't have a register
       if prefix: r[u] = ssa(prefix, u, dtype)
 
