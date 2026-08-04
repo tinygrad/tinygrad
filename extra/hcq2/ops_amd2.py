@@ -508,7 +508,7 @@ class PCIIface(PCIIfaceBase):
     if drain_only: d.iface.dev_impl.ih.drain()
     else: d.iface.dev_impl.ih.interrupt_handler()
 
-    if reset and d.iface.dev_impl.recover():
+    if reset and d.iface.dev_impl.recover(force=True):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)

@@ -500,6 +500,7 @@ class HCQ2Compiled(Compiled):
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
+    self.can_recover = can_recover
 
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="sentinel_signal"), lambda ctx: ctx[0].signal("sentinel", (1 << 64) - 1)),
@@ -529,6 +530,7 @@ class HCQ2Compiled(Compiled):
     if not hasattr(self, 'iface'): return
     sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     tl = self.signal("value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    timeout = timeout if timeout is not None and self.can_recover else None
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
