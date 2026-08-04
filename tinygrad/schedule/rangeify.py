@@ -681,7 +681,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
         indexes.setdefault(u.src[0], []).append(u)
     subs = {}
     for k,v in indexes.items():
-      if len(v) == 1 and k.arg.coeff <= 4:
+      # don't move REDUCE ranges up (real?)
+      if len(v) == 1 and all(all([r.arg[-1] == AxisType.WEAK for r in s.ranges]) for s in v[0].src[1:]):
         for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
           subs[old_r] = new_r
     if not len(subs): break
