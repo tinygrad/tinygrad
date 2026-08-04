@@ -125,7 +125,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
-      return dtypes.void
+      return None
     case Ops.INS:
       return None
     case Ops.NOOP:
@@ -1740,8 +1740,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
   # TODO: these ops keep their stored dtype until dtype_from_uop works
-  if n.op in {Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
-     all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if n.op is Ops.INDEX or all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
