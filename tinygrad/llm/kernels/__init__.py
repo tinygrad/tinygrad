@@ -48,8 +48,9 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   bh, row, cols = UOp.range(batch*heads, 0, AxisType.GLOBAL), UOp.range(value_dim, 2), tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if start_pos is None else
-    start_pos.eq(0).where(0, state[bh, row, col].float())) for col in cols)))
+  initial = None if start_pos is None else start_pos.eq(0) if tokens == 1 else start_pos < tokens+1
+  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if initial is None else
+    initial.where(0, state[bh, row, col].float())) for col in cols)))
   token = UOp.range(tokens, 1, AxisType.REDUCE)
   previous = tuple(current.after(token)[col].load() for col in cols)
   keys, queries = (tuple(x[bh, token, col].load() for col in cols) for x in (k, q))
