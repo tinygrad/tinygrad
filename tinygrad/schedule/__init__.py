@@ -140,7 +140,7 @@ def assert_all_same_devices(ast:UOp):
 
 def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, off:UOp|None=None, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
-  if off is not None: src = UOp(Ops.SLICE, dst.dtype, (src, off, UOp.const(dst.numel())))
+  if off is not None: src = UOp(Ops.SHRINK, src.dtype, (src, off, UOp.const(dst.numel())))
   return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
