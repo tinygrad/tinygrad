@@ -314,7 +314,8 @@ def split_patches(call:UOp) -> UOp|None:
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
-  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))]
+  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))
+    and all(v in [UOp.const(x, dtypes.uint32).simplify() for g in gs for x in data64_le(g)] for v in p.src[1].src if get_getaddrs(v))]
   scatter = make_scatter_loop(input_patches, tables[0], lt_patches) if input_patches else {}
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
