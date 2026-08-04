@@ -90,10 +90,11 @@ class CustomASM24Controller:
   def __init__(self, usb:USB3):
     self.usb = usb
 
-    # Custom firmware now boots with PCIe off. Power it on before probing the link.
-    ltssm = self.read(0xB450, 1)[0]
-    if ltssm != 0x78: self.set_pcie_power(True)
-    ltssm = self.read(0xB450, 1)[0]
+    # Custom firmware now boots with PCIe off. Power it on before probing the link with a 5s grace period.
+    if (ltssm:=self.read(0xB450, 1)[0]) != 0x78:
+      self.set_pcie_power(True)
+      grace_period = time.monotonic() + 5.
+      while time.monotonic() < grace_period and (ltssm:=self.read(0xB450, 1)[0]) != 0x78: time.sleep(0.1)
     if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
 
   def set_pcie_power(self, enabled:bool, timeout:int=10000): self.usb.control_write(0xF3, value=int(enabled), timeout=timeout)

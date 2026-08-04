@@ -28,7 +28,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
   if ast.op is Ops.PROGRAM: return ast.arg.name
   if ast.op is Ops.SLICE:
-    offset = ast.src[1].arg * arg_uops[1].dtype.itemsize
+    offset = ast.src[1].val * arg_uops[1].dtype.itemsize
     return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {offset:<10d}", "yellow")
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
@@ -156,7 +156,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
-  bv = bufs[1].view(resolved[0].max_numel(), ast.dtype, ast.src[1].arg*bufs[1].dtype.itemsize)
+  bv = bufs[1].view(resolved[0].max_numel(), ast.dtype, ast.src[1].val*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
   return None
 
@@ -198,7 +198,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
-  shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
+  shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
   return None
@@ -265,18 +265,18 @@ pm_exec = PatternMatcher([
 
 if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, jit=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, jit=jit)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp, jit=False, cache=True) -> UOp: return hcq_link(linear, jit=jit, cache=cache) if getenv("HCQ2") else linear
+def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, jit=False))
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
@@ -287,4 +287,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  return pm_exec.rewrite(link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache).src[0], ctx)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache)
+  return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)

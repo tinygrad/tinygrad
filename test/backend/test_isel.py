@@ -49,7 +49,7 @@ class TestIselX86(unittest.TestCase):
     load = UOp.param(0, dtypes.int32, (16,)).index(a + 1).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
-    self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].arg == 4)
+    self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].val == 4)
 
 if __name__ == "__main__":
   unittest.main()

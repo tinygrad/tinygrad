@@ -83,8 +83,8 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
       return out, x_fp8
   return (x_fp8.dot(w.T, dtype=dtypes.float) * ((amax_x.float() + 1e-8) / FP8_MAX) * w_inv_scale).cast(dtypes.bfloat16), x_fp8
 
-def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor,
-                         next_amax_x:Tensor, grad_amax_state:Tensor, next_grad_amax_state:Tensor):
+def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor|None,
+                         next_amax_x:Tensor|None, grad_amax_state:Tensor|None, next_grad_amax_state:Tensor|None):
   if FUSED_ADD_NORM_MUL_QUANTIZE and not MXFP4:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_rmsnorm_mul_quantize_fp8
     x_fp8, x_normed, rrms = fused_rmsnorm_mul_quantize_fp8(x, norm, amax_x, eps, FP8_DTYPE, next_amax_x)
@@ -96,8 +96,8 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
                      next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x)
   return out, x_normed, rrms, ret
 
-def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor,
-                             next_amax_x:Tensor, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None):
+def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor|None,
+                             next_amax_x:Tensor|None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None):
   if FUSED_ADD_NORM_MUL_QUANTIZE and not MXFP4:
     from extra.llama_kernels.fused_rmsnorm_mul_quantize_fp8 import fused_add_rmsnorm_mul_quantize_fp8
     x_fp8, h, x_normed, rrms = fused_add_rmsnorm_mul_quantize_fp8(x, residual, norm, amax_x, eps, FP8_DTYPE, next_amax_x)
@@ -111,9 +111,9 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
   return out, h, x_normed, rrms, ret
 
 def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
-                             amax_x2:Tensor, next_amax_x2:Tensor,
-                             grad_amax_xw13:Tensor, next_grad_amax_xw13:Tensor,
-                             grad_amax_xout:Tensor, next_grad_amax_xout:Tensor):
+                             amax_x2:Tensor|None, next_amax_x2:Tensor|None,
+                             grad_amax_xw13:Tensor|None, next_grad_amax_xw13:Tensor|None,
+                             grad_amax_xout:Tensor|None, next_grad_amax_xout:Tensor|None):
   if FUSED_SILU_W13 and not MXFP4:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13,
@@ -164,14 +164,15 @@ class FlatTransformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).clone().is_param_(False)
 
     def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().is_param_(False)
+    n_amax = 0 if MXFP4 else n_layers
     names = ["xqkv", "xo", "x2"]
     names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
-    self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
-    self._fp8_next_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
+    self._fp8_amax = {name: [_amax() for _ in range(n_amax)] for name in names}
+    self._fp8_next_amax = {name: [_amax() for _ in range(n_amax)] for name in names}
     grad_names = ["xqkv", "xo", "xout"]
     grad_names += ["xw1", "xw3"] if SPLIT_W13 else ["xw13"]
-    self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
-    self._fp8_next_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
+    self._fp8_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
+    self._fp8_next_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
     self._fp8_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
@@ -195,9 +196,10 @@ class FlatTransformer:
     return (w * scale_b).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
 
   def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
-                amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
-                next_amax_xqkv:Tensor, next_amax_xo:Tensor,
-                grad_amax_xqkv:Tensor, grad_amax_xo:Tensor, next_grad_amax_xqkv:Tensor, next_grad_amax_xo:Tensor):
+                amax_xqkv:Tensor|None, amax_xo:Tensor|None, s_qkv:Tensor, s_o:Tensor,
+                next_amax_xqkv:Tensor|None, next_amax_xo:Tensor|None,
+                grad_amax_xqkv:Tensor|None, grad_amax_xo:Tensor|None,
+                next_grad_amax_xqkv:Tensor|None, next_grad_amax_xo:Tensor|None):
     bsz, seqlen, _ = x.shape
     saves = []
 
@@ -319,28 +321,33 @@ class FlatTransformer:
           for i in range(len(amax_dict[name])):
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
 
+  def reset_amax(self):
+    for st in (self._fp8_next_amax, self._fp8_next_grad_amax):
+      for ts in st.values():
+        for t in ts: t.assign(0)
+
+  def update_amax(self):
+    for cur, nxt in ((self._fp8_amax, self._fp8_next_amax), (self._fp8_grad_amax, self._fp8_next_grad_amax)):
+      for name in cur:
+        for c, n in zip(cur[name], nxt[name]): c.assign(n)
+
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)
     if not getenv("HK_FLASH_ATTENTION"): freqs_cis = freqs_cis[:, :tokens.shape[1], :, :, :]
     a, na, ga, nga, s = self._fp8_amax, self._fp8_next_amax, self._fp8_grad_amax, self._fp8_next_grad_amax, self._fp8_inv_scale
+    def amax_kwargs(i:int, act_names:tuple[str, ...], grad_names:tuple[str, ...]) -> dict[str, Tensor|None]:
+      specs = (("amax_", a, act_names), ("next_amax_", na, act_names), ("grad_amax_", ga, grad_names), ("next_grad_amax_", nga, grad_names))
+      if MXFP4: return dict.fromkeys(f"{prefix}{name}" for prefix, _, names in specs for name in names)
+      return {f"{prefix}{name}":val[name][i] for prefix, val, names in specs for name in names}
     for i in range(self.n_layers):
-      attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i],
-                         amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
-                         next_amax_xqkv=na["xqkv"][i], next_amax_xo=na["xo"][i],
-                         grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i],
-                         next_grad_amax_xqkv=nga["xqkv"][i], next_grad_amax_xo=nga["xo"][i])
-      ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], w2=self.w2[i],
-                        amax_x2=a["x2"][i], s_2=s["w2"][i], grad_amax_xout=ga["xout"][i], next_grad_amax_xout=nga["xout"][i],
-                        next_amax_x2=na["x2"][i])
+      attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
+                         **amax_kwargs(i, ("xqkv", "xo"), ("xqkv", "xo")))
+      ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], w2=self.w2[i], s_2=s["w2"][i], **amax_kwargs(i, ("x2",), ("xout",)))
       if SPLIT_W13:
-        ffn_kwargs.update(w1=self.w1[i], w3=self.w3[i], amax_x1=a["x1"][i], amax_x3=a["x3"][i],
-                          next_amax_x1=na["x1"][i], next_amax_x3=na["x3"][i],
-                          s_1=s["w1"][i], s_3=s["w3"][i], grad_amax_xw1=ga["xw1"][i], grad_amax_xw3=ga["xw3"][i],
-                          next_grad_amax_xw1=nga["xw1"][i], next_grad_amax_xw3=nga["xw3"][i])
+        ffn_kwargs.update(w1=self.w1[i], w3=self.w3[i], s_1=s["w1"][i], s_3=s["w3"][i], **amax_kwargs(i, ("x1", "x3"), ("xw1", "xw3")))
       else:
-        ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i],
-                          next_grad_amax_xw13=nga["xw13"][i], next_amax_x13=na["x13"][i])
+        ffn_kwargs.update(w13=self.w13[i], s_13=s["w13"][i], **amax_kwargs(i, ("x13",), ("xw13",)))
       h, *_ = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
@@ -424,9 +431,7 @@ if __name__ == "__main__":
   @TinyJit
   def fwd_bwd(tokens:Tensor):
     with Timing("python forward: "):
-      for amax_dict in (model._fp8_next_amax, model._fp8_next_grad_amax):
-        for ts in amax_dict.values():
-          for nxt in ts: nxt.assign(0)
+      model.reset_amax()
       logits = model(tokens[:, :-1], save=llama_size=="8B")
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
