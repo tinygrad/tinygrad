@@ -73,4 +73,9 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
     from tinygrad.llm.kernels.amd import _gated_delta_prefill_kernel as kernel
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  return Tensor.custom_kernel(*srcs, *((start_pos,) if start_pos is not None else ()), fxn=kernel)[0]
+  if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=kernel)[0]
+  contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
+  params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
+  assert start_pos.uop.op is Ops.BIND
+  call = kernel(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
+  return Tensor(contig[0].after(call))
