@@ -305,6 +305,11 @@ def make_scatter_loop(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp
   subs[patches[0]] = UOp.group(loop, subs[patches[0]])
   return subs
 
+def make_scatter_loops(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
+  by_dst:dict[UOp, list[UOp]] = collections.defaultdict(list)
+  for p in patches: by_dst[p.buf_uop].append(p)
+  return {p:s for ps in by_dst.values() for p,s in make_scatter_loop(ps, inputs_table, lt_patches).items()}
+
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
 
 def split_patches(call:UOp) -> UOp|None:
@@ -319,7 +324,7 @@ def split_patches(call:UOp) -> UOp|None:
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
   input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))
     and all(is_bare_addr(v) for v in p.src[1].src if get_getaddrs(v))]
-  scatter = make_scatter_loop(input_patches, tables[0], lt_patches) if input_patches else {}
+  scatter = make_scatter_loops(input_patches, tables[0], lt_patches)
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
   lt_srcs = collections.defaultdict(list)
