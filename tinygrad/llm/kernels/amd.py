@@ -290,13 +290,13 @@ def _q5_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   return _half(d), _half(dmin), scale.float(), minimum.float()
 
 @functools.cache
-def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, raw_offset:UOp, out_features:int, in_features:int, ggml_type:int) -> UOp:
+def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_features:int, ggml_type:int) -> UOp:
   group_count = in_features // Q8_GROUP_SIZE
   def group_dot(output:UOp, group:UOp) -> UOp:
     block, subgroup = group // 8, group % 8
     xwords = _amd_load(xq[0, group, 0], 8)
     if ggml_type == Q5_K:
-      base = raw_offset + (output * in_features//GGML_BLOCK_SIZE + block) * Q5_WORDS
+      base = (output * in_features//GGML_BLOCK_SIZE + block) * Q5_WORDS
       qs_base, dot, qsum = base + 12 + (subgroup//2)*8, UOp.const(0, dtypes.int32), UOp.const(0, dtypes.int32)
       for word_idx in range(8):
         word = (raw[qs_base+word_idx] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
@@ -305,14 +305,14 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, raw_offset:UOp, out_f
       d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
       return (dot.float()*d*scale - qsum.float()*dmin*minimum) * xd[0, group]
     if ggml_type == IQ4_XS:
-      base = raw_offset + (output * in_features//GGML_BLOCK_SIZE + block) * IQ4_WORDS
+      base = (output * in_features//GGML_BLOCK_SIZE + block) * IQ4_WORDS
       dot = UOp.const(0, dtypes.int32)
       for word_idx in range(8):
         packed = _amd_load(raw[base + 2 + subgroup*4 + word_idx%4])
         dot = _amd_dp4a(_iq4_bytes(packed, 4*(word_idx//4)), xwords[word_idx], dot)
       d, scale = _iq4_scales(raw, base, subgroup)
       return dot.float() * xd[0, group] * d * scale
-    base = raw_offset*4 + (output*in_features//GGML_BLOCK_SIZE+block)*Q6_BYTES
+    base = (output*in_features//GGML_BLOCK_SIZE+block)*Q6_BYTES
     dots = [UOp.const(0, dtypes.int32), UOp.const(0, dtypes.int32)]
     for word_idx in range(8):
       pos, within = subgroup*32 + word_idx*4, (subgroup*32 + word_idx*4)%128
@@ -351,11 +351,10 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
     arg=KernelInfo(name=name, opts_to_apply=()))
 
 @functools.cache
-def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, raw_offset:UOp, out_features:int, in_features:int) -> UOp:
+def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int) -> UOp:
   token_tile, output_tiles = (64, 1) if out_features <= 1024 and out.shape[0] % 64 == 0 else \
     (64, 2) if out.shape[0] % 64 == 0 else (32 if out.shape[0] % 32 == 0 else 16, 2)
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
-    base = raw_offset + base
     d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
     qs_base = base + 12 + (subgroup // 2)*8 + half*4
     words = tuple((raw[qs_base+i] >> ((subgroup&1)*4).cast(dtypes.uint32) & 0x0f0f0f0f) |
@@ -370,7 +369,7 @@ def _iq4_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
   return _half(raw[base] & 0xffff), (scale.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float()
 
 @functools.cache
-def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, raw_offset:UOp, out_features:int, in_features:int) -> UOp:
+def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int) -> UOp:
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     (out_features <= 6144 or out_features == 5120 and in_features > 8192) else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
@@ -381,7 +380,6 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, raw_offset:UOp
   tid, lut_items = wave*32+lane, 256//(32*output_waves)
   lut = local_lut.after(UOp.group(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items))).barrier())
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
-    base = raw_offset + base
     d, scale = _iq4_scales(raw, base, subgroup)
     scale = scale * d
     if out_features <= 6144:
@@ -395,26 +393,26 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, raw_offset:UOp
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
-  assert layer.ggml_type in (Q5_K, Q6_K, IQ4_XS) and layer._raw_offset is not None
+  assert layer.ggml_type in (Q5_K, Q6_K, IQ4_XS)
   tokens = int(x.numel()) // layer.in_features
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device).uop
-  raw, offset = layer.weight.uop.buf_uop, layer._raw_offset.uop
+  raw = layer.weight.uop.buf_uop
   out_features, in_features = layer.out_features, layer.in_features
   use_wmma = tokens % 16 == 0 and layer.out_features % 16 == 0
   def run(fxn:Callable[..., UOp], *srcs:UOp) -> Tensor:
     params = tuple(UOp.placeholder_like(src, slot=i) for i,src in enumerate(srcs))
-    kernel = fxn(*params[:-1], params[-1][0], out_features=out_features, in_features=in_features).call(*srcs)
+    kernel = fxn(*params, out_features=out_features, in_features=in_features).call(*srcs)
     result = Tensor(srcs[0].after(kernel)).reshape(*x.shape[:-1], layer.out_features)
     return result if layer.bias is None else result + layer.bias
 
   if layer.ggml_type == Q5_K and use_wmma:
-    return run(_q5_linear_f16_wmma_kernel, out, raw.bitcast(dtypes.uint32), x.cast(dtypes.float16).contiguous().uop, offset)
+    return run(_q5_linear_f16_wmma_kernel, out, raw.bitcast(dtypes.uint32), x.cast(dtypes.float16).contiguous().uop)
   if layer.ggml_type == IQ4_XS and use_wmma:
     return run(_iq4_linear_f16_wmma_kernel, out, raw.bitcast(dtypes.uint32), x.cast(dtypes.float16).contiguous().uop,
-               iq4_half_lut(str(x.device)).uop, offset)
+               iq4_half_lut(str(x.device)).uop)
   xq, xd = q8_quantize(x, tokens, layer.in_features)
   decode = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
-  return run(decode, out, raw if layer.ggml_type == Q6_K else raw.bitcast(dtypes.uint32), xq.uop, xd.uop, offset)
+  return run(decode, out, raw if layer.ggml_type == Q6_K else raw.bitcast(dtypes.uint32), xq.uop, xd.uop)
 
 @functools.cache
 def iq4_half_lut(device:str) -> Tensor:

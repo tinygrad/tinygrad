@@ -4,7 +4,7 @@ import time, functools, sys, inspect, pathlib, hashlib, weakref
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, Context
+from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike
 from tinygrad.mixin.rand import RandMixin
@@ -16,16 +16,6 @@ from tinygrad.callify import transform_to_call
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _realize_tensors(tensors:tuple[Tensor, ...], do_update_stats=True):
-  for x in tensors:
-    if x.uop.op is Ops.COPY and x.uop.src[0].op is Ops.BUFFER and x.uop.src[0].device == "PYTHON" and \
-      isinstance(x.device, str) and x.nbytes() <= 8:
-      out = UOp.new_buffer(x.device, x.uop.max_numel(), x.dtype)
-      with Context(ALLOW_DEVICE_USAGE=1):
-        cast(Buffer, out.buffer).ensure_allocated().copy_from(cast(Buffer, x.uop.src[0].buffer).ensure_allocated())
-      x.uop = out.reshape(x.shape)
-  to_realize = [x for x in tensors if not x.uop.is_virtual and not x.uop.has_buffer_identity()]
-  if to_realize: run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
@@ -200,7 +190,9 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    _realize_tensors((self,)+lst, do_update_stats)
+    to_realize = [x for x in (self,)+lst if not x.uop.is_virtual and not x.uop.has_buffer_identity()]
+    if len(to_realize):
+      run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:

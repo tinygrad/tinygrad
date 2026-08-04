@@ -24,7 +24,7 @@ class TestQ8Quantize(unittest.TestCase):
     linear = Linear(256, 1, bias=False)
     nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
     self.assertTrue(np.isfinite(linear(Tensor.randn(1, 256)).realize().item()))
-    self.assertIsNotNone(linear._raw_offset)
+    self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
 
   def test_attention_uses_physical_cache_length(self):
     if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
