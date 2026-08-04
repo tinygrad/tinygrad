@@ -560,7 +560,8 @@ def convert_contig_to_store(ctx, copy:UOp):
   # create the output buffer
   buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
   # reshape back to input
-  return buf.after(buf.store(input_src))
+  view = buf.shrink_to(input_src.shape)
+  return view.after(view.store(input_src))
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
