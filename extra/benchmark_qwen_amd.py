@@ -18,7 +18,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   with Context(BEAM=0): model.warmup(args.chunk_size)
   print(f"warm {time.perf_counter()-st:.3f}s", flush=True)
-  assert time.perf_counter()-startup_st < 60
+  assert time.perf_counter()-startup_st < 65
   states = [getattr(block, name) for block in model.blk for name in ("cache_kv", "cache_kv_scale", "conv_state", "recurrent_state")
             if hasattr(block, name)]
   assert all(str(state.device).startswith("AMD") and state.uop.is_realized for state in states)

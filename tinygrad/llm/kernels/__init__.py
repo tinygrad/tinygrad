@@ -4,7 +4,7 @@ from tinygrad import Tensor, UOp, nn, dtypes
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 class Linear(nn.Linear):
   ggml_type:int|None = None
@@ -26,17 +26,10 @@ class Linear(nn.Linear):
       return q8_linear(self, x)
     return super().__call__(x)
 
-def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor|None, start_pos:int|UOp) -> Tensor:
-  if cache_kv.dtype == dtypes.int8:
-    from tinygrad.llm.kernels.amd import quantized_attention
-    assert cache_scale is not None
-    return quantized_attention(q, stacked_kv, cache_kv, cache_scale, start_pos)
-  T = q.shape[2]
-  assigned_kv = Tensor(cache_kv.uop.after(cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(stacked_kv.uop)))
-  k, v = assigned_kv[0, :, :, 0:start_pos+T, :], assigned_kv[1, :, :, 0:start_pos+T, :]
-  mask = Tensor.full((1, 1, T, k.shape[-2]), float("-inf"), dtype=q.dtype, device=q.device, buffer=False).triu(start_pos+1) \
-    if resolve(T != 1) else None
-  return q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
+def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor, start_pos:int|UOp) -> Tensor:
+  from tinygrad.llm.kernels.amd import quantized_attention
+  assert cache_kv.dtype == dtypes.int8
+  return quantized_attention(q, stacked_kv, cache_kv, cache_scale, start_pos)
 
 @functools.cache
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
@@ -48,8 +41,9 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   bh, row, cols = UOp.range(batch*heads, 0, AxisType.GLOBAL), UOp.range(value_dim, 2), tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if start_pos is None else
-    start_pos.eq(0).where(0, state[bh, row, col].float())) for col in cols)))
+  initial = None if start_pos is None else start_pos.eq(0) if tokens == 1 else start_pos < tokens+1
+  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if initial is None else
+    initial.where(0, state[bh, row, col].float())) for col in cols)))
   token = UOp.range(tokens, 1, AxisType.REDUCE)
   previous = tuple(current.after(token)[col].load() for col in cols)
   keys, queries = (tuple(x[bh, token, col].load() for col in cols) for x in (k, q))

@@ -94,7 +94,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    return block._attention(x_norm, start_pos).realize().numpy()
+    return block._attention(x_norm, start_pos+x.shape[1] if x.shape[1] > 1 else start_pos).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
@@ -223,7 +223,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
     block.recurrent_state.assign(initial_state).realize()
     block.ssm_a = Tensor([[-1.], [-1.]])
-    block._attention(x, 0).realize()
+    block._attention(x, x.shape[1]).realize()
     alpha = np.exp(-self._softplus_np(np.array([[1, 2, 3, 4], [2, 1, 3, 5]])).reshape(2, 2, 2)).prod(0)
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[..., None], rtol=1e-5, atol=1e-5)
 

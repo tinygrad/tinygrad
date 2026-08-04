@@ -181,14 +181,15 @@ def flash_attention_causal_cached(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UO
 
 def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor, start_pos:int|UOp) -> Tensor:
   T = q.shape[2]
+  if resolve(T != 1): start_pos = start_pos - (start_pos-1) % T - 1
   scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
   packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
   stores = (cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop),
             cache_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop))
   assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(*stores)), Tensor(cache_scale.uop.after(*stores))
-  start = start_pos.unbind()[0] if isinstance(start_pos, UOp) else start_pos
-  return amd_flash_attention_decode(q.half(), assigned_kv, start+1, assigned_scale, cast(int, cache_kv.shape[3])) if resolve(T == 1) else \
-    flash_attention_causal_cached(q.half(), assigned_kv, start+T, assigned_scale)
+  valid_end = start_pos.unbind_all()[0]+T if isinstance(start_pos, UOp) else start_pos+T
+  return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, assigned_scale, cast(int, cache_kv.shape[3])) if resolve(T == 1) else \
+    flash_attention_causal_cached(q.half(), assigned_kv, valid_end, assigned_scale)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c), arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
@@ -232,8 +233,9 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   rows = tuple(row_base+i for i in range(row_tile))
   cols = tuple(lane + i*32 for i in range(key_dim//32))
   current = UOp.placeholder((row_tile*key_dim//32,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if start_pos is None else
-    start_pos.eq(0).where(0, state[bh, row, col].float()) for row in rows for col in cols))))
+  initial = None if start_pos is None else start_pos.eq(0) if tokens == 1 else start_pos < tokens+1
+  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if initial is None else
+    initial.where(0, state[bh, row, col].float()) for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.REDUCE)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)

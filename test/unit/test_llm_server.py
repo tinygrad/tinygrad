@@ -178,6 +178,12 @@ class TestTransformerGenerate(unittest.TestCase):
     # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
     self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
 
+  def test_recurrent_temperature_high_produces_variety(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    outputs = {model.forward(Tensor([[1]]), 0, Tensor([2.0])).item() for _ in range(5)}
+    self.assertGreater(len(outputs), 1)
+
   def test_temperature_passed_to_forward(self):
     """Temperature from generate should be passed through to __call__."""
     model = Transformer(TEST_CONFIG)

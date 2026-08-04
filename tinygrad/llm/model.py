@@ -125,14 +125,14 @@ class FFNBlock:
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
   def _init_state(self, x:Tensor): raise NotImplementedError
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor: raise NotImplementedError
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
-  def __call__(self, x: Tensor, start_pos: int|UOp, valid_len:int|UOp|None=None):
+  def __call__(self, x:Tensor, start_pos:int|UOp):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      h = x + self._attention(self.attn_norm(x), start_pos, valid_len)
+      h = x + self._attention(self.attn_norm(x), start_pos)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos)
 
@@ -150,11 +150,13 @@ class TransformerBlock(FFNBlock):
     self.attn_output = Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
+    position = start_pos
+    if self.config.ssm is not None and resolve(T != 1): start_pos = start_pos - (start_pos-1) % T - 1
     if self.config.attn_output_gate:
       qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
       q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
@@ -167,7 +169,16 @@ class TransformerBlock(FFNBlock):
     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    attn = cached_attention(q, Tensor.stack(k, v), self.cache_kv, getattr(self, "cache_kv_scale", None), start_pos)
+    stacked_kv = Tensor.stack(k, v)
+    if hasattr(self, "cache_kv_scale"):
+      cache_pos = position if self.config.ssm is not None and resolve(T != 1) else start_pos
+      attn = cached_attention(q, stacked_kv, self.cache_kv, self.cache_kv_scale, cache_pos)
+    else:
+      assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(stacked_kv.uop)))
+      k, v = assigned_kv[0, :, :, 0:start_pos+T, :], assigned_kv[1, :, :, 0:start_pos+T, :]
+      mask = Tensor.full((1, 1, T, k.shape[-2]), float("-inf"), dtype=q.dtype, device=q.device, buffer=False).triu(start_pos+1) \
+        if resolve(T != 1) else None
+      attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
 
@@ -197,8 +208,9 @@ class MLATransformerBlock(FFNBlock):
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
+    if self.config.ssm is not None and resolve(T != 1): start_pos = start_pos - (start_pos-1) % T - 1
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
@@ -248,13 +260,15 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, valid_len:int|UOp|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
+    position = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context+1).bind(start_pos)
+    chunk_len = (position-1) % T + 1 if resolve(T != 1) else T
+    start_pos = position - chunk_len if resolve(T != 1) else position
     is_kda, x = hasattr(self, "ssm_g_a"), x.half()
     out_gate = (self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)).reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
     initial = Tensor(start_pos).eq(0)
     conv_state = initial.where(0, self.conv_state) if not self.conv_state.uop.is_realized else self.conv_state
     conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
@@ -268,15 +282,14 @@ class GatedDeltaNetBlock(FFNBlock):
     beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
     log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
       if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
-    if valid_len is not None:
-      active = (Tensor.arange(T).to(x.device) < Tensor(valid_len, device=x.device)).reshape(1, T, 1)
+    if resolve(T != 1):
+      active = (Tensor.arange(T).to(x.device) < Tensor(chunk_len, device=x.device)).reshape(1, T, 1)
       beta, log_alpha = beta * active, log_alpha * (active.unsqueeze(-1) if is_kda else active)
     q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
     alpha = log_alpha.transpose(1, 2).float().exp()
-    state_pos = T if valid_len is None else valid_len
-    conv_state = conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
+    conv_state = conv_window[:, chunk_len:chunk_len+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
     state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop))))
-    reset_pos = Tensor(start_pos) if not self.recurrent_state.uop.is_realized else None
+    reset_pos = Tensor(position) if not self.recurrent_state.uop.is_realized else None
     core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, reset_pos).transpose(1, 2)
     gate = out_gate.sigmoid() if is_kda else out_gate.silu()
     return self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
@@ -306,19 +319,16 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, valid_len:int|UOp|None=None) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
-    for block in self.blk: x = block(x, start_pos, valid_len)
-    last = x[:, tokens.shape[1]-1:tokens.shape[1]] if valid_len is None else x[:, valid_len-1:valid_len]
-    logits = self.output(self.output_norm(last))[:, -1, :]
-    # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    if self.has_recurrent_block: return logits.argmax(-1, keepdim=True)
+    for block in self.blk: x = block(x, start_pos)
+    T = tokens.shape[1]
+    last = (start_pos-1) % T if self.has_recurrent_block and resolve(T != 1) else T-1
+    logits = self.output(self.output_norm(x[:, last:last+1]))[:, -1, :]
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, valid_len:int|UOp|None=None) -> Tensor:
-    if resolve(tokens.shape[1] == 1): return self.rollout_jit(tokens.contiguous(), start_pos, temperature)
-    return self.prefill_jit(tokens.contiguous(), start_pos, temperature, valid_len=valid_len) if self.has_recurrent_block else \
-      self.prefill_jit(tokens.contiguous(), start_pos, temperature)
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -439,8 +449,7 @@ class Transformer:
       if decode_resume and start_pos < prompt_len and out is not None:
         inp = out.assign(Tensor([[tokens[start_pos]]], dtype="int32")).realize()
       else: inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
-      valid_len = v_toks.bind(n_toks) if padded_prefill else None
-      out = self(inp, sp, temp, valid_len=valid_len).realize()
+      out = self(inp, v_start_pos.bind(start_pos+n_toks) if padded_prefill else sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
