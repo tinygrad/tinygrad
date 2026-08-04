@@ -255,10 +255,10 @@ class GatedDeltaNetBlock(FFNBlock):
     if ssm.kda:
       self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
-      self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
     else:
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
-      self.ssm_beta_alpha = Linear(config.dim, 2*self.num_v_heads, bias=False)
+      self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
+    self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
@@ -268,8 +268,8 @@ class GatedDeltaNetBlock(FFNBlock):
     B, T, _ = x.shape
     is_kda, x = hasattr(self, "ssm_g_a"), x.half()
     out_gate = (self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)).reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta, alpha = (self.ssm_beta(x), self.ssm_f_b(self.ssm_f_a(x))) if is_kda else \
-      self.ssm_beta_alpha(x).split(self.num_v_heads, dim=-1)
+    beta = self.ssm_beta(x)
+    alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
     conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
     conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
@@ -363,9 +363,6 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(kv[f'{arch}.block_count']))
-      for i,is_ssm in enumerate(ssm_layers):
-        if is_ssm: state_dict[f"blk.{i}.ssm_beta_alpha.weight"] = state_dict.pop(f"blk.{i}.ssm_beta.weight").cat(
-          state_dict.pop(f"blk.{i}.ssm_alpha.weight"), dim=0).contiguous()
     elif arch == 'kimi-linear':
       ssm_layers = tuple(x == 0 for x in n_kv_heads)
       n_kv_heads = max(n_kv_heads)
@@ -427,9 +424,6 @@ class Transformer:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     return model, kv
-
-  def warmup(self):
-    for _ in range(2): list(zip(range(2), self.generate([0])))
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))

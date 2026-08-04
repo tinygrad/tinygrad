@@ -252,16 +252,6 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> Tensor:
-  batch, heads, tokens, key_dim = q.shape
-  value_dim = v.shape[-1]
-  assert q.shape == k.shape and v.shape[:3] == q.shape[:3] and beta.shape == (batch, heads, tokens)
-  assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, value_dim))
-  assert state.shape == (batch, heads, value_dim, key_dim)
-  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
-  return Tensor.custom_kernel(core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq,
-                              fxn=_gated_delta_prefill_kernel)[0]
-
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)

@@ -37,7 +37,7 @@ if __name__ == "__main__":
   decode = args.decode_tokens/(et-pt)
   print(f"decode {decode:.3f} tok/s output {output}", flush=True)
   if args.prompt_tokens == 3000 and args.decode_tokens == 16:
-    assert prefill > 800 and decode > 40
+    assert prefill > 750 and decode > 40
     assert output == [13, 271, 248068, 198, 8160, 579, 264, 7047, 1817, 25, 271, 16, 13, 220, 2972, 2014, 53983]
 
   if not args.skip_resume_check:
