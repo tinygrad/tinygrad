@@ -7,19 +7,12 @@ from tinygrad.llm.kernels import Linear, cached_attention, gated_delta_prefill
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
-def _prepare_quantized_weights(model:Any, state_dict:dict[str, Tensor]) -> list[tuple[Linear, Tensor]]:
-  packed:list[tuple[Linear, Tensor]] = []
-  layers = cast(dict[str, Linear], nn.state.get_state_dict(model, tensor_type=Linear))
-  for name,owner in layers.items():
-    key, weight = f"{name}.weight", state_dict[f"{name}.weight"]
-    if str(weight.device).startswith("AMD") and (offset:=owner.set_quantized(weight)) is not None:
-      packed.append((owner, offset))
-      state_dict[key] = owner.weight
-  return packed
-
 def load_state_dict(model:Any, state_dict:dict[str, Tensor]):
-  packed = _prepare_quantized_weights(model, state_dict)
   nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
+  layers = cast(dict[str, Linear], nn.state.get_state_dict(model, tensor_type=Linear)).values()
+  packed:list[tuple[Linear, Tensor]] = []
+  for layer in layers:
+    if str(layer.weight.device).startswith("AMD") and (offset:=layer.set_quantized(layer.weight)) is not None: packed.append((layer, offset))
   if packed: Tensor.realize(*(offset for _,offset in packed))
   for layer,offset in packed: layer._raw_offset_uop = offset.uop
 
@@ -281,8 +274,9 @@ class GatedDeltaNetBlock(FFNBlock):
     conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q, k = (z.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6).repeat(
-      1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+    q = q.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
+    k = k.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
+    q, k = q.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1), k.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
     v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
     log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
@@ -326,11 +320,10 @@ class Transformer:
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
-    self.has_recurrent_prefill = config.ssm is not None
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
-    self.rollout_jit = TinyJit(self.forward_recurrent_decode if self.has_recurrent_prefill else self.forward)
+    self.rollout_jit = TinyJit(self.forward_recurrent_decode if self.has_recurrent_block else self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor, valid_len:int|UOp|None=None) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
@@ -338,7 +331,7 @@ class Transformer:
     last = x[:, tokens.shape[1]-1:tokens.shape[1]] if valid_len is None else x[:, valid_len-1:valid_len]
     logits = self.output(self.output_norm(last))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
-    if self.has_recurrent_prefill: return logits.argmax(-1, keepdim=True)
+    if self.has_recurrent_block: return logits.argmax(-1, keepdim=True)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def forward_recurrent_decode(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -440,7 +433,7 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def warmup(self, chunk_size:int=256):
-    if not self.has_recurrent_prefill:
+    if not self.has_recurrent_block:
       for _ in range(2): list(zip(range(2), self.generate([0])))
       return
     x = Tensor.zeros(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
@@ -456,8 +449,7 @@ class Transformer:
     self._cached_tokens = []
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    chunk_size = min(chunk_size or (256 if self.has_recurrent_prefill else 32), 256)
-    if self.has_recurrent_block and not self.has_recurrent_prefill: chunk_size = 1
+    chunk_size = min(chunk_size or (256 if self.has_recurrent_block else 32), 256)
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -467,19 +459,20 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context + chunk_size - len(tokens)), dtype="int32", device=device).reshape(1, self.max_context+chunk_size)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    decode_resume = self.has_recurrent_prefill and bool(self._cached_tokens) and start_pos > 0
+    decode_resume = self.has_recurrent_block and bool(self._cached_tokens) and start_pos > 0
     if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      padded_prefill = self.has_recurrent_prefill and start_pos < prompt_len and not decode_resume
+      padded_prefill = self.has_recurrent_block and start_pos < prompt_len and not decode_resume
       n_toks = min(1 if decode_resume and start_pos < prompt_len else chunk_size, len(tokens)-start_pos)
       sp = v_start_pos.bind(start_pos)
-      nt = chunk_size if padded_prefill else n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
+      nt = n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
+      if padded_prefill: nt = chunk_size
       if decode_resume and start_pos < prompt_len and out is not None:
         inp = out.assign(Tensor([[tokens[start_pos]]], dtype="int32", device=device)).realize()
       else: inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
       valid_len = v_toks.bind(n_toks) if padded_prefill else None
-      out = self(inp, sp, temp, valid_len).realize() if self.has_recurrent_prefill else self(inp, sp, temp).realize()
+      out = self(inp, sp, temp, valid_len=valid_len).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
