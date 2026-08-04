@@ -1,8 +1,8 @@
 from __future__ import annotations
 import functools, math
 from typing import Callable, cast
-from tinygrad import Tensor, UOp, nn
-from tinygrad.helpers import prod
+from tinygrad import Tensor, UOp
+from tinygrad.llm.kernels import Linear
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.dtype import AddrSpace, dtypes
 
@@ -12,24 +12,6 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32), math.log2(math.e)
 Q5_K, Q6_K, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 13, 14, 23, 256, 32, 44, 210, 34
-
-class Linear(nn.Linear):
-  ggml_type:int|None = None
-  def __init__(self, in_features:int, out_features:int, bias=True):
-    super().__init__(in_features, out_features, bias)
-    self.in_features, self.out_features = in_features, out_features
-    self._raw_offset_uop:UOp|None = None
-  def set_quantized(self, decoded:Tensor) -> Tensor|None:
-    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((Q5_K, 176), (Q6_K, 210), (IQ4_XS, 136))}
-    raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
-    if raw is None: return None
-    self.weight, self.ggml_type = Tensor(raw).flatten(), packed_sizes[prod(raw.shape)]
-    raw_offset = self.weight.uop.contiguous_view_offset()
-    assert raw_offset is not None and raw_offset % 4 == 0 and self.weight.uop.buf_uop.dtype == dtypes.uint8
-    if self.ggml_type == IQ4_XS and str(self.weight.device).startswith("AMD"): iq4_half_lut(str(self.weight.device))
-    return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
-  def __call__(self, x:Tensor) -> Tensor:
-    return q8_linear(self, x) if self.ggml_type in (Q5_K, Q6_K, IQ4_XS) and str(self.weight.device).startswith("AMD") else super().__call__(x)
 
 def warp_reduce(val:UOp, lane:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ([16, 8, 4, 2, 1] if full_wave else [8, 4, 2, 1]):
@@ -238,40 +220,45 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
 
 @functools.cache
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp) -> UOp:
-  batch, heads, tokens, dim, row_tile = *core.shape, 4
-  assert all(isinstance(x, int) for x in (batch, heads, tokens, dim)) and dim % 32 == 0 and dim % row_tile == 0
-  batch, heads, tokens, dim = cast(tuple[int, int, int, int], (batch, heads, tokens, dim))
-  core, q, k, v = (x.reshape(batch*heads, tokens, dim) for x in (core, q, k, v))
-  beta, alpha, kq = (x.reshape(batch*heads, tokens) for x in (beta, alpha, kq))
-  state = state.reshape(batch*heads, dim, dim)
-  bh_row, lane = UOp.range(batch*heads*dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
-  bh, row_base = bh_row // (dim//row_tile), (bh_row % (dim//row_tile))*row_tile
+  batch, heads, tokens, value_dim, row_tile = *core.shape, 4
+  key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
+  assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
+  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
+  core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
+  q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
+  beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
+  alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
+  bh_row, lane = UOp.range(batch*heads*value_dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
+  bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
   rows = tuple(row_base+i for i in range(row_tile))
-  cols = tuple(lane + i*32 for i in range(dim//32))
-  current = UOp.placeholder((row_tile*dim//32,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
+  cols = tuple(lane + i*32 for i in range(key_dim//32))
+  current = UOp.placeholder((row_tile*key_dim//32,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() for row in rows for col in cols))))
   token = UOp.range(tokens, 2, AxisType.REDUCE)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)
-  av, bv = alpha[bh, token].load(), beta[bh, token].load()
   updates:list[UOp] = []
   stores:list[UOp] = []
   for row_idx,row in enumerate(rows):
-    previous = tuple(current.after(token)[row_idx*dim//32+i].load() for i in range(dim//32))
+    previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
+    av, bv = alpha[bh, token, row if alpha_dim > 1 else 0].load(), beta[bh, token].load()
     state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
     state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
     delta = (v[bh, token, row].load() - state_k*av) * bv
     updates += [x*av + delta*y for x,y in zip(previous, keys)]
     stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q*av + delta*kq[bh, token]))
   step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
-  state_stores = (state[bh, row, col].store(current.after(step)[row_idx*dim//32+i].load().cast(state.dtype))
+  state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
 def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> Tensor:
-  batch, heads, tokens, dim = q.shape
-  assert q.shape == k.shape == v.shape and beta.shape == alpha.shape == (batch, heads, tokens) and state.shape == (batch, heads, dim, dim)
-  core, kq = Tensor.empty_like(q), (q*k).sum(-1).contiguous()
+  batch, heads, tokens, key_dim = q.shape
+  value_dim = v.shape[-1]
+  assert q.shape == k.shape and v.shape[:3] == q.shape[:3] and beta.shape == (batch, heads, tokens)
+  assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, value_dim))
+  assert state.shape == (batch, heads, value_dim, key_dim)
+  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   return Tensor.custom_kernel(core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq,
                               fxn=_gated_delta_prefill_kernel)[0]
 

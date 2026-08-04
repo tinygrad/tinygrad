@@ -1,17 +1,29 @@
-from typing import Any, cast
 from tinygrad import Tensor, UOp, nn, dtypes
-from tinygrad.llm.kernels.amd import Linear
-from tinygrad.uop.ops import resolve
+from tinygrad.helpers import prod
+from tinygrad.uop.ops import Ops, resolve
 
-def select_cache_dtype(device:str|tuple[str, ...]|None, recurrent:bool, max_context:int):
-  return dtypes.int8 if recurrent and max_context > 8192 and str(device).startswith("AMD") else dtypes.default_float
-
-def make_attention_cache(batch:int|UOp, n_kv_heads:int, max_context:int, head_dim:int, device, recurrent:bool):
-  dtype, cache_len = select_cache_dtype(device, recurrent, max_context), (max_context+255)//256*256 if recurrent else max_context
-  shape = (2, batch, n_kv_heads, cache_len, head_dim)
-  cache = Tensor.empty(*shape, dtype=dtype, device=device).contiguous()
-  scale = Tensor.empty(*shape[:-1], dtype=dtypes.float16, device=device).contiguous() if dtype == dtypes.int8 else None
-  return cache, scale, cache_len
+class Linear(nn.Linear):
+  ggml_type:int|None = None
+  def __init__(self, in_features:int, out_features:int, bias=True):
+    super().__init__(in_features, out_features, bias)
+    self.in_features, self.out_features = in_features, out_features
+    self._raw_offset_uop:UOp|None = None
+  def set_quantized(self, decoded:Tensor) -> Tensor|None:
+    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
+    raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    if raw is None: return None
+    self.weight, self.ggml_type = Tensor(raw).flatten(), packed_sizes[prod(raw.shape)]
+    raw_offset = self.weight.uop.contiguous_view_offset()
+    assert raw_offset is not None and raw_offset % 4 == 0 and self.weight.uop.buf_uop.dtype == dtypes.uint8
+    if self.ggml_type == 23 and str(self.weight.device).startswith("AMD"):
+      from tinygrad.llm.kernels.amd import iq4_half_lut
+      iq4_half_lut(str(self.weight.device))
+    return Tensor([raw_offset // 4], dtype=dtypes.uint64, device=self.weight.device)
+  def __call__(self, x:Tensor) -> Tensor:
+    if self.ggml_type in (13, 14, 23) and str(self.weight.device).startswith("AMD"):
+      from tinygrad.llm.kernels.amd import q8_linear
+      return q8_linear(self, x)
+    return super().__call__(x)
 
 def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:Tensor|None,
                      start_pos:int|UOp, max_context:int) -> Tensor:
@@ -27,28 +39,8 @@ def cached_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scale:T
   return q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
 
 def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> Tensor:
-  if str(q.device).startswith("AMD"):
+  if str(q.device).startswith("AMD") and q.shape[-1] % 32 == 0 and v.shape[-1] % 4 == 0:
     from tinygrad.llm.kernels.amd import gated_delta_prefill as kernel
   else:
     from tinygrad.llm.kernels.generic import gated_delta_prefill as kernel
   return kernel(q, k, v, beta, alpha, state)
-
-def _prepare_quantized_weights(model:Any, state_dict:dict[str, Tensor]) -> list[tuple[Linear, Tensor]]:
-  packed:list[tuple[Linear, Tensor]] = []
-  layers = cast(dict[str, Linear], nn.state.get_state_dict(model, tensor_type=Linear))
-  for name,owner in layers.items():
-    key, weight = f"{name}.weight", state_dict[f"{name}.weight"]
-    if str(weight.device).startswith("AMD") and (offset:=owner.set_quantized(weight)) is not None:
-      packed.append((owner, offset))
-      state_dict[key] = owner.weight
-  return packed
-
-def load_state_dict(model:Any, state_dict:dict[str, Tensor]):
-  for key in nn.state.get_state_dict(model):
-    if key.endswith(".ssm_beta_alpha.weight") and key not in state_dict:
-      prefix = key.removesuffix("beta_alpha.weight")
-      state_dict[key] = state_dict.pop(prefix+"beta.weight").cat(state_dict.pop(prefix+"alpha.weight"), dim=0).contiguous()
-  packed = _prepare_quantized_weights(model, state_dict)
-  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
-  if packed: Tensor.realize(*(offset for _,offset in packed))
-  for layer,offset in packed: layer._raw_offset_uop = offset.uop

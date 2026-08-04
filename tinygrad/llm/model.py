@@ -1,10 +1,27 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context
-from tinygrad.llm.kernels import Linear, cached_attention, gated_delta_prefill, load_state_dict, make_attention_cache
+from typing import Any, cast
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
+from tinygrad.llm.kernels import Linear, cached_attention, gated_delta_prefill
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
+
+def _prepare_quantized_weights(model:Any, state_dict:dict[str, Tensor]) -> list[tuple[Linear, Tensor]]:
+  packed:list[tuple[Linear, Tensor]] = []
+  layers = cast(dict[str, Linear], nn.state.get_state_dict(model, tensor_type=Linear))
+  for name,owner in layers.items():
+    key, weight = f"{name}.weight", state_dict[f"{name}.weight"]
+    if str(weight.device).startswith("AMD") and (offset:=owner.set_quantized(weight)) is not None:
+      packed.append((owner, offset))
+      state_dict[key] = owner.weight
+  return packed
+
+def load_state_dict(model:Any, state_dict:dict[str, Tensor]):
+  packed = _prepare_quantized_weights(model, state_dict)
+  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
+  if packed: Tensor.realize(*(offset for _,offset in packed))
+  for layer,offset in packed: layer._raw_offset_uop = offset.uop
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -179,9 +196,12 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      self.cache_kv, cache_scale, cache_len = make_attention_cache(
-        x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, x.device, self.config.ssm is not None)
-      if cache_scale is not None: self.cache_kv_scale = cache_scale
+      recurrent = self.config.ssm is not None
+      cache_len, cache_dtype = ((self.config.max_context+255)//256*256 if recurrent else self.config.max_context), \
+        (dtypes.int8 if recurrent and self.config.max_context > 8192 and str(x.device).startswith("AMD") else dtypes.default_float)
+      shape = (2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim)
+      self.cache_kv = Tensor.empty(*shape, dtype=cache_dtype, device=x.device).contiguous()
+      if cache_dtype == dtypes.int8: self.cache_kv_scale = Tensor.empty(*shape[:-1], dtype=dtypes.float16, device=x.device).contiguous()
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, cache_len, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -258,36 +278,25 @@ class GatedDeltaNetBlock(FFNBlock):
     beta, alpha = (self.ssm_beta(x), self.ssm_f_b(self.ssm_f_a(x))) if is_kda else \
       self.ssm_beta_alpha(x).split(self.num_v_heads, dim=-1)
     conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
-    conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda else functools.reduce(lambda a,b: a+b,
+    conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q, k = (z.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6).repeat(
       1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
     v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
-    state_pos:int|UOp
-    if is_kda:
-      assert T == 1, "channel-wise gated delta prefill is not supported"
-      beta = beta.sigmoid().reshape(B, self.num_v_heads, 1, 1)
-      alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, self.num_v_heads, -1) *
-               self.ssm_a.reshape(1, self.num_v_heads, -1)).exp().unsqueeze(-2)
-      q, k, v = q[:, 0].mul(self.head_k_dim**-0.5).unsqueeze(-1), k[:, 0].unsqueeze(-1), v[:, 0].unsqueeze(-1)
-      recurrent_state = self.recurrent_state * alpha
-      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
-      recurrent_state = Tensor(self.recurrent_state.uop.after(
-        self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)))
-      core, gate, state_pos = (recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim), out_gate.sigmoid(), 1
-    else:
-      beta, log_alpha = beta.sigmoid().reshape(B, T, self.num_v_heads), \
-        ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
-      if valid_len is not None:
-        active = (Tensor.arange(T).to(x.device) < Tensor(valid_len, device=x.device)).reshape(1, T, 1)
-        beta, log_alpha = beta * active, log_alpha * active
-      q, k, v, beta, log_alpha = [z.transpose(1, 2).float() for z in (q, k, v, beta, log_alpha)]
-      core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, log_alpha.exp(), self.recurrent_state).transpose(1, 2)
-      gate, state_pos = out_gate.silu(), T if valid_len is None else valid_len
+    beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
+      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
+    if valid_len is not None:
+      active = (Tensor.arange(T).to(x.device) < Tensor(valid_len, device=x.device)).reshape(1, T, 1)
+      beta, log_alpha = beta * active, log_alpha * (active.unsqueeze(-1) if is_kda else active)
+    q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
+    alpha = log_alpha.transpose(1, 2).float().exp()
+    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, self.recurrent_state).transpose(1, 2)
+    gate, state_pos = (out_gate.sigmoid() if is_kda else out_gate.silu()), T if valid_len is None else valid_len
     out = self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
     conv_state = conv_window[:, state_pos:state_pos+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
-    return Tensor(out.uop.after(self.conv_state.uop.after(self.conv_state.uop.store(conv_state.uop)))) if is_kda else (out, conv_state)
+    return out, conv_state
 
   def _update_state(self, out:Tensor, *state:Tensor) -> Tensor:
     conv_state, = state
@@ -302,7 +311,7 @@ class GatedDeltaNetBlock(FFNBlock):
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
-      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
+      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
@@ -317,7 +326,7 @@ class Transformer:
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
-    self.has_recurrent_prefill = config.ssm is not None and not config.ssm.kda
+    self.has_recurrent_prefill = config.ssm is not None
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
@@ -361,6 +370,9 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(kv[f'{arch}.block_count']))
+      for i,is_ssm in enumerate(ssm_layers):
+        if is_ssm: state_dict[f"blk.{i}.ssm_beta_alpha.weight"] = state_dict.pop(f"blk.{i}.ssm_beta.weight").cat(
+          state_dict.pop(f"blk.{i}.ssm_alpha.weight"), dim=0).contiguous()
     elif arch == 'kimi-linear':
       ssm_layers = tuple(x == 0 for x in n_kv_heads)
       n_kv_heads = max(n_kv_heads)
