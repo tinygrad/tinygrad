@@ -502,6 +502,7 @@ pre_regalloc_matcher = PatternMatcher([
 ])
 
 post_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.INDEX, name="x"), lambda x: (nx := x.replace(tag=(rdefs(x.src[0])[x.src[1].val],)), [nx])),
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),

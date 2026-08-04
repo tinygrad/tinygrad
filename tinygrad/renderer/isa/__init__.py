@@ -15,16 +15,14 @@ class Register:
 @dataclass(frozen=True)
 class VRegister:
   name: str
-  _cons: tuple[Register, ...] = field(default_factory=tuple)
+  cons: tuple[Register, ...] = field(default_factory=tuple)
   width: int = 1
   alignment: int = 1
   parent: VRegister|None = None
   pos: int|None = None
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
-  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self._cons, self.width, self.alignment, self, i)
-  def candidates(self) -> list[tuple[Register,...]]:
-    return [self._cons[i:i+self.width] for i in range(len(self._cons) - self.width + 1) if self._cons[i].index % self.alignment == 0]
+  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])

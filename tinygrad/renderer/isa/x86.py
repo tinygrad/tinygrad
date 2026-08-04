@@ -590,15 +590,8 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
-def rewrite_buffer(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  offset = UOp.const(ctx.ren.spill_size, dtypes.uint32)
-  ctx.ren.spill_size += x.max_numel() * x.dtype.itemsize
-  return (nx := ctx.ren.isel_matcher.rewrite(ctx.spill_pointer().index(offset, tag=x.tag))), [nx]
-
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # rewrite BUFFER to stack ptr now that the stack size is known
-  (UPat(Ops.BUFFER, name="x"), rewrite_buffer),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.ren.spill_size + x.tag), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
@@ -677,7 +670,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # IMM byte
     if imm_uop is not None:
       if imm_uop.op is Ops.CONST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.val)
-      elif isinstance(greg(imm_uop), Register): inst += bytes([(greg(imm_uop).index & 0b1111) << 4 | 0b0000])
+      elif isinstance(rdef(imm_uop), Register): inst += bytes([(rdef(imm_uop).index & 0b1111) << 4 | 0b0000])
     return inst
 
   # get the encoding structure of the uop
@@ -854,8 +847,16 @@ class X86Renderer(ISARenderer):
     disp = UOp.const(spill_offset, dtypes.uint32)
     return UOp(Ops.INS, dt, fold_address(self.spill_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, (reg,))
 
+  # NOTE: kinda dirty, where does this belong in pipeline?
+  # - buffers have to be rewritten/stack size updated before FRAME_INDEX in post_regalloc
+  # - make this a seperate line rewrite pattern matcher?
   def stack_alloc(self, uops:list[UOp]):
     sp = self.spill_pointer()
+    # allocate buffers
+    for i, u in enumerate(uops):
+      if u.op is Ops.BUFFER:
+        uops[i] = self.isel_matcher.rewrite(sp.index(UOp.const(self.spill_size, dtypes.uint32), tag=u.tag))
+        self.spill_size += u.max_numel() * u.dtype.itemsize
     offset = UOp.const(self.spill_size, sp.dtype)
     uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag)))
     uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag)))
