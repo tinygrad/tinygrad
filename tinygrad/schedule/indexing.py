@@ -101,7 +101,7 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
-  return valid.where(bx.src[0], UOp.const(0, x.dtype))
+  return valid.where(bx.src[0], UOp.const(x.dtype.const(0)))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
