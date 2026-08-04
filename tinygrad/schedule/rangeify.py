@@ -624,8 +624,11 @@ def index_on_stack(stack:UOp, idx:UOp):
   return ret
 
 pm_simple_rangeify = PatternMatcher([
-  # INDEX without src is nothing (TODO: this should be in mop_cleanup)
-  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # INDEX and STAGE without src is nothing
+  (UPat((Ops.INDEX, Ops.STAGE), src=(UPat.var('x'),)), lambda x: x),
+  # if INDEX is on STAGE with the same ranges, remove the pair
+  (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
+   lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # handle movement ops on INDEX
@@ -634,9 +637,6 @@ pm_simple_rangeify = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
-  # if INDEX is on STAGE with the same ranges, remove the pair
-  (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
-   lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
 ])
 
 pm_range_creation = PatternMatcher([
