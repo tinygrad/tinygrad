@@ -182,7 +182,8 @@ def sdma_copy(ctx, call):
   src_addr, dst_addr = call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs)
   return call.ins(SDMAOps.COPY, src=tuple(UOp.const(x, dtypes.uint32) for off in range(0, sz, ctx.max_copy_size) for x in (
     ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
-    ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0, *data64_le(src_addr+off), *data64_le(dst_addr+off))))
+    ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0,
+    *data64_le(src_addr+UOp.const(off, dtypes.uint64)), *data64_le(dst_addr+UOp.const(off, dtypes.uint64)))))
 
 def sdma_wait(ctx, ins, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
@@ -507,11 +508,12 @@ class PCIIface(PCIIfaceBase):
     if drain_only: d.iface.dev_impl.ih.drain()
     else: d.iface.dev_impl.ih.interrupt_handler()
 
-    if reset and d.iface.dev_impl.recover():
+    if reset and d.iface.dev_impl.recover(force=True):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.signal('timeline')._buf.cpu_view().mv.cast('Q')[0] = d.signal('value', 1).as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.signal('timeline')._buf.cpu_view().mv.cast('Q')[0] = \
+        d.signal('value', 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):

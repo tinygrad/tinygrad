@@ -44,9 +44,13 @@ class TestWeakPromotion(unittest.TestCase):
     r = Tensor([2], dtype=dtypes.uint8, device="CPU").copysign(Tensor([1], dtype=dtypes.uint32, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
 
-  def test_minimum_commits_both_operands(self):
+  def test_minimum_reflects_weak_operand(self):
     r = Tensor(1).minimum(Tensor([2], dtype=dtypes.uint8, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint8, [1]))
+    for dt in dtypes.uints:
+      r = Tensor([dt.max], dtype=dt, device="CPU").minimum(1)
+      self.assertEqual((r.dtype, r.tolist()), (dt, [1]))
+      self.assertNotIn(Ops.CAST, [u.op for u in r._uop.toposort()])
 
   def test_broadcasted_keeps_const_weak(self):
     # a python scalar stays a bare weak CONST through _broadcasted, lifted only to the KIND of the lub
@@ -57,6 +61,17 @@ class TestWeakPromotion(unittest.TestCase):
     x, y = Tensor.const(1).reshape(1)._broadcasted(Tensor([1.0], dtype=dtypes.float32))
     self.assertEqual((x._uop.base.op, x._uop.base.val, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
+
+  def test_weak_expression_anchors_at_strong_lub(self):
+    # regression test for the HALF bert nan (#17408, reverted in #17409): lub(int32, weakfloat)==weakfloat makes
+    # `loss_mask.sum() + 1e-5` a weakfloat EXPRESSION. Meeting a strong float in a binop must pin it at the lub, otherwise
+    # nothing owns a width until the bufferize/codegen commits it at default_float: a HALF reciprocal of (sum+1e-5) is inf
+    denom = (Tensor.zeros(912, dtype=dtypes.int32) != Tensor.zeros(912, dtype=dtypes.float32)).sum() + 1e-5
+    self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
+    x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
+    self.assertIs(y.dtype, dtypes.float32)
+    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
+    self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
