@@ -1789,10 +1789,11 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   return None if ret is u else ret
 
 def commit_weak(s:UOp, dt:DType) -> UOp:
-  # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
+  # a bare weak CONST commits directly (the value stays mathematical, emission truncates), a weak non-const src takes the demand cast
   return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
+  if not any(s.dtype in dtypes.weaks for s in u.src): return None
   if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
   return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
