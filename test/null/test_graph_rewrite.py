@@ -220,7 +220,7 @@ class TestBottomUpRewrite(unittest.TestCase):
     self.assertIs(gt, ret)
 
 # normally .substitute would be fine, but it's not tracked
-@rewrite_group(new_ctx=True)
+@rewrite_group()
 def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
 def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
 

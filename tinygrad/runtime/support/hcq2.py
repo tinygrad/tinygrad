@@ -393,7 +393,7 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
 
 hcq_compile_cache:dict[bytes, UOp] = {}
 
-@rewrite_group(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}", new_ctx=True)
+@rewrite_group(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   if input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
@@ -477,7 +477,7 @@ def link_buf_key(a:UOp): return a.key, to_tuple(a.device)
 link_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 link_linear_cache:dict[bytes, UOp] = {}
 
-@rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}", new_ctx=True)
+@rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear_key:=linear.key)) is not None: return linked
 

@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UPat, rewrite_group, GroupOp, Ops
 from tinygrad.uop.upat import _get_code, upat_compile
 import dis
 
-@rewrite_group(new_ctx=True)
+@rewrite_group()
 def do_compile(up):
   print("\n***** COMPILE", up)
   match_code = _get_code(up, False)
