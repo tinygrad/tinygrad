@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
+import importlib.resources, inspect, functools, os, contextlib, re, atexit, pickle, decimal
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
@@ -14,7 +14,7 @@ if TYPE_CHECKING: from tinygrad.renderer import Renderer
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
-    self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self._devices = [x.name[len("ops_"):-3].upper() for x in importlib.resources.files(__package__+".runtime").iterdir() if x.name.startswith("ops_")]
     self._opened_devices:set[str] = set()
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])

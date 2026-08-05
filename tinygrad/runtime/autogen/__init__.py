@@ -29,6 +29,10 @@ nv_lib_path = ("[f'/{pre}/cuda/targets/{tgt}/lib' for pre in ['opt', 'usr/local'
 
 def load(name, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
+    # the file can be missing but the module still importable (e.g. zipimport), try that before regenerating
+    if not getenv('REGEN'):
+      try: return importlib.import_module(f"{path}.{name.replace('/', '.')}")
+      except ImportError: pass
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (srcs:=kwargs.pop('srcs', None)):
       srcpath = (td:=tempfile.TemporaryDirectory(f"autogen-src-{name.replace('/','-')}")).name + "/"
