@@ -25,11 +25,21 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self: ctx[src] = None
 
+# the inputs of a custom kernel resolve to whole buffers (one per PARAM slot), so they have to materialize.
+# buffer states (AFTER/BUFFER/PARAM) and views of buffers already materialize, anything else must be realized.
+def realize_custom_kernel_srcs(ctx:dict[UOp, None], c:UOp) -> None:
+  for s in c.src[1:]:
+    t = s
+    while t.op in GroupOp.Movement or t.op is Ops.SLICE: t = t.src[0]
+    if t.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: ctx[s] = None
+
 pm_generate_realize_map = PatternMatcher([
   # always realize
   (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  # realize the inputs of custom kernel calls
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])

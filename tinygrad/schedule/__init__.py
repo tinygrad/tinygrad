@@ -196,4 +196,6 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  # buffers that already hold data can't be suballocated by the memory planner, custom kernels write them in place
+  held_bufs |= {b for b in big_sink.toposort(gate_kernel_sink) if b.op is Ops.BUFFER and b.buffer.is_allocated()}
   return memory_plan_rewrite(linear, held_bufs), var_vals
