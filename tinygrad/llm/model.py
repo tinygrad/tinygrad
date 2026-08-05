@@ -451,12 +451,11 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
+      # recurrent blocks prefill full chunks with a static shape, the tail of the prompt goes through the decode graph
       remaining = len(tokens)-start_pos
       n_toks = 1 if self.has_recurrent_block and remaining < chunk_size else min(chunk_size, remaining)
-      sp = v_start_pos.bind(start_pos)
-      nt = n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
-      inp = t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out
-      out = self(inp, sp, temp).realize()
+      sp, nt = v_start_pos.bind(start_pos), n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
+      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
