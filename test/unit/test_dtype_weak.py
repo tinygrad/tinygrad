@@ -62,6 +62,15 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((x._uop.base.op, x._uop.base.val, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
 
+  def test_broadcasted_keeps_expression_weak(self):
+    # a weak EXPRESSION is not a const, so it survives as itself: the lub lives on the parent, not on a cast of the operand
+    x, y = Tensor([1], dtype=dtypes.int8)._broadcasted(Tensor(2) * 3)
+    self.assertEqual((y._uop.base.op, y.dtype, x.dtype), (Ops.MUL, dtypes.weakint, dtypes.int8))
+    self.assertIs((x + y).dtype, dtypes.int8)
+    # only the KIND is lifted, and a cast is the only way an expression can state it
+    x, y = Tensor([1.0], dtype=dtypes.float32)._broadcasted(Tensor(2) * 3)
+    self.assertEqual((y._uop.base.op, y.dtype), (Ops.CAST, dtypes.weakfloat))
+
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
                                                  (dtypes.int32, 1, dtypes.int32, dtypes.weakint),
