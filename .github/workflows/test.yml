@@ -519,15 +519,7 @@ jobs:
           deps: testing_unit
           amd: 'true'
       - name: Run HCQ2 tests
-        run: |
-          command -v gdb >/dev/null || sudo apt-get install -y -qq gdb || true
-          ulimit -c unlimited || true
-          echo 'core.%p' | sudo tee /proc/sys/kernel/core_pattern || true
-          # -u + -v so the last test name reaches the log before a crash, faulthandler for the python stack on SIGSEGV
-          HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONFAULTHANDLER=1 PYTHONPATH=. python -u test/test_tiny.py -v || {
-            st=$?; echo "::error::test_tiny exited $st"
-            for c in core.*; do gdb -q -batch -ex 'thread apply all bt' "$(command -v python)" "$c" || true; done
-            exit $st; }
+        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/test_tiny.py
       - name: Run HCQ2 multi-device tests
         run: |
           HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_multitensor.py \
