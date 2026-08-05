@@ -398,9 +398,8 @@ class ElementwiseMixin(CreationMixin):
     """
     t, x = self._broadcasted(x)
     # NOTE: the int inverse is done in python, since const has weak dtype without width
-    # TODO: clean this up once _broadcasted does not promote dtype
-    if dtypes.is_float(dt:=least_upper_dtype(t.dtype, x.dtype)): return -(-t).alu(Ops.MAX, -x)
-    return (t ^ (k:=dt.const(dt.min+dt.max))).alu(Ops.MAX, x ^ k) ^ k
+    if dtypes.is_float(dt:=least_upper_dtype(t.dtype, x.dtype)): return -(-t).maximum(-x)
+    return (t ^ (k:=dt.const(dt.min+dt.max))).maximum(x ^ k) ^ k
 
   def copysign(self, other: Self | ConstType) -> Self:
     """
