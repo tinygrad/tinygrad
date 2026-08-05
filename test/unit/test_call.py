@@ -225,6 +225,17 @@ class TestCallSchedule(unittest.TestCase):
     # the function bodies (src[0]) should have identical keys
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 
+  def test_precompile_view_schedule_cache_hit(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return (x + 1).contiguous()
+    a, b = Tensor.empty(32).realize(), Tensor.empty(32).realize()
+    r0, r1 = f(a[4:8]), f(b[8:12])
+    from tinygrad.callify import transform_to_call
+    sink, _ = transform_to_call(UOp.sink(r0.uop, r1.uop))
+    calls = [u for u in sink.toposort() if u.op is Ops.CALL and u.arg.precompile]
+    self.assertEqual(len(calls), 2)
+    self.assertEqual(calls[0].src[0].key, calls[1].src[0].key)
+
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
     @function(precompile=True)
