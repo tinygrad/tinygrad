@@ -1,8 +1,9 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
+from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
-from tinygrad.llm.kernels import Linear, gated_delta_prefill
+from tinygrad.llm.kernels import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -191,7 +192,7 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       # hybrid models use a quantized KV cache on AMD, padded to the flash decode block multiple
-      quantize = str(x.device).startswith("AMD") and self.config.ssm is not None
+      quantize = amd_custom_kernels_supported(cast(str, x.device)) and self.config.ssm is not None
       cache_len = (self.config.max_context+255)//256*256 if quantize else self.config.max_context
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim,
                                    dtype=dtypes.int8 if quantize else dtypes.default_float, device=x.device)
@@ -426,20 +427,19 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def warmup(self, chunk_size:int=256):
+  def warmup(self, chunk_size:int=32):
     prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
     if self.has_recurrent_block:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
     for _ in range(2):
       # NOTE: chunk_size must match what generate uses at serve time, otherwise the captured JIT rejects the new toks range
-      warm = self.generate(prompt, chunk_size=chunk_size if self.has_recurrent_block else None)
+      warm = self.generate(prompt, chunk_size=chunk_size)
       with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
       with Context(JIT_BATCH_SIZE=0): next(warm)
       self._cached_tokens = []
 
-  def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    chunk_size = min(chunk_size or 256, 256) if self.has_recurrent_block else chunk_size or 32
+  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported

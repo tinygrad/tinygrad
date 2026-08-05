@@ -1,10 +1,17 @@
 import functools
 from typing import cast
-from tinygrad import Tensor, UOp, nn, dtypes
+from tinygrad import Tensor, UOp, nn, dtypes, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
+
+def amd_custom_kernels_supported(device:str) -> bool:
+  # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
+  # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
+  # Device[...] trips ALLOW_DEVICE_USAGE=0 in function contexts, the device is always open here anyway
+  with Context(ALLOW_DEVICE_USAGE=1):
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
 
 class Linear(nn.Linear):
   ggml_type:int|None = None
@@ -22,9 +29,10 @@ class Linear(nn.Linear):
     self.ggml_type = packed_sizes[prod(raw.shape)]
   def __call__(self, x:Tensor) -> Tensor:
     static = isinstance(x.numel(), int)
-    if self.ggml_type is None and not static: self.use_custom_quant = False
-    if self.ggml_type is None and self.use_custom_quant and str(self.weight.device).startswith("AMD"): self.set_quantized(self.weight)
-    if self.ggml_type in (13, 14, 23) and self.use_custom_quant and str(self.weight.device).startswith("AMD"):
+    supported = self.use_custom_quant and amd_custom_kernels_supported(cast(str, self.weight.device))
+    if self.ggml_type is None and not static: supported = self.use_custom_quant = False
+    if self.ggml_type is None and supported: self.set_quantized(self.weight)
+    if self.ggml_type in (13, 14, 23) and supported:
       from tinygrad.llm.kernels.amd import q8_linear
       return q8_linear(self, x)
     return super().__call__(x)
@@ -61,7 +69,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, value_dim))
   assert state.shape == (batch, heads, value_dim, key_dim)
   kernel = _gated_delta_prefill_kernel
-  if str(q.device).startswith("AMD") and key_dim % 32 == 0 and value_dim % 4 == 0:
+  if amd_custom_kernels_supported(cast(str, q.device)) and key_dim % 32 == 0 and value_dim % 4 == 0:
     from tinygrad.llm.kernels.amd import _gated_delta_prefill_kernel as kernel
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)

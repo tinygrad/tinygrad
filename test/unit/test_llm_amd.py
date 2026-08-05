@@ -1,13 +1,13 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn
-from tinygrad.llm.kernels import Linear
+from tinygrad.llm.kernels import Linear, amd_custom_kernels_supported
 from tinygrad.llm.kernels.amd import q8_quantize, quantized_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
   def test_values_and_scales(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     x = np.linspace(-3.1, 2.7, 64, dtype=np.float32).reshape(2, 32)
     quant, scale = q8_quantize(Tensor(x), 2, 32)
     scale_np = np.maximum(np.max(np.abs(x), axis=-1, keepdims=True) / 127, 1e-8)
@@ -16,7 +16,7 @@ class TestQ8Quantize(unittest.TestCase):
     np.testing.assert_allclose(scale.numpy(), scale_np, rtol=1e-6)
 
   def test_q6_linear_compiles(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, 210, dtype=np.uint8)
     packed[-2:] = np.array([0.01], dtype=np.float16).view(np.uint8)
@@ -28,7 +28,7 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
 
   def test_q6_linear_multiple_tokens(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     in_features, blocks = 2048, 16*2048//256
     packed = rng.integers(0, 256, blocks*210, dtype=np.uint8)
@@ -51,7 +51,7 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertIsNone(generic.ggml_type)
 
   def test_attention_uses_physical_cache_length(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     q, k, v = Tensor.zeros(1, 2, 1, 32), Tensor.randn(1, 1, 1, 32), Tensor.randn(1, 1, 1, 32)
     cache = Tensor.empty(2, 1, 1, 256, 32, dtype=dtypes.int8).contiguous()
     scale = Tensor.empty(2, 1, 1, 256, dtype=dtypes.float16).contiguous()
@@ -59,7 +59,7 @@ class TestQ8Quantize(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
   def test_prefill_attention_unaligned_start(self):
-    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)
