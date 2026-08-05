@@ -6,11 +6,11 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, K
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.schedule.indexing import BufferizeOpts, IndexingContext, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -39,7 +39,16 @@ pm_fold_moved_after = PatternMatcher([
 def _mop_index(r:UOp, idx:UOp):
   idxs = idx.src[1:]
   if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+    ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+    if r.op is Ops.PAD:
+      # insert 0 for PAD with where
+      # TODO: does this need simplify
+      a = UOp.const(True)
+      for s in ret.src[1:]:
+        if s.op is Ops.WHERE and s.src[2].op is Ops.CONST and s.src[2].arg == Invalid:
+          a = a & s.src[0]
+      ret = a.where(ret, ret.const_like(0))
+    return ret
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
@@ -546,9 +555,101 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   # reshape back to input
   return buf.after(buf.store(input_src)).reshape(copy.shape)
 
+def convert_contig_to_store(ctx, copy:UOp):
+  input_src = copy.src[0]
+  # create the output buffer
+  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+  # reshape back to input
+  view = buf.shrink_to(input_src.shape)
+  return view.after(view.store(input_src))
+
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
   (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
+  (UPat(Ops.CONTIGUOUS, name="copy"), convert_contig_to_store),
+])
+
+# **** simple rangeify ****
+
+from tinygrad.helpers import all_same
+from tinygrad.uop.ops import _broadcast_shape
+
+def expand_broadcast(x:UOp):
+  shapes = [u._shape for u in x.src]
+  if any(s is None for s in shapes) or all_same(shapes): return None
+  shape = _broadcast_shape(*shapes)
+  return x.replace(src=tuple([u.expand(shape) for u in x.src]))
+
+pm_expand_broadcast = PatternMatcher([
+  # expand broadcasts first
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
+])
+
+def expand_coeff(sink:UOp) -> dict[UOp,int]:
+  coeff: dict[UOp,int] = {sink: 1}
+  contig: dict[UOp,int] = {}
+  for u in reversed(list(sink.toposort())):
+    c = 1 if u.op is Ops.STORE else coeff.get(u, 0)
+    # symbolic coeffs mark on vmax, an extra CONTIGUOUS is always safe
+    if (c > 1 if isinstance(c, int) else c.vmax > 1) and u.op in (GroupOp.Elementwise | {Ops.REDUCE}) and u.device is not None:
+      contig[u] = c
+      c = 1
+    coeff[u] = c
+    mult = prod(u.shape) // prod(u.src[0].shape) if u.op is Ops.EXPAND else 1
+    for s in u.src: coeff[s] = coeff.get(s, 0) + c * (mult if s is u.src[0] else 1)
+  return contig
+
+def rangeify_on_reduce(ctx, inp:UOp, red:UOp, idx:UOp|None=None):
+  if red.arg[1] == 0: return None
+  if idx is None and len(red.shape) > 0: return None
+  # TODO: is AxisType.REDUCE a real thing?
+  rngs = [UOp.range(s, next(ctx), AxisType.REDUCE) for s in inp.shape[:red.arg[1]]]
+  return inp.index(*rngs, *(idx.src[1:] if idx is not None else ())).reduce(*rngs, arg=(red.arg[0], 0))
+
+def rangeify_on_store(ctx, x:UOp):
+  if x.shape == (): return None
+  rngs = [UOp.range(s, next(ctx)) for s in x.shape]
+  return x.src[0].index(*rngs).store(x.src[1].index(*rngs)).end(*rngs)
+
+def rangeify_on_stage(ctx, x:UOp):
+  if x.src[0].shape == (): return None
+  # size 1 dims don't get ranges, they are reshaped out and back in
+  if all_int(x.shape) and 0 < len(sq := tuple(s for s in x.shape if s != 1)) < len(x.shape):
+    return rangeify_on_stage(ctx, x.src[0].reshape(sq).bufferize(arg=x.arg)).reshape(x.shape)
+  rngs = [UOp.range(s, next(ctx)) for s in x.shape]
+  return x.replace(src=(x.src[0].index(*rngs), *rngs))
+
+def index_on_stack(stack:UOp, idx:UOp):
+  srcs = [s.index(*idx.src[2:]) for s in stack.src]
+  r0 = idx.src[1]
+  ret = srcs[-1]
+  for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
+  return ret
+
+pm_simple_rangeify = PatternMatcher([
+  # INDEX without src is nothing
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
+  # STAGE on shape () is nothing
+  (UPat(Ops.STAGE, src=(UPat.var('x'),)), lambda x: x if x.shape == () else None),
+  # if INDEX is on STAGE with the same ranges, remove the pair
+  (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
+   lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
+  # reshape of a single element shaped value to scalar is an index
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
+  # handle movement ops on INDEX
+  (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
+  (UPat(Ops.STACK, name="stack").index(name="idx", allow_any_len=True), index_on_stack),
+  # pass index through elementwise
+  (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
+   lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+])
+
+pm_range_creation = PatternMatcher([
+  # reduce/store are what creates ranges
+  (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red").index(name="idx", allow_any_len=True), rangeify_on_reduce),
+  (UPat(Ops.REDUCE, src=(UPat.var('inp'),), name="red"), rangeify_on_reduce),
+  (UPat(Ops.STORE, name="x"), rangeify_on_store),
+  (UPat(Ops.STAGE, name="x"), rangeify_on_stage),
 ])
 
 @profile_matches
@@ -557,13 +658,61 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
+  # convert movement ops to ranges
+  #tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
+
+  # mark ops that would be recomputed (expand coeff > 1) as CONTIGUOUS, like the realize map in run_rangeify
+  contig = expand_coeff(tsink)
+  subs: dict[UOp, UOp] = {}
+  for u in tsink.toposort():
+    u2 = u.replace(src=tuple(subs.get(s, s) for s in u.src))
+    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device)) if u in contig else u2
+  tsink = subs[tsink]
+
+  # add buffers on copy
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
-  # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  # simple rangeify
+  tsink = graph_rewrite(tsink, pm_range_creation+pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
+
+  # for each index on a stage without children, try to merge the stage into the consumer kernel
+  while 1:
+    indexes: dict[UOp, list[UOp]] = {}
+    consumers: dict[UOp, list[UOp]] = {}
+    for u in tsink.toposort():
+      if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
+        indexes.setdefault(u.src[0], []).append(u)
+      for s in u.src: consumers.setdefault(s, []).append(u)
+    # the ranges wrapping u: REDUCE ranges on the path up, plus the enclosing END/STAGE nest
+    def nest_ranges(u:UOp) -> set[UOp]:
+      ret: set[UOp] = set()
+      stack, seen = [u], set()
+      while len(stack):
+        if (x := stack.pop()) in seen: continue
+        seen.add(x)
+        if x.op is Ops.REDUCE: ret.update(*[er.ranges for er in x.ended_ranges])
+        elif x.op in {Ops.END, Ops.STAGE}:
+          ret.update(*[er.ranges for er in x.ended_ranges])
+          continue
+        stack.extend(consumers.get(x, []))
+      return ret
+    subs = {}
+    for k,v in indexes.items():
+      # don't move REDUCE ranges up (real?)
+      if len(v) != 1 or not all(all([r.arg[-1] == AxisType.WEAK for r in s.ranges]) for s in v[0].src[1:]): continue
+      # merging must not add iteration multiplicity around range-bound computation in the stage body:
+      # every range of the enclosing kernel nest must be used by the index, unless the body has no inner loops
+      if not nest_ranges(v[0]) <= set().union(*[s.ranges for s in v[0].src[1:]]) and \
+         any(x.op is Ops.REDUCE for x in k.src[0].toposort(gate=lambda x: x.op is not Ops.STAGE)): continue
+      for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
+        subs[old_r] = new_r
+    if not len(subs): break
+    tsink = tsink.substitute(subs)
+    tsink = graph_rewrite(tsink, pm_simple_rangeify, bottom_up=True, name=f"merge kernels ({len(subs)})")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  #tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
