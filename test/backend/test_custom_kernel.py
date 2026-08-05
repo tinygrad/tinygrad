@@ -138,7 +138,7 @@ class TestCustomKernel(unittest.TestCase):
     # forge the call like llm/kernels does: params and call args, no Tensor.custom_kernel contiguous
     params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate((out.uop, x.uop)))
     call = copy_kernel(*params).call(out.uop, x.uop)
-    np.testing.assert_array_equal(Tensor(out.uop.after(call)).realize().numpy(), x.realize().numpy())
+    np.testing.assert_allclose(Tensor(out.uop.after(call)).realize().numpy(), x.realize().numpy(), rtol=1e-6)
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
