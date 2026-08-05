@@ -1140,6 +1140,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, volatile=False):
+    dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device,volatile=volatile))
     else:

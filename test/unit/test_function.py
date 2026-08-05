@@ -4,6 +4,7 @@ from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from test.helpers import assert_kernel_count
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -618,7 +619,7 @@ class TestFunctionTuple(unittest.TestCase):
     out = f(a)
     GlobalCounters.reset()
     out.realize()
-    self.assertEqual(GlobalCounters.kernel_count, kernel_count)
+    assert_kernel_count(kernel_count)
     np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
 
   def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)

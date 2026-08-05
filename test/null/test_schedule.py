@@ -2,32 +2,11 @@
 import gc, unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
-from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import compile_linear, run_linear
-from tinygrad.codegen import to_program
-
-class KernelCountException(Exception): pass
-def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
-  if to_prerealize:
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
-  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
-  else:
-    assert isinstance(t, UOp), f"can't schedule {t}"
-    linear, var_vals = Tensor(t).linear_with_vars()
-  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
-                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
-  if kernel_cnt != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
-    if DEBUG >= 3:
-      for i,call in enumerate(linear.src):
-        print("kernel", i+1)
-        print(call.src[0])
-    raise KernelCountException(f"{kernel_cnt} != {allowed}")
-  # test compiling the linear
-  compile_linear(linear)
-  return linear, var_vals
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
+from tinygrad.helpers import GlobalCounters, Context
+from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.codegen import to_program, full_rewrite_to_sink
+from test.helpers import check_schedule, assert_kernel_count
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -143,7 +122,7 @@ class TestSimpleSchedule(unittest.TestCase):
     a = Tensor.empty(16,16).sum(axis=1)
     a1 = a.reshape(4,4)
     a2 = a.reshape(16,1,1)
-    self.assertEqual(len(Tensor.schedule_linear(a1, a2).src), 1)
+    check_schedule([a1, a2], 1)
 
 class TestSchedule(unittest.TestCase):
   def setUp(self):
@@ -155,8 +134,7 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1).clone()
-    linear, var_vals = t.linear_with_vars()
-    self.assertEqual(len(linear.src), kcount)
+    check_schedule(t, kcount)
 
   def test_arange_avgpool2d_fused_noopt(self):
     with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
@@ -224,7 +202,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a/b)/c
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertLessEqual(GlobalCounters.global_ops, 4*3)
 
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
@@ -356,6 +334,11 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + b
     check_schedule([out0, out1], 2)
+
+  def test_reduce_broadcast_not_recomputed(self):
+    a = Tensor.empty(32, 16).realize()
+    out = a-a.mean(axis=0, keepdim=True)
+    check_schedule(out, 2)
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     q = Tensor.empty(32,8,16,8).realize()
@@ -714,6 +697,19 @@ class TestSchedule(unittest.TestCase):
     xt = X[[Tensor([2]), Tensor([1])]]
     check_schedule(xt, 1)
 
+  def test_split_advanced_indexing_not_recomputed(self):
+    with Context(SPLIT_REDUCEOP=1):
+      X = Tensor.empty(32768, 4).realize()
+      idx = Tensor.randint(4, high=X.shape[0])
+      linear, _ = check_schedule(X[idx], 3, [Tensor._device_rng_counters[idx.device]])
+      # The split's final reduction remains, but the one-hot gather should collapse into a direct indexed load.
+      reduce_kernels = 0
+      for call in linear.src:
+        if call.src[0].op is not Ops.SINK: continue
+        sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
+        reduce_kernels += any(u.op is Ops.RANGE and u.arg[-1] is AxisType.REDUCE for u in sink.toposort())
+      self.assertEqual(reduce_kernels, 1)
+
   def test_push_through_reshape(self):
     x = Tensor.empty(10, 20).realize()
     out = x.argmax(1)
@@ -874,8 +870,7 @@ class TestSchedule(unittest.TestCase):
     t = Tensor.zeros((3, 3)).contiguous().realize()
     v = t[1]  # view - is_realized but not has_buffer_identity
     assert v.uop.is_realized
-    linear, _ = Tensor.linear_with_vars(v)
-    self.assertEqual(len(linear.src), 0)
+    check_schedule(v, 0)
 
   # NOTE: because empty does not have a lowered kernel if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
@@ -1457,8 +1452,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
     out = x.softmax(dtype=dtypes.float)
-    linear = out.schedule_linear()
-    self.assertEqual(len(linear.src), 3)
+    linear, _ = check_schedule(out, 3)
     # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
     self.assertEqual(linear.src[0].src[1].dtype, dtypes.half)
     self.assertEqual(linear.src[1].src[1].dtype, dtypes.float)
@@ -1873,8 +1867,7 @@ class TestFusionOp(unittest.TestCase):
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
-    linear = a.schedule_linear()
-    self.assertLessEqual(len(linear.src), 1)
+    check_schedule(a, 0)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
@@ -1883,8 +1876,7 @@ class TestFusionOp(unittest.TestCase):
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
-    linear = r.schedule_linear()
-    self.assertEqual(len(linear.src), 1)
+    check_schedule(r, 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports SLICE

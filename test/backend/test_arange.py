@@ -4,7 +4,7 @@ from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import needs_second_gpu
+from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -55,8 +55,7 @@ class TestIndexing(unittest.TestCase):
     with Context(NOOPT=1):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
-      linear, var_vals = out.linear_with_vars()
-      self.assertEqual(len(linear.src), 1)
+      linear, var_vals = check_schedule(out, 1)
       run_linear(linear, var_vals)
     self.assertEqual(out.item(), 1337)
 
@@ -72,8 +71,7 @@ class TestIndexing(unittest.TestCase):
       reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1, buffer=False))
       X = full.sum(axis=(2,3))
-      linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear.src), 1)
+      linear, var_vals = check_schedule(X, 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -98,8 +96,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
-      linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear.src), 1)
+      linear, var_vals = check_schedule(X, 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -113,8 +110,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
-      linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear.src), 1)
+      linear, var_vals = check_schedule(X, 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -157,7 +153,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       z = emb(x).realize()
       self.assertLessEqual(GlobalCounters.global_ops, op_limit)
-      self.assertEqual(GlobalCounters.kernel_count, 2)
+      assert_kernel_count(2)
     if getenv("CHECK", 1):
       import torch
       with torch.no_grad():

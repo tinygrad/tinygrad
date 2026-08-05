@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv, DEV, OSX
-from test.backend.test_schedule import check_schedule
+from test.helpers import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
 import numpy as np
 import math

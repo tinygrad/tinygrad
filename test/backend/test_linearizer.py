@@ -12,7 +12,7 @@ from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.isa import ISARenderer
-from test.helpers import replace_opts
+from test.helpers import replace_opts, check_schedule
 from test.backend.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -293,8 +293,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool()
     a.assign(b.where(2, a))
-    linear, var_vals = a.linear_with_vars()
-    assert len(linear.src) == 1
+    linear, var_vals = check_schedule(a, 1)
     run_linear(linear, var_vals)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
     program = to_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
