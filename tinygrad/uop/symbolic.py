@@ -68,7 +68,7 @@ invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
-  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
+  (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
    lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i)),
   # binary ops move inside the gate, with Invalid in the false branch
