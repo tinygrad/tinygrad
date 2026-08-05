@@ -24,6 +24,7 @@ class ElementwiseMixin(CreationMixin):
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
+      if t._uop.base.is_invalid: return t  # invalid bool is weak const
       if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.val, weak_dtype(out_dtype)))
       return t.cast(out_dtype)
     return promote(x), promote(y)
@@ -395,9 +396,10 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     t, x = self._broadcasted(x)
-    # ~ is width-dependent: min(a,b) == ~max(~a,~b) only holds at a common width, so a weak operand commits at its sibling's
-    t, x = t.cast(dt:=least_upper_dtype(t.dtype, x.dtype)), x.cast(dt)
-    return t._inverse().maximum(x._inverse())._inverse()
+    # NOTE: the int inverse is done in python, since const has weak dtype without width
+    # TODO: clean this up once _broadcasted does not promote dtype
+    if dtypes.is_float(dt:=least_upper_dtype(t.dtype, x.dtype)): return -(-t).alu(Ops.MAX, -x)
+    return (t ^ (k:=dt.const(dt.min+dt.max))).alu(Ops.MAX, x ^ k) ^ k
 
   def copysign(self, other: Self | ConstType) -> Self:
     """

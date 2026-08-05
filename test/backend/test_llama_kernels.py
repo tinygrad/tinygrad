@@ -7,7 +7,7 @@ from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
-from test.helpers import needs_second_gpu
+from test.helpers import needs_second_gpu, assert_kernel_count
 from test.backend.test_asm_gemm import has_hipcc
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -95,7 +95,7 @@ class TestLocalAmax(unittest.TestCase):
     x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
     GlobalCounters.reset()
     out = (x * local_abs_max(x)).clone().realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")

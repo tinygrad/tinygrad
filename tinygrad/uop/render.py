@@ -104,8 +104,10 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CMOD, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.CMOD, {ctx[x.src[1]]})"),
   # `.where` re-promotes its operands, so render WHERE via .alu() too
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.WHERE, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
+  # the binary operators re-promote their operands (a weak src meeting a strong one gets a cast), render those via .alu() too
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
-    strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),
+    strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")
+    if x.src[0]._broadcasted(x.src[1]) == x.src else f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
   (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),

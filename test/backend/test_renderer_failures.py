@@ -8,6 +8,7 @@ from tinygrad.helpers import prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
+from test.helpers import check_schedule
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, python_alu
 from tinygrad.tensor import Tensor
@@ -61,8 +62,7 @@ class TestCStyleFailures(unittest.TestCase):
     dtype = "bool" if op in (Ops.OR, Ops.XOR, Ops.AND) else None
     ret = Tensor.empty(1, dtype=dtype)
     for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
-    linear = ret.schedule_linear()
-    assert len(linear.src) == 1
+    linear, _ = check_schedule(ret, 1)
     src = to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[2].arg
     self.assertEqual("("*5 not in src, should_strip_paren)
 

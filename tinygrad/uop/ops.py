@@ -801,7 +801,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        return UOp(Ops.STACK, dtype, tuple(u.cast(dtype) for u in srcs))
+        # TODO: why cast here?
+        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
@@ -1096,11 +1097,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
+      # an int destination truncates a float source toward zero. trunc is monotone
+      smin, smax = self.src[0]._min_max
+      if dtypes.is_int(self.dtype) and dtypes.is_float(self.src[0].dtype) and all(math.isfinite(v) for v in (smin, smax)):
+        smin, smax = math.trunc(smin), math.trunc(smax)
       # a cast to unsigned keeps exact bounds when the source fits
       # TODO: can do more based on new dtype window
-      if dtypes.is_unsigned(self.dtype) and 0 <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0]._min_max
-      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
-        return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+      if dtypes.is_unsigned(self.dtype) and 0 <= smin and smax <= self.dtype.max: return smin, smax
+      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,): return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property
@@ -1135,6 +1139,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, volatile=False):
+    dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device,volatile=volatile))
     else:
@@ -1758,7 +1763,7 @@ def lower_weak_node(u:UOp) -> UOp|None:
   if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
   dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
                     else unwrap(dtype_from_uop(u.op, src, u.arg)))
-  return u.replace(dtype=None, src=src[:start]+tuple(s.cast(dt) for s in src[start:])).cast(u.dtype)
+  return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid else s.cast(dt) for s in src[start:])).cast(u.dtype)
 pm_lower_weak = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, select_dtype(u)).cast(u.dtype)),
   # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.

@@ -728,6 +728,17 @@ class TestOps(unittest.TestCase):
         else:
           self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
 
+  def test_pow_neg_inf_frac_exponent(self):
+    # pow(-inf, 0.3) is +inf, so the gradient 0.3*pow(-inf, -0.7) is 0, never nan
+    helper_test_op(None, lambda x: x**0.3, vals=[[-math.inf]])
+    # is_odd truncates, so it calls 3.3 odd: only the non_int guard keeps pow(-inf, 3.3) from negating to -inf
+    helper_test_op(None, lambda x: x**3.3, vals=[[-math.inf]])
+
+  def test_pow_zero_exponent(self):
+    # x ** 0 is the constant 1 for every x, so the gradient with respect to the base is 0, never nan
+    # TODO: nan ** 0, failed on WEBGPU
+    helper_test_op(None, lambda x,y: x**y, vals=[[-math.inf, math.inf, 0.0], [0.0, 0.0, 0.0]])
+
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
     # TODO: fix WEBGPU
