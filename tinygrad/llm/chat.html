@@ -31,10 +31,10 @@
       for (const ln of lines)
         if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
           try { const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
-            const s = document.createElement('span'); s.textContent = dl?.reasoning_content || dl?.content || '';
-            if (dl?.reasoning_content) { s.style.color = '#888'; rsn += dl.reasoning_content }
-            if (dl?.content) txt += dl.content
-            d.appendChild(s) } catch {}
+            if (dl?.reasoning_content) { const s = document.createElement('span'); s.style.color = '#888';
+              s.textContent = dl.reasoning_content; rsn += dl.reasoning_content; d.appendChild(s) }
+            if (dl?.content) { const s = document.createElement('span');
+              s.textContent = dl.content; txt += dl.content; d.appendChild(s) } } catch {}
       chat.scrollTop = chat.scrollHeight;
     }
     const m = {role:'assistant', content:txt}; if (rsn) m.reasoning_content = rsn; msgs.push(m);
