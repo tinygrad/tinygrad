@@ -4,13 +4,13 @@ from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count
+from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
     linear = compile_linear(tensor.schedule_linear())
-    self.assertEqual(len(linear.src), 1)
+    if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     run_linear(linear)
     np.testing.assert_equal(tensor.numpy(), desired)
     return estimate_uop(linear.src[-1]).ops
@@ -253,7 +253,7 @@ class TestIndexing(unittest.TestCase):
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
     linear = compile_linear(wq.grad.schedule_linear())
-    assert len(linear.src) == 1, f"expected one kernel for backward, got: {len(linear.src)}"
+    if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     bwd_ops = estimate_uop(linear.src[0]).ops
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")

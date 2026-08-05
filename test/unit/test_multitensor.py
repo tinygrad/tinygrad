@@ -2,7 +2,7 @@ import unittest, numpy as np
 from tinygrad import Tensor, Variable, Context, Device, TinyJit, GlobalCounters, dtypes, UOp, nn, getenv
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.uop.ops import Ops
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, assert_kernel_count
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -583,7 +583,7 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule_linear().src
-    self.assertEqual(len(sched), 0)
+    if len(sched) != 0: raise KernelCountException(0, len(sched))
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
