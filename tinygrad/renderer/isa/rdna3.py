@@ -169,29 +169,28 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
-  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4)) if x.tag is None else None
+  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS)) if x.tag is None else None
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
-  if gate is None:
-    vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
-    return x.ins(opc, src=fold_address(idx), tag=(vreg,))
-  else:
-    # hacky, takes advantage of codegen gated loads
-    n = len(alt.src) if alt.op is Ops.GROUP else alt.max_numel()
-    dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
-    out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
-    vregs = ctx.regptr(out, GP_VGPRS, width=(sz+3)//4)
-    gated = UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), UOp(Ops.NOOP), gate), arg=opc, tag=(vregs[0].parent,))
-    return out.load().after(gated.after(out.store(alt)))
+  if gate is None: return x.ins(opc, src=fold_address(idx), tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
+  # NOTE: hacky, takes advantage of codegen gated loads
+  # TODO: alt needs to be folded
+  n = len(alt.src) if alt.op is Ops.GROUP else alt.max_numel()
+  dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
+  out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
+  gated = UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), UOp(Ops.NOOP), gate), arg=opc, tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
+  return out.load().after(out.store(gated).after(out.store(alt)))
 
 def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize
   if idx.addrspace is AddrSpace.REG:
+    vregs = ctx.regptr(idx, GP_VGPRS)
     if val.op is Ops.GROUP:
-      vregs = ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4)
-      return val.replace(src=tuple(s.replace(tag=(v,)) for v,s in zip(vregs,val.src)), tag=(vregs[0].parent,))
-    else: return to_vgpr(val).replace(tag=ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4))
+      assert idx.op is Ops.SHRINK
+      copies = [ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]
+      return UOp.group(*copies).replace(tag=vregs)
+    else: return ctx.ren.copy(val, *vregs)
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz*8}")
   if gate is None: return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
   else: return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), to_vgpr(val), gate), arg=opc)

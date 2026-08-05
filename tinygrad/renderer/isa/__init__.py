@@ -32,7 +32,8 @@ def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
 class PreRegallocContext:
-  def __init__(self, sink:UOp):
+  def __init__(self, sink:UOp, ren:ISARenderer):
+    self.ren = ren
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
     self.lock: UOp|None = None
@@ -42,7 +43,6 @@ class PreRegallocContext:
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
     self.regbufs: dict[tuple[UOp, int], VRegister] = {}
-    self.gated_stores: set[UOp] = {}
 
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
@@ -50,10 +50,7 @@ class PreRegallocContext:
     buf = idx.src[0]
     while buf.op is Ops.AFTER: buf = buf.src[0]
     idxs = (idx.src[1].val,) if idx.op is Ops.INDEX else range(idx.src[-1].val)
-    if "width" in kwargs:
-      vp = self.vreg(cons, **kwargs)
-      return tuple(self.regbufs.setdefault((buf,i), vp.sub(i)) for i in idxs)
-    else: return tuple(self.regbufs.setdefault((buf,i), self.vreg(cons, **kwargs)) for i in idxs)
+    return tuple(self.regbufs.setdefault((buf,i), self.vreg(cons, **kwargs)) for i in idxs)
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
