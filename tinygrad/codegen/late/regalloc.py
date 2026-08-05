@@ -51,8 +51,11 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None) -> tuple[Register,...]:
       if v not in self.spills:
+        sz = v.cons[0].size
+        # TODO: make isa generic
         # the value of a BUFFER is its 64bit address, XMM registers need 16 bytes
-        sz = 16 if v.cons[0].size == 16 else (8 if self.vdef(v).op is Ops.BUFFER else self.vdef(v).dtype.itemsize)
+        if isinstance(ren, X86Renderer):
+          sz = 16 if v.cons[0].size == 16 else (8 if self.vdef(v).op is Ops.BUFFER else self.vdef(v).dtype.itemsize)
         sz *= v.width
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = offset
