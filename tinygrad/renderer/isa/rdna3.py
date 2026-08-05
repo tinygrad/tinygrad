@@ -332,7 +332,7 @@ def long2double(x:UOp):
   return UOp(Ops.ADD, dtype=dtypes.float64, src=(lo,hi))
 
 def const64(x:UOp):
-  v = x.arg.bits if dtypes.is_float(x.dtype) else x.arg
+  v = x.val.bits if dtypes.is_float(x.dtype) else x.val
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   return multireg(vmov(const(v)), vmov(const(v >> 32, hi_dt)), dtype=x.dtype)
 
@@ -360,10 +360,9 @@ def lower_end(ctx, x:UOp, acc:UOp):
 # --- other stuff ---
 # NOTE: this should just be triggered in to_vgpr????
 def gethalf(x:UOp, buf:UOp, idx:UOp):
-  i = idx.arg
-  b32 = buf.index(const(i // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
+  b32 = buf.index(const(idx.val // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
   # NOTE: manual construction, needs to be cleaned
-  if i % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype) 
+  if idx.val % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
@@ -413,7 +412,7 @@ pre_isel_matcher = PatternMatcher([
     lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint32)) + x.src[2:])),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != 0),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
-  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.arg else 0),), tag=GP_SGPRS)),
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
   # --- int8 alu is int16 ---
@@ -517,7 +516,7 @@ def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
   def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
-  def _immorreg(x:UOp): return x.arg if x.op is Ops.CONST else _fuse(rdefs(x))
+  def _immorreg(x:UOp): return x.val if x.op is Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
