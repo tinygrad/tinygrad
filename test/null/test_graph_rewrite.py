@@ -208,7 +208,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.uop.ops import graph_rewrite, _substitute, track_rewrites
+from tinygrad.uop.ops import graph_rewrite, _substitute, rewrite_group
 from tinygrad.uop.symbolic import symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
@@ -220,7 +220,7 @@ class TestBottomUpRewrite(unittest.TestCase):
     self.assertIs(gt, ret)
 
 # normally .substitute would be fine, but it's not tracked
-@track_rewrites()
+@rewrite_group()
 def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
 def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
 

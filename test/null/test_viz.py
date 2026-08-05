@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -14,7 +14,7 @@ from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewr
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
 from tinygrad.codegen import do_to_program
 
-@track_rewrites(name=True)
+@rewrite_group(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
   for i,pm in enumerate(pm_lst):
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
@@ -109,7 +109,7 @@ class TestViz(unittest.TestCase):
   def test_default_name(self):
     with save_viz() as viz:
       a = UOp.variable("a", 1, 10)
-      @track_rewrites()
+      @rewrite_group()
       def name_default(): return graph_rewrite(a, PatternMatcher([]))
       name_default()
     lst = viz.list_items()
@@ -118,7 +118,7 @@ class TestViz(unittest.TestCase):
   # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
     with save_viz() as viz:
-      @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
+      @rewrite_group(name=lambda *args,ret,**kwargs: ret.render())
       def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
       name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
     lst = viz.list_items()
@@ -128,18 +128,18 @@ class TestViz(unittest.TestCase):
   # name can also come from a function that returns a TracingKey
   def test_tracing_key(self):
     with save_viz() as viz:
-      @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
+      @rewrite_group(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
       def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
       test(UOp.variable("a", 1, 10)+1)
     lst = viz.list_items()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
 
-  def test_nested_track_rewrites(self):
+  def test_nested_rewrite_group(self):
     with save_viz() as viz:
-      @track_rewrites(name=lambda x,ret: TracingKey(f"inner fxn for {x.render()}", (ret,)))
+      @rewrite_group(name=lambda x,ret: TracingKey(f"inner fxn for {x.render()}", (ret,)))
       def inner(x:UOp): return graph_rewrite(x, PatternMatcher([]), name="each")
-      @track_rewrites(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
+      @rewrite_group(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
       def outer(*xs:tuple[UOp, ...]): return graph_rewrite(UOp.sink(*[inner(x) for x in xs]), PatternMatcher([]), name="all")
       items = ["a", "b", "c"]
       outer(*[UOp.variable(x, 1, 10) for x in items])
@@ -156,13 +156,13 @@ class TestViz(unittest.TestCase):
       self.assertEqual(len(steps), 1)
       self.assertEqual(steps[0]["name"], "each")
 
-  def test_profile_matches(self):
+  def test_rewrite_group_nested(self):
     with save_viz() as viz:
-      @profile_matches
+      @rewrite_group(new_ctx=False)
       def nested_function(u:UOp):
         for i in range(2): graph_rewrite(u, PatternMatcher([]), name=f"step {i+1}")
 
-      @track_rewrites()
+      @rewrite_group()
       def main_rewrite(u:UOp):
         graph_rewrite(u, PatternMatcher([]), name="init")
         nested_function(u)
@@ -173,9 +173,9 @@ class TestViz(unittest.TestCase):
     self.assertEqual(steps[1]["name"], "nested_function")
     self.assertEqual(len(steps), 4)
 
-  def test_profile_matches_invalid_arg(self):
+  def test_rewrite_group_invalid_arg(self):
     with save_viz():
-      @profile_matches
+      @rewrite_group(new_ctx=False)
       def invalid_fxn(arg:str): return graph_rewrite(UOp(Ops.SINK), PatternMatcher([]))
       with self.assertRaisesRegex(AssertionError, "invalid match tracing input"):
         invalid_fxn("test")
@@ -395,7 +395,7 @@ class TestVizIntegration(unittest.TestCase):
     graph = next(viz.get_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
-  # tracing also works without a track_rewrites context
+  # tracing also works without a rewrite_group context
   # all graph_rewrites get put into the default group
   def test_default_tracing(self):
     with save_viz() as viz:
@@ -407,11 +407,11 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(len(ls), 1)
     self.assertEqual(ls[0]["name"], "default graph_rewrite")
 
-  # using @track_rewrites organizes function calls into groups
+  # using @rewrite_group organizes function calls into groups
   # and nicely counts function calls.
   def test_group_traces(self):
     with save_viz() as viz:
-      @track_rewrites()
+      @rewrite_group()
       def test(root):
         return graph_rewrite(root, sym)
       test(c:=UOp.const(1))
@@ -420,11 +420,11 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(len(ls), 2)
     for i in range(2): self.assertEqual(ls[i]["name"], f"test n{i+1}")
 
-  # @track_rewrites always starts a new group.
+  # @rewrite_group always starts a new group.
   def test_group_combined(self):
     with save_viz() as viz:
       def default_test(root): return graph_rewrite(root, sym)
-      tracked_test = track_rewrites()(default_test)
+      tracked_test = rewrite_group()(default_test)
       c = UOp.const(1)
       default_test(c+1) # goes to the default group
       tracked_test(c)   # all rewrites after this go inside the second group.
