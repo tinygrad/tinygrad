@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from test.helpers import check_schedule
+from test.helpers import check_schedule, assert_kernel_count
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -202,7 +202,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a/b)/c
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertLessEqual(GlobalCounters.global_ops, 4*3)
 
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
