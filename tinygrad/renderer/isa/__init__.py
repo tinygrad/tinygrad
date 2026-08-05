@@ -23,6 +23,8 @@ class VRegister:
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
   def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
+  def candidates(self) -> list[tuple[Register,...]]:
+    return [self.cons[i:i+self.width] for i in range(len(self.cons) - self.width + 1) if self.cons[i].index % self.alignment == 0]
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])

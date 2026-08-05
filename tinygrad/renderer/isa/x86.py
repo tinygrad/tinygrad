@@ -857,9 +857,9 @@ class X86Renderer(ISARenderer):
       if u.op is Ops.BUFFER:
         uops[i] = self.isel_matcher.rewrite(sp.index(UOp.const(self.spill_size, dtypes.uint32), tag=u.tag))
         self.spill_size += u.max_numel() * u.dtype.itemsize
-    offset = UOp.const(self.spill_size, sp.dtype)
-    uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag)))
-    uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag)))
+    sz = UOp.const(self.spill_size, sp.dtype)
+    uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, sz), tag=sp.tag)))
+    uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, sz), tag=sp.tag)))
     return uops
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:

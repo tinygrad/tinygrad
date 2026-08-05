@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
+from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.dtype import dtypes
 
 REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL}
@@ -16,17 +17,17 @@ class LinearScanRegallocContext:
 
     lr = self.live_intervals
     range_vars: list[VRegister] = []
-    def _live_units(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
-      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return _live_units(u.src[0]) # hack
-      return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
+    def live(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
+      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return live(u.src[0]) # hack
+      return tuple(r.parent if isinstance(r, VRegister) and r.is_sub() else r for r in rdefs(u) if isinstance(r, (Register,VRegister)))
     for i, u in enumerate(reversed(self.uops)):
-      defs, uses = _live_units(u), []
-      for s in dedup(u.src): uses.extend(_live_units(s))
+      defs, uses = live(u), []
+      for s in dedup(u.src): uses.extend(live(s))
       for v in defs + tuple(uses):
         lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
         if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: range_vars.extend(defs)
+      if u.op is Ops.RANGE: range_vars.append(rdef(u))
 
     # allocate registers
     self.stack_size: int = 0
@@ -40,7 +41,7 @@ class LinearScanRegallocContext:
     # allocate the best register. Registers not in live or not used again are free and have priority,
     # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
     def alloc(v:VRegister, cons:list[tuple[Register, ...]], i:int) -> tuple[Register,...]:
-      cons = cons or [v.cons[i:i+v.width] for i in range(len(v.cons) - v.width + 1) if v.cons[i].index % v.alignment == 0]
+      cons = cons or v.candidates()
       live_inv = {r:k for k,v in live.items() for r in v}
       block = max(cons, key=lambda b: min(next((j-i for j in lr[live_inv.get(r)] if j >= i), len(uops)) if r in live_inv else len(uops) for r in b))
       for r in block:
@@ -67,20 +68,29 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
         vv = v.parent if v.is_sub() else v
-        if vv not in live: live[vv] = fill(vv,i)
+        if vv not in live:
+          live[vv] = fill(vv,i)
         self.reals.setdefault(i, {})[v] = (live[v.parent][v.pos],) if v.is_sub() else live[v]
 
       # allocate defs
       for j,v in enumerate(rdefs(u)):
+        # NOTE: X86 hack to imitate physical register lifetime constraints as vregs
+        # - need to fix this
+        if isinstance(ren, X86Renderer) and isinstance(v, Register): live[v] = (v,)
         if not isinstance(v, VRegister): continue
         if v.is_sub() and (vp := v.parent) in live:
           self.reals.setdefault(i, {})[v] = (live[vp][v.pos],)
           continue
-        # NOTE: ignoring 2 addr coalesce hint for now
+        cons = None
+        if ren.is_two_address(u) and j == 0:
+          uses = []
+          for s in u.src:
+            if rdef(s) in live: uses.extend(live.get(rdef(s)))
+          cons = ([(uses[0],)] if uses[0] in v.cons else []) + [r for r in v.candidates() if r[0] not in uses]
         vv = v.parent if v.is_sub() else v
         # parents can be defined by premature subregister op ex. collect then store
         if vv not in live:
-          live[vv] = alloc(vv, None, i+1 if u.op is not Ops.RANGE else i)
+          live[vv] = alloc(vv, cons, i+1 if u.op is not Ops.RANGE else i)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[v]
 
       # loop prologue, avoid loading inside the loop
@@ -102,7 +112,7 @@ class LinearScanRegallocContext:
         # TODO: don't reload if first use in loop is a load
         for v,rs in live_ins.pop().items():
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
-      self.ren.spill_size = self.stack_size
+    self.ren.spill_size = self.stack_size
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
