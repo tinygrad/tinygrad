@@ -261,7 +261,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | xargs -r sudo kill -9
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -306,7 +306,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | xargs -r sudo kill -9
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
