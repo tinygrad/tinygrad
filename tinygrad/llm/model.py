@@ -190,12 +190,12 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      recurrent = self.config.ssm is not None
-      cache_len, cache_dtype = ((self.config.max_context+255)//256*256 if recurrent else self.config.max_context), \
-        (dtypes.int8 if recurrent and str(x.device).startswith("AMD") else dtypes.default_float)
-      shape = (2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim)
-      self.cache_kv = Tensor.empty(*shape, dtype=cache_dtype, device=x.device).contiguous()
-      if cache_dtype == dtypes.int8: self.cache_kv_scale = Tensor.zeros(*shape[:-1], dtype=dtypes.float16, device=x.device).contiguous()
+      # hybrid models use a quantized KV cache on AMD, padded to the flash decode block multiple
+      quantize = str(x.device).startswith("AMD") and self.config.ssm is not None
+      cache_len = (self.config.max_context+255)//256*256 if quantize else self.config.max_context
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim,
+                                   dtype=dtypes.int8 if quantize else dtypes.default_float, device=x.device)
+      if quantize: self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, cache_len, dtype=dtypes.float16, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, cache_len, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -268,12 +268,19 @@ class GatedDeltaNetBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
-    is_kda, x = hasattr(self, "ssm_g_a"), x.half()
-    out_gate = (self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)).reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x)
+    is_kda = hasattr(self, "ssm_g_a")
+
+    # input processing
+    x = x.half()
+    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
+    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    initial = Tensor(start_pos).eq(0)
-    conv_state = initial.where(0, self.conv_state)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
+      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
+
+    # qkv conv, conv_state is reset when starting from position 0
+    conv_state = Tensor(start_pos).eq(0).where(0, self.conv_state)
     conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
     conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
@@ -282,21 +289,23 @@ class GatedDeltaNetBlock(FFNBlock):
     k = k.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
     q, k = q.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1), k.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
     v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = beta.sigmoid().reshape(B, T, self.num_v_heads)
-    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
-      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
     q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
-    alpha = log_alpha.transpose(1, 2).float().exp()
+    alpha = log_alpha.transpose(1, 2).exp()
+
+    # recurrent, the conv and recurrent states are updated in place
     conv_state = conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
     state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.store(conv_state.uop)))
     core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
-    gate = out_gate.sigmoid() if is_kda else out_gate.silu()
-    return self.ssm_out((self.ssm_norm(core) * gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
+
+    # output
+    core_attn_out = self.ssm_norm(core)
+    out_gate = out_gate.sigmoid() if is_kda else out_gate.silu()
+    return self.ssm_out((core_attn_out * out_gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
-      self.conv_state = Tensor.empty(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).contiguous()
-      self.recurrent_state = Tensor.empty(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).contiguous()
+      self.conv_state = Tensor.empty(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device)
+      self.recurrent_state = Tensor.empty(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device)
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
