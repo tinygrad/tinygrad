@@ -3,7 +3,7 @@ from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes
-from tinygrad.uop.symbolic import sym
+from tinygrad.uop.symbolic import const_arg, sym, symbolic, symbolic_lowered, symbolic_simple_lowered
 from test.helpers import to_uops_list
 
 simple_pm = PatternMatcher([
@@ -19,6 +19,12 @@ def const_values(u:UOp):
   raise AssertionError(f"expected const-like UOp, got {u.op}")
 
 class TestGraphRewriteConst(unittest.TestCase):
+  def test_kind_crossing_pair_fold(self):
+    pair = UOp.const(2.5).cast(dtypes.int)
+    self.assertIs(graph_rewrite(pair, symbolic).op, Ops.CONST)
+    self.assertIs(graph_rewrite(pair, symbolic_lowered).op, Ops.CAST)
+    self.assertEqual(graph_rewrite(pair*2, symbolic_simple_lowered).val, 4)
+
   def test_gep_const(self):
     v1 = UOp.const((0,1,2), dtypes.int)
     v2 = v1.index(1)
@@ -394,7 +400,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].val == 5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert const_arg(u.src[1]) == 5
 
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
