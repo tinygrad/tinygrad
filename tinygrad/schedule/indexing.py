@@ -29,10 +29,12 @@ BUFFER_STATE_OPS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops
 
 def realize_custom_kernel_srcs(ctx:dict[UOp, None], c:UOp) -> None:
   # the inputs of a custom kernel must resolve to a buffer state. realize the ones that don't (e.g. lazy const
-  # expressions above the call), otherwise a reduce in that subgraph has no ranges and crashes in rangeify
+  # expressions above the call), otherwise a reduce in that subgraph has no ranges and crashes in rangeify.
+  # NOTE: only view-only movement ops preserve the underlying buffer. anything computed (ALU, REDUCE, ...) must be
+  # realized even if one of its sources is a buffer, since the CALL gives the whole subgraph no ranges
   for s in c.src[1:]:
     t = s
-    while len(t.src) and t.op not in BUFFER_STATE_OPS: t = t.src[0]
+    while t.op in GroupOp.Movement and len(t.src): t = t.src[0]
     if t.op not in BUFFER_STATE_OPS: ctx[s] = None
 
 pm_generate_realize_map = PatternMatcher([
