@@ -303,7 +303,7 @@ def abi(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
   def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
   def _stack_arg(disp:int):
-    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp), imm(dtypes.uint8, 8))
+    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, src=(imm(dtypes.int32, disp),), dtype=dtypes.int32), imm(dtypes.uint8, 8))
   if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
   else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
@@ -329,11 +329,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
   return X86Ops.VMOVSSm
 
 def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
-  # register placeholders with real registers
-  # if x.arg is X86Ops.DEFINE and x.tag is not None: return None
-  if x.arg is X86Ops.LOOP_CMP: return None
-  # this is an immediate
-  if x.arg is X86Ops.FRAME_INDEX: return None
+  if x.arg in {X86Ops.LOOP_CMP, X86Ops.FRAME_INDEX}: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -593,7 +589,8 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.ren.spill_size + x.tag), [nx])),
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, src=(UPat.cvar("disp"),), name="x"), lambda ctx,x,disp:
+    (nx:=x.const_like(ctx.ren.spill_size + disp.val), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
