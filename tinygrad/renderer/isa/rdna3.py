@@ -166,30 +166,35 @@ def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
 def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
-def load(ctx, x:UOp, idx:UOp):
-  n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
+def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
+  n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
-  vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
+  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4)) if x.tag is None else None
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
-  return x.ins(opc, src=fold_address(idx), tag=(vreg,))
+  if gate is None:
+    vreg = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
+    return x.ins(opc, src=fold_address(idx), tag=(vreg,))
+  else:
+    # hacky, takes advantage of codegen gated loads
+    n = len(alt.src) if alt.op is Ops.GROUP else alt.max_numel()
+    dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
+    out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
+    vregs = ctx.regptr(out, GP_VGPRS, width=(sz+3)//4)
+    gated = UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), UOp(Ops.NOOP), gate), arg=opc, tag=(vregs[0].parent,))
+    return out.load().after(gated.after(out.store(alt)))
 
-def store(ctx, idx:UOp, val:UOp):
-  n = idx.src[-1].arg if idx.op is Ops.SHRINK else 1
-  sz = n * idx.dtype.itemsize * 8
-  opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz}")
-  return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
-
-# TODO: cleanup + make load copy zero cost?
-def gated_load(idx:UOp, alt:UOp, gate:UOp):
-  buf = idx.src[0] if idx.src[0].op is Ops.BUFFER else idx.src[0].src[0]
-  n = alt.max_numel()
-  dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
-  out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
-  thru = out.load()
-  # out.store(alt) needs to be emitted directly before the gated store/copy
-  gated = out.store(idx.load(), gate).after(out.store(alt.after(idx, gate)))
-  return thru.after(gated)
+def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
+  n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
+  sz = n * idx.dtype.itemsize
+  if idx.addrspace is AddrSpace.REG:
+    if val.op is Ops.GROUP:
+      vregs = ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4)
+      return val.replace(src=tuple(s.replace(tag=(v,)) for v,s in zip(vregs,val.src)), tag=(vregs[0].parent,))
+    else: return to_vgpr(val).replace(tag=ctx.regptr(idx, GP_VGPRS, width=(sz+3)//4))
+  opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz*8}")
+  if gate is None: return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
+  else: return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), to_vgpr(val), gate), arg=opc)
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
@@ -404,8 +409,6 @@ pm_int_to_float = PatternMatcher([
 ])
 
 pre_isel_matcher = PatternMatcher([
-  # --- gated ---
-  (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")), gated_load),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -447,11 +450,10 @@ pre_isel_matcher = PatternMatcher([
 
 isel_matcher = PatternMatcher([
   # --- mem ops ---
-  # prevent members of gated store address to be irrepareably lowered ahead of time in isel
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")).named("x"), lambda ctx,x,idx,val,gate: \
-    x.replace(src=(idx.store(val), val, gate)) if idx.addrspace is not AddrSpace.REG else None),
-  (UPat.var("idx").store(UPat.var("val")), lambda ctx,idx,val: store(ctx,idx,val) if idx.addrspace is not AddrSpace.REG else None),
-  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: load(ctx, x, idx) if idx.addrspace is not AddrSpace.REG else None),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")), store),
+  (UPat.var("idx").store(UPat.var("val")), store),
+  (UPat.var("idx").load(name="x"), load),
+  (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")).named("x"), load),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -498,7 +500,8 @@ pre_regalloc_matcher = PatternMatcher([
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
     ((nx := UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))), [nx])),
-  (UPat.var("idx").store(UPat()), lambda idx: (idx, [idx])),
+  (UPat(Ops.STORE, src=(UPat.var("addr"), UPat.var("val")), name="x"), lambda x,addr,val:
+    ((nx := UOp(Ops.INS, arg=x.arg, src=addr.src + ((val,) if val.op is not Ops.NOOP else ()), tag=x.tag)), [nx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
@@ -522,7 +525,7 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
 
-  # print("encoding", opc, rdefs(x), [(s.op, s.arg, rdefs(s)) for s in oprs])
+  # print("encoding", opc, rdefs(x), [(s.op,s.arg,rdefs(s)) for s in oprs])
 
   kw = args = None
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
@@ -575,8 +578,6 @@ class RDNA3Renderer(ISARenderer):
     super().__init__(target)
     self.tensor_cores = tc.get_amd(target.arch)
 
-  @staticmethod
-  def mem2reg_alloc(name:str, u:UOp) -> VRegister: return VRegister(name, GP_VGPRS, width=(u.src[0].dtype.itemsize+3)//4)
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""

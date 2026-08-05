@@ -24,7 +24,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, Mem2RegContext, pm_mem2reg_rewrite
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
@@ -391,7 +391,7 @@ pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK, Ops.INS)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, name="u", src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
@@ -411,7 +411,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    if ctx.mem2reg_alloc is not None: lst = line_rewrite(lst, pm_mem2reg_rewrite, ctx=Mem2RegContext(ctx))
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, ctx.pre_regalloc_context)
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
