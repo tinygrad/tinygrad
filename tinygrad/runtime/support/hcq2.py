@@ -5,7 +5,7 @@ from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -393,7 +393,7 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
 
 hcq_compile_cache:dict[bytes, UOp] = {}
 
-@track_rewrites(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+@rewrite_group(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}", new_ctx=True)
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   if input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
@@ -477,7 +477,7 @@ def link_buf_key(a:UOp): return a.key, to_tuple(a.device)
 link_buf_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 link_linear_cache:dict[bytes, UOp] = {}
 
-@track_rewrites(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+@rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}", new_ctx=True)
 def hcq_link(linear:UOp, cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear_key:=linear.key)) is not None: return linked
 

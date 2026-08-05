@@ -1515,54 +1515,50 @@ def add_trace_group(kt:TracingKey) -> None:
   tracked_ctxs.append([])
 
 active_group:list[int] = []
-def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
+active_rewrites:list[TrackedGraphRewrite] = []
+def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=False):
+  if not new_ctx: assert not callable(name) and not replay, "name fxn and replay are only supported for new_ctx groups"
   def _decorator(func):
     def __wrapper(*args, **kwargs):
+      # without tracking, we just call the function (unless top-level, which always profiles)
+      if TRACK_MATCH_STATS < 2 and not new_ctx: return func(*args, **kwargs)
       fn = key = func.__name__
       idx = -1
       if TRACK_MATCH_STATS >= 2:
-        add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
-        active_group.append(idx:=len(tracked_keys)-1)
+        if new_ctx:
+          add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
+          active_group.append(idx:=len(tracked_keys)-1)
+        else:
+          rewrite_name = str(kwargs.get("name", None) or fn)
+          assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {rewrite_name} with {args}"
+          loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+          depth = len(active_rewrites)
+          if not tracked_ctxs: add_trace_group(TracingKey(f"default {fn}"))
+          dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
+          tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
+                                                                   kwargs.get("walk", False), kwargs.get("enter_calls", False)))
+          active_rewrites.append(ctx)
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2: active_group.pop()
-      if TRACK_MATCH_STATS >= 2 and callable(name):
-        name_ret = name(*args, **kwargs, ret=ret)
-        assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
-        tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
-        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
+      if TRACK_MATCH_STATS >= 2:
+        if new_ctx: active_group.pop()
+        else: active_rewrites.pop()
+        if callable(name):
+          name_ret = name(*args, **kwargs, ret=ret)
+          assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
+          tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
+          e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if CAPTURE_PROCESS_REPLAY and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-        loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+        replay_loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
         inputs = (fn, args, kwargs, ContextVar._cache)
-        replay_capture.append(pickle.dumps(inputs+(loc, ret)))
+        replay_capture.append(pickle.dumps(inputs+(replay_loc, ret)))
       return ret
     return __wrapper
   return _decorator
-
-active_rewrites:list[TrackedGraphRewrite] = []
-def profile_matches(fxn:Callable):
-  def wrap_profile_matches(*args, **kwargs):
-    if TRACK_MATCH_STATS >= 2:
-      name = str(kwargs.get("name", None) or fxn.__name__)
-      assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
-      loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-      depth = len(active_rewrites)
-      if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
-      dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
-      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False),
-                                                               kwargs.get("walk", False), kwargs.get("enter_calls", False)))
-      active_rewrites.append(ctx)
-      with cpu_profile(name, "TINY"):
-        ret = fxn(*args, **kwargs)
-      active_rewrites.pop()
-      return ret
-    # without tracking, we just call the function
-    return fxn(*args, **kwargs)
-  return wrap_profile_matches
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None):
@@ -1742,7 +1738,7 @@ class RewriteContext:
           if n in waitlist: stack.extend(waitlist.pop(n))
     return self.replace[root]
 
-@profile_matches
+@rewrite_group()
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
