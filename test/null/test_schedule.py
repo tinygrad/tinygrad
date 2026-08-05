@@ -3,31 +3,10 @@ import gc, unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
-from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import compile_linear, run_linear
+from tinygrad.helpers import GlobalCounters, Context
+from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program
-
-class KernelCountException(Exception): pass
-def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
-  if to_prerealize:
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
-  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
-  else:
-    assert isinstance(t, UOp), f"can't schedule {t}"
-    linear, var_vals = Tensor(t).linear_with_vars()
-  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
-                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
-  if kernel_cnt != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
-    if DEBUG >= 3:
-      for i,call in enumerate(linear.src):
-        print("kernel", i+1)
-        print(call.src[0])
-    raise KernelCountException(f"{kernel_cnt} != {allowed}")
-  # test compiling the linear
-  compile_linear(linear)
-  return linear, var_vals
+from test.helpers import check_schedule
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -143,7 +122,7 @@ class TestSimpleSchedule(unittest.TestCase):
     a = Tensor.empty(16,16).sum(axis=1)
     a1 = a.reshape(4,4)
     a2 = a.reshape(16,1,1)
-    self.assertEqual(len(Tensor.schedule_linear(a1, a2).src), 1)
+    check_schedule([a1, a2], 1)
 
 class TestSchedule(unittest.TestCase):
   def setUp(self):
@@ -155,8 +134,7 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1).clone()
-    linear, var_vals = t.linear_with_vars()
-    self.assertEqual(len(linear.src), kcount)
+    check_schedule(t, kcount)
 
   def test_arange_avgpool2d_fused_noopt(self):
     with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
@@ -874,8 +852,7 @@ class TestSchedule(unittest.TestCase):
     t = Tensor.zeros((3, 3)).contiguous().realize()
     v = t[1]  # view - is_realized but not has_buffer_identity
     assert v.uop.is_realized
-    linear, _ = Tensor.linear_with_vars(v)
-    self.assertEqual(len(linear.src), 0)
+    check_schedule(v, 0)
 
   # NOTE: because empty does not have a lowered kernel if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
@@ -1457,8 +1434,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
     out = x.softmax(dtype=dtypes.float)
-    linear = out.schedule_linear()
-    self.assertEqual(len(linear.src), 3)
+    linear, _ = check_schedule(out, 3)
     # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
     self.assertEqual(linear.src[0].src[1].dtype, dtypes.half)
     self.assertEqual(linear.src[1].src[1].dtype, dtypes.float)
@@ -1873,8 +1849,7 @@ class TestFusionOp(unittest.TestCase):
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
-    linear = a.schedule_linear()
-    self.assertLessEqual(len(linear.src), 1)
+    check_schedule(a, 0)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
@@ -1883,8 +1858,7 @@ class TestFusionOp(unittest.TestCase):
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
-    linear = r.schedule_linear()
-    self.assertEqual(len(linear.src), 1)
+    check_schedule(r, 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports SLICE

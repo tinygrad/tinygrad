@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, compile_linear
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -355,8 +355,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_const_like_shrink_on_shard_axis(self):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = t.const_like(2)[:, :8]
-    linear, var_vals = out.linear_with_vars()
-    self.assertEqual(len(linear.src), 0)
+    linear, var_vals = check_schedule(out, 0)
     run_linear(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
