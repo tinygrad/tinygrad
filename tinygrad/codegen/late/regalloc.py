@@ -19,7 +19,7 @@ class LinearScanRegallocContext:
     range_vars: list[VRegister] = []
     def live(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return live(u.src[0]) # hack
-      return tuple(r.parent if isinstance(r, VRegister) and r.is_sub() else r for r in rdefs(u) if isinstance(r, (Register,VRegister)))
+      return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for i, u in enumerate(reversed(self.uops)):
       defs, uses = live(u), []
       for s in dedup(u.src): uses.extend(live(s))
@@ -68,15 +68,13 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
         vv = v.parent if v.is_sub() else v
-        if vv not in live:
-          live[vv] = fill(vv,i)
+        if vv not in live: live[vv] = fill(vv,i)
         self.reals.setdefault(i, {})[v] = (live[v.parent][v.pos],) if v.is_sub() else live[v]
 
       # allocate defs
       for j,v in enumerate(rdefs(u)):
         # NOTE: X86 hack to imitate physical register lifetime constraints as vregs
         # - need to fix this
-        if isinstance(ren, X86Renderer) and isinstance(v, Register): live[v] = (v,)
         if not isinstance(v, VRegister): continue
         if v.is_sub() and (vp := v.parent) in live:
           self.reals.setdefault(i, {})[v] = (live[vp][v.pos],)
