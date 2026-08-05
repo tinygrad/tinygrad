@@ -80,7 +80,7 @@ def main(args) -> None:
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
-    data = viz.get_render(viz_data, step["query"]+"&update_sink=false")
+    data = viz.get_render(viz_data, step["query"], update_sink=False)
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if print_graph and "graph" in m and not args.json:

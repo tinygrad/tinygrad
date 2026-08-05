@@ -611,11 +611,11 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 
 # ** Main render function to get the complete details about a trace event
 
-def get_render(viz_data:VizData, query:str) -> dict:
+def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   url = urlparse(query)
-  i, j, fmt = pop_int(qs:=parse_qs(url.query), "ctx"), pop_int(qs, "step"), url.path.lstrip("/")
+  i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
-  if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **qs), "content_type":"text/event-stream"}
+  if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data)) is None: return {"src":"No linear found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
@@ -662,7 +662,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
 
 # ** HTTP server
 
-def pop_int(query:dict[str, list[str]], k:str) -> int: return int(query.pop(k,["0"])[0])
+def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
 def filter_keys(data:dict) -> dict: return {k:v for k,v in data.items() if not k.startswith("_")}
 
