@@ -22,11 +22,12 @@ class ElementwiseMixin(CreationMixin):
     y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    # keep weak CONST weak, might lift weakint -> weakfloat
+    # a weak stays weak, might lift weakint -> weakfloat
     def promote(t):
       if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.val, weak_dtype(out_dtype)))
-      return t.cast(out_dtype)
+      dt = weak_dtype(out_dtype) if (weak:=t.dtype in dtypes.weaks) else out_dtype
+      # constuct new const directly
+      return t._wrap_uop(t._uop.const_like(t._uop.base.val, dt)) if weak and t._uop.base.op is Ops.CONST else t.cast(dt)
     return promote(x), promote(y)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
