@@ -35,7 +35,11 @@ def derandomize_model(model):
     p.replace(Tensor.empty(p.shape, device=p.device, dtype=p.dtype))
     p.realize()
 
-class KernelCountException(Exception): pass
+class KernelCountException(Exception):
+  def __init__(self, expected:int, got:int):
+    self.expected, self.got = expected, got
+    super().__init__(f"expected {expected}, got {got}")
+
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
@@ -52,7 +56,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
       for i,call in enumerate(linear.src):
         print("kernel", i+1)
         print(call.src[0])
-    raise KernelCountException(f"{kernel_cnt} != {allowed}")
+    raise KernelCountException(allowed, kernel_cnt)
   # test compiling the linear
   compile_linear(linear)
   return linear, var_vals
@@ -76,15 +80,15 @@ def jit_cache_count(linear:UOp) -> int:
 def assert_jit_cache_len(fxn, expected_len):
   linear = fxn.captured.linear if fxn.captured is not None else None
   if linear is None or not linear.src:
-    assert expected_len == 0, expected_len
+    if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
   if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 3 # HCQ2: merged same-queue calls + finalizer + bumps
   if call_is_graph(linear.src[0]):
-    assert len(linear.src) == 1, len(linear.src)
+    if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION
-    assert len(inner.src) == expected_len, f"expected {expected_len}, got {len(inner.src)}"
+    if len(inner.src) != expected_len: raise KernelCountException(expected_len, len(inner.src))
   else:
-    assert len(linear.src) == expected_len, f"expected {expected_len}, got {len(linear.src)}"
+    if len(linear.src) != expected_len: raise KernelCountException(expected_len, len(linear.src))
 
 def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
 
