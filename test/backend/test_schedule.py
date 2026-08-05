@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import Ops, UPat
 from tinygrad.helpers import DEV, GlobalCounters, Context, all_same, temp
 from tinygrad.engine.realize import run_linear
-from test.helpers import check_schedule
+from test.helpers import check_schedule, assert_kernel_count
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
@@ -103,9 +103,9 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.arange(16).clone().realize()
     GlobalCounters.reset()
     a[4] = 3
-    self.assertEqual(GlobalCounters.kernel_count, 0)
+    assert_kernel_count(0)
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertListEqual(a.tolist(), [0, 1, 2, 3, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
   def test_no_extra_contiguous_on_setitem_assign_back(self):

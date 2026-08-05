@@ -2,11 +2,11 @@
 import gc, unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.engine.realize import run_linear, compile_linear
-from tinygrad.codegen import to_program
-from test.helpers import check_schedule
+from tinygrad.codegen import to_program, full_rewrite_to_sink
+from test.helpers import check_schedule, assert_kernel_count
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -202,7 +202,7 @@ class TestSchedule(unittest.TestCase):
     GlobalCounters.reset()
     expr = (a/b)/c
     expr.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertLessEqual(GlobalCounters.global_ops, 4*3)
 
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
@@ -334,6 +334,11 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + b
     check_schedule([out0, out1], 2)
+
+  def test_reduce_broadcast_not_recomputed(self):
+    a = Tensor.empty(32, 16).realize()
+    out = a-a.mean(axis=0, keepdim=True)
+    check_schedule(out, 2)
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     q = Tensor.empty(32,8,16,8).realize()
@@ -691,6 +696,19 @@ class TestSchedule(unittest.TestCase):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
     check_schedule(xt, 1)
+
+  def test_split_advanced_indexing_not_recomputed(self):
+    with Context(SPLIT_REDUCEOP=1):
+      X = Tensor.empty(32768, 4).realize()
+      idx = Tensor.randint(4, high=X.shape[0])
+      linear, _ = check_schedule(X[idx], 3, [Tensor._device_rng_counters[idx.device]])
+      # The split's final reduction remains, but the one-hot gather should collapse into a direct indexed load.
+      reduce_kernels = 0
+      for call in linear.src:
+        if call.src[0].op is not Ops.SINK: continue
+        sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
+        reduce_kernels += any(u.op is Ops.RANGE and u.arg[-1] is AxisType.REDUCE for u in sink.toposort())
+      self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):
     x = Tensor.empty(10, 20).realize()
