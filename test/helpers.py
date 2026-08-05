@@ -8,10 +8,11 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, Target, DEV
+from tinygrad.helpers import T, Target, DEV, DEBUG, Context
 from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
+from tinygrad.engine.realize import compile_linear
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
@@ -33,6 +34,28 @@ def derandomize_model(model):
   for p in get_parameters(model):
     p.replace(Tensor.empty(p.shape, device=p.device, dtype=p.dtype))
     p.realize()
+
+class KernelCountException(Exception): pass
+def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
+  if to_prerealize:
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
+  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
+  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
+  else:
+    assert isinstance(t, UOp), f"can't schedule {t}"
+    linear, var_vals = Tensor(t).linear_with_vars()
+  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
+  if kernel_cnt != allowed:
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
+    if DEBUG >= 3:
+      for i,call in enumerate(linear.src):
+        print("kernel", i+1)
+        print(call.src[0])
+    raise KernelCountException(f"{kernel_cnt} != {allowed}")
+  # test compiling the linear
+  compile_linear(linear)
+  return linear, var_vals
 
 def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]

@@ -1096,11 +1096,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
+      # an int destination truncates a float source toward zero. trunc is monotone
+      smin, smax = self.src[0]._min_max
+      if dtypes.is_int(self.dtype) and dtypes.is_float(self.src[0].dtype) and all(math.isfinite(v) for v in (smin, smax)):
+        smin, smax = math.trunc(smin), math.trunc(smax)
       # a cast to unsigned keeps exact bounds when the source fits
       # TODO: can do more based on new dtype window
-      if dtypes.is_unsigned(self.dtype) and 0 <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0]._min_max
-      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
-        return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+      if dtypes.is_unsigned(self.dtype) and 0 <= smin and smax <= self.dtype.max: return smin, smax
+      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,): return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property
@@ -1135,6 +1138,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, volatile=False):
+    dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device,volatile=volatile))
     else:
