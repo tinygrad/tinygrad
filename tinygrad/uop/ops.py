@@ -801,7 +801,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        return UOp(Ops.STACK, dtype, tuple(u.cast(dtype) for u in srcs))
+        # TODO: why cast here?
+        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
@@ -1762,7 +1763,7 @@ def lower_weak_node(u:UOp) -> UOp|None:
   if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
   dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
                     else unwrap(dtype_from_uop(u.op, src, u.arg)))
-  return u.replace(dtype=None, src=src[:start]+tuple(s.cast(dt) for s in src[start:])).cast(u.dtype)
+  return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid else s.cast(dt) for s in src[start:])).cast(u.dtype)
 pm_lower_weak = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, select_dtype(u)).cast(u.dtype)),
   # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.

@@ -55,11 +55,11 @@ class TestDTypeFromUOp(unittest.TestCase):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
     self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
-    self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
+    for u in (UOp.param(0, dtypes.bool, ()).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)
     for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
               UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
