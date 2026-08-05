@@ -664,7 +664,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   subs: dict[UOp, UOp] = {}
   for u in tsink.toposort():
     u2 = u.replace(src=tuple(subs.get(s, s) for s in u.src))
-    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device, coeff=contig[u])) if u in contig else u2
+    subs[u] = u2.alu(Ops.STAGE, arg=BufferizeOpts(u2.device)) if u in contig else u2
   tsink = subs[tsink]
 
   # add buffers on copy

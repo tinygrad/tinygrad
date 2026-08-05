@@ -40,7 +40,6 @@ class BufferizeOpts:
   device: str|tuple[str, ...]|int|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
-  coeff: int = 1
 
 @dataclass
 class IndexingContext:
