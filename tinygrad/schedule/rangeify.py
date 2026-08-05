@@ -585,7 +585,7 @@ pm_expand_broadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
 ])
 
-def expand_coeff(sink:UOp) -> tuple[dict[UOp,int], dict[UOp,int]]:
+def expand_coeff(sink:UOp) -> dict[UOp,int]:
   coeff: dict[UOp,int] = {sink: 1}
   contig: dict[UOp,int] = {}
   for u in reversed(list(sink.toposort())):
