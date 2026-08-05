@@ -24,6 +24,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   return root.const_like(bitcast(c.val, c.dtype, root.dtype))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
+  # a width stated by a CAST over a CONST is still a constant. matching may not see through that pair, evaluation must
+  if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return u.dtype.const(u.src[0].val)
   if u.op is Ops.CONST: return u.val
   if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.val for s in u.src)
   return None
@@ -96,6 +98,11 @@ pm_remove_invalid = PatternMatcher([
    if any(x.is_invalid for x in s.src) else None),
 ])
 
+# collapse the pair CAST(dt, CONST(v)) into a typed CONST. composed only into pm_decomp, below THE BOUNDARY: the decomp waves
+# mint pairs and a final program may not contain a weak CONST. above the boundary the pair is the honest form.
+# TODO: delete this once CONST has no dtype
+pm_fold_cast_const = PatternMatcher([(UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val))])
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -132,10 +139,10 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
-  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)).or_casted(),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
-  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
-  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
+  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)).or_casted(),)*2, name="a"), fold_const_alu),
+  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)).or_casted(),)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -152,8 +159,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
                                              and isinstance(x.val, float) and (math.isnan(x.val) or math.isinf(x.val)) else 0)),
   # *** cast/bitcast ***
-  # TODO: delete this once CONST has no dtype
-  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
@@ -380,8 +385,9 @@ def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   return UOp.const(True).uprod(*keep).where(x, i) if drop else None
 pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 
-# move conditions from where to load's valid, drop clauses already in load
-def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
+# move conditions from where to load's valid, drop clauses already in load. only a zero alt is free, the gated load already yields 0
+def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp, alt:UOp) -> UOp|None:
+  if const_arg(alt) != 0: return None
   where_clauses, load_valid = list(cond.split_uop(Ops.AND)), idx.get_valid()
   in_load = set(load_valid.split_uop(Ops.AND))
   idx_index = {u for u in idx.backward_slice_with_self if u.op is Ops.INDEX}
@@ -396,9 +402,9 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([
-  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast"), 0), where_on_load),
-  (UPat.var("cond").where(0, UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast")),
-   lambda cond,buf,idx,or_cast: where_on_load(cond.logical_not(),buf,idx,or_cast)),
+  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast"), UPat.var("alt")), where_on_load),
+  (UPat.var("cond").where(UPat.var("alt"), UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast")),
+   lambda cond,buf,idx,or_cast,alt: where_on_load(cond.logical_not(),buf,idx,or_cast,alt)),
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
