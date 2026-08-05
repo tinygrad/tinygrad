@@ -13,20 +13,12 @@ WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * 
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32), math.log2(math.e)
 Q5_K, Q6_K, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 13, 14, 23, 256, 32, 44, 210, 34
 
-def warp_reduce(val:UOp, lane:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
-  for offset in ([16, 8, 4, 2, 1] if full_wave else [8, 4, 2, 1]):
-    idx = ((lane ^ offset) * 4).int()
+def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
+  for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = UOp(Ops.CUSTOM, dtypes.float, (idx, val),
-                arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
-    val = val.maximum(other) if maximum else val + other
-  return val
-
-def warp_sum_swizzle(val:UOp) -> UOp:
-  for offset in (16, 8, 4, 2, 1):
     other = UOp(Ops.CUSTOM, dtypes.float, (val,), arg=
       f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))")
-    val = val + other
+    val = val.maximum(other) if maximum else val + other
   return val
 
 def _reg(shape:tuple[int, ...], slot:int, value:float, dep:UOp|None=None) -> UOp:
@@ -62,7 +54,7 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, cache_scale, va
   updates:list[UOp] = []
   for head,q_head in enumerate(q_heads):
     scores = tuple(warp_reduce(sum((q[b, q_head, 0, d].float()*k for d,k in zip(dims, key_kvals)),
-                                   UOp.const(0, dtypes.float)), lane + wave*WARP_SIZE, full_wave=True) / math.sqrt(D) for key_kvals in kvals)
+                                   UOp.const(0, dtypes.float)), full_wave=True) / math.sqrt(D) for key_kvals in kvals)
     prev_acc, prev_max, prev_sum = acc.after(offset)[head], row_max.after(offset)[head], row_sum.after(offset)[head]
     new_max = functools.reduce(lambda a,vs:a.maximum(vs[0].where(vs[1], UOp.const(-math.inf, dtypes.float))), zip(valid, scores), prev_max)
     alpha = ((prev_max-new_max)*LOG2E).exp2()
@@ -140,11 +132,11 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int
   m_ij, rm2 = _reg((TM,), 7, -math.inf, n_tile), UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
   ri_w = UOp.range(TM, 270)
-  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], lane, maximum=True)).end(ri_w))
+  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], maximum=True)).end(ri_w))
   tile_max = m_ij.reshape(TM, 1).expand(TM, TN).maximum(-1e30)
   S_reg = S_reg.after(S_reg.store(((S_reg - tile_max) * LOG2E).exp2()))
   p_local, ri_ws = _reg((TM,), 8, 0, n_tile), UOp.range(TM, 295, AxisType.WEAK)
-  p_sum = p_local.after(p_local[ri_ws].store(sum((warp_reduce(S_reg[ri_ws, rn], lane) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
+  p_sum = p_local.after(p_local[ri_ws].store(sum((warp_reduce(S_reg[ri_ws, rn]) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
   P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
   P_write = P_lds.reshape(WAVES_N, WAVES_M, TM, LANES_PER_WAVE_M, 1, TN, LANES_PER_WAVE_N, 1)
   P_write = P_write.permute((1, 0, 3, 6, 2, 4, 5, 7)).reshape(THREADS_PER_BLOCK, TM, TN)
@@ -226,7 +218,7 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int) ->
   token_group, lane = UOp.range(tokens*groups, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
   token, group = token_group//groups, token_group%groups
   x = x.reshape(tokens, groups, 32)
-  group_scale = warp_reduce(x[token, group, lane].float().abs(), lane, maximum=True, full_wave=True) / 127
+  group_scale = warp_reduce(x[token, group, lane].float().abs(), maximum=True, full_wave=True) / 127
   group_scale = group_scale.maximum(1e-8)
   word_lane = lane.minimum(7)
   xs = tuple(x[token, group, word_lane*4+i].float() for i in range(4))
@@ -268,8 +260,8 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   for row_idx,row in enumerate(rows):
     previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
     av, bv = alpha[bh, token, row if alpha_dim > 1 else 0].load(), beta[bh, token].load()
-    state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
-    state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), lane, full_wave=True)
+    state_k = warp_reduce(sum((x*y for x,y in zip(previous, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
+    state_q = warp_reduce(sum((x*y for x,y in zip(previous, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
     delta = (v[bh, token, row].load() - state_k*av) * bv
     updates += [x*av + delta*y for x,y in zip(previous, keys)]
     stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q*av + delta*kq[bh, token]))
@@ -306,7 +298,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   group = lane+chunk*32
   value = group_dot(token, output, group) if group_count % 32 == 0 else \
     (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
-  total = warp_sum_swizzle(value)
+  total = warp_reduce(value, full_wave=True)
   return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(token_output_chunk, lane).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 

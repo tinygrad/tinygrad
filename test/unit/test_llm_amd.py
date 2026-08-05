@@ -7,6 +7,7 @@ from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
   def test_values_and_scales(self):
+    if not str(Tensor.empty(1).device).startswith("AMD"): self.skipTest("AMD required")
     x = np.linspace(-3.1, 2.7, 64, dtype=np.float32).reshape(2, 32)
     quant, scale = q8_quantize(Tensor(x), 2, 32)
     scale_np = np.maximum(np.max(np.abs(x), axis=-1, keepdims=True) / 127, 1e-8)
