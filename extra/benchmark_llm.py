@@ -1,3 +1,4 @@
+# DEV=USB+AMD python extra/benchmark_llm.py --model /raid/models/Qwen3.6-27B-IQ4_XS.gguf --max-context 131072 --prompt-tokens 3072
 import argparse, time
 from tinygrad.llm.model import Transformer
 
