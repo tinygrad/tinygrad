@@ -126,6 +126,19 @@ class TestCustomKernel(unittest.TestCase):
     # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
     self.assertEqual(x.tolist(), [1, 2, 3, 4] if Device.DEFAULT != "WEBGPU" else [0, 1, 2, 3])
 
+  def test_lazy_const_srcs_with_reduce(self):
+    # lazy const expressions above a custom kernel call don't resolve to a buffer state, they must be realized.
+    # without this, the rangeify doesn't assign ranges to the subgraph above the call and reduce conversion crashes
+    x = Tensor.linspace(-1.0, 1.0, 64)  # Tensor.arange is cumsum-based, so this contains a REDUCE with no buffer anchor
+    out = Tensor.empty_like(x)
+    def copy_kernel(out:UOp, inp:UOp) -> UOp:
+      i = UOp.range(inp.numel(), 0)
+      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name="copy"))
+    # forge the call like llm/kernels does: params and call args, no Tensor.custom_kernel contiguous
+    params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate((out.uop, x.uop)))
+    call = copy_kernel(*params).call(out.uop, x.uop)
+    np.testing.assert_array_equal(Tensor(out.uop.after(call)).realize().numpy(), x.realize().numpy())
+
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
 
