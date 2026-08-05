@@ -222,7 +222,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   st = time.perf_counter()
   for d in call.arg.aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals):
-      if ctx.wait: Device[d].synchronize()
+      if ctx.wait: cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
   return time.perf_counter() - st
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
