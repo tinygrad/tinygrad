@@ -62,18 +62,28 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((x._uop.base.op, x._uop.base.val, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
 
-  def test_weak_expression_anchors_at_strong_lub(self):
-    # regression test for the HALF bert nan (#17408, reverted in #17409): lub(int32, weakfloat)==weakfloat makes
-    # `loss_mask.sum() + 1e-5` a weakfloat EXPRESSION. Meeting a strong float in a binop must pin it at the lub
-    denom = (Tensor.zeros(912, dtype=dtypes.int32) != Tensor.zeros(912, dtype=dtypes.float32)).sum() + 1e-5
-    self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
-    x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
-    self.assertIs(y.dtype, dtypes.float32)
-    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
-    self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
+  def test_weak_expression_crossing_a_buffer_commits_at_the_demand(self):
+    # regression test for the HALF bert nan (#17409). `loss_mask.sum() + 1e-5` is a weakfloat EXPRESSION;
+    # broadcast against a f32 numerator it stays weak, so the width is chosen where the scheduler puts it in a
+    # buffer. it must come from the consumer, not from DEFAULT_FLOAT: at half, 100000 is inf and the answer is 0
+    N = 131072
     with Context(DEFAULT_FLOAT=dtypes.float16):
-      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
-    self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
+      mask = (Tensor.arange(N).to("CPU") < 100000).cast(dtypes.int32)
+      denom = (mask != Tensor.zeros(N, dtype=dtypes.float32, device="CPU")).sum(0, keepdim=True) + 1e-5
+      self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
+      num = Tensor.full((N,), 2048.0, dtype=dtypes.float32, device="CPU").contiguous()
+      out = (num / denom).sum()                     # keepdim -> the denominator is expanded, so it gets a buffer
+      self.assertIs(out.dtype, dtypes.float32)
+      self.assertAlmostEqual(out.item(), N*2048.0/100000, places=1)
+
+  def test_broadcasted_keeps_expression_weak(self):
+    # promotion lifts the KIND only, for consts and expressions alike; the lub lives on the parent
+    x, y = Tensor([1], dtype=dtypes.int8)._broadcasted(Tensor(2) * 3)
+    self.assertEqual((y._uop.base.op, y.dtype, x.dtype), (Ops.MUL, dtypes.weakint, dtypes.int8))
+    self.assertIs((x + y).dtype, dtypes.int8)
+    x, y = Tensor([1.0], dtype=dtypes.float32)._broadcasted(Tensor(2) * 3)
+    self.assertEqual((y._uop.base.op, y.dtype), (Ops.CAST, dtypes.weakfloat))
+    self.assertIs((x + y).dtype, dtypes.float32)
 
   def test_cast_weak_expression_commits_at_cast_floor(self):
     # the floor never narrows: a cast BELOW the default does not pull the compute width down with it

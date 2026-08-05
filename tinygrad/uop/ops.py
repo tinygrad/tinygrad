@@ -1789,11 +1789,32 @@ def commit_weak(s:UOp, dt:DType) -> UOp:
   # a bare weak CONST commits directly (the value stays mathematical, emission truncates), a weak non-const src takes the demand cast
   return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
+def stated_width(u:UOp) -> DType|None:
+  # the width a node states about its value srcs: a CAST states its target, a Broadcastable the lub of its operands
+  return u.dtype if u.op is Ops.CAST else least_upper_dtype(*(s.dtype for s in u.src)) if u.op in GroupOp.Broadcastable else None
+
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if not any(s.dtype in dtypes.weaks for s in u.src): return None
-  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
+  if (dt:=stated_width(u)) in dtypes.weaks: return None
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
   return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
+
+# a weak value that crosses a buffer commits at the width its consumers state. demand accumulates over ALL of a node's
+# consumers, so this is a reverse-topo walk over the whole graph mounted as a SINK rule (like merge_reduce_ends) --
+# a node-local rule sees one parent at a time and cannot take the lub
+def commit_weak_stages(sink:UOp) -> UOp|None:
+  demand: dict[UOp, DType] = {}
+  replaces: dict[UOp, UOp] = {}
+  for u in reversed(sink.toposort()):
+    if (dt:=stated_width(u)) is None or dt in dtypes.weaks:
+      if (dt:=demand.get(u)) is None: continue
+    # the buffer commits at the demand, the cast back to weak keeps every consumer's own promotion result unchanged
+    if u.op is Ops.STAGE and u.dtype in dtypes.weaks: replaces[u] = u.replace(dtype=None, src=(commit_weak(u.src[0], dt),)+u.src[1:]).cast(u.dtype)
+    for s in ((u.src[1:] if u.op is Ops.WHERE else u.src) if u.op in GroupOp.Broadcastable else u.src[:1]):
+      if s.dtype in dtypes.weaks: demand[s] = least_upper_dtype(dt, demand.get(s, dt))
+  return sink.substitute(replaces) if replaces else None
+
+pm_commit_weak_stages = PatternMatcher([(UPat(Ops.SINK, name="sink"), commit_weak_stages)])
 
 # runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
 pm_commit_weak = PatternMatcher([
