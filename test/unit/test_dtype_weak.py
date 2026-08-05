@@ -64,14 +64,28 @@ class TestWeakPromotion(unittest.TestCase):
 
   def test_weak_expression_anchors_at_strong_lub(self):
     # regression test for the HALF bert nan (#17408, reverted in #17409): lub(int32, weakfloat)==weakfloat makes
-    # `loss_mask.sum() + 1e-5` a weakfloat EXPRESSION. Meeting a strong float in a binop must pin it at the lub, otherwise
-    # nothing owns a width until the bufferize/codegen commits it at default_float: a HALF reciprocal of (sum+1e-5) is inf
+    # `loss_mask.sum() + 1e-5` a weakfloat EXPRESSION. Meeting a strong float in a binop must pin it at the lub
     denom = (Tensor.zeros(912, dtype=dtypes.int32) != Tensor.zeros(912, dtype=dtypes.float32)).sum() + 1e-5
     self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
     x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
     self.assertIs(y.dtype, dtypes.float32)
     recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
     self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
+    with Context(DEFAULT_FLOAT=dtypes.float16):
+      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
+    self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
+
+  def test_cast_weak_expression_commits_at_cast_floor(self):
+    # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
+    with Context(DEFAULT_FLOAT=dtypes.float32):
+      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_lower_index_dtype, ctx={})
+    self.assertEqual((narrowed.dtype, narrowed.src[0].dtype), (dtypes.float16, dtypes.float32))
+
+  def test_cast_weak_expression_value_uses_cast_floor(self):
+    with Context(DEFAULT_FLOAT=dtypes.float16):
+      denom = Tensor.ones(1, dtype=dtypes.int32, device="CPU").sum() * 70000 + 1e-5
+      out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
+      self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),

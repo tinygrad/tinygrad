@@ -1805,14 +1805,17 @@ pm_commit_weak = PatternMatcher([
    lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
 ])
 
-# push cast to weak src
+# a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
+def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
+  if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
+  dt = least_upper_dtype(c.dtype, select_dtype(u))
+  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
+
 pm_cast_weak = PatternMatcher([
-  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.Broadcastable, dtype=dtypes.weaks, name="u"),)),
-   lambda c,u: u.replace(dtype=None, src=tuple(commit_weak(s, c.dtype) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
-   if c.dtype not in dtypes.weaks else None),
+  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
 ])
 
-pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
+pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
