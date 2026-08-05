@@ -69,7 +69,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-4, atol=1e-4)
 
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
-    return Tensor(np.linspace(start, stop, int(np.prod(shape)), dtype=np.float32).reshape(shape), device=Tensor.empty(1).device).realize()
+    return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
   def _make_config(self, **kwargs):
     return TransformerConfig(**({"num_blocks":1, "dim":32, "hidden_dim":64, "n_heads":1, "n_kv_heads":1,
@@ -176,7 +176,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def test_gatedeltanet_reference_and_reset(self):
     config = self._make_config(max_context=3)
     block = self._make_block(config)
-    x = self._tensor_linspace(-1.0, 1.0, (1, 3, config.dim))
+    x = Tensor.linspace(-1.0, 1.0, 3 * config.dim, dtype=dtypes.float32).reshape(1, 3, config.dim)
 
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, x)
     out = self._run_attention(block, x, 0)
@@ -196,8 +196,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet recurrent cache mismatch at step {step}")
 
-    warmup = self._tensor_linspace(-0.5, 0.5, (1, 2, config.dim))
-    prompt = self._tensor_linspace(0.75, -0.75, (1, 2, config.dim))
+    warmup = Tensor.linspace(-0.5, 0.5, 2 * config.dim, dtype=dtypes.float32).reshape(1, 2, config.dim)
+    prompt = Tensor.linspace(0.75, -0.75, 2 * config.dim, dtype=dtypes.float32).reshape(1, 2, config.dim)
 
     for i in range(warmup.shape[1]): self._run_attention(block, warmup[:, i:i+1], i)
     self._reset_state(block)
