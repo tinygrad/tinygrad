@@ -130,10 +130,6 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return linear
 
-pm_schedule = PatternMatcher([
-  (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
-])
-
 def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
@@ -169,8 +165,8 @@ pm_copy_from_store = PatternMatcher([
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
-  # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
+  assert big_sink.op is Ops.CALL and big_sink.src[0].op is Ops.SINK, "tensor graph is a single sink"
+  linear_call = big_sink.replace(src=(lower_sink_to_linear(big_sink.src[0]),)+big_sink.src[1:])
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
