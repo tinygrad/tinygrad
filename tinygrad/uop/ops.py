@@ -1538,6 +1538,7 @@ def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fals
           tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
                                                                    kwargs.get("walk", False), kwargs.get("enter_calls", False)))
           active_rewrites.append(ctx)
+          key = rewrite_name  # profile spans are named after the rewrite step
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2:
