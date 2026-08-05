@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer, DepsTracker
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
@@ -64,7 +64,7 @@ def _copy_input(u:UOp) -> UOp:
   run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u),)))
   return new
 
-@track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+@rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
