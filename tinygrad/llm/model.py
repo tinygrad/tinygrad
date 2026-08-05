@@ -416,7 +416,8 @@ class Transformer:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
     for _ in range(2):
-      warm = self.generate(prompt, chunk_size=chunk_size)
+      # NOTE: chunk_size must match what generate uses at serve time, otherwise the captured JIT rejects the new toks range
+      warm = self.generate(prompt, chunk_size=chunk_size if self.has_recurrent_block else None)
       with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
       with Context(JIT_BATCH_SIZE=0): next(warm)
       self._cached_tokens = []

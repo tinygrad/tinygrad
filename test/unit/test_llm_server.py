@@ -19,6 +19,12 @@ class TestTransformerGenerate(unittest.TestCase):
     with patch.object(model, "generate", generate): model.warmup()
     self.assertEqual(calls, [[0], [0]])
 
+  def test_warmup_then_generate_with_default_chunk(self):
+    # warmup must not capture JIT graphs that generate()'s default chunk_size then rejects
+    model = Transformer(TEST_CONFIG)
+    model.warmup()
+    self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
+
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True
