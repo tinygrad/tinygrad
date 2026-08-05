@@ -164,7 +164,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
-      if not all(dtypes.is_int(x.dtype) for x in src): raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
+      if not all(dtypes.is_int(x.dtype) or x.is_invalid for x in src): raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
@@ -268,7 +268,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
     return self.arg
   @property
-  def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
+  # poison is the bool Invalid CONST, wearing a CAST where it stands for a value of another dtype
+  def is_invalid(self) -> bool: return (u:=self.src[0] if self.op is Ops.CAST else self).op is Ops.CONST and u.val is Invalid
   @recursive_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
@@ -622,7 +623,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
-    if dtype is None or b is Invalid: dtype = dtypes.from_py(b)
+    if b is Invalid: return UOp(Ops.CONST, dtypes.bool, arg=Invalid).cast(dtype or dtypes.bool)
+    if dtype is None: dtype = dtypes.from_py(b)
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
@@ -1748,7 +1750,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
-  if all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if all(a.dtype is b.dtype for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
@@ -1816,7 +1818,8 @@ pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
   # TODO: more generic
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long),
+                                                                               UPat(Ops.CONST, arg=Invalid).or_casted())),
         allow_any_len=True, name="u"),
    lambda u,buf,gate,idx: u.replace(src=(buf, idx.cast(dtypes.int).valid(gate))+u.src[2:]) if buf.max_numel()-1 <= dtypes.int32.max else None),
 ])

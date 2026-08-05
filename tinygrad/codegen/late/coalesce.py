@@ -2,7 +2,7 @@ import itertools, functools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, invalid_pat
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
@@ -54,8 +54,8 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
 indexing_simplify = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("valid").where(UPat.var("idx_y"), UPat(arg=Invalid)),
-                                         UPat.var("valid").where(UPat.var("idx_x"), UPat(arg=Invalid)))), simplify_valid_image_load),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("valid").where(UPat.var("idx_y"), invalid_pat),
+                                         UPat.var("valid").where(UPat.var("idx_x"), invalid_pat))), simplify_valid_image_load),
 ])
 
 # get list of (height, width) that do not require pitch padding

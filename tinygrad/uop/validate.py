@@ -33,7 +33,7 @@ def create_bounded(name:str, vmin:int, vmax:int, z3ctx:z3.Context) -> tuple[z3.A
   return (s:=z3.Int(name, ctx=z3ctx)), (vmin <= s)&(s <= vmax)
 
 z3_renderer = PatternMatcher([
-  (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), lambda x,cond,ctx: (ctx[1][x], ctx[1][cond])),
+  (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid).or_casted()), lambda x,cond,ctx: (ctx[1][x], ctx[1][cond])),
   # variables
   (UPat(Ops.SPECIAL, name="x"), lambda x,ctx: create_bounded(x.arg, 0, ctx[1][x.src[0]]-1, ctx[0])),
   (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0])),
@@ -44,6 +44,7 @@ z3_renderer = PatternMatcher([
   (UPat((Ops.LOAD, Ops.INDEX), dtypes.bool), lambda ctx: (z3.Bool(f"load{len(ctx[1])}", ctx=ctx[0]), None)),
   # constants
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: (z3.Int("Invalid", ctx=ctx[0]), None)),
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, arg=Invalid),), name="x"), lambda x,ctx: (ctx[1][x.src[0]], None)),
   (UPat(Ops.CONST, dtypes.ints+(dtypes.weakint,), name="x"), lambda x,ctx: (z3.IntVal(x.val, ctx=ctx[0]), None)),
   (UPat(Ops.CONST, dtypes.bool, name="x"), lambda x,ctx: (z3.BoolVal(x.val, ctx=ctx[0]), None)),
   # casts from floats create new variables

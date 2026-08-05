@@ -1357,11 +1357,12 @@ class TestInvalidIndex(unittest.TestCase):
       "valid inside a valid should make a single valid and & the conditions")
 
   def test_alu_invalid(self):
-    self.assertIs((UOp.invalid()*2).simplify(), UOp.invalid())
-    self.assertIs((UOp.invalid()*0).simplify(), UOp.invalid())
-    self.assertIs((UOp.invalid()+8).simplify(), UOp.invalid())
-    self.assertIs((UOp.invalid()+Variable("a",0,10)).simplify(), UOp.invalid())
-    self.assertIs((UOp.invalid()*Variable("a",0,10)).simplify(), UOp.invalid())
+    invalid = UOp.const(Invalid, dtypes.weakint)
+    self.assertIs((UOp.invalid()*2).simplify(), invalid)
+    self.assertIs((UOp.invalid()*0).simplify(), invalid)
+    self.assertIs((UOp.invalid()+8).simplify(), invalid)
+    self.assertIs((UOp.invalid()+Variable("a",0,10)).simplify(), invalid)
+    self.assertIs((UOp.invalid()*Variable("a",0,10)).simplify(), invalid)
     self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
 
   def test_alu_invalid_vconst(self):

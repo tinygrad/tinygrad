@@ -46,29 +46,32 @@ class TestDTypeFromUOp(unittest.TestCase):
       type_verify(UOp.const(value, concrete).sink(), spec_program)
 
   def test_invalid_stated_dtype(self):
-    # UOp.const normalizes a stated dtype away (const_like/full pass their position's); the core constructor does not,
-    # and the spec is what rejects a non-bool Invalid
-    self.assertIs(UOp.const(Invalid, dtypes.float32), UOp.invalid())
+    # UOp.const represents a typed Invalid as CAST(dtype, CONST(Invalid, bool)); the core constructor does not normalize,
+    # and the spec still rejects a non-bool Invalid CONST
+    invalid = UOp.const(Invalid, dtypes.float32)
+    self.assertEqual((invalid.op, invalid.dtype), (Ops.CAST, dtypes.float32))
+    self.assertIs(invalid.src[0], UOp.invalid())
     with self.assertRaises(RuntimeError): type_verify(UOp(Ops.CONST, dtypes.float32, arg=Invalid), spec_shared)
 
   def test_invalid_dtype_and_consumers(self):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
-    self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
-    self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
+    typed_invalid = UOp.const(Invalid, dtypes.float32)
+    self.assertEqual((typed_invalid.op, typed_invalid.dtype, typed_invalid.src[0]), (Ops.CAST, dtypes.float32, invalid))
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
-    invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
-    for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
-              UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
-              UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
+    value = UOp.const(1, dtypes.float32)
+    for u in (UOp(Ops.STACK, dtypes.float32, src=(value, typed_invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, typed_invalid)),
+              UOp.const(True).where(value, typed_invalid), UOp(Ops.CMPLT, src=(typed_invalid, value)),
+              UOp(Ops.CMPLT, src=(value, typed_invalid)), UOp.param(0, dtypes.float32, (4,)).index(UOp.const(Invalid, dtypes.weakint))):
+      type_verify(u, spec_shared)
     gate, value = UOp.param(0, dtypes.bool, ()), UOp.param(1, dtypes.float, ())
-    self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
+    self.assertIs((out:=graph_rewrite(gate.where(value, value.const_like(Invalid)), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
     type_verify(out.sink(), spec_program)
 
   def test_remove_invalid_stack_lanes(self):
-    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1, dtypes.half), UOp.invalid()))
+    stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1, dtypes.half), UOp.const(Invalid, dtypes.half)))
     out = graph_rewrite(stack, pm_remove_invalid)
     self.assertEqual(out.src, (UOp.const(1, dtypes.half), UOp.const(0, dtypes.half)))
     type_verify(out.sink(), spec_program)

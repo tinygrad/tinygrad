@@ -24,8 +24,9 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   return root.const_like(bitcast(c.val, c.dtype, root.dtype))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
+  if u.is_invalid: return Invalid
   if u.op is Ops.CONST: return u.val
-  if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.val for s in u.src)
+  if u.op is Ops.STACK and all(s.op is Ops.CONST or s.is_invalid for s in u.src): return tuple(Invalid if s.is_invalid else s.val for s in u.src)
   return None
 
 def fold_const_alu(a:UOp) -> UOp|None:
@@ -64,30 +65,30 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
 
 # Invalid poisons the value: ops move inside the gate so the Invalid reaches the LOAD/STORE and folds there.
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
-invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
-invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
+invalid_pat = UPat(Ops.CONST, arg=Invalid).or_casted()
+invalid_gate = UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid).or_casted("i"))
 pm_data_invalid = PatternMatcher([
-  (invalid_pat.broadcast(), lambda i: i),
-  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
-  (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
-   lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i)),
+  (invalid_pat.broadcast(name="s"), lambda s: s.src[0] if len(s.src) else None),
+  (UPat(GroupOp.Unary|{Ops.BITCAST}, src=(invalid_pat,), name="op"), lambda op: op.const_like(Invalid)),
+  (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"), lambda cond,x,op,i: cond.where(op.replace(src=(x,)), UOp.invalid())),
   # binary ops move inside the gate, with Invalid in the false branch
-  (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
-  (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
-  (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), UOp.invalid())),
+  (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), UOp.invalid())),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()], name="alu"), lambda alu: alu.const_like(Invalid)),
   # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
-  (invalid_pat.where(UPat(), UPat()), lambda i: i),
-  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i)),
+  (invalid_pat.where(UPat(), UPat()).named("w"), lambda w: w.const_like(Invalid)),
+  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), UOp.invalid())),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
-  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if not val.is_invalid else i),
+  (UPat.var("cond").where(invalid_pat, UPat.var("val")).named("w"),
+   lambda cond,val,w: cond.logical_not().where(val, UOp.invalid()) if not val.is_invalid else w.const_like(Invalid)),
   # lift Invalid out: a.where(cond.where(x, Invalid), c) -> (~a|cond).where(a.where(x, c), Invalid)
   (UPat.var("a").where(invalid_gate, UPat.var("c")), lambda cond,i,x,a,c:
-   (a.logical_not()|cond).where(a.where(x,c), i) if not c.is_invalid else None),
-  (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if not b.is_invalid else None),
+   (a.logical_not()|cond).where(a.where(x,c), UOp.invalid()) if not c.is_invalid else None),
+  (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), UOp.invalid()) if not b.is_invalid else None),
   # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
-    lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
+    lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
 pm_remove_invalid = PatternMatcher([
@@ -153,7 +154,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
                                              and isinstance(x.val, float) and (math.isnan(x.val) or math.isinf(x.val)) else 0)),
   # *** cast/bitcast ***
   # TODO: delete this once CONST has no dtype
-  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
+  (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val) if c.val is not Invalid else None),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
@@ -438,10 +439,10 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),
   # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda i: UOp(Ops.NOOP)),
+  (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat))),
-   lambda index, cond, val, i: UOp.store(index.src[0].index(index.src[1].valid(cond)), val)),
+   lambda index, cond, val: UOp.store(index.src[0].index(index.src[1].valid(cond)), val)),
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   ((UPat.var("x") * UPat.cvar("c")).reciprocal(), lambda x,c: x.reciprocal()*c.reciprocal()), # 1/(x*c) -> (1/c)*(1/x)
