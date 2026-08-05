@@ -613,6 +613,9 @@ def rangeify_on_store(ctx, x:UOp):
 
 def rangeify_on_stage(ctx, x:UOp):
   if x.src[0].shape == (): return None
+  # size 1 dims don't get ranges, they are reshaped out and back in
+  if all_int(x.shape) and 0 < len(sq := tuple(s for s in x.shape if s != 1)) < len(x.shape):
+    return rangeify_on_stage(ctx, x.src[0].reshape(sq).bufferize(arg=x.arg)).reshape(x.shape)
   rngs = [UOp.range(s, next(ctx)) for s in x.shape]
   return x.replace(src=(x.src[0].index(*rngs), *rngs))
 
@@ -673,18 +676,37 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_simple_rangeify, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
-  # for each index on a stage without children and with a small coefficient
+  # for each index on a stage without children, try to merge the stage into the consumer kernel
   while 1:
-    indexes = {}
+    indexes: dict[UOp, list[UOp]] = {}
+    consumers: dict[UOp, list[UOp]] = {}
     for u in tsink.toposort():
       if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
         indexes.setdefault(u.src[0], []).append(u)
+      for s in u.src: consumers.setdefault(s, []).append(u)
+    # the ranges wrapping u: REDUCE ranges on the path up, plus the enclosing END/STAGE nest
+    def nest_ranges(u:UOp) -> set[UOp]:
+      ret: set[UOp] = set()
+      stack, seen = [u], set()
+      while len(stack):
+        if (x := stack.pop()) in seen: continue
+        seen.add(x)
+        if x.op is Ops.REDUCE: ret.update(*[er.ranges for er in x.ended_ranges])
+        elif x.op in {Ops.END, Ops.STAGE}:
+          ret.update(*[er.ranges for er in x.ended_ranges])
+          continue
+        stack.extend(consumers.get(x, []))
+      return ret
     subs = {}
     for k,v in indexes.items():
       # don't move REDUCE ranges up (real?)
-      if len(v) == 1 and all(all([r.arg[-1] == AxisType.WEAK for r in s.ranges]) for s in v[0].src[1:]):
-        for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
-          subs[old_r] = new_r
+      if len(v) != 1 or not all(all([r.arg[-1] == AxisType.WEAK for r in s.ranges]) for s in v[0].src[1:]): continue
+      # merging must not add iteration multiplicity around range-bound computation in the stage body:
+      # every range of the enclosing kernel nest must be used by the index, unless the body has no inner loops
+      if not nest_ranges(v[0]) <= set().union(*[s.ranges for s in v[0].src[1:]]) and \
+         any(x.op is Ops.REDUCE for x in k.src[0].toposort(gate=lambda x: x.op is not Ops.STAGE)): continue
+      for old_r, new_r in zip(k.src[1:], v[0].src[1:]):
+        subs[old_r] = new_r
     if not len(subs): break
     tsink = tsink.substitute(subs)
     tsink = graph_rewrite(tsink, pm_simple_rangeify, bottom_up=True, name=f"merge kernels ({len(subs)})")
