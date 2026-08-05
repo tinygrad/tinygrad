@@ -6,7 +6,7 @@ from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, s
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -411,7 +411,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
     linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
 
     # patches and runtime uops
-    linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
+    linear = graph_rewrite(linear, pm_early_simplify+symbolic+pm_fold_cast_const, bottom_up=False, name="simplify patches", enter_calls=True)
     linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
 
     # and compile it
@@ -484,7 +484,7 @@ def hcq_link(linear:UOp, cache=True) -> UOp:
   bufs = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
           if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
   linear = linear.substitute({x:link_buf_cache[k] for a in bufs.values() if (k:=link_buf_key(a)) in link_buf_cache for x in (a, a.src[0])}, walk=True)
-  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
+  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_fold_cast_const+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
                          name="resolve patches")
   for (j,i),a in bufs.items(): link_buf_cache.setdefault(link_buf_key(a), linear.src[j].src[i])
   if cache: link_linear_cache[linear_key] = linear
