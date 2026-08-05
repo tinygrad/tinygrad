@@ -75,7 +75,8 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
     ```
     """
-    return self.logical_not() if self.dtype == dtypes.bool else self * (-1)
+    if self.dtype == dtypes.bool: return self.logical_not()
+    return ((~self + 1) & self.dtype.max) if dtypes.is_unsigned(self.dtype) else self * (-1)
 
   def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -115,7 +116,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return a + (-b)
+    # `neg` on unsigned is the WRAPPED negation, `b + neg(b) == 2**bits`. subtraction is arithmetic, so negate by multiplication.
+    return a + b * (-1)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """

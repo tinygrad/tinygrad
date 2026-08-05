@@ -76,6 +76,10 @@ class WGSLRenderer(CStyleLanguage):
      f"var{'<workgroup>' if x.addrspace == AddrSpace.LOCAL else ''} {ctx[x]}: array<{ctx.buf_map(x)},{_packed_size(x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
      lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]"),
+    # WGSL keeps sub-32-bit ints in 32-bit registers, so a narrowing cast has to drop the high bits by hand
+    (UPat(Ops.CAST, dtype=(dtypes.uchar, dtypes.ushort), name="x"), lambda ctx,x: f"(u32({ctx[x.src[0]]})&0x{_mask(x.dtype):X})"),
+    (UPat(Ops.CAST, dtype=(dtypes.char, dtypes.short), name="x"),
+     lambda ctx,x: f"((i32({ctx[x.src[0]]})<<{(sh:=32-x.dtype.bitsize)})>>{sh})"),
     (UPat(Ops.BITCAST, dtype=dtypes.uchar, name="x"), lambda ctx,x: f"bitcast<u32>({ctx[x.src[0]]}&0xFF)"),
     (UPat(Ops.BITCAST, dtype=dtypes.char, name="x"), lambda ctx,x: f"((i32({ctx[x.src[0]]}&0xFF)<<24)>>24)"),
     (UPat(Ops.BITCAST, dtype=dtypes.ushort, name="x"), lambda ctx,x: f"bitcast<u32>(vec2<f16>({ctx[x.src[0]]},0))" \
