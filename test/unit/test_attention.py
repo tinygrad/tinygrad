@@ -176,6 +176,28 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
 
+  def test_gatedeltanet_prefill_matches_decode(self):
+    # chunked prefill (T>1, custom kernel) must produce the same output and state as sequential decode (T=1).
+    # uses lazy linspace weights, which exercise the scheduler's WAR tracking for the packed conv/recurrent
+    # state write-backs (a write to one buffer packed in another buffer's AFTER must not be reordered before
+    # the producers that read the target buffer)
+    config = self._make_config(max_context=3)
+    block = self._make_block(config)
+    x = Tensor.linspace(-1.0, 1.0, 3 * config.dim, dtype=dtypes.float32).reshape(1, 3, config.dim)
+
+    x_norm = block.attn_norm(x)
+    block._init_state(x_norm)
+    prefill = block._attention(x_norm, 0).realize().numpy()
+    prefill_conv, prefill_recurrent = self._cache_views(block)
+
+    block = self._make_block(config)
+    decode = np.concatenate([self._run_attention(block, x[:, t:t+1], t) for t in range(x.shape[1])], axis=1)
+    decode_conv, decode_recurrent = self._cache_views(block)
+
+    np.testing.assert_allclose(prefill, decode, rtol=1e-3, atol=1e-3, err_msg="prefill output mismatch")
+    np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg="prefill conv cache mismatch")
+    np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg="prefill recurrent cache mismatch")
+
   def test_kda_channel_decay(self):
     config = self._make_config(n_heads=2, ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
     block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.]]])

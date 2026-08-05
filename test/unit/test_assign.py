@@ -697,6 +697,40 @@ class TestAssignOrdering(unittest.TestCase):
   - Race conditions (concurrent access to same buffer)
   """
 
+  def test_packed_state_write_not_reordered_before_readers(self):
+    """A store to buffer B packed in another buffer's AFTER (rec.after(B.store(v))) must not be
+    reordered before producer kernels that read B. The store is tracked under the AFTER's base buffer
+    (rec), so without resolving the actual store targets the scheduler generates no WAR dependency for
+    B's readers and the write-back can run first, corrupting the producers' input."""
+    from tinygrad.llm.model import _gated_delta_prefill_kernel
+    def build(pre_realize:bool) -> np.ndarray:
+      def Tl(a, b, shape): return Tensor.linspace(a, b, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
+      x = Tensor.linspace(-1.0, 1.0, 12, dtype=dtypes.float32).reshape(1, 3, 4)
+      xh = (x / x.square().mean(-1, keepdim=True).sqrt()).half()
+      qkv = xh @ Tl(-0.15, 0.2, (6, 4)).T
+      conv_state = Tensor.zeros(1, 1, 6).clone()   # read by the conv below
+      rec_state = Tensor.zeros(1, 1, 2, 2).clone()
+      window = conv_state.cat(qkv, dim=1)
+      T = 3
+      w_conv = Tl(-0.05, 0.05, (6, 2))
+      conv_out = (window[:, 0:T] * w_conv[:, 0] + window[:, 1:T+1] * w_conv[:, 1]).silu()
+      q, k, v = conv_out.split([2, 2, 2], dim=-1)
+      q = q.reshape(1, T, 1, 2).normalize(dim=-1)
+      k = k.reshape(1, T, 1, 2).normalize(dim=-1)
+      v = v.reshape(1, T, 1, 2)
+      beta, alpha = Tensor.zeros(1, T, 1) + 0.5, Tensor.zeros(1, T, 1) + 0.9
+      q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
+      alpha = alpha.transpose(1, 2).float().exp()
+      qs, kq = q * 2**-0.5, ((q * 2**-0.5)*k).sum(-1).contiguous()
+      # conv_state write-back packed into rec_state's AFTER, custom kernel consumes it
+      new_conv_state = window[:, T:T+1].contiguous()
+      state = Tensor(rec_state.uop.after(conv_state.uop.store(new_conv_state.uop)))
+      args = [Tensor.empty_like(v), qs, k, v, beta, alpha, state, kq]
+      if pre_realize: args = [a.realize() if i != 6 else a for i, a in enumerate(args)]
+      return Tensor.custom_kernel(*args, fxn=_gated_delta_prefill_kernel)[0].transpose(1, 2).realize().numpy()
+    # lazy execution (build the whole graph, then realize) must match eager (inputs realized up front)
+    np.testing.assert_allclose(build(False), build(True), rtol=1e-4, atol=1e-4)
+
   def test_overlapping_slice_assigns(self):
     """Overlapping slice assigns - later write should win for overlapping elements."""
     buf = Tensor.zeros(8).contiguous().realize()

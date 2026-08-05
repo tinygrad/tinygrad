@@ -26,6 +26,15 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
     raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
 
+def _kernel_write_targets(k:UOp) -> list[tuple[UOp, UOp]]:
+  # the buffers a kernel stores to, each with the buffer state that the write supersedes (resolved from the call args)
+  call = k.src[0] if k.op is Ops.END else k
+  out: list[tuple[UOp, UOp]] = []
+  for s in call.src[0].toposort():
+    if s.op is Ops.STORE and s.src[0].buf_uop.op is Ops.PARAM and s.src[0].buf_uop.arg.slot >= 0:
+      out.extend((st.buf_uop, st) for st in _states(call.src[s.src[0].buf_uop.arg.slot+1]))
+  return out
+
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
@@ -38,7 +47,13 @@ def create_schedule(sched_sink:UOp) -> UOp:
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(u.buf_uop, []).append((u, prev_state, tuple(k for k in kernels if k not in prev_kernels)))
+      new_kernels = tuple(k for k in kernels if k not in prev_kernels)
+      writes.setdefault(u.buf_uop, []).append((u, prev_state, new_kernels))
+      # a kernel may store to buffers other than the AFTER's base buffer (e.g. state writes packed into another
+      # buffer's AFTER); register those writes under the buffer they actually target so readers get WAR deps
+      for k in new_kernels:
+        for buf, pstate in _kernel_write_targets(k):
+          if buf is not u.buf_uop: writes.setdefault(buf, []).append((u, pstate, (k,)))
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
