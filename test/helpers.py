@@ -8,7 +8,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, Target, DEV, DEBUG, Context
+from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
 from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
@@ -60,6 +60,10 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   # test compiling the linear
   compile_linear(linear)
   return linear, var_vals
+
+def assert_kernel_count(expected:int):
+  got = GlobalCounters.kernel_count
+  if got != expected: raise KernelCountException(expected, got)
 
 def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]

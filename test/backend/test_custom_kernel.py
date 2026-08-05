@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.ptx import PTXRenderer
+from test.helpers import assert_kernel_count
 
 # **** kernels ****
 
@@ -276,7 +277,7 @@ class TestCustomKernel(unittest.TestCase):
 
     GlobalCounters.reset()
     out.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 5)
+    assert_kernel_count(5)
 
   def test_simple_reshape(self):
     a = Tensor.ones(2,3,4).realize()
@@ -286,7 +287,7 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     c.realize()
     assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
-    self.assertEqual(GlobalCounters.kernel_count, 3)
+    assert_kernel_count(3)
 
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
@@ -336,7 +337,7 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     c.realize()
-    self.assertEqual(GlobalCounters.kernel_count, len(devs))
+    assert_kernel_count(len(devs))
     self.assertTrue((c == 2).all().item())
 
   def test_partial_invalid_store_keeps_uncovered_reads(self):
@@ -401,7 +402,7 @@ class TestCustomKernel(unittest.TestCase):
     else: z = y.T.T+1
     GlobalCounters.reset()
     z.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
   @unittest.expectedFailure
@@ -418,7 +419,7 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     y = run(x[0]).realize()
     # it's copying the input and the output
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
