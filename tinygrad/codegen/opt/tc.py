@@ -1,6 +1,6 @@
 import math, functools
 from dataclasses import dataclass
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import DType, dtypes
 
 @dataclass(frozen=True)
