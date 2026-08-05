@@ -959,7 +959,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
     import numpy as np
-    if not training_mode: return data, data.const_like(True).cast(dtypes.bool)
+    if not training_mode: return data, data.const_like(True, dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
     else:

@@ -94,6 +94,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -104,6 +105,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -145,6 +149,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -155,6 +160,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -194,6 +202,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -204,6 +213,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -240,6 +252,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -250,6 +263,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -292,6 +308,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |

@@ -113,7 +113,7 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -164,9 +164,7 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    # run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+    with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

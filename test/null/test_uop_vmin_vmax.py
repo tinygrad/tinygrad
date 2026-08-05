@@ -162,6 +162,12 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x_uint.vmin, dtypes.uint.min)
     self.assertEqual(x_uint.vmax, dtypes.uint.max)
 
+  def test_vmin_vmax_cast_float_to_int(self):
+    self.assertEqual(UOp.variable('x', -4.5, 4.5, dtypes.float).cast(dtypes.int)._min_max, (-4, 4))
+    self.assertEqual(UOp.const(4.5).cast(dtypes.float).cast(dtypes.int)._min_max, (4, 4))
+    x = UOp.const(4.5).cast(dtypes.float)
+    self.assertIs(x.ne(x.cast(dtypes.int).cast(dtypes.float)).simplify().arg, True)
+
   def test_vmin_vmax_invalid(self):
     i = UOp.invalid()
     self.assertNotEqual(i.vmin, i.vmax)

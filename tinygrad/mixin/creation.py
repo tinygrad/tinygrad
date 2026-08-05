@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Callable, Self
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype
 from tinygrad.helpers import argfix, prod
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -11,7 +11,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
   @staticmethod
   def const(b, dtype=None): raise NotImplementedError
 
-  def const_like(self, b: ConstType) -> Self: return self._wrap_uop(self._uop.const_like(b))
+  def const_like(self, b: ConstType, dtype:DType|None=None) -> Self: return self._wrap_uop(self._uop.const_like(b, dtype))
 
   def _multi_like(self, fxn:'Callable[[tuple[sint, ...], str|None], Self]') -> Self:
     from tinygrad.uop.ops import UOp

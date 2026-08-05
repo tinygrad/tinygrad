@@ -35,21 +35,36 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
+def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
             dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8", dtypes.int8: "iu8", dtypes.int32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
   N,M,K = wmma.arg[0]
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype]}" + \
-           f".{N}x{M}x{K}{dt_map[wmma.arg[1]]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
+    scaled = K == 128
+    args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
+    # scaled mfma call require E8M0 scale args, byte = 0x7F = 127, scale = 2^(127 - 127) = 1.0
+    if scaled:
+      _fmt = { dtypes.fp8e5m2:1, dtypes.fp8e4m3:0 }
+      # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
+      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"])
+    else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
+
+    scale = "scale." if scaled else ""
+    dt_in = dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"
+    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{scale}{dt_map[wmma.src[-1].dtype]}" + \
+           f".{N}x{M}x{K}{dt_in}(" + ", ".join(args) + ")"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
   args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
   if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
-  return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
-    f"{dt_map[wmma.arg[1]]}(" + ", ".join(args) + (", i1 false)" if wmma.dtype != dtypes.float else ")")
+  if wmma.dtype != dtypes.float: args.append("i1 false") # opsel
+  def _bf16(dt:DType): return dtypes.ushort if dt is dtypes.bfloat16 else dt
+  suffix = f".v{wmma.max_numel()}{dt_map[_bf16(wmma.dtype)]}.v{wmma.src[0].max_numel()}{dt_map[_bf16(wmma.arg[1])]}" if rdna4 else ""
+  # bfloat treated as i16 in LLVM call
+  return f"  {ctx[wmma]} = call {ldt(_bf16(wmma.dtype), wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
+    f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
@@ -254,6 +269,8 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
+  @staticmethod
+  def is_rdna4(arch): return arch.split(':')[0] in {'gfx1200', 'gfx1201'}
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler

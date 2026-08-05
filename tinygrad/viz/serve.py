@@ -47,7 +47,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#D8F9E4", Ops.STACK: "#D8F9E4",
+               Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
                Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.SLICE: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
@@ -177,14 +177,14 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None: data.all_uops[a] = ret
   return ret
 
-def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None) -> Generator[GraphRewriteDetails, None, None]:
+def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
     replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
-    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls)
+    try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
     yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -611,11 +611,11 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 
 # ** Main render function to get the complete details about a trace event
 
-def get_render(viz_data:VizData, query:str) -> dict:
+def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   url = urlparse(query)
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["_data"]
-  if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
+  if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt == "uops":
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data)) is None: return {"src":"No linear found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
