@@ -96,25 +96,11 @@ __device__ __forceinline__ uint8_t e8m0_scale(float amax, float& scale) {
   return static_cast<uint8_t>(exponent + 127);
 }
 
-__device__ __forceinline__ uint8_t encode_e2m1_rne(float value, float scale_rcp) {
-  const float scaled = value * scale_rcp;
-  const float magnitude = fabsf(scaled);
-  const uint8_t code = (magnitude > 0.25f) + (magnitude >= 0.75f) + (magnitude > 1.25f) +
-                       (magnitude >= 1.75f) + (magnitude > 2.5f) + (magnitude >= 3.5f) + (magnitude > 5.0f);
-  return code | ((scaled < 0.0f) << 3);
-}
-
 __device__ __forceinline__ uint16_t pack_fp4(float4 value, float scale) {
-#if defined(__gfx950__)
   uint32_t lo = 0, hi = 0;
   asm volatile("v_cvt_scalef32_pk_fp4_f32 %0, %1, %2, %3" : "+v"(lo) : "v"(value.x), "v"(value.y), "v"(scale));
   asm volatile("v_cvt_scalef32_pk_fp4_f32 %0, %1, %2, %3" : "+v"(hi) : "v"(value.z), "v"(value.w), "v"(scale));
   return static_cast<uint16_t>(lo | (hi << 8));
-#else
-  const float scale_rcp = 1.0f / scale;
-  return static_cast<uint16_t>(encode_e2m1_rne(value.x, scale_rcp) | (encode_e2m1_rne(value.y, scale_rcp) << 4) |
-                               (encode_e2m1_rne(value.z, scale_rcp) << 8) | (encode_e2m1_rne(value.w, scale_rcp) << 12));
-#endif
 }
 
 __device__ __forceinline__ Quantized4 quantize(float4 value, int lane) {
