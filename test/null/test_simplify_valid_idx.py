@@ -2,7 +2,8 @@ import unittest, itertools
 
 from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, pm_lower_index_dtype
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite
+from tinygrad.uop.weak import pm_lower_index_dtype
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
