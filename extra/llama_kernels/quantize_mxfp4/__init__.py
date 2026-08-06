@@ -1,6 +1,7 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
 @functools.cache
@@ -8,11 +9,12 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
   name = f"quantize_mxfp4_{int(shuffle_row)}_{int(shuffle_col)}_{M}_{N}"
+  mem = M*N*2 + M*N + M*N//16  # read bf16, write row+col fp4 + e8m0
   outputs = (row_fp4, row_scale, col_fp4, col_scale)
   sink = UOp.sink(*(o.base for o in outputs), x.base,
                   *(UOp(Ops.CUSTOM, dtypes.void, (o.base.index(0),), arg="") for o in outputs),
                   UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1"),
-                  arg=KernelInfo(name))
+                  arg=KernelInfo(name, estimates=Estimates(ops=12*M*N, mem=mem)))
   src = (pathlib.Path(__file__).parent/"quantize_mxfp4.cpp").read_text()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
     UOp(Ops.BINARY, arg=compile_hip(src, [f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",

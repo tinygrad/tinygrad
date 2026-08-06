@@ -158,12 +158,19 @@ class TestMXFP4(unittest.TestCase):
   def test_quantize(self):
     import numpy as np
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
-    row, row_scale, col, col_scale = quantize_mxfp4(Tensor.zeros(256, 256, dtype=dtypes.bfloat16))
+    rng = np.random.default_rng(0)
+    x = np.triu(rng.standard_normal((256, 256), dtype=np.float32))
+    x += np.triu(x, 1).T
+    x[:32, :32] = 0
+    row, row_scale, col, col_scale = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
     Tensor.realize(row, row_scale, col, col_scale)
-    np.testing.assert_array_equal(row.numpy(), np.zeros((256, 128), dtype=np.uint8))
-    np.testing.assert_array_equal(col.numpy(), np.zeros((256, 128), dtype=np.uint8))
-    np.testing.assert_array_equal(row_scale.numpy(), np.full((256, 8), 127, dtype=np.uint8))
-    np.testing.assert_array_equal(col_scale.numpy(), np.full((256, 8), 127, dtype=np.uint8))
+    row, row_scale = row.numpy(), row_scale.numpy()
+    col, col_scale = col.numpy(), col_scale.numpy()
+    np.testing.assert_array_equal(row, col)
+    np.testing.assert_array_equal(row_scale, col_scale)
+    self.assertTrue(row.any())
+    self.assertTrue((row_scale == 127).any())
+    self.assertTrue((row_scale != 127).any())
 
   def test_correctness(self):
     import numpy as np
