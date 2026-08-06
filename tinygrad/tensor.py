@@ -184,7 +184,6 @@ def finalize_after(ctx:AllocCtx, x:UOp):
   # tagged: untag and map each original pre-rewrite UOp to the stripped buffer; the untagged result is reprocessed as untagged
   ret = x.replace(tag=None)
   replace_uop = ret
-  while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
   # then, add views back
   views:list[UOp] = []
   while replace_uop.op in GroupOp.Movement|{Ops.UNSHARD, Ops.BITCAST, Ops.AFTER}:
