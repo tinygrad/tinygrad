@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
-from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const, pm_simplify_valid, pm_drop_and_clauses
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER, Ops.SLICE,
@@ -27,19 +27,7 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
 
 BUFFER_STATE_OPS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}
 
-def realize_custom_kernel_srcs(ctx:dict[UOp, None], c:UOp) -> None:
-  # the inputs of a custom kernel must resolve to a buffer state. realize the ones that don't (e.g. lazy const
-  # expressions above the call), otherwise a reduce in that subgraph has no ranges and crashes in rangeify.
-  # NOTE: only view-only movement ops preserve the underlying buffer. anything computed (ALU, REDUCE, ...) must be
-  # realized even if one of its sources is a buffer, since the CALL gives the whole subgraph no ranges
-  for s in c.src[1:]:
-    t = s
-    while t.op in GroupOp.Movement and len(t.src): t = t.src[0]
-    if t.op not in BUFFER_STATE_OPS: ctx[s] = None
-
 pm_generate_realize_map = PatternMatcher([
-  # realize the inputs of custom kernel calls
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # always realize
   (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
@@ -168,7 +156,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_fold_cast_const+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
 # this is the definition of the movement ops
 @functools.cache
@@ -182,7 +170,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       # NOTE: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
       #       wraps the pad with only the newly added valid
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
-        symbolic+pm_fold_cast_const+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
+        symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:r.replace(src=r.src[:1], arg=(i, AxisType.PLACEHOLDER)) for i,r in enumerate(sink.ranges)}
@@ -263,7 +251,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(False).usum(valids)
-          _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic+pm_fold_cast_const, name="minimum_valid"))
+          _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)

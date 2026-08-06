@@ -119,7 +119,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
-])+symbolic+pm_fold_cast_const
+])+symbolic
 
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
   # lift x+y out of reduce on ne
