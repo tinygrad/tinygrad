@@ -79,7 +79,7 @@ class Ops(FastEnum):
   BARRIER = auto(); WAIT = auto()
 
   # control flow ops
-  RANGE = auto(); END = auto(); IF = auto(); ENDIF = auto(); BLOCKEND = auto(); START = auto()
+  RANGE = auto(); END = auto(); IF = auto(); ENDIF = auto(); THEN = auto(); ELSE = auto(); START = auto()
 
   # const.
   CONST = auto()
@@ -140,7 +140,10 @@ class GroupOp:
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 
-  # Ops that compose the control flow graph
-  ControlFlow = {Ops.RANGE, Ops.END, Ops.IF, Ops.ENDIF, Ops.BLOCKEND, Ops.START, Ops.SINK}
+  # Ops that form the control flow graph
+  Control = {Ops.RANGE, Ops.END, Ops.IF, Ops.ENDIF, Ops.THEN, Ops.ELSE, Ops.START, Ops.SINK}
+
+  # Ops that create a new basic block
+  Block = Control - {Ops.IF, Ops.SINK}
 
   All = set(Ops)

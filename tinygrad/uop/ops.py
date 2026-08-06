@@ -301,7 +301,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION | Ops.START | Ops.BLOCKEND:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.CALL | Ops.FUNCTION | Ops.START | Ops.THEN | Ops.ELSE:
         return None
 
       # INS shape is always scalar, vector width is in the instruction encoding
@@ -624,12 +624,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   # returns the i'th block argument
   def get_arg(self, i:int) -> UOp:
-    assert self.op in GroupOp.ControlFlow | {Ops.FUNCTION, Ops.TUPLE}
+    assert self.op in GroupOp.Block | {Ops.FUNCTION, Ops.TUPLE}
     if self.op is Ops.FUNCTION: return self.src[0].src[i]
     if self.op is Ops.END: return self.src[3+i]
-    # NOTE: this returns the arg on the true branch
+    # NOTE: this only returns the arg on the true branch
     if self.op is Ops.ENDIF: return self.src[0].get_arg(i)
-    if self.op in (Ops.RANGE, Ops.BLOCKEND): return self.src[1+i]
+    if self.op in (Ops.RANGE, Ops.THEN, Ops.ELSE): return self.src[1+i]
     return self.src[i]
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
@@ -813,6 +813,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
+    if self.op is Ops.GETTUPLE: return self.src[0].get_arg(self.arg).addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT}:

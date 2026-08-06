@@ -94,39 +94,40 @@ def linearize(sink:UOp) -> list[UOp]:
 
   # early schedule, here we find the earliest/highest block u can go in
   for u in topo:
-    # control flow ops are pinned to themselves
-    if u.op in GroupOp.ControlFlow: cfg[u] = []
+    # control ops are pinned to themselves
+    if u.op in GroupOp.Control: cfg[u] = []
     # the highest block for u is the lowest block of all its srcs
     else: sched[u] = max((sched.get(s, s) for s in u.src), key=block_depth, default=None)
 
-  # late schedule, here we find the latest/lowest block u can go in, this is the lowest block that dominates all uses of u
-  # then we pick the best block in the range of earliest to latest
+  # late schedule, here we find the latest/lowest block u can go in, then we pick the best block for u in the range of earliest to latest
   for u in reversed(sched):
-    best = last = lca(tuple(sched.get(s, idom(s) if s.op in (Ops.START, Ops.END, Ops.SINK) else s) for s in users[u]))
+    # GETTUPLE is pinned to the block with the argument it extracts
+    if u.op is Ops.GETTUPLE: continue
+    # the lowest block for u is the lowest block that dominates all users of u
+    best = last = lca(tuple(sched.get(s, s if s.op in (Ops.THEN, Ops.ELSE) else idom(s)) for s in users[u]))
     # we pick the block with lowest loop nest and most depth, so we hoist out of loops and into branches
     while True:
       if loop_depth(last) < loop_depth(best) or block_depth(last) > block_depth(best) or best is not None and best.op is Ops.IF: best = last
       if last is sched[u]: break
       assert last is not None
       last = idom(last)
-    #print(u.op, sched[u].op if sched[u] is not None else None, best.op if best is not None else None)
     sched[u] = best
 
   # get the uops in each block
   for k,v in sched.items(): cfg[v].append(k)
-  print("BEFORE BLOCK SCHEDULE")
-  for k,v in cfg.items():
-    print("BLOCK: ", (k.op, k.arg) if k is not None else None)
-    for x in v: print("  ", x.op)
+
+  #print("BEFORE BLOCK SCHEDULE")
+  #for k,v in cfg.items():
+  #  print("BLOCK: ", (k.op, k.arg) if k is not None else None)
+  #  for x in v: print("  ", x.op)
 
   # schedule the uops in each block
-  for k in cfg:
-    cfg[k] = block_linearize(cfg[k], users)
+  for k in cfg: cfg[k] = block_linearize(cfg[k], users)
 
-  print("AFTER BLOCK SCHEDULE")
-  for k,v in cfg.items():
-    print("BLOCK: ", (k.op, k.arg) if k is not None else None)
-    for x in v: print("  ", x.op)
+  #print("AFTER BLOCK SCHEDULE")
+  #for k,v in cfg.items():
+  #  print("BLOCK: ", (k.op, k.arg) if k is not None else None)
+  #  for x in v: print("  ", x.op)
 
   ret = []
   for k,v in cfg.items(): ret.extend(([k] if k is not None else []) + v)
@@ -134,10 +135,11 @@ def linearize(sink:UOp) -> list[UOp]:
 
 def block_linearize(lst:list[UOp], users:dict[UOp, dict[UOp, None]]) -> list[UOp]:
   count:dict[UOp, int] = {}
-  for u in lst: count[u] = len([s for s in u.src if s in count])
+  for u in lst: count[u] = len({s for s in u.src if s in count})
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: x.tuplize if TUPLE_ORDER else ()))}
+  # GETTUPLE must be scheduled at the top of the block
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (x.op is not Ops.GETTUPLE,)+(x.tuplize if TUPLE_ORDER else ())))}
 
   # then force them to be toposorted in as close to the ideal order as possible
   heap = [(nkey[u],u) for u in lst if count[u] == 0]

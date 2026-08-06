@@ -215,10 +215,11 @@ spec_program = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
   # control flow
-  (UPat(Ops.IF, dtypes.bool, (UPat(GroupOp.ControlFlow), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(Ops.ENDIF, dtypes.void, (UPat(Ops.BLOCKEND),), allow_any_len=True), lambda: True),
+  (UPat(Ops.IF, dtypes.bool, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.ENDIF, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.RANGE, Ops.ENDIF, Ops.START)),)), lambda: True),
-  (UPat(Ops.BLOCKEND), lambda: True),
+  (UPat((Ops.THEN, Ops.ELSE), dtypes.void, (UPat(Ops.IF),), allow_any_len=True), lambda: True),
+  (UPat(Ops.ELSE), lambda: True),
   (UPat(Ops.END), lambda: True),
   (UPat(Ops.START), lambda: True),
 

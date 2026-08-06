@@ -3,7 +3,7 @@ import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
-from tinygrad.uop.ops import AxisType
+from tinygrad.uop.ops import AxisType, consumer_map_from_toposort
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -24,6 +24,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.codegen.late.control_flow import CFGContext, pm_split_ends, pm_add_control_flow, pm_lower_gated_load_store, pm_lower_reg_buffer
+from tinygrad.codegen.late.control_flow import LowerRegBufferContext
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalese import memory_coalesing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
@@ -358,13 +359,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends+pm_no_index
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
-  sink = graph_rewrite(sink, pm_lower_gated_load_store, name="lower gated load/store")
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
-  sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx={}, name="lower reg buffer", bottom_up=True)
-
   # put unnumbered variable PARAMs in slots
-  #num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
-  #sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+
+  sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store")
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+  sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
