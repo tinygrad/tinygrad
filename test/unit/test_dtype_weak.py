@@ -3,7 +3,8 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite
+from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
