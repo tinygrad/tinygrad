@@ -22,7 +22,9 @@ class VRegister:
   pos: int|None = None
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
-  def sub(self, i:int) -> VRegister: return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
+  def sub(self, i:int) -> VRegister:
+    assert i < self.width, f"sub-register index out of width range ({i} >= {self.width})"
+    return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
   def candidates(self) -> list[tuple[Register,...]]:
     return [self.cons[i:i+self.width] for i in range(len(self.cons) - self.width + 1) if self.cons[i].index % self.alignment == 0]
 

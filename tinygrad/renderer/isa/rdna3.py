@@ -169,9 +169,9 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
+  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
-  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS)) if x.tag is None else None
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
   vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
@@ -185,12 +185,18 @@ def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
   return load, init + [mif, load, UOp(Ops.ENDIF, src=(mif,))]
 
 def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
+  # NOTE: probably fails on 64 bit SHRINK
   if idx.addrspace is AddrSpace.REG:
-    vregs = ctx.regptr(idx, GP_VGPRS)
+    vregs = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)
     if val.op is Ops.GROUP:
-      if idx.op is Ops.INDEX: return ctx.ren.copy(val.src[idx.src[1].val], vregs[idx.src[1].val])
-      else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
-    else: return ctx.ren.copy(val.after(idx), *vregs)
+      assert idx.op is Ops.INDEX
+      i = idx.src[1].val
+      if idx.dtype.itemsize == 8:
+        image = multireg(val.src[i*2], val.src[i*2+1], dtype=idx.dtype)
+        return ctx.ren.copy(image, vregs[i])
+      return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
+      # else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
+    else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
 
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize

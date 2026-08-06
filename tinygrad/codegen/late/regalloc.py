@@ -76,8 +76,6 @@ class LinearScanRegallocContext:
 
       # allocate defs
       for j,v in enumerate(rdefs(u)):
-        # NOTE: X86 hack to imitate physical register lifetime constraints as vregs
-        # - need to fix this
         if not isinstance(v, VRegister): continue
         if v.is_sub() and (vp := v.parent) in live:
           self.reals.setdefault(i, {})[v] = (live[vp][v.pos],)
