@@ -270,7 +270,9 @@ class PCIDevice:
       vfio.VFIO_IOMMU_UNMAP_DMA(unwrap(System.vfio), du)
       i = j + 1
 
-  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
+  def reset(self):
+    if getattr(self, 'vfio_dev', None) is not None: vfio.VFIO_DEVICE_RESET(self.vfio_dev)
+    else: os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def write_config_flush(self, offset:int, value:int, size:int):
