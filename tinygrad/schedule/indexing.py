@@ -43,8 +43,6 @@ def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:
-    # A source-backed PROGRAM receives raw pointers, so keep views of existing buffers as-is.
-    if c.src[0].op is Ops.PROGRAM and s.base.op in ALWAYS_CONTIGUOUS: continue
     while s.op is Ops.RESHAPE: s = s.src[0]
     if s.op not in ALWAYS_CONTIGUOUS:
       ctx.realize_map[s] = None

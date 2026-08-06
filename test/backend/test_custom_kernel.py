@@ -441,8 +441,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
 
   @Context(DEV="CPU")
-  def test_computed_input_from_source(self):
-    # Source-backed PROGRAMs still need live inputs realized before the call.
+  def test_simple_from_source_alt(self):
     a = Tensor.arange(4).clone().realize()
     src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
     from tinygrad.device import Device
