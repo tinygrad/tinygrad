@@ -502,7 +502,7 @@ jobs:
         env:
           AMD: 0
         run: |
-          MXFP4=1 LLAMA_LAYERS=2 NO_COLOR=1 BENCHMARK=3 SPEC=0 NOOPT=1 PYTHONPATH=. NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 DEV=NULL:HIP:gfx950 JITBEAM=0 \
+          MXFP4=1 LLAMA_LAYERS=2 NO_COLOR=1 BENCHMARK=3 SPEC=0 NOOPT=1 PYTHONPATH=. NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 DEV=NULL:HIPCC:gfx950 JITBEAM=0 \
             examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run matmul on MOCKKFD
         run: |
