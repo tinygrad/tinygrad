@@ -367,7 +367,7 @@ def lower_range(ctx, x:UOp):
   loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
   pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,bnd), tag=(EXEC,))
   jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_END_{range_str(x)}")
-  return acc, [acc, mask, loop_body, pred, jmp_out]
+  return acc, [acc, loop_body, pred, jmp_out]
 
 def lower_end(ctx, x:UOp, acc:UOp):
   loop_end = label(ctx, f".LOOP_END_{ctx.loop_label[acc]}")

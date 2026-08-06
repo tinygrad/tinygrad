@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
-from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.dtype import dtypes
 
 REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.IF, Ops.ENDIF}
@@ -17,14 +16,14 @@ class LinearScanRegallocContext:
 
     lr = self.live_intervals
     range_vars: list[VRegister] = []
-    def live(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
+    def live_edge(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
       # hmmm, why doesnt rdefs fix this?
-      if u.op in {Ops.AFTER, Ops.NOOP}: return live(u.src[0])
-      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return live(u.src[0]) # hack
+      if u.op in {Ops.AFTER, Ops.NOOP}: return live_edge(u.src[0])
+      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return live_edge(u.src[0]) # hack
       return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for i, u in enumerate(reversed(self.uops)):
-      defs, uses = live(u), []
-      for s in dedup(u.src): uses.extend(live(s))
+      defs, uses = live_edge(u), []
+      for s in dedup(u.src): uses.extend(live_edge(s))
       for v in defs + tuple(uses):
         lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
@@ -53,11 +52,9 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None) -> tuple[Register,...]:
       if v not in self.spills:
-        sz = v.cons[0].size
-        # TODO: make isa generic
-        # the value of a BUFFER is its 64bit address, XMM registers need 16 bytes
-        if isinstance(ren, X86Renderer):
-          sz = 16 if v.cons[0].size == 16 else (8 if self.vdef(v).op is Ops.BUFFER else self.vdef(v).dtype.itemsize)
+        # the value of an x86 BUFFER is its 64bit address
+        # RDNA3 does not assign directly to BUFFERs
+        sz = 8 if self.vdef(v).op is Ops.BUFFER else v.cons[0].size
         sz *= v.width
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = offset
