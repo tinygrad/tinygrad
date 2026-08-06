@@ -27,7 +27,8 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
 
 def realize_custom_kernel_srcs(ctx:dict[UOp, None], c:UOp) -> None:
   for s in c.src[1:]:
-    if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+    while s.op is Ops.RESHAPE: s = s.src[0]
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
