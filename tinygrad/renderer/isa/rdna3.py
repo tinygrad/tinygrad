@@ -58,10 +58,8 @@ def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST
 def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
-  # if nbits < 32: u = UOp(Ops.SHL, dtypes.uint32, src=(u, const(32 - nbits, dtypes.uint16)))
   return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
-  # if x.dtype.itemsize == 8: return multireg(vmov(x.index(0)), vmov(x.index(1)), dtype=x.dtype)
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
   return nx if r is None else nx.replace(tag=(r,))
 def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
@@ -94,6 +92,13 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
+# NOTE: this should just be triggered in to_vgpr??
+def gethalf(x:UOp, buf:UOp, idx:UOp):
+  b32 = buf.index(const(idx.val // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
+  # NOTE: manual construction, needs to be cleaned
+  if idx.val % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype)
+  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+
 # ---- operand legalization wrappers ----
 def _vop3(ctx, x:UOp):
   lits = [s for s in x.src if s.op is Ops.CONST]
@@ -109,12 +114,10 @@ def _vop2(ctx, x:UOp):
   if not non_commutative and not is_const(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
   return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
 
-# TODO: allocate vgpr / sgpr based on op group (x.arg.func)
+# TODO: allocate vgpr / sgpr based on op group (x.arg.func)?
 def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
-  if x.op is Ops.LOAD and x.src[0].addrspace is not AddrSpace.REG: return None
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
-  # if x.op is Ops.GROUP and not all(rdef(s) is not None for s in x.src): return None
 
   if x.op is Ops.GROUP:
     vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
@@ -133,7 +136,7 @@ def abi(ctx, x:UOp) -> UOp|None:
     dim = int(x.arg[-1])
     if x.arg[0] == 'g': return vmov(x.replace(tag=(WGIDS[dim],), dtype=dtypes.uint32)).rtag()
     else: # granulated work item ids, packed into 3 10 bit fields in v0, extract with bfe
-      return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10))) 
+      return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)])
   addr = (x.replace(tag=KERNARG_PTR), const(offs))
   if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=addr, tag=(ctx.vreg(GP_SGPRS),)))
@@ -153,8 +156,7 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
-# NOTE: keep base in src to maintain graph dependencies?
-# TODO: actually calculate lds offset per seperate BUFFER, need some way to know what # this is (ctx.func_args) and the size of the other ones. Use isel ctx?
+# TODO: actually calculate lds offset per seperate BUFFER, (ctx.func_args)
 def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.arg * scale, dtypes.uint16), base)
@@ -172,28 +174,29 @@ def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
   if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS)) if x.tag is None else None
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_load_{suffix}{sz*8}")
-  if gate is None: return x.ins(opc, src=fold_address(idx), tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
-  # NOTE: hacky, takes advantage of codegen gated loads
-  # TODO: alt needs to be folded
-  n = len(alt.src) if alt.op is Ops.GROUP else alt.max_numel()
-  dst = UOp.placeholder((n,), alt.dtype, next(lane_ctr), addrspace=AddrSpace.REG)
-  out = UOp(Ops.SHRINK, idx.dtype, src=(dst, const(0), const(n))) if n > 1 else dst.index(0)
-  gated = UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), UOp(Ops.NOOP), gate), arg=opc, tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
-  return out.load().after(out.store(gated).after(out.store(alt)))
+  vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
+  if gate is None: return x.ins(opc, src=fold_address(idx), tag=(vp,))
+  else: return x.replace(src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), alt, gate), tag=(vp,))
+
+def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
+  init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
+  load = UOp(Ops.INS, x.dtype, arg=addr.arg, src=addr.src, tag=x.tag)
+  mif = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))
+  return load, init + [mif, load, UOp(Ops.ENDIF, src=(mif,))]
 
 def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
-  n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
-  sz = n * idx.dtype.itemsize
   if idx.addrspace is AddrSpace.REG:
     vregs = ctx.regptr(idx, GP_VGPRS)
     if val.op is Ops.GROUP:
-      assert idx.op is Ops.SHRINK
-      copies = [ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]
-      return UOp.group(*copies).replace(tag=vregs)
-    else: return ctx.ren.copy(val, *vregs)
+      if idx.op is Ops.INDEX: return ctx.ren.copy(val.src[idx.src[1].val], vregs[idx.src[1].val])
+      else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
+    else: return ctx.ren.copy(val.after(idx), *vregs)
+
+  n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
+  sz = n * idx.dtype.itemsize
   opc = getattr(RDNA3Ops, f"{"global" if idx.addrspace is AddrSpace.GLOBAL else "ds"}_store_b{sz*8}")
   if gate is None: return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
-  else: return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx)), to_vgpr(val), gate), arg=opc)
+  else: return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), to_vgpr(val), gate))
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
@@ -228,7 +231,7 @@ def mul64(ctx, x:UOp):
   p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)), add=True)
   return _mad(a.index(0), b.index(0), p3)
 
-# TODO: fold const 64 as imms here?, shift hi, mas lo
+# TODO: fold const 64 as imms here?, shift hi, mask lo
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
   lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(0), b.index(0)))
@@ -238,7 +241,6 @@ def bitwise64(ctx, x:UOp, ins):
 # Allows embedding special alu instructions ex. mul_hi without introducing
 # Ops.INS which have None shape and cause alu() _broadcast to error
 def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
-
 def _mulhi(a:UOp, b:UOp, signed:bool) -> UOp:
   return _aluhint(UOp(Ops.MUL, dtypes.uint32, src=(a, b)), RDNA3Ops.v_mul_hi_i32 if signed else RDNA3Ops.v_mul_hi_u32)
 # use explicit SUBs (not x + y*-1): this runs post-decomp so nothing repairs the weak -1, and weak consts break isel vreg sizing
@@ -282,6 +284,18 @@ def alu(ctx, x:UOp):
   # alu arg used for machine instruction overrides, ex. mul_hi for cdiv
   ins = x.arg if isinstance(x.arg, InsOp) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
+
+def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+  if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
+  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
+  return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
+
+def render_wmma(ctx, wmma:UOp):
+  a,b,acc = wmma.src
+  srcdt = dt_to_isa[wmma.arg[1]]
+  if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
+  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
+  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.vreg(GP_VGPRS, width=8),))
 
 # ---- casting utilities -----
 def cvt(ctx, y:UOp, x:UOp):
@@ -344,7 +358,6 @@ def const64(x:UOp):
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
 def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
 
-# https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/SILowerControlFlow.cpp#L423
 def lower_range(ctx, x:UOp):
   bnd, mask = x.src[0], x.src[-1]
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
@@ -360,27 +373,6 @@ def lower_end(ctx, x:UOp, acc:UOp):
   inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
   jmp_back = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
   return inc, [inc, jmp_back, loop_end, restoreexec(ctx.exec_mask[acc])]
-
-# --- other stuff ---
-# NOTE: this should just be triggered in to_vgpr????
-def gethalf(x:UOp, buf:UOp, idx:UOp):
-  b32 = buf.index(const(idx.val // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
-  # NOTE: manual construction, needs to be cleaned
-  if idx.val % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype)
-  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
-
-# NOTE: handle 64 bit where??, should be 2 32 bit cndmasks
-def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
-  if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
-  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
-
-def render_wmma(ctx, wmma:UOp):
-  a,b,acc = wmma.src
-  srcdt = dt_to_isa[wmma.arg[1]]
-  if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
-  ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
-  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.vreg(GP_VGPRS, width=8),))
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
@@ -450,9 +442,9 @@ pre_isel_matcher = PatternMatcher([
 isel_matcher = PatternMatcher([
   # --- mem ops ---
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(UPat.var("alt"), UPat.var("gate")).named("x"), load),
   (UPat.var("idx").store(UPat.var("val")), store),
   (UPat.var("idx").load(name="x"), load),
-  (UPat.var("idx").load(UPat.var("alt"), UPat.var("gate")).named("x"), load),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -490,17 +482,18 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
-  # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
 ])
 
 pre_regalloc_matcher = PatternMatcher([
+  # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
+  (UPat(Ops.LOAD, src=(UPat.var("addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
     ((nx := UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))), [nx])),
   (UPat(Ops.STORE, src=(UPat.var("addr"), UPat.var("val")), name="x"), lambda x,addr,val:
-    ((nx := UOp(Ops.INS, arg=x.arg, src=addr.src + ((val,) if val.op is not Ops.NOOP else ()), tag=x.tag)), [nx])),
+    ((nx := UOp(Ops.INS, arg=addr.arg, src=addr.src + ((val,) if val.op is not Ops.NOOP else ()), tag=x.tag)), [nx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
@@ -518,15 +511,15 @@ def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
   def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
-  def _immorreg(x:UOp): return x.val if x.op is Ops.CONST else _fuse(rdefs(x))
+  def _immorreg(x:UOp):
+    while x.op is Ops.AFTER: x=x.src[0]
+    return x.val if x.op is Ops.CONST else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
-
-  # print("encoding", opc, rdefs(x), [(s.op,s.arg,rdefs(s)) for s in oprs])
-
   kw = args = None
+
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.GLOBAL:

@@ -6,7 +6,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.dtype import dtypes
 
-REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL}
+REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.IF, Ops.ENDIF}
 
 class LinearScanRegallocContext:
   # NOTE: wrong for fill regs
