@@ -120,9 +120,9 @@ const drawGraph = (data) => {
     .attr("transform", d => `translate(${d.width/2-8}, ${-d.height/2+8})`).datum(e => ({ rect:true, width:10, height:10, fill:e.addrspace, stroke:"none" })));
   const CALL_TAG_WIDTH = 14;
   addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
-    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
-      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
+    .attr("transform", d => d.collapsePorts != null ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
+    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.collapsePorts != null ? null : d.color,
+      ...(d.collapsePorts != null && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
       e.stopPropagation();
       const t = d3.zoomTransform(document.getElementById("graph-svg"));
       const [x, y] = t.apply([d.x, d.y]);
