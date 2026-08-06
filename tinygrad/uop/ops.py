@@ -1169,6 +1169,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
     if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, name=f"p{slot}"))
+    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU: return self.replace(arg=replace(self.arg, slot=slot, name=f"p{slot}"))
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
@@ -1180,6 +1181,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     if ret_dtype is not None: return UOp(Ops.CALL, ret_dtype, src=(self,)+srcs)
+    # scope scalar PARAM names
+    self = self.substitute({x:x.param_like(i) for i,x in enumerate(srcs) if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU})
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
