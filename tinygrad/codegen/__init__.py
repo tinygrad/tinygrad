@@ -310,7 +310,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+pm_fold_cast_const+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range, name="postopt symbolic")
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
@@ -326,7 +326,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+pm_fold_cast_const+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+pm_fold_cast_const+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
@@ -336,18 +336,18 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  sink = graph_rewrite(sink, symbolic_simple+pm_fold_cast_const+ew_devectorizer+pm_simplify_add_image,
+  sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image,
                        name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym+pm_fold_cast_const, name="extra symbolic")
+  sink = graph_rewrite(sink, sym, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   sink = graph_rewrite(sink, pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
 
   # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic+pm_fold_cast_const, name="final symbolic")
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
 
   sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 

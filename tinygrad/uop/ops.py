@@ -895,7 +895,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def contiguous_view_offset(self) -> int|None:
     """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
     from tinygrad.schedule.rangeify import pm_mops
-    from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+    from tinygrad.uop.symbolic import symbolic
 
     # WEBGPU and CL do not support views.
     # WEBGPU requires that minUniformBufferOffsetAlignment be at least 32 bytes: https://gpuweb.github.io/gpuweb/#adapter-capability-guarantees
@@ -905,7 +905,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
-    out = graph_rewrite(idx, pm_mops+symbolic+pm_fold_cast_const+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
+    out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
     return out.val if out.op is Ops.CONST and isinstance(out.val, int) else None
 
   def has_buffer_identity(self, after_ok=False):
