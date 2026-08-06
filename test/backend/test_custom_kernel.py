@@ -483,8 +483,6 @@ class TestCustomKernelInput(unittest.TestCase):
   def test_flip(self): self._test_mop(lambda x: x.flip(0), max_kernels=2)
   def test_offset_shrink(self): self._test_mop(lambda x: x[4:8], max_kernels=2)
   def test_2d_shrink(self): self._test_mop(lambda x: x.reshape(4, 8)[:, 2:6], max_kernels=3)
-
-  @unittest.skip("this is broken, expand moves")
   def test_expand(self): self._test_mop(lambda x: x.reshape(16, 2)[:, :1].expand(16, 2), max_kernels=3)
 
 class TestUnshardIndex(unittest.TestCase):
