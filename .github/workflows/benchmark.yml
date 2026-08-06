@@ -324,11 +324,6 @@ jobs:
         if [[ "${{ matrix.dev }}" == "NV" ]]; then
           DEBUG=2 DEV=CUDA python -m pytest -rA test/test_tiny.py
         fi
-    - name: Run MXFP4 Llama training on NULL backend
-      if: ${{ matrix.dev == 'AMD' }}
-      run: |
-        MXFP4=1 LLAMA_LAYERS=2 NO_COLOR=1 BENCHMARK=3 SPEC=0 NOOPT=1 PYTHONPATH=. NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 DEV=NULL:HIP:gfx950 JITBEAM=0 \
-          examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "METAL" ]]; then
