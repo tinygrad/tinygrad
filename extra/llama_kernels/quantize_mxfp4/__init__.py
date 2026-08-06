@@ -13,7 +13,7 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
                   *(UOp(Ops.CUSTOM, dtypes.void, (o.base.index(0),), arg="") for o in outputs),
                   UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1"),
                   arg=KernelInfo(name))
-  src = (pathlib.Path(__file__).parent/"quantize_mxfp4.hip").read_text()
+  src = (pathlib.Path(__file__).parent/"quantize_mxfp4.cpp").read_text()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
     UOp(Ops.BINARY, arg=compile_hip(src, [f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",
                                              f"-DSHUFFLE_ROWWISE_FP4_VALUE={int(shuffle_row)}",
