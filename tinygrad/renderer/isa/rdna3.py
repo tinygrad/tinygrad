@@ -56,7 +56,6 @@ def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), 
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.const((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
 def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
-def multireg(*args, dtype:DType): return UOp.group(*args).replace(dtype=dtype)
 def getsign(u:UOp, nbits):
   return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
@@ -88,7 +87,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
       if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
       else: mvs.append(vmov(x.src[i*2]))
     else: mvs.append(vmov(x.src[i]))
-  nx = multireg(*mvs, dtype=x.dtype)
+  nx = UOp.group(*mvs, dtype=x.dtype)
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
@@ -192,7 +191,7 @@ def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
       assert idx.op is Ops.INDEX
       i = idx.src[1].val
       if idx.dtype.itemsize == 8:
-        image = multireg(val.src[i*2], val.src[i*2+1], dtype=idx.dtype)
+        image = UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype)
         return ctx.ren.copy(image, vregs[i])
       return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
       # else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
@@ -222,7 +221,7 @@ def arith64(ctx, x:UOp, add:bool):
   vreg = ctx.vreg(GP_VGPRS, width=2) # NOTE: after causes a problem for auto allocating group reg?
   lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
   hi = UOp(Ops.INS, dtype=narrow, arg=ins_hi, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
-  return multireg(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
+  return UOp.group(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
 # a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
@@ -242,7 +241,7 @@ def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
   lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(0), b.index(0)))
   hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
-  return multireg(lo, hi, dtype=x.dtype)
+  return UOp.group(lo, hi, dtype=x.dtype)
 
 # Allows embedding special alu instructions ex. mul_hi without introducing
 # Ops.INS which have None shape and cause alu() _broadcast to error
@@ -326,7 +325,7 @@ def int_to_int64(y:UOp, tdt:DType):
     lo = vmov(y)
     hi = getsign(to_vgpr(y), nbits)
   else: lo, hi = vmov(y), vmov(const(0))
-  return multireg(lo, hi, dtype=tdt)
+  return UOp.group(lo, hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
@@ -346,7 +345,7 @@ def f64_to_int64(y:UOp, tdt:DType):
   hi_f = UOp(Ops.INS, dtypes.float64, arg=RDNA3Ops.v_floor_f64_e32, src=(hi_f,))
   lo_f = hi_f.ins(RDNA3Ops.v_ldexp_f64, src=(hi_f, const(32, dtypes.int16))) # tr - hi_f * 2 ^ 32
   lo_f = UOp(Ops.ADD, dtypes.float64, src=(tr, UOp(Ops.MUL, dtypes.float64, src=(lo_f, const(-1., dtypes.float64)))))
-  return multireg(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=tdt)
+  return UOp.group(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=tdt)
 
 # TODO: currently only 53 bit precision (f64 mantissa), could do better
 def long2double(x:UOp):
@@ -358,7 +357,7 @@ def long2double(x:UOp):
 def const64(x:UOp):
   v = x.val.bits if dtypes.is_float(x.dtype) else x.val
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  return multireg(vmov(const(v)), vmov(const(v >> 32, hi_dt)), dtype=x.dtype)
+  return UOp.group(vmov(const(v)), vmov(const(v >> 32, hi_dt)), dtype=x.dtype)
 
 # ---- control flow ----
 def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
@@ -429,7 +428,7 @@ pre_isel_matcher = PatternMatcher([
   # --- 64 bit semantics ---
   (UPat(Ops.CONST, (dtypes.float64, dtypes.long, dtypes.ulong), name="x"), const64),
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))),
-    lambda pred,a,b: multireg(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
+    lambda pred,a,b: UOp.group(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), # prevent 64 bit immediate from being realized into 2 regs for shift
     lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
   # --- other ---
@@ -582,7 +581,7 @@ class RDNA3Renderer(ISARenderer):
   def stack_alloc(self, uops:list[UOp]): return uops
   def copy(self, u:UOp, r:VRegister|Register) -> UOp:
     if u.dtype.itemsize == 8:
-      return multireg(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype).replace(tag=(r,))
+      return UOp.group(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype, tag=(r,))
     return vmov(u,r)
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
