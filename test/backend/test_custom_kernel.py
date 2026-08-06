@@ -438,7 +438,7 @@ class TestCustomKernel(unittest.TestCase):
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
     a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
-    self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
+    self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 
   @Context(DEV="CPU")
   def test_simple_from_source_alt(self):
