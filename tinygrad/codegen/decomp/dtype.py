@@ -78,9 +78,11 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
-def split_l2i(op: Ops, dt: DType, *uops:UOp):
-  # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself
-  return l2i(op, dt, *graph_rewrite(UOp.sink(*uops), pm_long_decomp, bottom_up=True).src)
+def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
+  # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.
+  # both word halves of a node ask for the same split, so ctx memos it for the pass
+  if (key:=(op, dt, uops)) not in ctx: ctx[key] = l2i(op, dt, *graph_rewrite(UOp.sink(*uops), pm_long_decomp, ctx=ctx, bottom_up=True).src)
+  return ctx[key]
 
 # ***** floats *****
 f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
@@ -139,21 +141,21 @@ pm_long_decomp = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag((0, dt:=l2i_dt[idx.dtype])), val.rtag((0, dt)))).group(
      st.replace(src=(idx.rtag((1, dt)), val.rtag((1, dt))))) if val.tag is None else None),
-  (UPat(GroupOp.Comparison, src=[UPat.var('a', tuple(l2i_dt.keys())), UPat()], name="x"), lambda a,x:
-   split_l2i(x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
-  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-   split_l2i(Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
-  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
-   split_l2i(x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
-  (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-   split_l2i(x.op, x.dtype, a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt))) if x.dtype not in l2i_dt and a.tag is None else None),
-  (UPat((Ops.SHL, Ops.SHR), tuple(l2i_dt.keys()), src=(UPat.var('a'), UPat.var('b')), name="x"), lambda a,b,x:
-   split_l2i(x.op, dt:=l2i_dt[x.dtype], a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)))[x.tag[0]] if x.tag is not None else None),
-  (UPat(Ops.WHERE, tuple(l2i_dt.keys()), src=(UPat.var('c'), UPat.var('a'), UPat.var('b')), name="x"), lambda a,b,c,x:
-   split_l2i(x.op, dt:=l2i_dt[x.dtype], c, a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)), b.rtag((1, dt)))[x.tag[0]]
+  (UPat(GroupOp.Comparison, src=[UPat.var('a', tuple(l2i_dt.keys())), UPat()], name="x"), lambda ctx,a,x:
+   split_l2i(ctx, x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
+   split_l2i(ctx, Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda ctx,a,x:
+   split_l2i(ctx, x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
+  (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
+   split_l2i(ctx, x.op, x.dtype, a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt))) if x.dtype not in l2i_dt and a.tag is None else None),
+  (UPat((Ops.SHL, Ops.SHR), tuple(l2i_dt.keys()), src=(UPat.var('a'), UPat.var('b')), name="x"), lambda ctx,a,b,x:
+   split_l2i(ctx, x.op, dt:=l2i_dt[x.dtype], a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)))[x.tag[0]] if x.tag is not None else None),
+  (UPat(Ops.WHERE, tuple(l2i_dt.keys()), src=(UPat.var('c'), UPat.var('a'), UPat.var('b')), name="x"), lambda ctx,a,b,c,x:
+   split_l2i(ctx, x.op, dt:=l2i_dt[x.dtype], c, a.rtag((0, dt)), a.rtag((1, dt)), b.rtag((0, dt)), b.rtag((1, dt)))[x.tag[0]]
    if x.tag is not None else None),
-  (UPat((*(GroupOp.ALU - GroupOp.Comparison - {Ops.SHL, Ops.SHR, Ops.WHERE}), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
-   split_l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
+  (UPat((*(GroupOp.ALU - GroupOp.Comparison - {Ops.SHL, Ops.SHR, Ops.WHERE}), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda ctx,x:
+   split_l2i(ctx, x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
@@ -197,7 +199,7 @@ def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
       to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
       if DEBUG >= 2: print(f"emulating {fr} as {to}")
       pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+      sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx={} if pm is pm_long_decomp else (fr, to), bottom_up=True)
   ctx[0].clear()
   return sink
 

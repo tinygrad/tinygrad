@@ -21,7 +21,7 @@
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
-    let buf = '';
+    let buf = '', txt = '', rsn = '';
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
       if (done) break;
@@ -30,9 +30,13 @@
       buf = lines.pop();
       for (const ln of lines)
         if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
-          try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
+          try { const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
+            if (dl?.reasoning_content) { const s = document.createElement('span'); s.style.color = '#888';
+              s.textContent = dl.reasoning_content; rsn += dl.reasoning_content; d.appendChild(s) }
+            if (dl?.content) { const s = document.createElement('span');
+              s.textContent = dl.content; txt += dl.content; d.appendChild(s) } } catch {}
       chat.scrollTop = chat.scrollHeight;
     }
-    msgs.push({role: 'assistant', content: d.textContent});
+    const m = {role:'assistant', content:txt}; if (rsn) m.reasoning_content = rsn; msgs.push(m);
   }
 </script></body></html>

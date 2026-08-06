@@ -127,6 +127,41 @@ class TestCustomKernel(unittest.TestCase):
     # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
     self.assertEqual(x.tolist(), [1, 2, 3, 4] if Device.DEFAULT != "WEBGPU" else [0, 1, 2, 3])
 
+  def test_lazy_const_srcs_with_reduce(self):
+    # lazy const expressions above a custom kernel call don't resolve to a buffer state, they must be realized.
+    # without this, the rangeify doesn't assign ranges to the subgraph above the call and reduce conversion crashes
+    x = Tensor.linspace(-1.0, 1.0, 64)  # Tensor.arange is cumsum-based, so this contains a REDUCE with no buffer anchor
+    out = Tensor.empty_like(x)
+    def copy_kernel(out:UOp, inp:UOp) -> UOp:
+      i = UOp.range(inp.numel(), 0)
+      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name="copy"))
+    # forge the call like llm/kernels does: params and call args, no Tensor.custom_kernel contiguous
+    params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate((out.uop, x.uop)))
+    call = copy_kernel(*params).call(out.uop, x.uop)
+    np.testing.assert_allclose(Tensor(out.uop.after(call)).realize().numpy(), x.realize().numpy(), rtol=1e-6)
+
+  def test_mixed_buffer_and_lazy_const_srcs(self):
+    # a computed input must be realized even if one of its sources resolves to a buffer: the CALL gives the whole
+    # subgraph no ranges, so the const branch still crashes reduce conversion if only the buffer branch is found
+    x = Tensor.linspace(-1.0, 1.0, 64)  # lazy const expression with a REDUCE
+    y = Tensor.ones(64).contiguous().realize()
+    out = Tensor.empty_like(x)
+    def copy_kernel(out:UOp, inp:UOp) -> UOp:
+      i = UOp.range(inp.numel(), 0)
+      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name="copy"))
+    for expr in (y + x, x + y, y * 2.0):  # buffer on either side, and a scalar const over a buffer
+      params = tuple(UOp.placeholder_like(u, slot=i) for i,u in enumerate((out.uop, expr.uop)))
+      call = copy_kernel(*params).call(out.uop, expr.uop)
+      np.testing.assert_allclose(Tensor(out.uop.after(call)).realize().numpy(), expr.realize().numpy(), rtol=1e-6)
+    # view-only movement ops over a buffer resolve to the buffer state and must NOT be realized
+    expr = y.reshape(8, 8).reshape(64)
+    expected = expr.numpy()
+    params = tuple(UOp.placeholder_like(u, slot=i) for i,u in enumerate((out.uop, expr.uop)))
+    call = copy_kernel(*params).call(out.uop, expr.uop)
+    GlobalCounters.kernel_count = 0
+    np.testing.assert_allclose(Tensor(out.uop.after(call)).realize().numpy(), expected, rtol=1e-6)
+    self.assertEqual(GlobalCounters.kernel_count, 1, "a view over a buffer should not add a realize kernel")
+
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
 

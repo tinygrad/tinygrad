@@ -251,7 +251,7 @@ DEFAULT_FLOAT, DEFAULT_INT = ContextVar("DEFAULT_FLOAT", "float32"), ContextVar(
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 def _get_cpu_count() -> int:
   # os.process_cpu_count (3.13+) respects cgroup limits
-  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count())
+  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count() or 1)
   # cgroup v2 (containers with --cpus=N)
   try:
     with open("/sys/fs/cgroup/cpu.max") as f:

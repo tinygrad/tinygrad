@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from test.helpers import check_schedule, assert_kernel_count
+from test.helpers import check_schedule, assert_kernel_count, KernelCountException
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -592,9 +592,7 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.randn(BS, CIN, 64, 64).realize()
     w = Tensor.uniform(16, CIN, 3, 3).realize()
     ret = Tensor.conv2d(img, w).relu().mean().backward()
-    linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
-    cnt = len([call for call in linear.src if call.src[0].op is Ops.SINK])
-    assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
+    check_schedule([ret, img.grad, w.grad], allowed)
 
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
@@ -615,7 +613,8 @@ class TestSchedule(unittest.TestCase):
         return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
-        self.assertEqual(cnt(), 5)
+        got = cnt()
+        if got != 5: raise KernelCountException(5, got)
 
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -630,7 +629,8 @@ class TestSchedule(unittest.TestCase):
         return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
-        self.assertEqual(cnt(), 9)
+        got = cnt()
+        if got != 9: raise KernelCountException(9, got)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
