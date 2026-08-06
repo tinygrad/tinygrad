@@ -332,7 +332,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_fold_cast_const+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
 
   # some coalescing misses without this
-  sink = graph_rewrite(sink, sym+pm_fold_cast_const, name="early symbolic")
+  sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
