@@ -32,8 +32,8 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
-  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=True):
+  lst = list(ast.toposort(enter_calls=enter_calls)) if isinstance(ast, UOp) else ast
   if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
   with Context(TRACK_MATCH_STATS=0):
@@ -255,24 +255,19 @@ spec_full = PatternMatcher([
 
 # ***** kernel graph spec *****
 
-def validate_custom_kernel_srcs(c:UOp) -> bool:
-  # custom kernels need buffers: every input must resolve to a buffer state. computed (ALU) or non-RESHAPE movement
-  # ops above the buffer are silently dropped when call args are unwrapped to their base buffer in create_schedule.
-  # Tensor.custom_kernel makes inputs contiguous, forged calls (like llm/kernels) must pass buffer states
-  for s in c.src[1:]:
-    t = s
-    # RESHAPEs on call args are stripped in pm_add_buffers, INDEXes come from ranges of other consumers (dropped in _unwrap_src)
-    while t.op in {Ops.RESHAPE, Ops.INDEX} and len(t.src): t = t.src[0]
-    if t.op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.SLICE, Ops.MSELECT, Ops.MSTACK, Ops.BIND}:
-      raise RuntimeError(f"custom kernel input must be a buffer, got {t.op}. "
-                         "realize it before the call (Tensor.custom_kernel makes inputs contiguous)")
-  return True
-
-# this is the spec for the kernel graph, the output of get_kernel_graph
 spec_kernel_graph = PatternMatcher([
-  # custom kernel (SINK body) inputs must resolve to buffer states
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="c"), validate_custom_kernel_srcs),
-])+spec_full
+  # sink and const
+  (UPat(Ops.SINK, dtypes.void), lambda: True),
+  (UPat(Ops.CONST, src=()), lambda: True),
+  # param is outside buffer, buffer is local buffer
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace == AddrSpace.GLOBAL),
+  # all calls are on sink
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True), lambda: True),
+  # after on PARAM or AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER})),),
+        allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
+])
 
 # **** pyrender (move this) ****
 

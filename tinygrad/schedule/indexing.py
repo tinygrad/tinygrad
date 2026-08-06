@@ -105,10 +105,7 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
-  # a REDUCE above a custom kernel call gets no ranges (the CALL contributes none), so the input doesn't resolve
-  # to a buffer state. reject it here instead of crashing on the missing range_map entry
-  if x not in ctx.range_map:
-    raise RuntimeError("custom kernel input must be a buffer: REDUCE above a custom kernel call has no ranges")
+  if x not in ctx.range_map: raise RuntimeError("REDUCE has no ranges, probably because custom kernel input must be a buffer")
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
   new_ranges = list(ctx.range_map[x][0][:x.arg[1]])

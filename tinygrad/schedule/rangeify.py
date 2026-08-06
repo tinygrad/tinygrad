@@ -574,10 +574,9 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
-  # validate the kernel graph (custom kernel inputs must resolve to buffer states)
-  if SPEC:
-    from tinygrad.uop.spec import type_verify, spec_kernel_graph  # late import to avoid circular import
-    type_verify(tsink, spec_kernel_graph)
-
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
+  if SPEC:
+    # validate the kernel graph
+    from tinygrad.uop.spec import type_verify, spec_kernel_graph
+    type_verify(tsink, spec_kernel_graph, enter_calls=False)
   return tsink
