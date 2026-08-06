@@ -89,9 +89,11 @@ class HIPCompiler(Compiler):
 
 class HIPCCCompiler(Compiler):
   def __init__(self, arch:str, extra_options:list[str]=[]):
-    self.arch, self.extra_options = arch, extra_options
-    super().__init__(f"compile_hipcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
+    self.arch, self.extra_options, self.no_hipcc = arch, extra_options, getenv("NO_HIPCC")
+    super().__init__(f"compile_hipcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}"+
+                     ("_nohipcc" if self.no_hipcc else ""))
   def compile(self, src:str) -> bytes:
+    if self.no_hipcc: return b""
     with tempfile.NamedTemporaryFile(suffix=".cpp") as srcf, tempfile.NamedTemporaryFile(suffix=".bc") as bcf:
       with tempfile.NamedTemporaryFile(suffix=".hsaco") as libf:
         srcf.write(src.encode())
