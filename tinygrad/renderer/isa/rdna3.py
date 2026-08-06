@@ -87,7 +87,7 @@ def stack2regs(ctx, x:UOp, vreg:VRegister|None=None):
       if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
       else: mvs.append(vmov(x.src[i*2]))
     else: mvs.append(vmov(x.src[i]))
-  nx = UOp.group(*mvs, dtype=x.dtype)
+  nx = UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
   if vreg is not None: nx = nx.replace(src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)), tag=(vreg,))
   return nx
 
@@ -486,6 +486,7 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
+  # NOTE: this messes up a WMMA test that loads from 16b indexs?
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
