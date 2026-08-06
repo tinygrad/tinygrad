@@ -25,8 +25,6 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self: ctx[src] = None
 
-BUFFER_STATE_OPS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}
-
 pm_generate_realize_map = PatternMatcher([
   # always realize
   (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
@@ -107,6 +105,8 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
+  # no ranges, this can happen above a custom kernel call. the kernel graph spec rejects this, don't crash here
+  if x not in ctx.range_map: return None
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
   # input ranges
   new_ranges = list(ctx.range_map[x][0][:x.arg[1]])

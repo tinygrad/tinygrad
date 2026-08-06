@@ -253,6 +253,27 @@ spec_full = PatternMatcher([
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 ])+spec_tensor+spec_program+spec_hcq
 
+# ***** kernel graph spec *****
+
+def validate_custom_kernel_srcs(c:UOp) -> bool:
+  # custom kernels need buffers: every input must resolve to a buffer state. computed (ALU) or non-RESHAPE movement
+  # ops above the buffer are silently dropped when call args are unwrapped to their base buffer in create_schedule.
+  # Tensor.custom_kernel makes inputs contiguous, forged calls (like llm/kernels) must pass buffer states
+  for s in c.src[1:]:
+    t = s
+    # RESHAPEs on call args are stripped in pm_add_buffers, INDEXes come from ranges of other consumers (dropped in _unwrap_src)
+    while t.op in {Ops.RESHAPE, Ops.INDEX} and len(t.src): t = t.src[0]
+    if t.op not in {Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.SLICE, Ops.MSELECT, Ops.MSTACK, Ops.BIND}:
+      raise RuntimeError(f"custom kernel input must be a buffer, got {t.op}. "
+                         "realize it before the call (Tensor.custom_kernel makes inputs contiguous)")
+  return True
+
+# this is the spec for the kernel graph, the output of get_kernel_graph
+spec_kernel_graph = PatternMatcher([
+  # custom kernel (SINK body) inputs must resolve to buffer states
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="c"), validate_custom_kernel_srcs),
+])+spec_full
+
 # **** pyrender (move this) ****
 
 # late imports to avoid circular import
