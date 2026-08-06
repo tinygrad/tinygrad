@@ -287,7 +287,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     (UOp.const(x.val) if x.op is Ops.CONST else x.cast(dtypes.int)).alu(u.op,
      UOp.const(y.val) if y.op is Ops.CONST else y.cast(dtypes.int)).cast(u.dtype)
     if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
-  ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
+  ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
   # only RANGE/IF/STORE/KERNEL have side effects
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.LINEAR, Ops.STAGE}

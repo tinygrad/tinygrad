@@ -321,6 +321,10 @@ def split_patches(call:UOp) -> UOp|None:
   scatter = make_scatter_loops(input_patches, tables[0], lt_patches)
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
+  if inputs: # fence inputs
+    fills.append((t:=tables[0][0]).after(make_binary_patch(t, bytes(t.max_numel() * 8)))) # zeroed at link, slot 0 is the host fence
+    body = body.replace(src=(UOp.sink(*body.src[0].src, t.after(*body.src[0].src).index(0).store(0)),)) # open it once consumed
+
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
@@ -344,7 +348,7 @@ def replace_params(call:UOp) -> UOp|None:
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
-  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.tag == "inputs"), None))
+  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.without_after.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
                       arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
 pm_replace_params = PatternMatcher([
@@ -525,7 +529,8 @@ class HCQ2Compiled(Compiled):
     return buf
 
   def synchronize(self, timeout:int|None=None):
-    if not hasattr(self, 'iface'): return
+    if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
+
     sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     tl = self.signal("value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     timeout = timeout if timeout is not None and self.can_recover else None

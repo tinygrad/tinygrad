@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, wait_cond
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
@@ -216,8 +216,9 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     table = call.src[1+inputs].buffer
     for j,dev in enumerate(call.arg.aux.device):
       addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
-      buf = table.bufs[j] if isinstance(table, MultiBuffer) else table
-      buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = addrs
+      mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
+      wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")
+      mv[:len(addrs)] = addrs
 
   exec_kernel(replace(ctx, update_stats=False), call, ast)
 
