@@ -9,6 +9,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -24,9 +25,9 @@ from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import pm_mops
-from tinygrad.codegen.late.linearizer import linearize
-from tinygrad.codegen.late.control_flow import CFGContext, pm_split_ends, pm_add_control_flow, pm_lower_gated_load_store, pm_lower_reg_buffer
-from tinygrad.codegen.late.control_flow import LowerRegBufferContext
+from tinygrad.codegen.late.linearizer import linearize, pm_add_control_flow, CFGContext, linearize2
+from tinygrad.codegen.late.control_flow import pm_split_ends, pm_add_control_flow2, pm_lower_gated_load_store, pm_lower_reg_buffer
+from tinygrad.codegen.late.control_flow import CFGContext2, LowerRegBufferContext
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, flatten, argsort, partition
@@ -382,15 +383,27 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
-  sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store")
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
-  sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
+  if isinstance(ren, LLVMRenderer):
+    sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store")
+    sink = graph_rewrite(sink, pm_add_control_flow2, ctx=CFGContext2(sink), name="add control flow", bottom_up=True)
+    sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
+  else: sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink
+
+# TODO: rm when all renderers are refactored
+# inject IF/ENDIF. only needed if device doesn't support gated stores
+pm_linearize_cleanups = PatternMatcher([
+  # if statements are not allowed in the graph
+  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
+  # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
+])
 
 # requires lst be toposorted. like graph rewrite, but for lines
 def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
@@ -405,7 +418,8 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = linearize(sink)
+  lst = linearize2(sink) if isinstance(ctx, LLVMRenderer) else linearize(sink)
+  lst = line_rewrite(lst, pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())

@@ -1,11 +1,12 @@
 import heapq, functools
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import UOp, Ops, GroupOp, multirange_str, consumer_map_from_toposort
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, GroupOp, multirange_str, consumer_map_from_toposort
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
-def linearize2(sink:UOp) -> list[UOp]:
+# TODO: rm when all renderers are refactored
+def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
@@ -50,10 +51,40 @@ def linearize2(sink:UOp) -> list[UOp]:
       print(f"{i:4d} {str(u.op):20s} {multirange_str(u.ranges, color=True, pad=10)} {priorities[u]}")
   return newlst
 
+# TODO: rm when all renderers are refactored
+class CFGContext:
+  def __init__(self, sink:UOp):
+    # there are 3 relationships between ranges:
+    # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
+    # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
+    # independent, endrange y is not a dependency of endrange x
+    # everything is nested inside the sink
+    deps: dict[UOp, dict[UOp, None]] = {}
+    nesting: dict[UOp, UOp] = {}
+    for u in sink.toposort():
+      # get the deps from the src
+      deps[u] = {}
+      for s in u.src: deps[u] |= deps[s]
 
+      if u.op in (Ops.END, Ops.SINK):
+        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
+      if u.op in (Ops.RANGE, Ops.END): deps[u][u] = None
 
+    self.edges: dict[UOp, UOp] = {}
+    siblings: dict[UOp, list[UOp]] = {}
+    for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
+    for k,v in siblings.items():
+      # ranges that have dependencies on other siblings need to be scheduled after them
+      order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
+      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
+      for x,y in zipped:
+        # TODO: this can happen! it causes infinite loop in shufflenet
+        assert y.src[1] not in x.backward_slice_with_self
+        self.edges[y.src[1]] = x
 
-
+pm_add_control_flow = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+])
 
 
 # the lowest common ancestor of the blocks
@@ -86,7 +117,7 @@ def loop_depth(x:UOp|None) -> int:
   if x.op is Ops.END: return loop_depth(idom(x)) - 1
   return loop_depth(idom(x))
 
-def linearize(sink:UOp) -> list[UOp]:
+def linearize2(sink:UOp) -> list[UOp]:
   topo = sink.toposort()
   users = consumer_map_from_toposort(topo)
   sched: dict[UOp, UOp|None] = {}

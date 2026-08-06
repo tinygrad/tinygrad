@@ -40,7 +40,7 @@ pm_lower_gated_load_store = PatternMatcher([
 # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
 # independent, endrange y is not a dependency of endrange x
 # everything is nested inside the sink
-class CFGContext:
+class CFGContext2:
   def __init__(self, sink:UOp):
     topo = sink.toposort()
     params = tuple(sorted([u for u in topo if u.op is Ops.PARAM], key=lambda x: x.arg.slot))
@@ -68,18 +68,15 @@ class CFGContext:
     for k,v in siblings.items():
       # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
-      #print(k.op, [(o.op, o.arg) for o in order])
       for x,y in zip(order, order[1:] + [k]): self.idom[y if y is k else _entry(y)] = x
-      # TODO: this can happen! it causes infinite loop in shufflenet
-      #assert y.src[1] not in x.backward_slice_with_self
 
-def lower_range(ctx:CFGContext, x:UOp) -> UOp|None:
+def lower_range(ctx:CFGContext2, x:UOp) -> UOp|None:
   if x not in ctx.idom: return None
   it = UOp(Ops.CONST, dtypes.int32, (), 0)
   rng = UOp(Ops.RANGE, dtypes.void, (ctx.idom[x], it), x.arg)
   return rng
 
-def lower_end(ctx:CFGContext, x:UOp) -> UOp|None:
+def lower_end(ctx:CFGContext2, x:UOp) -> UOp|None:
   if x not in ctx.idom: return None
   rng = x.src[1]
   inc = UOp(Ops.ADD, rng.dtype, (rng, UOp(Ops.CONST, rng.dtype, arg=1)))
@@ -88,7 +85,7 @@ def lower_end(ctx:CFGContext, x:UOp) -> UOp|None:
   end = UOp(Ops.END, dtypes.void, (ctx.idom[x], rng, cond, inc) + rest)
   return end
 
-pm_add_control_flow = PatternMatcher([
+pm_add_control_flow2 = PatternMatcher([
   # the uses of RANGE that aren't control are really using the iterator
   (UPat(GroupOp.All - GroupOp.Control - {Ops.GETTUPLE, Ops.AFTER}, name="x"), lambda x:
    x.replace(src=tuple(s if s.op is not Ops.RANGE else UOp(Ops.GETTUPLE, s.dtype, (s,), 0) for s in x.src))),

@@ -81,6 +81,10 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), lambda ctx,buf,idx,x:
    f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.val}" if buf.addrspace == AddrSpace.ALU else None),
 
+  # memory load/store
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.GETTUPLE, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+
   # load/store
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
@@ -105,15 +109,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"{ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
-  # control flow
-  (UPat(Ops.START, name="x"), lambda ctx,x: ctx._render_fn(x)),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"br label %{ctx[x]}\n\n{ctx[x]}:"),
-  (UPat(Ops.END, name="x"), lambda ctx,x: f"br i1 {ctx[x.src[2]]}, label %{ctx[x.src[1]]}, label %{ctx[x]}\n\n{ctx[x]}:"),
-  (UPat(Ops.IF, name="x"), lambda ctx,x: f"br i1 {ctx[x.src[1]]}, label %if_then_{ctx[x][1:]}, label %if_else_{ctx[x][1:]}"),
-  (UPat((Ops.THEN, Ops.ELSE), name="x"), lambda ctx,x: f"br label %{ctx[x]}\n\n{ctx[x]}:"),
-  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"br label %{ctx[x]}\n\n{ctx[x]}:"),
-  (UPat(Ops.SINK), lambda: "ret void\n}"),
-  (UPat(GroupOp.Block, name="x"), lambda ctx,x: f"{ctx[x]}:"),
   # phi
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.ENDIF, src=(UPat.var("a"), UPat.var("b"))),), name="x"), lambda ctx,a,b,x:
    f"{ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [ {ctx[a.get_arg(x.arg)]}, %{ctx[a]} ], [ {ctx[b.get_arg(x.arg)]}, %{ctx[b]} ]"),
