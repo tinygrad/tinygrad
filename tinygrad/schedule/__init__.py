@@ -98,10 +98,14 @@ pm_post_sched_cache = PatternMatcher([
    create_new_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
+def resolve_linear_call(linear_call:UOp):
+  linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  binds = {f"p{i}":x.src[0] for i,x in enumerate(linear_call.src[1:]) if x.op is Ops.BIND}
+  return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
+
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
-   graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}

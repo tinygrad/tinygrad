@@ -1166,8 +1166,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
+    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, name=f"p{slot}"))
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
-    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, addrspace=addrspace))
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
   @staticmethod
