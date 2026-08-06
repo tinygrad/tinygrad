@@ -434,11 +434,27 @@ class TestCustomKernel(unittest.TestCase):
     # TODO: it currently requires a compiler for Ops.BINARY
     from tinygrad.device import Device
     binary = Device[a.device].renderer.compiler.compile(src)
-    def custom_src_kernel(A:UOp) -> UOp:
+    def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
-    a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
+    a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
+
+  @Context(DEV="CPU")
+  def test_computed_input_from_source(self):
+    # Source-backed PROGRAMs still need live inputs realized before the call.
+    a = Tensor.arange(4).clone().realize()
+    src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
+    from tinygrad.device import Device
+    binary = Device[a.device].renderer.compiler.compile(src)
+    def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
+      sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a+1, fxn=custom_src_kernel)[0]
+    GlobalCounters.reset()
+    out.realize()
+    assert_kernel_count(2)
+    self.assertEqual(out.tolist(), [1, 2, 3, 4])
 
   @unittest.skip("this shouldn't be expected to work")
   def test_inplace_transpose(self):
