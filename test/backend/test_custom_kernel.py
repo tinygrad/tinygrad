@@ -423,7 +423,8 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     y = run(x[0]).realize()
     # it's copying the input and the output
-    assert_kernel_count(1)
+    # TODO: subbuffer usage has runtime specific behavior, this will be fixed after the removal of SLICE.
+    assert_kernel_count(2 if y.device in ("CL", "WEBGPU") else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
