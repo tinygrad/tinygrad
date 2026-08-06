@@ -60,7 +60,6 @@ class ISARenderer(Renderer):
   pre_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
-  do_asm: bool = False
   spill_size: int = 0
 
   def is_two_address(self, x:UOp) -> bool: return False
