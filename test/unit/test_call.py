@@ -242,7 +242,7 @@ class TestCallSchedule(unittest.TestCase):
     def f(x:Tensor) -> Tensor: return (x + 1).contiguous()
     a, b = Tensor.empty(32).realize(), Tensor.empty(32).realize()
     r0, r1 = f(a[4:8]), f(b[8:12])
-    from tinygrad.callify import transform_to_call
+    from tinygrad.tensor import transform_to_call
     sink, _ = transform_to_call(UOp.sink(r0.uop, r1.uop))
     calls = [u for u in sink.toposort() if u.op is Ops.CALL and u.arg.precompile]
     self.assertEqual(len(calls), 2)
