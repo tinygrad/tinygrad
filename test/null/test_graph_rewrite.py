@@ -208,7 +208,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.uop.ops import graph_rewrite, _substitute, track_rewrites
+from tinygrad.uop.ops import graph_rewrite, _substitute, rewrite_group
 from tinygrad.uop.symbolic import symbolic_simple
 
 class TestBottomUpRewrite(unittest.TestCase):
@@ -220,7 +220,7 @@ class TestBottomUpRewrite(unittest.TestCase):
     self.assertIs(gt, ret)
 
 # normally .substitute would be fine, but it's not tracked
-@track_rewrites()
+@rewrite_group()
 def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
 def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
 
@@ -307,8 +307,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop(self):
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
@@ -316,8 +316,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop_bottom_up(self):
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
@@ -378,8 +378,8 @@ class TestWalkRewrite(unittest.TestCase):
     """A bouncing pattern applies once and stops instead of looping."""
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
@@ -456,8 +456,8 @@ class TestWalkRewrite(unittest.TestCase):
     """Bottom-up walk also applies once per node, no fixed-point iteration."""
     a = UOp.const(3)
     pm = PatternMatcher([
-      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
-      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: UOp.const(3, x.dtype)),
     ])
     ret = graph_rewrite(a, pm, bottom_up=True, walk=True)
     self.assertIs(ret, UOp.const(4))
@@ -511,7 +511,7 @@ class TestWalkRewrite(unittest.TestCase):
     def bpm_match(ctx, x):
       ctx.append((x.val if x.op is Ops.CONST else x.op, "bpm"))
       # rewrite const(1) -> const(10), short-circuiting its subtree
-      if x.op is Ops.CONST and x.val == 1: return x.replace(arg=10)
+      if x.op is Ops.CONST and x.val == 1: return UOp.const(10, x.dtype)
       return None
     def pm_match(ctx, x):
       ctx.append((x.val if x.op is Ops.CONST else x.op, "pm"))

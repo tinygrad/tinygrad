@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 
-from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu
+from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu, KernelCountException
 from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
@@ -97,7 +97,7 @@ class TestJit(unittest.TestCase):
       prev = o
 
     # Checking that 2 graphs are inited.
-    assert len(jf.captured.linear.src) == 2
+    if len(jf.captured.linear.src) != 2: raise KernelCountException(2, len(jf.captured.linear.src))
     for si in jf.captured.linear.src:
       assert call_is_graph(si)
 

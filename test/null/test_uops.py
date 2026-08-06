@@ -5,7 +5,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite, pm_lower_index_dtype  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.weak import pm_lower_index_dtype
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
@@ -55,11 +56,11 @@ class TestDTypeFromUOp(unittest.TestCase):
     invalid = UOp.invalid()
     self.assertIs(invalid.dtype, dtypes.bool)
     self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
-    self.assertIs((moved:=invalid.reshape((1,))).cast(dtypes.float32), moved)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
+    for u in (UOp.param(0, dtypes.bool, ()).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)
     for u in (UOp(Ops.STACK, dtypes.float32, src=(value, invalid)), UOp(Ops.ADD, dtypes.float32, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
               UOp.param(0, dtypes.float32, (4,)).index(invalid)): type_verify(u, spec_shared)
@@ -125,6 +126,12 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(nan != math.nan)  # float.__ne__ would say True here
     self.assertFalse(nan == Invalid)
     self.assertTrue(nan != Invalid)    # __ne__ must defer to the reflected eq, not swallow NotImplemented
+
+  def test_invalid_eq_defers_to_reflected(self):
+    class HoldsInvalid:  # a carrier that knows it holds Invalid. returning False for foreign types would silence its eq
+      def __eq__(self, other): return other is Invalid
+    self.assertTrue(Invalid == HoldsInvalid())
+    self.assertFalse(Invalid != HoldsInvalid())
 
   def test_matchers_agree_on_nan(self):
     n = UOp.const(math.nan, dtypes.float32)
@@ -447,7 +454,7 @@ class TestUPatHelpers(unittest.TestCase):
 
 class TestUopsObject(unittest.TestCase):
   def test_timing(self):
-    with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
+    with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000
 
   def test_nested(self):

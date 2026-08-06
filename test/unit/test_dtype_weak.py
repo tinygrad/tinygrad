@@ -3,7 +3,8 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite, pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite
+from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
@@ -44,9 +45,13 @@ class TestWeakPromotion(unittest.TestCase):
     r = Tensor([2], dtype=dtypes.uint8, device="CPU").copysign(Tensor([1], dtype=dtypes.uint32, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint32, [2]))
 
-  def test_minimum_commits_both_operands(self):
+  def test_minimum_reflects_weak_operand(self):
     r = Tensor(1).minimum(Tensor([2], dtype=dtypes.uint8, device="CPU"))
     self.assertEqual((r.dtype, r.tolist()), (dtypes.uint8, [1]))
+    for dt in dtypes.uints:
+      r = Tensor([dt.max], dtype=dt, device="CPU").minimum(1)
+      self.assertEqual((r.dtype, r.tolist()), (dt, [1]))
+      self.assertNotIn(Ops.CAST, [u.op for u in r._uop.toposort()])
 
   def test_broadcasted_keeps_const_weak(self):
     # a python scalar stays a bare weak CONST through _broadcasted, lifted only to the KIND of the lub
@@ -57,6 +62,31 @@ class TestWeakPromotion(unittest.TestCase):
     x, y = Tensor.const(1).reshape(1)._broadcasted(Tensor([1.0], dtype=dtypes.float32))
     self.assertEqual((x._uop.base.op, x._uop.base.val, x.dtype, x.shape, y.dtype),
                      (Ops.CONST, 1, dtypes.weakfloat, (1,), dtypes.float32))
+
+  def test_weak_expression_anchors_at_strong_lub(self):
+    # regression test for the HALF bert nan (#17408, reverted in #17409): lub(int32, weakfloat)==weakfloat makes
+    # `loss_mask.sum() + 1e-5` a weakfloat EXPRESSION. Meeting a strong float in a binop must pin it at the lub
+    denom = (Tensor.zeros(912, dtype=dtypes.int32) != Tensor.zeros(912, dtype=dtypes.float32)).sum() + 1e-5
+    self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
+    x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
+    self.assertIs(y.dtype, dtypes.float32)
+    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
+    self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
+    with Context(DEFAULT_FLOAT=dtypes.float16):
+      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
+    self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
+
+  def test_cast_weak_expression_commits_at_cast_floor(self):
+    # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
+    with Context(DEFAULT_FLOAT=dtypes.float32):
+      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_lower_index_dtype, ctx={})
+    self.assertEqual((narrowed.dtype, narrowed.src[0].dtype), (dtypes.float16, dtypes.float32))
+
+  def test_cast_weak_expression_value_uses_cast_floor(self):
+    with Context(DEFAULT_FLOAT=dtypes.float16):
+      denom = Tensor.ones(1, dtype=dtypes.int32, device="CPU").sum() * 70000 + 1e-5
+      out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
+      self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),

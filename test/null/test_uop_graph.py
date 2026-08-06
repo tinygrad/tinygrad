@@ -1,10 +1,11 @@
 import unittest, pytest
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from test.helpers import to_uops_list
+from tinygrad.codegen import full_rewrite_to_sink
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.weakint), lambda x: UOp.const(1.0) + UOp.const(2.0)),
@@ -536,6 +537,15 @@ class TestReduceCollapse(unittest.TestCase):
     # Should become add of two separate reduces
     self.assertEqual(result.op, Ops.ADD)
 
+  def test_reduce_shapeless_const_unroll(self):
+    """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""
+    out = UOp.param(0, dtypes.float, (1,))
+    red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
+    ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
+    uops = full_rewrite_to_sink(ast, Device["CPU"].renderer, optimize=False).toposort()
+    self.assertNotIn(Ops.REDUCE, [u.op for u in uops])
+    self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
+
 class TestMovementOps(unittest.TestCase):
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
     from tinygrad.schedule.rangeify import pm_mops
@@ -593,7 +603,7 @@ class TestUOpTags(unittest.TestCase):
   def test_inc_by_one(self):
     g = UOp.const(1) + UOp.const(1)
     assert g.ssimplify() == 2
-    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x.replace(arg=x.val+1, tag=1) if x.tag is None else None)])
+    pm_plus_1 = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: UOp.const(x.val+1, x.dtype).rtag(1) if x.tag is None else None)])
     pm_strip_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
     g = graph_rewrite(g, pm_plus_1)
     assert g.ssimplify() == 4

@@ -6,33 +6,12 @@ import unittest, time
 import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
-from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import DEBUG, DEV, GlobalCounters, Context, all_same, temp
-from tinygrad.engine.realize import compile_linear, run_linear
+from tinygrad.uop.ops import Ops, UPat
+from tinygrad.helpers import DEV, GlobalCounters, Context, all_same, temp
+from tinygrad.engine.realize import run_linear
+from test.helpers import check_schedule, assert_kernel_count
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
-
-class KernelCountException(Exception): pass
-def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
-  if to_prerealize:
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
-  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
-  else:
-    assert isinstance(t, UOp), f"can't schedule {t}"
-    linear, var_vals = Tensor(t).linear_with_vars()
-  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
-                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
-  if kernel_cnt != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
-    if DEBUG >= 3:
-      for i,call in enumerate(linear.src):
-        print("kernel", i+1)
-        print(call.src[0])
-    raise KernelCountException(f"{kernel_cnt} != {allowed}")
-  # test compiling the linear
-  compile_linear(linear)
-  return linear, var_vals
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -113,11 +92,9 @@ class TestSchedule(unittest.TestCase):
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
-    linear, var_vals = a.linear_with_vars()
-    kcount = len(linear.src)
+    linear, var_vals = check_schedule(a, expected_kcount)
     run_linear(linear, var_vals)
     self.assertListEqual(a.tolist(), expected)
-    self.assertEqual(kcount, expected_kcount)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
@@ -126,9 +103,9 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.arange(16).clone().realize()
     GlobalCounters.reset()
     a[4] = 3
-    self.assertEqual(GlobalCounters.kernel_count, 0)
+    assert_kernel_count(0)
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertListEqual(a.tolist(), [0, 1, 2, 3, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
   def test_no_extra_contiguous_on_setitem_assign_back(self):

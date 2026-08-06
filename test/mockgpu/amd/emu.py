@@ -109,7 +109,7 @@ def _init_sqtt_encoder():
   _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
   _VALU = (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
            ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOPC, ir4.VOPD, ir4.VOP3SD, ir4.VOP3_SDST, ir4.VOP1_SDST,
-           irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
+           irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOP3PX2, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
   _DS = (ir3.DS, ir4.DS, irc.DS)
   _GLOBAL = (ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
   _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
@@ -1323,7 +1323,7 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
-def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
+def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   """CDNA MFMA matrix multiply-accumulate emulation.
 
   Uses local temp arrays to cache inputs, avoiding aliasing issues when vdst overlaps src0/src1.
@@ -1348,6 +1348,25 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   # Check if sources are VGPRs (offset >= 256) vs inline constants/SGPRs
   src0_is_vgpr = src0_off >= _c(256)
   src1_is_vgpr = src1_off >= _c(256)
+
+  scaled = isinstance(inst, irc.VOP3PX2)
+  if scaled:
+    assert isinstance(inst, irc.VOP3PX2)
+    # F8F6F4 input formats: 0=FP8(E4M3), 1=BF8(E5M2). FP6/FP4 (2-4) not emulated.
+    src0_fmt, src1_fmt = int(inst.cbsz), int(inst.blgp)
+    if src0_fmt > 1 or src1_fmt > 1: raise RuntimeError(f"unsupported scaled MFMA formats cbsz={src0_fmt} blgp={src1_fmt}")
+    # scale_src0/scale_src1 are source operands pointing at 32-bit registers holding 4 packed E8M0 scale exponents.
+    # The 2-bit opsel/opsel_hi select which byte applies to A/B for this instruction.
+    scale0_off = ctx.inst_field(type(inst).scale_src0)
+    scale1_off = ctx.inst_field(type(inst).scale_src1)
+    sel0, sel1 = int(inst.opsel) & 3, int(inst.opsel_hi) & 3
+    def _scale_exp(off: UOp, sel: int, lane: UOp) -> UOp:
+      sv = ctx.rsrc_dyn(off, lane, 32)
+      byte = (sv >> UOp.const(sel * 8, dtypes.uint32)) & UOp.const(0xFF, dtypes.uint32)
+      return byte.cast(dtypes.int32) - UOp.const(127, dtypes.int32)
+    # combined A*B scale for this lane: 2^(ea-127) * 2^(eb-127)
+    def scale_factor(lane: UOp) -> UOp:
+      return UOp.exp2((_scale_exp(scale0_off, sel0, lane) + _scale_exp(scale1_off, sel1, lane)).cast(dtypes.float32))
 
   m = _re.search(r'(\d+)X(\d+)X(\d+)', op_name)
   if m is None: raise ValueError(f"could not parse MFMA dimensions from {op_name}")
@@ -1404,7 +1423,18 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   # The optimizer folds bitcast(uint32→float32) stores to float32 arrays, losing the conversion.
   tmp = UOp.placeholder((n_a_elems + n_b_elems,), dtypes.uint32, slot=0, addrspace=AddrSpace.LOCAL)
 
-  def cvt_elem(raw: UOp, sub_idx: int) -> UOp:
+  # Per-operand fp8 format ("fp8"=E4M3, "bf8"=E5M2) for A and B
+  if 'F8F6F4' in op_name:
+    assert isinstance(inst, (irc.VOP3P_MFMA, irc.VOP3PX2))
+    _fmts = {0: "fp8", 1: "bf8"}
+    a_fmt, b_fmt = _fmts.get(int(inst.cbsz), "fp8"), _fmts.get(int(inst.blgp), "fp8")
+  elif is_fp8:
+    # A/B formats from name suffix, e.g. V_MFMA_F32_16X16X32_BF8_FP8
+    suffixes = op_name.rsplit('_', 2)[-2:]
+    a_fmt, b_fmt = ("bf8" if sfx == "BF8" else "fp8" for sfx in suffixes)
+  else: a_fmt = b_fmt = "fp8"
+
+  def cvt_elem(raw: UOp, sub_idx: int, fp8_fmt: str = "fp8") -> UOp:
     if is_i8:
       # Extract i8, sign-extend to i32
       byte_val = (raw >> UOp.const(sub_idx * 8, dtypes.uint32)) & UOp.const(0xFF, dtypes.uint32)
@@ -1412,7 +1442,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
     elif is_f32_src:
       return raw  # already uint32 (f32 bit pattern)
     elif is_fp8:
-      return ((raw >> UOp.const(sub_idx * 8, dtypes.uint32)) & UOp.const(0xFF, dtypes.uint32)).cast(dtypes.uint32)
+      return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(sub_idx * 8, dtypes.uint32)).bitcast(dtypes.uint32)
     elif is_bf16:
       # bf16→f32 bits: just shift left by 16 (bf16 is upper 16 bits of f32)
       return ((raw >> UOp.const(sub_idx * 16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)) << UOp.const(16, dtypes.uint32)
@@ -1454,7 +1484,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
     # Read A/B sources. Use rsrc_dyn for inline constants/SGPRs (src_off < 256), rvgpr_dyn for VGPRs (src_off >= 256).
     a_raw = src0_is_vgpr.where(ctx.rvgpr_dyn(src0_r + _c(reg_idx), read_lane),
                                 ctx.rsrc_dyn(src0_off, _c(0, dtypes.int), 32))
-    a_val = cvt_elem(a_raw, sub_idx)
+    a_val = cvt_elem(a_raw, sub_idx, a_fmt)
     if M == 4:
       a_idx = grp_idx * UOp.const(M * K, dtypes.int) + mn_idx * UOp.const(K, dtypes.int) + UOp.const(kl, dtypes.int)
     else:
@@ -1463,7 +1493,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
 
     b_raw = src1_is_vgpr.where(ctx.rvgpr_dyn(src1_r + _c(reg_idx), read_lane),
                                 ctx.rsrc_dyn(src1_off, _c(0, dtypes.int), 32))
-    b_val = cvt_elem(b_raw, sub_idx)
+    b_val = cvt_elem(b_raw, sub_idx, b_fmt)
     if M == 4:
       b_idx = b_off + grp_idx * UOp.const(N * K, dtypes.int) + mn_idx * UOp.const(K, dtypes.int) + UOp.const(kl, dtypes.int)
     else:
@@ -1479,6 +1509,17 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   #   n = (l%32)%16 + ((l%32)//16)*16, m = (l//32)*4 + r (for r in 0..3), with 4 groups of 4 rows -> 16 outputs total
   #   Actually: 16 ACCVGPRs per lane, organized as 4 groups (l//32 gives half, each half has 2 sub-groups) of 4 rows
   tmp2 = tmp.after(read_phase)
+
+  def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, lane: UOp) -> UOp:
+    """acc += sum_k A[a_row+k] * B[b_row+k]. For scaled MFMA, only the dot product is scaled: D = dot*scale + C."""
+    def prod(k: int) -> UOp:
+      return tmp2.index(a_row + UOp.const(k, dtypes.int)).bitcast(acc_dt) * tmp2.index(b_row + UOp.const(k, dtypes.int)).bitcast(acc_dt)
+    if not scaled:
+      for k in range(K): acc = acc + prod(k)
+      return acc
+    dot = prod(0)
+    for k in range(1, K): dot = dot + prod(k)
+    return acc + dot * scale_factor(lane)
 
   compute_lane = ctx.range()
   compute_stores = []
@@ -1510,10 +1551,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       else: acc_v = acc_v.bitcast(dtypes.float32)
       acc = src2_is_vgpr.where(acc_v, acc_scalar)
 
-      for k in range(K):
-        a_val = tmp2.index(m_base * UOp.const(K, dtypes.int) + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-        b_val = tmp2.index(b_off + n_idx * UOp.const(K, dtypes.int) + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-        acc = acc + a_val * b_val
+      acc = _dot_accum(acc, m_base * UOp.const(K, dtypes.int), b_off + n_idx * UOp.const(K, dtypes.int), compute_lane)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
@@ -1535,17 +1573,13 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       if M == 4:
         # 4x4: each group is independent. A/B indexed per-group.
         m_base = c_grp * UOp.const(M * K, dtypes.int) + UOp.const(out_reg * K, dtypes.int)
-        for k in range(K):
-          a_val = tmp2.index(m_base + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-          b_val = tmp2.index(b_off + c_grp * UOp.const(N*K, dtypes.int) + n_idx * UOp.const(K, dtypes.int)+UOp.const(k, dtypes.int)).bitcast(acc_dt)
-          acc = acc + a_val * b_val
+        b_base = b_off + c_grp * UOp.const(N * K, dtypes.int) + n_idx * UOp.const(K, dtypes.int)
       else:
         # 16x16: K is split across groups. Shared MxK/NxK arrays.
         m_base = c_grp * UOp.const(out_per_lane, dtypes.int) + UOp.const(out_reg, dtypes.int)
-        for k in range(K):
-          a_val = tmp2.index(m_base * UOp.const(K, dtypes.int) + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-          b_val = tmp2.index(b_off + n_idx * UOp.const(K, dtypes.int) + UOp.const(k, dtypes.int)).bitcast(acc_dt)
-          acc = acc + a_val * b_val
+        b_base = b_off + n_idx * UOp.const(K, dtypes.int)
+
+      acc = _dot_accum(acc, m_base if M == 4 else m_base * UOp.const(K, dtypes.int), b_base, compute_lane)
 
       if is_int_out:
         compute_stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(
@@ -1563,33 +1597,41 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   vdst_reg = ctx.inst_field(type(inst).vdst)
   src0_r = ctx.inst_field(type(inst).src0) - _c(256)
   src1_r = ctx.inst_field(type(inst).src1) - _c(256)
-  src2_r = ctx.inst_field(type(inst).src2) - _c(256)
-  is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
+  src2_r = ctx.inst_field(type(inst).src2)
+  src2_r = (src2_r >= 256).where(src2_r - _c(256), src2_r)
+  output_type = op_name.split("WMMA_", 1)[1].split("_", 1)[0]
   is_bf16 = 'BF16' in op_name
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
   is_rdna4 = isinstance(inst, ir4.VOP3P)
-  # read 16x16 F16/BF16 matrix from VGPRs → flat f32 array[row*16+k]
-  def read_f16_val(src, lane, vgpr, half):
+  sz = 8 if "8" in op_name else 16
+  # read matrix from VGPRs → flat f32/i32 array[row*16+k]
+  def gval(src, lane, vgpr, ridx):
     v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(lane, dtypes.int))
-    return cvt((v >> UOp.const(16, dtypes.uint32)) if half else (v & UOp.const(0xFFFF, dtypes.uint32)))
+    pkd = v >> UOp.const(ridx * sz, dtypes.uint32) if ridx > 0 else v
+    pkd = pkd & UOp.const((1 << sz) - 1, dtypes.uint32)
+    if "F" in output_type: return cvt(pkd)
+    return (pkd << _c(24, dtypes.uint)).bitcast(dtypes.int32) >> _c(24, dtypes.int32) # sign extend
 
-  # RDNA3: 16 lanes × 8 VGPRs × 2 halves, k maps linearly
-  # RDNA4: 32 lanes × 4 VGPRs × 2 halves, k bits are scrambled (k[2] goes to lane bit 4)
-  def read_f16_mat(src):
-  # (row, k) → (lane, vgpr, half)
+  # RDNA3 f16/bf16: 16 lanes × 8 VGPRs × 2 halves,    k maps linearly
+  # RDNA3 iu8:      16 lanes × 4 VGPRs × 4 quarters,  k maps linearly
+  # RDNA4:          32 lanes x 4 VGPRS x 2 halves, k bits are scrambled (k[2] goes to lane bit 4)
+  def read_mat(src):
+    n = 32 // sz # values per vgpr
+    # (row, k) → (lane, vgpr, row index)
     def ab_map(i, k):
       elem, lane = ((k & 3) | ((k >> 1) & 4), i + ((k >> 2) & 1) * 16) if is_rdna4 else (k, i)
-      return lane, elem // 2, elem % 2
-    return [read_f16_val(src, *ab_map(row, k)) for row in range(16) for k in range(16)]
-  mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
+      return lane, elem // n, elem % n
+    return [gval(src, *ab_map(row, k)) for row in range(16) for k in range(16)]
+
+  mat_a, mat_b = read_mat(src0_r), read_mat(src1_r)
   # (row, col) -> (lane, vgpr)
   def d_map(m, n):
     lane_bit, vgpr = (m >> 3, m & 7) if is_rdna4 else (m & 1, m >> 1)
     return n + lane_bit * 16, vgpr
-  if is_f16_output:
+  if output_type in ["F16", "BF16"]:
     # read accumulator C with f16 layout: for RDNA4, pairs of f32 vgprs pack into one f16 vgpr
     # for RDNA3, same layout as f32 but only lo 16 bits used
-    mat_c = [read_f16_val(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
+    mat_c = [gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
     mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
     def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
@@ -1602,18 +1644,22 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     else:  # (rdna3) 1 f16 per VGPR (lo half only)
       stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int), out_cvt(mat_d[m*16+n]), exec_mask)
                 for m in range(16) for n in range(16)]
-  else: # f32
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int)).bitcast(dtypes.float32)
+  else: # f32/i32
+    out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
+    mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int)).bitcast(out_dt)
              for m in range(16) for n in range(16)]
     mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
     stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(d_map(m, n)[0], dtypes.int), mat_d[m*16+n].bitcast(dtypes.uint32), exec_mask)
               for m in range(16) for n in range(16)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
+def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
-  if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name): return _compile_wmma(inst, ctx)
-  if 'MFMA' in op_name and any(f'{s}X{s}X' in op_name for s in ('4', '16', '32')) and isinstance(inst, irc.VOP3P): return _compile_mfma(inst, ctx)
+  if 'WMMA' in op_name:
+    assert not isinstance(inst, irc.VOP3PX2)
+    return _compile_wmma(inst, ctx)
+  if 'MFMA' in op_name and any(f'{s}X{s}X' in op_name for s in ('4', '16', '32')) and isinstance(inst, (irc.VOP3P, irc.VOP3PX2)):
+    return _compile_mfma(inst, ctx)
 
   # ACCVGPR_WRITE/READ/MOV: copies between VGPR and ACCVGPR register files
   # Detect by checking operand types for ACCVGPR involvement
@@ -2044,7 +2090,7 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   irc.SOPP: _compile_sopp, irc.SMEM: _compile_smem, irc.SOP1: _compile_sop, irc.SOP2: _compile_sop, irc.SOPC: _compile_sop, irc.SOPK: _compile_sop,
   irc.VOP1: _compile_vop12, irc.VOP1_DPP16: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOP2_DPP16: _compile_vop12,
   irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
-  irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
+  irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p, irc.VOP3PX2: _compile_vop3p,
   irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
   irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,
   irc.MUBUF: _compile_mubuf,

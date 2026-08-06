@@ -5,12 +5,12 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import PyConst, InvalidType, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, weak_dtype
+from tinygrad.dtype import PyConst, InvalidType, weak_dtype, bitcast
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
-from tinygrad.helpers import colored, ansilen, printable, Target
+from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
 
@@ -125,13 +125,18 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
-      return dtypes.void
+      return None
     case Ops.INS:
       return None
     case Ops.NOOP:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
-    case Ops.LOAD | Ops.INDEX | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
+    case Ops.INDEX:
+      # an image access is always float, no matter the storage dtype
+      # TODO: should there be a CAST so src[0].dtype just work?
+      if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
+      return b.dtype
+    case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
       # pass through first
@@ -523,9 +528,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST: return self
     if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
     # late import!
-    from tinygrad.uop.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic+pm_fold_cast_const, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.val if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -796,7 +801,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        return UOp(Ops.STACK, dtype, tuple(u.cast(dtype) for u in srcs))
+        # TODO: why cast here?
+        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
@@ -1091,11 +1097,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
+      # an int destination truncates a float source toward zero. trunc is monotone
+      smin, smax = self.src[0]._min_max
+      if dtypes.is_int(self.dtype) and dtypes.is_float(self.src[0].dtype) and all(math.isfinite(v) for v in (smin, smax)):
+        smin, smax = math.trunc(smin), math.trunc(smax)
       # a cast to unsigned keeps exact bounds when the source fits
       # TODO: can do more based on new dtype window
-      if dtypes.is_unsigned(self.dtype) and 0 <= self.src[0].vmin and self.src[0].vmax <= self.dtype.max: return self.src[0]._min_max
-      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
-        return max(self.dtype.min, self.src[0].vmin), min(self.src[0].vmax, self.dtype.max)
+      if dtypes.is_unsigned(self.dtype) and 0 <= smin and smax <= self.dtype.max: return smin, smax
+      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,): return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property
@@ -1130,6 +1139,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, volatile=False):
+    dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device,volatile=volatile))
     else:
@@ -1156,8 +1166,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
+    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, name=f"p{slot}"))
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
-    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, addrspace=addrspace))
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
   @staticmethod
@@ -1292,12 +1302,6 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if truncate_output and (truncate_fxn:=truncate.get(dtype)) is not None: return truncate_fxn(alu)
   return alu
 
-def bitcast(x, in_dtype:DType, out_dtype:DType):
-  assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
-  packed = struct.pack(storage_fmt_for_dtype(in_dtype), to_storage_scalar(x, in_dtype))
-  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype), packed)[0]
-  return from_storage_scalar(out_val, out_dtype)
-
 # ***** pattern matcher *****
 
 def get_location() -> tuple[str, int]:
@@ -1386,7 +1390,6 @@ class UPat(OpMixin):
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
 
-  def const_like(self, b:ConstLike): return UPat.const(cast(ConstType, b), self.match_dtype)
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)
     return (y, self) if reverse else (self, y)
@@ -1512,54 +1515,51 @@ def add_trace_group(kt:TracingKey) -> None:
   tracked_ctxs.append([])
 
 active_group:list[int] = []
-def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
+active_rewrites:list[TrackedGraphRewrite] = []
+def rewrite_group(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False, new_ctx:bool=True):
+  if not new_ctx: assert not callable(name) and not replay, "name fxn and replay are only supported for new_ctx groups"
   def _decorator(func):
     def __wrapper(*args, **kwargs):
+      # without tracking, we just call the function (unless top-level, which always profiles)
+      if TRACK_MATCH_STATS < 2 and not new_ctx: return func(*args, **kwargs)
       fn = key = func.__name__
       idx = -1
       if TRACK_MATCH_STATS >= 2:
-        add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
-        active_group.append(idx:=len(tracked_keys)-1)
+        if new_ctx:
+          add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
+          active_group.append(idx:=len(tracked_keys)-1)
+        else:
+          rewrite_name = str(kwargs.get("name", None) or fn)
+          assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {rewrite_name} with {args}"
+          loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
+          depth = len(active_rewrites)
+          if not tracked_ctxs: add_trace_group(TracingKey(f"default {fn}"))
+          dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
+          tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], rewrite_name, depth, kwargs.get("bottom_up", False),
+                                                                   kwargs.get("walk", False), kwargs.get("enter_calls", False)))
+          active_rewrites.append(ctx)
+          key = rewrite_name  # profile spans are named after the rewrite step
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
-      if TRACK_MATCH_STATS >= 2: active_group.pop()
-      if TRACK_MATCH_STATS >= 2 and callable(name):
-        name_ret = name(*args, **kwargs, ret=ret)
-        assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
-        tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
-        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
+      if TRACK_MATCH_STATS >= 2:
+        if new_ctx: active_group.pop()
+        else: active_rewrites.pop()
+        if callable(name):
+          name_ret = name(*args, **kwargs, ret=ret)
+          assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
+          tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
+          e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if CAPTURE_PROCESS_REPLAY and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-        loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+        replay_loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
         inputs = (fn, args, kwargs, ContextVar._cache)
-        replay_capture.append(pickle.dumps(inputs+(loc, ret)))
+        replay_capture.append(pickle.dumps(inputs+(replay_loc, ret)))
       return ret
     return __wrapper
   return _decorator
-
-active_rewrites:list[TrackedGraphRewrite] = []
-def profile_matches(fxn:Callable):
-  def wrap_profile_matches(*args, **kwargs):
-    if TRACK_MATCH_STATS >= 2:
-      name = str(kwargs.get("name", None) or fxn.__name__)
-      assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
-      loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
-      depth = len(active_rewrites)
-      if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
-      dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
-      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False),
-                                                               kwargs.get("walk", False), kwargs.get("enter_calls", False)))
-      active_rewrites.append(ctx)
-      with cpu_profile(name, "TINY"):
-        ret = fxn(*args, **kwargs)
-      active_rewrites.pop()
-      return ret
-    # without tracking, we just call the function
-    return fxn(*args, **kwargs)
-  return wrap_profile_matches
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None):
@@ -1739,87 +1739,18 @@ class RewriteContext:
           if n in waitlist: stack.extend(waitlist.pop(n))
     return self.replace[root]
 
-@profile_matches
+@rewrite_group(new_ctx=False)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
-  # TODO: these ops keep their stored dtype until dtype_from_uop works
-  if n.op in {Ops.INDEX, Ops.CUSTOM, Ops.CUSTOMI, Ops.PYLITERAL} or \
-     all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
-
-def select_dtype(u:UOp):
-  if u.dtype is dtypes.weakfloat: return dtypes.default_float
-  return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
-def lower_weak_node(u:UOp) -> UOp|None:
-  start, src = (1 if u.op is Ops.WHERE else 0), tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
-  if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
-  dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
-                    else unwrap(dtype_from_uop(u.op, src, u.arg)))
-  return u.replace(dtype=None, src=src[:start]+tuple(s.cast(dt) for s in src[start:])).cast(u.dtype)
-pm_lower_weak = PatternMatcher([
-  (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype)),
-  # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.
-  # a SINGLE weak cast is never rewritten here, each consumer absorbs it on its own edge (see lower_weak_srcs)
-  (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
-   lambda u,x: x.cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
-  # Binary can widen from the bounds, all other nodes derive from the lowered sources.
-  # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
-  (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
-  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
-])
-def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
-  if ctx is None: ctx = {}
-  def lower(s:UOp) -> UOp:
-    if (r:=ctx.get(s)) is None:
-      r = graph_rewrite(s, pm_lower_weak)
-      # the consumer absorbs the cast on its own edge
-      ctx[s] = r = r.src[0] if r.op is Ops.CAST and r.dtype in dtypes.weaks else r
-    return r
-  # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
-  ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
-  return None if ret is u else ret
-
-def commit_weak(s:UOp, dt:DType) -> UOp:
-  # a bare weak CONST commits directly (its number must fit), a weak non-const src takes the demand cast
-  return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
-
-def commit_weak_srcs(u:UOp) -> UOp|None:
-  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
-  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
-
-# runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
-pm_commit_weak = PatternMatcher([
-  (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
-  # demand from the destination: a STORE's weak value commits at the destination's dtype
-  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
-   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
-])
-
-# push cast to weak src
-pm_cast_weak = PatternMatcher([
-  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.Broadcastable, dtype=dtypes.weaks, name="u"),)),
-   lambda c,u: u.replace(dtype=None, src=tuple(commit_weak(s, c.dtype) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
-   if c.dtype not in dtypes.weaks else None),
-])
-
-pm_lower_index_dtype = pm_commit_weak+PatternMatcher([
-  (UPat(GroupOp.All, name="u"),
-   lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
-  # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
-  # TODO: more generic
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
-        allow_any_len=True, name="u"),
-   lambda u,buf,gate,idx: u.replace(src=(buf, idx.cast(dtypes.int).valid(gate))+u.src[2:]) if buf.max_numel()-1 <= dtypes.int32.max else None),
-])
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])

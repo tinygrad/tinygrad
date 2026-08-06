@@ -27,7 +27,7 @@ class InvalidType:
   def __new__(cls):
     if cls._instance is None: cls._instance = object.__new__(cls)
     return cls._instance
-  def __eq__(self, other): return self is other
+  def __eq__(self, other): return self is other if isinstance(other, InvalidType) else NotImplemented  # foreign types get the reflected eq
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
@@ -292,6 +292,12 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   **{getattr(dtypes, n): (lambda x, c=getattr(ctypes, f'c_{n}'): c(x).value)
      for n in ('float', 'double', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64')}}
+
+def bitcast(x, in_dtype:DType, out_dtype:DType):
+  assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
+  packed = struct.pack(storage_fmt_for_dtype(in_dtype), to_storage_scalar(x, in_dtype))
+  out_val = struct.unpack(storage_fmt_for_dtype(out_dtype), packed)[0]
+  return from_storage_scalar(out_val, out_dtype)
 
 # numpy and torch dtype interop
 
