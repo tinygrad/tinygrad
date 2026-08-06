@@ -25,9 +25,13 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self: ctx[src] = None
 
-BUFFER_STATE_OPS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}
+def realize_custom_kernel_srcs(ctx:dict[UOp, None], c:UOp) -> None:
+  for s in c.src[1:]:
+    if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 pm_generate_realize_map = PatternMatcher([
+  # realize the inputs of custom kernel calls
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # always realize
   (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
