@@ -48,14 +48,14 @@ class Kernel(AbstractContextManager):
   @property
   def warpgroup(self): return self.group(4)
 
-  def range(self, start:int, end:int=0, step:int=1, axis_type:AxisType=AxisType.LOOP, track:bool=True):
+  def range(self, start:int, end:int=0, step:int=1, axis_type:AxisType=AxisType.WEAK, track:bool=True):
     if end == 0: start, end = 0, start
     rng = _tk_range(start, end, step, axis_type, self.range_id)
     self.range_id += 1
     if track: self.range_stack.append(rng)
     return rng
 
-  def raw_range(self, end:int=0, axis_type:AxisType=AxisType.LOOP):
+  def raw_range(self, end:int=0, axis_type:AxisType=AxisType.WEAK):
     rng = UOp.range(end, self.range_id, axis_type=axis_type)
     self.range_id += 1
     return rng

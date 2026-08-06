@@ -94,6 +94,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -104,6 +105,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -117,10 +121,10 @@ jobs:
       run: python3 test/external/process_replay/reset.py
     - name: Run llama3.2
       run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
-    - name: Run qwen3.5
-      # qwen3.5:35b-a3b doesn't fit on mac
+    - name: Run qwen3.6
+      # qwen3.6:35b-a3b doesn't fit on mac
       if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=qwen35_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.5:35b-a3b --benchmark --warmup
+      run: BENCHMARK_LOG=qwen36_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.6:35b-a3b --benchmark --warmup
     - name: Run olmoe
       # just metal for now
       if: ${{ matrix.dev == 'METAL' }}
@@ -145,6 +149,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -155,6 +160,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -194,6 +202,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -204,6 +213,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -240,6 +252,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -250,6 +263,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -292,6 +308,9 @@ jobs:
         ./extra/amdpci/setup_python_cap.sh
         ./extra/hcq/hcq_smi.py amd rmmod
         ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -402,6 +421,35 @@ jobs:
       run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
   testcommalatest:
+    name: comma Benchmark (0.11.2)
+    runs-on: [self-hosted, Linux, comma]
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
+    - name: openpilot compile3 0.11.2 supercombo
+      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
+    - name: openpilot compile3 0.11.2 supercombo (from pickle)
+      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
+    - name: IR3 openpilot compile3 0.11.2 supercombo
+      run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=41 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
+    - name: openpilot compile3 0.11.2 dmonitoring
+      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  testcommaold:
     name: comma Benchmark (0.11.0)
     runs-on: [self-hosted, Linux, comma]
     timeout-minutes: 12
@@ -429,35 +477,6 @@ jobs:
       run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3.2 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.11.0 dmonitoring
       run: BENCHMARK_LOG=openpilot_0_11_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
-
-  testcommaold:
-    name: comma Benchmark (0.10.1)
-    runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 12
-    defaults:
-      run:
-        shell: bash -e -o pipefail {0}
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
-      run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
-    - name: DEBUG=2 openpilot compile3 0.10.1 driving_vision
-      run: PYTHONPATH="." DEBUG=2 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.10.1 driving_vision
-      run: BENCHMARK_LOG=openpilot_0_10_1_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.10.1 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_10_1_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3.2 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_policy.onnx
-    - name: openpilot compile3 0.10.1 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_10_1_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -515,12 +534,12 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: openpilot compile3 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot load_pickle 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
-    - name: openpilot run_pickle 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_run_pickle RUN_PICKLE=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py
+    - name: openpilot compile3 big_driving_supercombo
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo PICKLE_OOB=1 PYTHONPATH="." TC_OPT=2 GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl
+    - name: openpilot load_pickle big_driving_supercombo
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
+    - name: openpilot run_pickle big_driving_supercombo
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle RUN_PICKLE=1 PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py - openpilot.pkl
     - name: Test copy speeds
       run: SIZE=64e6 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py TestDevCopySpeeds
 

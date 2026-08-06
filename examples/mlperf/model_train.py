@@ -1282,10 +1282,10 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1434,9 +1434,9 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
-  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts] if hasattr(model, "_fp8_next_amax") else []
-  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts] if hasattr(model, "_fp8_next_grad_amax") else []
+  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
+  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts]
   fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
 
   from tinygrad.nn.state import get_state_dict
@@ -1462,6 +1462,7 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
@@ -1480,12 +1481,12 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
-    for cur, nxt in zip(fp8_amax, fp8_next_amax): cur.assign(nxt)
-    for cur, nxt in zip(fp8_grad_amax, fp8_next_grad_amax): cur.assign(nxt)
+    model.update_amax()
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
@@ -1576,7 +1577,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 4.6e15)) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * (9.2e15 if MXFP4 else 4.6e15))) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
@@ -1665,7 +1666,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1708,9 +1709,10 @@ def train_gptoss():
     wandb.init(config=config, **wandb_args, project="MLPerf-gpt-oss")
 
   model_params = GPT_OSS_20B
-  model_params['vocab_size'] = 128256
+  model_params['vocab_size'] = getenv("VOCAB_SIZE", 128256)
   real_vocab_size = model_params['vocab_size']
   if (layers:=getenv("LAYERS")) != 0: model_params['n_layers'] = layers
+  if (experts:=getenv("EXPERTS")) != 0: model_params['n_experts'] = experts
   print(f"model parameters: {model_params}")
 
   model = GPTOSS(**model_params, max_context=SEQLEN)
@@ -1731,7 +1733,12 @@ def train_gptoss():
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+  params_wd = [p for p in params if p.ndim >= 3]
+  params_no_wd = [p for p in params if p.ndim < 3]
+  optim = GradAccClipAdamWGroup(
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+  )
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
@@ -1740,7 +1747,10 @@ def train_gptoss():
 
   from extra.gemm.cdna_asm_gemm import _mx_block_scale
   model_state = get_state_dict(model)
-  fp8_scale_names = {n: f"{n}_scale" for n, t in model_state.items() if t.dtype == FP8_DTYPE}
+  def _scale_key(n):
+    if "." in n and (c:=f"{(b:=n.rsplit('.',1))[0]}_scale.{b[1]}") in model_state: return c
+    return f"{n}_scale"
+  fp8_scale_names = {n: _scale_key(n) for n, t in model_state.items() if t.dtype == FP8_DTYPE}
   fp8_inv_scales = [model_state[sname] for sname in fp8_scale_names.values()]
   for wname, sname in fp8_scale_names.items():
     w, scale = model_state[wname], model_state[sname]
@@ -1773,7 +1783,8 @@ def train_gptoss():
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)

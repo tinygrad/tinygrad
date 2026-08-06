@@ -150,6 +150,44 @@ class TestAsmGEMM(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
 
+class TestMXFP4(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("requires real amd machine")
+
+  def test_quantize(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(0)
+    x = np.triu(rng.standard_normal((256, 256), dtype=np.float32))
+    x += np.triu(x, 1).T
+    x[:32, :32] = 0
+    row, row_scale, col, col_scale = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    Tensor.realize(row, row_scale, col, col_scale)
+    row, row_scale = row.numpy(), row_scale.numpy()
+    col, col_scale = col.numpy(), col_scale.numpy()
+    np.testing.assert_array_equal(row, col)
+    np.testing.assert_array_equal(row_scale, col_scale)
+    self.assertTrue(row.any())
+    self.assertTrue((row_scale == 127).any())
+    self.assertTrue((row_scale != 127).any())
+
+  def test_correctness(self):
+    import numpy as np
+    M = N = K = 256
+    rng = np.random.default_rng(1)
+    a = Tensor(rng.standard_normal((M, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    b = Tensor(rng.standard_normal((N, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    out = asm_gemm(a, b.T, mxfp4=True).realize().numpy().astype(np.float32)
+    ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
+    self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
+
+  def test_empty(self):
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
+    b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
+    asm_gemm(a, b.T, mxfp4=True).realize()
+
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")

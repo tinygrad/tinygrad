@@ -5,7 +5,7 @@ real RDNA4 hardware when USE_HW=1.
 """
 import ctypes, unittest
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.helpers import flat_mv
+from tinygrad.helpers import Target, flat_mv
 from tinygrad.renderer.amd.dsl import NULL
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
@@ -36,8 +36,7 @@ def _run_emu(instructions: list, out_reg: int = 2) -> list[int]:
   return list(out_buf)
 
 def _run_hw(instructions: list, out_reg: int = 2) -> list[int]:
-  from tinygrad.device import Device
-  from tinygrad.runtime.ops_amd import AMDProgram
+  from tinygrad.device import Device, TinyELF
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
   dev = Device['AMD']
@@ -85,7 +84,7 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
   lib = compiler.compile(asm_src)
-  prg = AMDProgram(dev, 'test', lib)
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
   out_gpu = dev.allocator.alloc(LANES * 4)
   prg(out_gpu, global_size=(1, 1, 1), local_size=(LANES, 1, 1), wait=True)
   out = bytearray(LANES * 4)

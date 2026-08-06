@@ -2,7 +2,7 @@ import math, pathlib, functools, struct
 
 from tinygrad import Device, Tensor
 from tinygrad.dtype import DTypeLike, dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
@@ -14,7 +14,7 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   shard_axis = ref.uop.axis if axis is None else axis
   shape = tuple(s // len(ref.device) if i == shard_axis else s for i, s in enumerate(shape))
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
+  return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.unshard(axis), dtype=dtype, device=ref.device)
 
 @functools.cache
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
@@ -94,7 +94,7 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   B_local = B // num_devices if is_dp else B
   H_local = n_heads // num_devices if is_mp else n_heads
   H_KV_local = n_kv_heads // num_devices if is_mp else n_kv_heads
-  assert (B_local, N, H_local, H_KV_local, head_dim) == (2, 8192, 32, 8, 128)
+  assert H_local % H_KV_local == 0 and head_dim % 2 == 0 and head_dim <= 512
   single_device = xqkv.device[0] if isinstance(xqkv.device, tuple) else xqkv.device
   arch = Device[single_device].renderer.target.arch
   axis = 0 if is_dp else 2 if is_mp else None
@@ -206,10 +206,11 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
                   arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  lib = bytearray(lib)
-  rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-  struct.pack_into('<I', lib, rodata_off, 160000)
-  lib = bytes(lib)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
@@ -236,10 +237,11 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
                   arg=KernelInfo(name="custom_fa_backward_pre", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  lib = bytearray(lib)
-  rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-  struct.pack_into('<I', lib, rodata_off, 160000)
-  lib = bytes(lib)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
@@ -268,10 +270,11 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
                   arg=KernelInfo(name="custom_fa_backward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  lib = bytearray(lib)
-  rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-  struct.pack_into('<I', lib, rodata_off, 160000)
-  lib = bytes(lib)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
@@ -298,10 +301,11 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
                   arg=KernelInfo(name="custom_fa_backward_post", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  lib = bytearray(lib)
-  rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-  struct.pack_into('<I', lib, rodata_off, 160000)
-  lib = bytes(lib)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))

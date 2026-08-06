@@ -5,7 +5,9 @@ These tests intentionally cause GPU faults to verify error handling.
 Run with: DEV=AMD python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re, importlib
-from tinygrad.device import Device
+from tinygrad import Device, UOp, dtypes
+from tinygrad.engine.realize import run_linear
+from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
 
 RDNA3_CDNA3_MAP = {"v_mov_b32_e32": "v_mov_b32_e32", "s_mov_b32": "s_mov_b32", "s_waitcnt": "s_waitcnt", "s_endpgm": "s_endpgm",
@@ -13,20 +15,11 @@ RDNA3_CDNA3_MAP = {"v_mov_b32_e32": "v_mov_b32_e32", "s_mov_b32": "s_mov_b32", "
                    "global_atomic_add_u32": "global_atomic_add", "flat_load_b32": "flat_load_dword",
                    "flat_store_b32": "flat_store_dword", "flat_atomic_add_u32": "flat_atomic_add", "s_load_b32": "s_load_dword"}
 
-def assemble(code:str, name:str="test", is_cdna:bool=False) -> str:
-  kd = {"next_free_vgpr": 8, "next_free_sgpr": 8, "user_sgpr_kernarg_segment_ptr": 1, "kernarg_size": 8}
-  if is_cdna: kd["accum_offset"] = 8
-  else: kd["wavefront_size32"] = 1
-  return f".text\n.globl {name}\n.p2align 8\n.type {name},@function\n{name}:\n{code}\n.rodata\n.p2align 6\n.amdhsa_kernel {name}\n" + \
-         "\n".join(f".amdhsa_{k} {v}" for k,v in kd.items()) + "\n.end_amdhsa_kernel"
-
 @unittest.skipIf(Device.DEFAULT != "AMD", "AMD required")
 class TestGPUCrash(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
     cls.dev = Device["AMD"]
-    cls.compiler = HIPCompiler(cls.dev.arch)
     cls.is_cdna = cls.dev.target[0] < 10
     ins = importlib.import_module('tinygrad.runtime.autogen.amd.' + ('cdna' if cls.is_cdna else 'rdna3') + '.ins')
     for rdna3_name, cdna3_name in RDNA3_CDNA3_MAP.items():
@@ -41,14 +34,11 @@ class TestGPUCrash(unittest.TestCase):
     except Exception:
       self.fail("Device not working before test")
 
-  def _run(self, code: str):
-    from tinygrad.runtime.ops_amd import AMDProgram
-    prg = AMDProgram(self.dev, "test", self.compiler.compile(assemble(code, is_cdna=self.is_cdna)))
-    prg(self.dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)
-
   def _run_insts(self, insts: list[Inst]):
-    from test.amd.disasm import disasm
-    self._run("\n".join(disasm(i) for i in insts))
+    buf = UOp.new_buffer("AMD", 64, dtypes.uint8)
+    sink = UOp.sink(UOp.param(0, dtypes.uint8, (64,), device="AMD"), UOp.special(1, "lidx0"), arg=KernelInfo("test"))
+    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=i) for i in insts))))
+    run_linear(UOp(Ops.LINEAR, src=(prg.call(buf),)), wait=True)
 
   def _assert_gpu_fault(self, func):
     """Assert that func raises a RuntimeError indicating a GPU fault (not a setup error)."""

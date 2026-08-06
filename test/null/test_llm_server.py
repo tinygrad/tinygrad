@@ -1,5 +1,5 @@
 import unittest, threading, time, json
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -17,6 +17,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid in (999,))
 
     cls.mock_model = Mock()
+    cls.mock_model.max_context = 4
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
@@ -65,20 +66,18 @@ class TestLLMServer(unittest.TestCase):
       self.assertEqual(chunk.model, "test-model")
 
   def test_stream_with_usage(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=True,
-      stream_options={"include_usage": True}
-    )
-
-    chunks = list(stream)
+    def generate(ids, **kwargs):
+      for token in (300, 301, 999):
+        ids.append(token)
+        yield token
+    with patch.object(self.mock_model, "generate", side_effect=generate):
+      chunks = list(self.client.chat.completions.create(
+        model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
 
-    self.assertIsNotNone(last_chunk.usage)
-    self.assertIsNotNone(last_chunk.usage.prompt_tokens)
-    self.assertIsNotNone(last_chunk.usage.completion_tokens)
-    self.assertIsNotNone(last_chunk.usage.total_tokens)
+    self.assertEqual(last_chunk.usage.prompt_tokens, 3)
+    self.assertEqual(last_chunk.usage.completion_tokens, 2)
+    self.assertEqual(last_chunk.usage.total_tokens, 5)
 
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
@@ -110,6 +109,28 @@ class TestLLMServer(unittest.TestCase):
 
     self.assertGreater(len(contents), 0)
 
+  def test_interrupted_stream_logs_tokens(self):
+    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])), \
+         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
+      next(stream)
+      next(stream)
+      stream.close()
+    interrupt = log.call_args.args[0]
+    self.assertFalse(interrupt.startswith("\n"))
+    self.assertTrue(interrupt.endswith("\n"))
+    self.assertIn("gen:", interrupt)
+    self.assertIn("out:    1", interrupt)
+    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+
+  def test_stream_disconnect_closes_source(self):
+    from tinygrad.llm.serve import Handler
+    source, handler = Mock(), Mock()
+    source.__iter__ = Mock(return_value=iter([{}]))
+    handler.wfile.write.side_effect = BrokenPipeError
+    Handler.stream_json(handler, source)
+    source.close.assert_called_once()
+
   def test_non_streaming(self):
     resp = self.client.chat.completions.create(
       model="test-model",
@@ -128,6 +149,16 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage)
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
+
+  def test_context_length_error(self):
+    from openai import BadRequestError
+    self.mock_tok.encode.return_value = [200, 201, 202, 203]
+    try:
+      with self.assertRaises(BadRequestError) as err:
+        self.client.chat.completions.create(model="test-model", messages=[{"role":"user", "content":"too long"}])
+      self.assertEqual(err.exception.code, "context_length_exceeded")
+    finally:
+      self.mock_tok.encode.return_value = [200, 201, 202]
 
   def test_max_tokens_streaming(self):
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
@@ -170,6 +201,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok.is_end = Mock(return_value=False)
 
     cls.mock_model = Mock()
+    cls.mock_model.max_context = 4
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
     from tinygrad.llm.serve import LLMServer
@@ -219,6 +251,13 @@ class TestLLMToolCalls(unittest.TestCase):
                                                    tools=self.tools())
     self.assertEqual([json.loads(tc.function.arguments)["path"] for tc in response.choices[0].message.tool_calls], ["a", "b"])
     self.assertEqual(response.choices[0].finish_reason, "tool_calls")
+
+  def test_multiline_tool_argument_preserves_trailing_newline(self):
+    self.set_output("<tool_call>\n<function=write>\n<parameter=content>\nfirst\nsecond\n\n</parameter>\n"
+                    "<parameter=filePath>\nout.txt\n</parameter>\n</function>\n</tool_call>")
+    response = self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"Write out.txt"}], tools=self.tools())
+    args = json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+    self.assertEqual(args, {"content":"first\nsecond\n", "filePath":"out.txt"})
 
   def test_invalid_tool_call_becomes_content(self):
     self.set_output("<tool_call>not a call</tool_call>")

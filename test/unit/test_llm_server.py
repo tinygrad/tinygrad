@@ -3,18 +3,53 @@ from unittest.mock import patch
 from tinygrad import Tensor, UOp
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
+from tinygrad.llm.serve import StreamRouter
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
+V_START_POS = UOp.variable("start_pos", 0, TEST_CONFIG.max_context-1)
+V_TOKS = UOp.variable("toks", 1, 32)  # 32 is the default chunk_size in generate
 
 class TestTransformerGenerate(unittest.TestCase):
+  def test_warmup(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    def generate(tokens):
+      calls.append(tokens)
+      yield from (1, 2)
+    with patch.object(model, "generate", generate): model.warmup()
+    self.assertEqual(calls, [[0], [0]])
+
+  def test_first_recurrent_generate_before_state_init(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    with patch.object(Transformer, '__call__', return_value=Tensor([[42]])):
+      self.assertEqual(next(model.generate([0])), 42)
+
+  def test_recurrent_live_state_reuse(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    model._cached_tokens = [1, 2, 3, 4, 5]
+    self.assertEqual(model.get_start_pos([1, 2, 3, 4, 5, 42, 10]), 5)
+    calls = []
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      calls.append((tokens.shape, start_pos))
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call):
+      next(model.generate([1, 2, 3, 4, 5, 42, 10]))
+    self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
+
+  def test_template_starts_reasoning(self):
+    router = StreamRouter(reasoning=True)
+    self.assertEqual(list(router.route("reasoning</think>answer")),
+                     [("reasoning_content", "reasoning"), ("content", "answer")])
+
   def test_kv_cache_reuse(self):
     """Test that generate reuses the KV cache when tokens extend the cached prefix."""
     model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos, temperature):
-      captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      captured_inputs.append((tokens.shape, start_pos))
       return Tensor([[42]])
 
     with patch.object(Transformer, '__call__', mock_call):
@@ -31,17 +66,15 @@ class TestTransformerGenerate(unittest.TestCase):
       next(gen)
 
     # should process tokens[6:] = [42, 10, 11, 12] since first 6 have cached k/v
-    toks_shape = captured_inputs[0][0][-1]
-    self.assertEqual(toks_shape.val if isinstance(toks_shape, UOp) else toks_shape, 4)
-    self.assertEqual(captured_inputs[0][1], 6)
+    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(4)), V_START_POS.bind(6))])
 
   def test_kv_cache_invalidation(self):
     """Test that generate invalidates the KV cache when tokens diverge from the cached prefix."""
     model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos, temperature):
-      captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      captured_inputs.append((tokens.shape, start_pos))
       return Tensor([[42]])
 
     with patch.object(Transformer, '__call__', mock_call):
@@ -55,9 +88,7 @@ class TestTransformerGenerate(unittest.TestCase):
       next(gen)
 
     # should process all 3 tokens from start
-    toks_shape = captured_inputs[0][0][-1]
-    self.assertEqual(toks_shape.val if isinstance(toks_shape, UOp) else toks_shape, 3)
-    self.assertEqual(captured_inputs[0][1], 0)
+    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(3)), V_START_POS.bind(0))])
 
   def test_two_prompts_schedule_cache(self):
     """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
@@ -90,7 +121,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
     def get_prefill_flags(tokens, chunk_size):
       is_prefill = []
-      def mock_call(self, tokens, start_pos, temperature):
+      def mock_call(self, tokens, start_pos, temperature, **kwargs):
         is_prefill.append(resolve(tokens.shape[1] != 1))
         return Tensor([[42]])
       with patch.object(Transformer, '__call__', mock_call):
@@ -151,7 +182,7 @@ class TestTransformerGenerate(unittest.TestCase):
     """Temperature from generate should be passed through to __call__."""
     model = Transformer(TEST_CONFIG)
     captured_temps = []
-    def mock_call(self, tokens, start_pos, temperature):
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
       captured_temps.append(float(temperature.item()))
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):

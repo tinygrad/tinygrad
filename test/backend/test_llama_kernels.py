@@ -7,7 +7,7 @@ from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
-from test.helpers import needs_second_gpu
+from test.helpers import needs_second_gpu, assert_kernel_count
 from test.backend.test_asm_gemm import has_hipcc
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -49,9 +49,10 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
   with Context(DEBUG=0): Tensor.realize(x, amax_state)
 
   if delayed:
-    fp8, inv_scale, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=x.device).realize()
+    fp8, inv_scale = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
     ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
-    Tensor.realize(fp8, inv_scale, new_amax)
+    Tensor.realize(fp8, inv_scale)
     Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax)
   else:
     fp8 = quantize_fp8_scalar(x, amax_state, FP8_DTYPE)
@@ -63,8 +64,8 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
     if delayed:
       assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
-      assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
-        f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
+      assert amax_out.allclose(ref_new_amax, atol=0, rtol=0).item(), \
+        f"amax mismatch: got={amax_out.item()} ref={ref_new_amax.item()} diff={abs(amax_out.item()-ref_new_amax.item())}"
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires atomic max")
 class TestQuantizeFP8(unittest.TestCase):
@@ -79,13 +80,14 @@ class TestQuantizeFP8(unittest.TestCase):
   @needs_second_gpu
   def test_multi(self):
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
-    x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
+    x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.unshard(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
-    fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
-    Tensor.realize(fp8, new_amax)
+    amax_out = Tensor.zeros((), dtype=dtypes.float32, device=devs).realize()
+    fp8, _ = quantize_fp8_delayed(x, amax_state, amax_out, FP8_DTYPE)
+    Tensor.realize(fp8)
     assert fp8.uop.shape == x.uop.shape
-    assert new_amax.shape == ()
+    assert amax_out.shape == ()
 
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):
@@ -93,7 +95,7 @@ class TestLocalAmax(unittest.TestCase):
     x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
     GlobalCounters.reset()
     out = (x * local_abs_max(x)).clone().realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")

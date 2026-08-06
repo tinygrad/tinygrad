@@ -14,10 +14,10 @@ class TestGradient(unittest.TestCase):
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     if jf is None: jf = f
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), set([x]))[x]
+    gx = compute_gradient(f(x), UOp.const(1.0), set([x]))[x]
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
-      tg_out = gx.substitute({x: x.const_like(val)}).ssimplify()
+      tg_out = gx.substitute({x: UOp.const(val)}).ssimplify()
       tx = torch.tensor([val], dtype=torch.float, requires_grad=True)
       torch_out = torch.autograd.grad(jf(tx), tx)[0].item()
       self._cmp_nan_okay(tg_out, torch_out)
@@ -26,13 +26,13 @@ class TestGradient(unittest.TestCase):
     if jf is None: jf = f
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), set([x, y]))
+    grads = compute_gradient(f(x, y), UOp.const(1.0), set([x, y]))
     gx, gy = grads[x], grads[y]
 
     for valx in [-5., -2.0, 0.0, 2.0, 5.]:
       for valy in [-5., -2.0, 0.0, 2.0, 5.]:
         # Substitute the values into the gradient expressions
-        substitutions = {x: x.const_like(valx), y: y.const_like(valy)}
+        substitutions = {x: UOp.const(valx), y: UOp.const(valy)}
         tg_out_x = gx.substitute(substitutions).ssimplify()
         tg_out_y = gy.substitute(substitutions).ssimplify()
 

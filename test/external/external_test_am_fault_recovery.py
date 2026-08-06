@@ -16,9 +16,9 @@ def _run(code:str, timeout:float=15.0) -> subprocess.CompletedProcess:
   return subprocess.run(["python", "-c", code], env={**os.environ, "AMD": "1"}, capture_output=True, text=True, timeout=timeout)
 
 def _run_asm(asm_src:str) -> subprocess.CompletedProcess:
-  return _run('from tinygrad.device import Device; from tinygrad.runtime.ops_amd import AMDProgram; '
+  return _run('from tinygrad.device import Device, TinyELF; from tinygrad.helpers import Target; '
               'from tinygrad.runtime.support.compiler_amd import HIPCompiler; dev = Device["AMD"]; '
-              f'AMDProgram(dev, "test", HIPCompiler(dev.arch).compile("""{asm_src}"""))('
+              f'dev.runtime(TinyELF(HIPCompiler(dev.arch).compile("""{asm_src}"""), "test", Target("AMD", arch=dev.arch), ()))('
               'dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)')
 
 def _verify_recovery() -> subprocess.CompletedProcess:
