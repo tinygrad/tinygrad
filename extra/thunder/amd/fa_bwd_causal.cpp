@@ -93,8 +93,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   // first Q step that can overlap this K_span:
   const int first_step = max(0, k_start_min / STEP_QO);
 #if WINDOW
-  // cap the Q loop: further queries give no gradient to this KV block
-  const int num_steps_per_head = min(total_steps_per_head - first_step, (BLOCK_SIZE_KV + WINDOW) / STEP_QO);
+  // cap the Q loop, padded by 2 masked steps: the epilogue's deferred dq path miscomputes in-window tail queries
+  const int num_steps_per_head = min(total_steps_per_head - first_step, (BLOCK_SIZE_KV + WINDOW) / STEP_QO + 2);
 #else
   const int num_steps_per_head = total_steps_per_head - first_step;
 #endif
