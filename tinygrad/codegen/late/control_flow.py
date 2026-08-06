@@ -1,9 +1,9 @@
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, dtypes, GroupOp, AddrSpace
 
 def do_split_ends(e:UOp):
-  ret = e.src[0]
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret
+  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.dtype in (dtypes.void, dtypes.bool))
+  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret.end(*backedge) if len(backedge) else ret
 
 pm_split_ends = PatternMatcher([
   # split the ends
