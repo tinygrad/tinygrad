@@ -248,6 +248,16 @@ class TestCallSchedule(unittest.TestCase):
     self.assertEqual(len(calls), 2)
     self.assertEqual(calls[0].src[0].key, calls[1].src[0].key)
 
+  def test_precompile_multiple_views_same_buffer(self):
+    data = np.arange(4, dtype=np.float32)
+    base = Tensor(data.view(np.uint8)).realize()
+    w0, w1 = (base[i:i+8].contiguous().bitcast(dtypes.float32) for i in (0, 8))
+
+    @function(precompile=True, allow_implicit=True)
+    def f(x:Tensor) -> Tensor: return (x * w0).contiguous() * w1
+
+    np.testing.assert_equal(f(Tensor.ones(2).realize()).numpy(), data[:2] * data[2:])
+
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
     @function(precompile=True)

@@ -122,7 +122,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
-  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  targets = [o.param_like(len(input_buffers)+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
 
   items:list[UOp] = []
   for s, t in zip(srcs, targets):
