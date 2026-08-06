@@ -5,6 +5,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu, assert_kernel_count
@@ -160,6 +161,57 @@ class TestFusedQKVRoPE(unittest.TestCase):
     dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
+
+def run_swiglu_forward(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).contiguous().realize()
+  out = swiglu(x).realize()
+
+  hidden = x.shape[-1] // 2
+  act, gate = x[..., :hidden].float(), x[..., hidden:].float()
+  ref = (act * act.sigmoid() * gate).cast(dtypes.bfloat16).realize()
+
+  test.assertEqual(out.shape, (*shape[:-1], shape[-1]//2))
+  test.assertEqual(out.dtype, dtypes.bfloat16)
+  with Context(DEBUG=0): test.assertTrue(out.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU forward mismatch")
+
+def run_swiglu_backward(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(1)
+  x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).contiguous().realize()
+  x.requires_grad = True
+  grad = (Tensor.randn(*shape[:-1], shape[-1]//2) * 2).cast(dtypes.bfloat16).contiguous().realize()
+  grad_x = swiglu(x).gradient(x, gradient=grad)[0].realize()
+
+  hidden = x.shape[-1] // 2
+  act, gate, grad_f = x[..., :hidden].float(), x[..., hidden:].float(), grad.float()
+  sig = act.sigmoid()
+  silu = act * sig
+  ref = Tensor.cat(grad_f * (sig + silu * (1.0 - sig)) * gate, grad_f * silu, dim=-1).cast(dtypes.bfloat16).realize()
+
+  test.assertEqual(grad_x.shape, shape)
+  test.assertEqual(grad_x.dtype, dtypes.bfloat16)
+  with Context(DEBUG=0): test.assertTrue(grad_x.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU backward mismatch")
+
+class TestSwiGLU(unittest.TestCase):
+  # Small enough to exercise the backend-neutral kernel on CPU in the regular test suite.
+  SHAPE = (2, 32, 64)
+
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_forward(self): run_swiglu_forward(self, self.SHAPE)
+  def test_backward(self): run_swiglu_backward(self, self.SHAPE)
+
+@unittest.skipUnless(Device.DEFAULT == "AMD", "production-shape test requires an AMD device")
+class TestSwiGLUProduction(unittest.TestCase):
+  # Physical DP shard used by the production Llama 3.1 8B trainer: global batch 16 / 8 devices.
+  SHAPE = (2, 8192, 28672)
+
+  def setUp(self):
+    if not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"): self.skipTest("production performance target is gfx950")
+
+  def test_llama31_8b_forward(self): run_swiglu_forward(self, self.SHAPE)
+  def test_llama31_8b_backward(self): run_swiglu_backward(self, self.SHAPE)
 
 if __name__ == '__main__':
   unittest.main()

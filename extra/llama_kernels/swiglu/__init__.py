@@ -1,31 +1,37 @@
-import functools, math, pathlib
+import functools, math
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import ceildiv
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import alloc_like, compile_hip
+from extra.llama_kernels import alloc_like
+
+LOG2E = 1.4426950408889634
 
 @functools.cache
 def _custom_swiglu(out:UOp, x_w13:UOp) -> UOp:
-  hidden, n_elems = x_w13.shape[-1]//2, math.prod(x_w13.shape[:-1]) * x_w13.shape[-1]//2
-  num_wg = min(ceildiv(ceildiv(n_elems, 16), 512), 65535)
-  threads, workgroups = UOp.special(512, "lidx0"), UOp.special(num_wg, "gidx0")
-  sink = UOp.sink(out.base, x_w13.base, threads, workgroups,
-                  arg=KernelInfo(f"swiglu_fwd_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=6*n_elems)))
-  src = (pathlib.Path(__file__).parent/"swiglu.hip").read_text()
-  lib = compile_hip(src, [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={hidden}", f"-DNUM_WG={num_wg}", "-DTHREADS_PER_WG=512"])
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  rows, hidden = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]//2
+  n_elems = rows * hidden
+  out, x_w13 = out.reshape(n_elems), x_w13.reshape(rows, 2*hidden)
+  i = UOp.range(n_elems, 0)
+  row, col = i // hidden, i % hidden
+  act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
+  sigmoid = (1.0 + (-LOG2E * act).exp2()).reciprocal()
+  store = out[i].store((act * sigmoid * gate).cast(out.dtype))
+  return store.end(i).sink(arg=KernelInfo(f"swiglu_fwd_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=6*n_elems)))
 
 @functools.cache
 def _custom_swiglu_bwd(grad_out:UOp, x_w13:UOp, grad_act:UOp) -> UOp:
-  hidden, n_elems = x_w13.shape[-1]//2, math.prod(x_w13.shape[:-1]) * x_w13.shape[-1]//2
-  num_wg = min(ceildiv(ceildiv(n_elems, 16), 512), 65535)
-  threads, workgroups = UOp.special(512, "lidx0"), UOp.special(num_wg, "gidx0")
-  sink = UOp.sink(grad_out.base, x_w13.base, grad_act.base, threads, workgroups,
-                  arg=KernelInfo(f"swiglu_bwd_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=10*n_elems)))
-  src = (pathlib.Path(__file__).parent/"swiglu.hip").read_text()
-  lib = compile_hip(src, [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={hidden}", f"-DNUM_WG={num_wg}", "-DTHREADS_PER_WG=512", "-DSWIGLU_BACKWARD"])
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  rows, hidden = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]//2
+  n_elems = rows * hidden
+  grad_out, x_w13, grad_act = grad_out.reshape(rows, 2*hidden), x_w13.reshape(rows, 2*hidden), grad_act.reshape(n_elems)
+  i = UOp.range(n_elems, 0)
+  row, col = i // hidden, i % hidden
+  act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
+  grad = grad_act[i].cast(dtypes.float)
+  sigmoid = (1.0 + (-LOG2E * act).exp2()).reciprocal()
+  silu = act * sigmoid
+  dact = grad_out[row, col].store((grad * (sigmoid + silu * (1.0 - sigmoid)) * gate).cast(grad_out.dtype))
+  dgate = grad_out.after(dact)[row, hidden+col].store((grad * silu).cast(grad_out.dtype))
+  return dgate.end(i).sink(arg=KernelInfo(f"swiglu_bwd_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=10*n_elems)))
 
 def _swiglu_bwd(gradient:UOp, kernel:UOp):
   _, x_w13 = kernel.src[1:]
