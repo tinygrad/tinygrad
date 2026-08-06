@@ -58,11 +58,11 @@ __device__ __forceinline__ float max8(float value) {
   return fmaxf(value, swizzle_xor1(value));
 }
 
-__device__ __forceinline__ float4 unpack_bf16x4(uint64_t packed) {
-  return make_float4(__uint_as_float(static_cast<uint32_t>(packed) << 16),
-                     __uint_as_float(static_cast<uint32_t>(packed >> 16) << 16),
-                     __uint_as_float(static_cast<uint32_t>(packed >> 32) << 16),
-                     __uint_as_float(static_cast<uint32_t>(packed >> 48) << 16));
+__device__ __forceinline__ float4 load_bf16x4(const uint16_t* values) {
+  const uint32_t lo = *reinterpret_cast<const uint32_t*>(values);
+  const uint32_t hi = *reinterpret_cast<const uint32_t*>(values + 2);
+  return make_float4(__uint_as_float(lo << 16), __uint_as_float(lo & 0xffff0000u),
+                     __uint_as_float(hi << 16), __uint_as_float(hi & 0xffff0000u));
 }
 
 __device__ __forceinline__ void hadamard16(float4& value, int lane) {
@@ -140,7 +140,7 @@ __device__ __forceinline__ void quantize_row(uint16_t* tile, uint8_t* fp4_output
                                              int tile_m, int tile_n, int local_row, int lane) {
   const int row = tile_m + local_row;
   const int col = lane * VALUES_PER_THREAD;
-  const Quantized4 result = quantize(unpack_bf16x4(*reinterpret_cast<uint64_t*>(tile + local_row * SMEM_STRIDE + col)), lane);
+  const Quantized4 result = quantize(load_bf16x4(tile + local_row * SMEM_STRIDE + col), lane);
   store_fp4<SHUFFLE_ROWWISE_FP4>(fp4_output, row, (tile_n + col) / 2, N_PACKED, result.fp4);
   if (lane == 0) store_scale(scale_output, row, tile_n / BLOCK, N_SCALES, result.scale);
 }
