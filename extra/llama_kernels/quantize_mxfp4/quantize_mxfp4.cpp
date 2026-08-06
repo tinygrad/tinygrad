@@ -168,9 +168,13 @@ __device__ __forceinline__ Quantized4 quantize_col(uint16_t* tile, int col, int 
     __uint_as_float(static_cast<uint32_t>(tile[(row + 3) * SMEM_STRIDE + col]) << 16)), lane);
 }
 
-__device__ __forceinline__ void run_quantizer(uint8_t* rowwise_fp4, uint8_t* rowwise_scale,
-                                              uint8_t* colwise_fp4, uint8_t* colwise_scale,
-                                              const uint16_t* input, uint16_t* tile) {
+} // namespace
+
+extern "C" __global__ __launch_bounds__(THREADS, 8)
+void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwise_scale,
+                 uint8_t* __restrict__ colwise_fp4, uint8_t* __restrict__ colwise_scale,
+                 const uint16_t* __restrict__ input) {
+  __shared__ uint16_t tile[BLOCK * SMEM_STRIDE];
   const int tid = threadIdx.x;
   const int line = tid / THREADS_PER_ROW;
   const int lane = tid % THREADS_PER_ROW;
@@ -233,14 +237,4 @@ __device__ __forceinline__ void run_quantizer(uint8_t* rowwise_fp4, uint8_t* row
       }
     }
   }
-}
-
-} // namespace
-
-extern "C" __global__ __launch_bounds__(THREADS, 8)
-void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwise_scale,
-                 uint8_t* __restrict__ colwise_fp4, uint8_t* __restrict__ colwise_scale,
-                 const uint16_t* __restrict__ input) {
-  __shared__ uint16_t tile[BLOCK * SMEM_STRIDE];
-  run_quantizer(rowwise_fp4, rowwise_scale, colwise_fp4, colwise_scale, input, tile);
 }
