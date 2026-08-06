@@ -493,7 +493,7 @@ class TestCustomKernelInput(unittest.TestCase):
   def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=2)
   def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=3)
   def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=2)
-  def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=2)
+  def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=1)
   def test_pad(self): self._test_mop(lambda x: x[:4].pad(((0, 4),)), max_kernels=2)
   def test_flip(self): self._test_mop(lambda x: x.flip(0), max_kernels=2)
   def test_offset_shrink(self): self._test_mop(lambda x: x[4:8], max_kernels=2)
