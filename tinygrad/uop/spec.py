@@ -256,19 +256,24 @@ spec_full = PatternMatcher([
 # ***** kernel graph spec *****
 
 spec_kernel_graph = PatternMatcher([
-  # sink/const
+  # sink
   (UPat(Ops.SINK, dtypes.void), lambda: True),
+  # const + stack to make vconsts
   (UPat(Ops.CONST, src=()), lambda: True),
-  # stack to make vconsts (do we really need this)
-  #(UPat(Ops.STACK, src=UPat(Ops.CONST)), lambda: True),
+  (UPat(Ops.STACK, src=()), lambda: True),
+  (UPat(Ops.STACK, src=UPat(Ops.CONST)), lambda: True),
   # param is outside buffer, buffer is local buffer
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace == AddrSpace.GLOBAL),
+  # RESHAPE is a NOOP in the kernel graph (we should remove it)
+  (UPat(Ops.RESHAPE), lambda: True),
+  # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
+  (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   # all calls are on sink
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 ])
 
