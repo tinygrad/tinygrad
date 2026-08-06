@@ -12,7 +12,8 @@ def lane(y:UOp, i:int) -> UOp: return y.index(UOp.const(i, dtypes.int), dtype=y.
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
-    return graph_rewrite(x, cast(X86Renderer, Device[Device.DEFAULT].renderer).isel_matcher, PreRegallocContext(x), bottom_up=True)
+    ren = cast(X86Renderer, Device[Device.DEFAULT].renderer)
+    return graph_rewrite(x, ren.isel_matcher, PreRegallocContext(x, ren), bottom_up=True)
 
   def _check_op(self, dt_op, expr):
     nargs = expr.__code__.co_argcount
