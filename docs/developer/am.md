@@ -7,8 +7,13 @@ Make sure that amdgpu module is unloaded and just run tinygrad with `DEV=AMD`!
 
 Optional requirements:
 
-* System without IOMMU for P2P / SDMA support
-* vfio-pci module for IRQ handling
+* vfio-pci module for IRQ handling and IOMMU-protected DMA
+
+When the system IOMMU is enabled (AMD-Vi), the driver must go through vfio so that the GPU's DMA is confined to explicitly
+mapped pages: a device fault then hits an IOMMU page fault (and only kills the GPU session) instead of corrupting host memory
+and taking the whole system down. This is enabled automatically when the device is behind an IOMMU (set `VFIO=0` to opt out,
+e.g. with `iommu=pt`). Note that without an IOMMU (or with `iommu=pt`) DMA is unprotected. P2P between GPUs is only supported
+without address translation: boot with `iommu=pt` and set `VFIO=0`.
 
 ## Environment Variables
 
@@ -16,6 +21,7 @@ Optional requirements:
 |----------|------------------|-------------|
 | AM_RESET | [1] | Performs a full GPU reset (reloading all firmware and IP blocks) |
 | AM_DEBUG | [0-4] | Sets the level of additional debugging information |
+| VFIO | [0, 1] | Force raw PCI access (0) or vfio (1). By default vfio is used automatically when the device is behind an IOMMU, which requires it |
 
 ## AM Driver Details
 
