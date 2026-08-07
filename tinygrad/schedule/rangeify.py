@@ -448,7 +448,8 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL: ctx.buffer_slots[buf.arg.slot] = ctx.dg
+  if isinstance((ob:=buf.src[0] if buf.op is Ops.MSELECT else buf).arg, ParamArg) and ob.addrspace is AddrSpace.GLOBAL:
+    ctx.buffer_slots[ob.arg.slot] = ctx.dg
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
