@@ -443,10 +443,12 @@ class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
+  buffer_slots:dict[int, int] = field(default_factory=dict)
   range:int = 0
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
+  if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL: ctx.buffer_slots[buf.arg.slot] = ctx.dg
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
@@ -479,12 +481,15 @@ def find_bufs(x:UOp):
   if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
+def define_variable(ctx:LocalAddBufferContext, v:UOp):
+  offset_for = ctx.buffer_slots[v.arg.offset_for] if v.arg.offset_for is not None else None
+  return UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of, offset_for=offset_for)
+
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
-  (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
-   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+  (UPat(Ops.PARAM, name="v"), lambda ctx,v:
+   define_variable(ctx, v) if v.tag == () and v.arg.name is not None and v.arg.vmin_vmax is not None else None),
 
   # this renumbers the params
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:

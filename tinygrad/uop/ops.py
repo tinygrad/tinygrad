@@ -30,9 +30,10 @@ class ParamArg:
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
   volatile: bool = False
+  offset_for: int|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None),
-              ("volatile", False))
+              ("volatile", False), ("offset_for", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
@@ -985,9 +986,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
-    return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),),
-               arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU))
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1, offset_for:int|None=None) -> UOp:
+    return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of,
+                                                                      addrspace=AddrSpace.ALU, offset_for=offset_for))
   @property
   def expr(self) -> str:
     assert self.op is Ops.PARAM

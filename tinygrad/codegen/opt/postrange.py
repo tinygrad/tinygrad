@@ -334,7 +334,8 @@ class Scheduler:
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls]
+  offsets = [(v.arg.offset_for, int(v.vmax)) for v in ast.variables() if v.arg.offset_for is not None]
+  return [Buffer(dname, max((x.max_numel()-off for slot,off in offsets if slot == x.arg.slot), default=x.max_numel()), x.dtype) for x in glbls]
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
