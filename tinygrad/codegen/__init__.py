@@ -341,7 +341,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
                        name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
-  sink = graph_rewrite(sink, sym, name="extra symbolic")
+  # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
+  sink = graph_rewrite(sink, sym+indexing_simplify, name="extra symbolic")
 
   # lower index dtype
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
