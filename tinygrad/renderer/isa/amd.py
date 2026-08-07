@@ -1547,6 +1547,9 @@ def _vm_load_count(insts:list) -> int:
               n.startswith("BUFFER_LOAD") or n.startswith("FLAT_LOAD")))
 
 def insts_from_linear(lin:UOp):
+  # Soft waitcnt: flush a domain only when a later op reads regs still pending in that
+  # domain (or at endpgm). Do not insert schedule hoist/sink here — that is PR4.
+
   ops = list(lin.src)
   skip = _compute_amd_skip(ops) | _fused_d16_hi_loads(ops)
   mask_depth = 0
