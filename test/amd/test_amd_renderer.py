@@ -712,7 +712,6 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertTrue(renderer.supports_float4)
     self.assertEqual(renderer.local_prod_max, 1024)
 
-  @unittest.skip("skel: no WMMA")
   def test_tensor_cores_only_advertise_lowered_mode(self):
     self.assertEqual([(x.dtype_in, x.dtype_out) for x in _REN.tensor_cores], [(dtypes.half, dtypes.float)])
 
@@ -970,7 +969,6 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertEqual(inst_names.count("GLOBAL_STORE_B128"), 4)
     self.assertEqual(inst_names.count("V_FMA_F32"), 48)
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_wmma_assembles(self):
     prg = _half_matmul_wmma_program()
     # Small WMMA may still v_pack; product-16 register path uses u16+d16_hi (tested below).
@@ -1043,17 +1041,14 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_tc_lds_ab_stages_without_spill(self):
     # Dual LOCAL 2×2 WG + tile UPCAST 2×2 (product ≤4); default bounce.
     self._half_matmul_tc_lds_ab_pre_regalloc()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_tc_lds_ab_local4_stages_without_spill(self):
     # TC_LOCAL=4 → asymmetric LOCAL 4×2 (symmetric 4×4 historically TDR on display).
     self._half_matmul_tc_lds_ab_pre_regalloc(tc_local=4)
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_tc_lds_tid_fill_peer_lds_reads(self):
     # Opt-in tid-fill (TC_LDS_TID=1): peer remap → DS_LOAD_U16 when A block==threads
     # (needs A tile_prod=local_n*2). Default LDS tiles 2×2 → tile_prod=2 → bounce fallback.
@@ -1085,7 +1080,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_tc_lds_bounce_no_u16_lds(self):
     # Hybrid bounce: shared A (tid-fill/major-read) + B tid-wide → GLOBAL B128, no peer U16.
     # A LDS is block×16 (=4KiB at LOCAL 2×2); total A+B ≤ 8KiB.
@@ -1116,7 +1110,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_tc_lds_ab_stages_without_spill_gate(self):
     # Default LDS: product 8 + B transpose + addr remat → spill-free, DS_LOAD_B128 on A/B.
     import os
@@ -1150,7 +1143,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_upcast4_without_spill(self):
     # Full 4×4 (16 WMMA) is ALLOW_UPCAST16-only. Even SPILL=0 offline can TDR display GPUs
     # (vgpr_span≈254). Register path; expect ≥16 WMMA. Scratch may be high — do not ship.
@@ -1185,7 +1177,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_lds_upcast16_aliases_acc_not_reg_scratch(self):
     # LDS product-16 uses MOV-zero cin (vs register SLOAD reload). ACC alias must still
     # kill the 128-slot REG buffer SLOAD/SSTORE. Residual VGPR spills OK — not default yet.
@@ -1214,7 +1205,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_upcast16_refused_without_allow(self):
     # Register defaults to product 16; ALLOW_UPCAST16=0 clamps back to ≤8.
     import os
@@ -1242,7 +1232,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_default_lds_intensity_gates(self):
     # Opt-in LDS defaults to product 8, spill-free with EXTRACT+addr remat.
     import os
@@ -1285,9 +1274,8 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path, product 16 → 16 WMMA, spill-free (LDS is opt-in).
+    # Default ISA: register path, product ≤4 (product≥8 hangs gfx1100) → 4 WMMA, spill-free.
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
     for k in ("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB"): os.environ.pop(k, None)
@@ -1299,7 +1287,7 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       linear_ops = _lin_ops(prg)
-      self.assertEqual(linear_ops.count(AMDOps.WMMA), 16)
+      self.assertEqual(linear_ops.count(AMDOps.WMMA), 4)
       self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
       self.assertNotIn(AMDOps.SPILL, linear_ops)
       self.assertNotIn(AMDOps.FILL, linear_ops)
@@ -1312,9 +1300,8 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_c_stores_share_peeled_base(self):
-    # Soft-peel nested ADD+imm so 128 C stores share one addr base; large byte offs use v_lshl_add.
+    # Soft-peel nested ADD+imm so C stores share one addr base; large byte offs use v_lshl_add.
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES")}
     for k in old: os.environ.pop(k, None)
@@ -1326,18 +1313,16 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       stores = [u for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.STORE]
-      self.assertEqual(len(stores), 128)
+      self.assertEqual(len(stores), 32)  # product-4 default (was 128 at product-16)
       self.assertEqual(len({id(u.src[1]) for u in stores}), 1)
-      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 120)
+      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 28)
       names = _amd_inst_names(prg)
-      # 16×4096-byte pages → one scale/add per page, not per store.
       self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 20)
-      self.assertEqual(names.count("GLOBAL_STORE_B32"), 128)
+      self.assertEqual(names.count("GLOBAL_STORE_B32"), 32)
       # Float EXTRACT coalesces onto WMMA pack+lane — stores read ACC VGPRs directly.
       self.assertLess(names.count("V_MOV_B32_E32"), 200)
-      # Stores with instr offsets (page-relative), not only absolute lshl_add.
       self.assertGreater(sum(1 for i in _REN._insts_from_linear(_prg_lin(prg))
-                             if getattr(i, "op_name", "") == "GLOBAL_STORE_B32" and getattr(i, "offset", 0)), 50)
+                             if getattr(i, "op_name", "") == "GLOBAL_STORE_B32" and getattr(i, "offset", 0)), 10)
     finally:
       for k, v in old.items():
         if v is None: os.environ.pop(k, None)
@@ -1431,7 +1416,6 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertNotIn("GLOBAL_LOAD_U16", inst_names)
     self.assertNotIn("GLOBAL_STORE_B16", inst_names)
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_uses_wide_global_load(self):
     # Register path: contiguous operand B128; strided WMMA operand stays U16.
     import os
@@ -1456,7 +1440,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_register_path_strided_operand_is_u16(self):
     # Contiguous A → B128×8; strided B → u16+d16_hi into pack VGPR (default).
     # TC_LOCAL=4 (register default) + d16_hi; opt out with AMD_D16_HI=0 / TC_LOCAL=0.
@@ -1474,11 +1457,11 @@ class TestAMDRenderer(unittest.TestCase):
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       inst_names = _amd_inst_names(prg)
       self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 32)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 32)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 8)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 8)
       self.assertEqual(inst_names.count("V_PACK_B32_F16"), 0)
       self.assertGreaterEqual(inst_names.count("S_CLAUSE"), 2)
-      self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 16)
+      self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 4)
       self.assertTrue(any(o.op is OptOps.LOCAL and o.arg == 4 for o in prg.src[0].arg.applied_opts))
       self.assertEqual(prg.arg.local_size, (32, 4, 1))
     finally:
@@ -1488,7 +1471,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_register_path_vpack_opt_out(self):
     # AMD_D16_HI=0 + TC_LOCAL=0 → legacy u16×64 + v_pack (no LOCAL).
     import os
@@ -1505,10 +1487,10 @@ class TestAMDRenderer(unittest.TestCase):
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       inst_names = _amd_inst_names(prg)
       self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 64)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 16)
       self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 0)
       self.assertGreater(inst_names.count("V_PACK_B32_F16"), 0)
-      self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 16)
+      self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 4)
     finally:
       for k, v in old.items():
         if v is None: os.environ.pop(k, None)
@@ -1516,7 +1498,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_tc_lds_ab_not_default_until_faster(self):
     # Step C: ISA default is register+B128 until LDS wins @4096 on HW.
     import os
@@ -1530,14 +1511,13 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       self.assertEqual(_lin_ops(prg).count(AMDOps.LLOAD), 0)
-      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 16)
+      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 4)  # register default product-4
     finally:
       if old is None: os.environ.pop("TC_LDS_AB", None)
       else: os.environ["TC_LDS_AB"] = old
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_lds_product8_clamped_without_allow(self):
     # ALLOW_LDS_PRODUCT8=0 forces 2×2 under LDS (product 8 is otherwise the LDS default).
     import os
@@ -1562,7 +1542,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_lds_product8_allow_serializes_a_batches(self):
     # ALLOW_LDS_PRODUCT8: expand serializes A batches (AFTER). Spill-free with LLOAD EXTRACT remat.
     import os
@@ -1588,7 +1567,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  @unittest.skip("skel: no WMMA")
   def test_lds_unroll_gated_when_over_tile_budget(self):
     # TC_LDS_UNROLL used to apply then crash in expand_wmma (tile product > budget).
     # With product-8 already at max_tiles, UNROLL must not apply — compile stays green.
@@ -1904,7 +1882,6 @@ class TestAMDRenderer(unittest.TestCase):
     # 1D locals: USER_SGPR stays 2 so WGID lands at s2 (hand kernels / LLVM).
     self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) & 0x1f, 2)
 
-  @unittest.skip("skel: no WMMA")
   def test_half_matmul_2d_locals_pads_user_sgpr_on_gfx1100(self):
     # gfx1100 UserSGPRInit16Bug: 2D locals need USER_SGPR=15 so workitem Y is initialized.
     import os
