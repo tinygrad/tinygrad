@@ -538,12 +538,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.var(axis=1).numpy())
     ```
     """
+    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    reduced = squares.sum(axis=axis, keepdim=keepdim)
-    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
-    # TODO: remove relu?
-    return reduced.div(denominator.relu())
+    numerator = squares.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    return numerator.div(smax(n - correction, 0)).cast(output_dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
