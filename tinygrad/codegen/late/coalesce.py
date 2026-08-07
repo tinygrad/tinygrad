@@ -1,8 +1,8 @@
 import itertools, functools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
@@ -27,11 +27,14 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
     if lo <= hi:
       fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
-      for coord,b in zip(idx.src, (width, height)):
-        rw = coord.substitute({X:fake}).simplify()
-        if rw.vmin >= b or rw.vmax < 0:
-          drop_stmt.append(stmt)
-          break
+      subs = [{X: fake}]
+      # idx may not have X itself, so also substitute a term of X: v -> fake - (X - v)
+      terms = list(X.split_uop(Ops.ADD))
+      v = next((u for u in terms if u.op in GroupOp.Irreducible and u.op is not Ops.CONST), None)
+      if v is not None and (rest:=[u for u in terms if u is not v]): subs.append({v: fake - UOp.usum(*rest)})
+      if any((testidx:=graph_rewrite(coord.substitute(sub), sym)).vmin >= b or testidx.vmax < 0
+             for sub in subs for coord,b in zip(idx.src, (width, height))):
+        drop_stmt.append(stmt)
   return drop_stmt
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
