@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import dtypes, Invalid, truncate
 
 class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_constant(self):
@@ -317,8 +317,8 @@ class TestVminVmaxVConst(unittest.TestCase):
   def test_vmin_vmax_vconst_with_floats(self):
     # vmin and vmax for a vector constant of float values
     uop = UOp.const((1.5, -3.2, 0.0))
-    self.assertEqual(uop.vmin, -3.2)
-    self.assertEqual(uop.vmax, 1.5)
+    self.assertEqual(uop.vmin, truncate[dtypes.default_float](-3.2))
+    self.assertEqual(uop.vmax, truncate[dtypes.default_float](1.5))
 
   def test_vmin_vmax_vconst_with_bools(self):
     # vmin and vmax for a vector constant of bool values
