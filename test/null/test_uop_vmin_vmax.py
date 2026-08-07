@@ -168,6 +168,10 @@ class TestVminVmaxProperties(unittest.TestCase):
     x = UOp.const(4.5).cast(dtypes.float)
     self.assertIs(x.ne(x.cast(dtypes.int).cast(dtypes.float)).simplify().arg, True)
 
+  def test_vmin_vmax_cast_int_to_float_grid(self):
+    # a cast to float only takes values on the float grid, so its bounds are the source bounds rounded at the destination
+    self.assertEqual(UOp.variable('x', 0, 16777219, dtypes.int).cast(dtypes.float)._min_max, (0.0, 16777220.0))
+
   def test_vmin_vmax_invalid(self):
     i = UOp.invalid()
     self.assertNotEqual(i.vmin, i.vmax)

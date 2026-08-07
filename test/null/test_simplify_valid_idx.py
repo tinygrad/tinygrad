@@ -333,7 +333,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+r0)<11)&((((idx1*8)+r1)<3)!=True))",
+               "(((idx2*2)+r0)<11)",
                "(idx0+(idx1*512+r1*64)+-192)",
                "((((idx2*2)+r0)+(((idx1+((r1+5)//8))+1)//2))+-4)")
 
@@ -461,7 +461,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(gidx0+lidx0*1024+r0*1024+lidx1*128+-3168)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<19))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<19))",
                        "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
   def test_simplify10(self):
@@ -480,7 +480,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(lidx2+gidx0*4+lidx0*1024+r0*1024+lidx1*256+-3264)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
 
   def test_drop_non_monotonic_window(self):

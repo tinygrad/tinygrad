@@ -5,7 +5,8 @@ BLOCK_ROW = 256
 
 def _sharded_invalids(shape:tuple[int, ...], dtype, device) -> Tensor:
   if isinstance(device, tuple):
-    return Tensor.invalids(*shape, dtype=dtype, device=device[0]).shard(device, axis=0)
+    per = Tensor.invalids(shape[0]//len(device), *shape[1:], dtype=dtype, device=device)
+    return Tensor(per.uop.unshard(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def _atomic_add(device:str) -> str:
