@@ -582,7 +582,7 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   return (inc, [inc, jmp, end_label])
 
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  cond = x.replace(op=x.tag, src=x.src[:2])
+  cond = x.replace(op=x.tag[0], src=x.src[:2])
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
