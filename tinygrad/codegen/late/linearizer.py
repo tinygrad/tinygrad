@@ -57,23 +57,24 @@ class CFGContext:
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
     # everything is nested inside the sink
-    deps: dict[UOp, dict[UOp, None]] = {}
+    bit: dict[UOp, int] = {}
+    deps: dict[UOp, int] = {}
     nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
       # get the deps from the src
-      deps[u] = {}
+      deps[u] = 0
       for s in u.src: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.SINK):
-        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END): deps[u][u] = None
+        nesting |= {x:u for x in bit if x.op is Ops.END and deps[u]>>bit[x]&1 and (u.op is Ops.SINK or deps[x]>>bit[u.src[1]]&1) and x not in nesting}
+      if u.op in (Ops.RANGE, Ops.END): deps[u] |= 1<<bit.setdefault(u, len(bit))
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
       # ranges that have dependencies on other siblings need to be scheduled after them
-      order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
+      order = sorted(v, key=lambda x: len([u for u in v if deps[x]>>bit[u]&1]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
