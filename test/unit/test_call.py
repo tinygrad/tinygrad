@@ -240,13 +240,13 @@ class TestCallSchedule(unittest.TestCase):
   def test_precompile_view_schedule_cache_hit(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return (x + 1).contiguous()
-    a, b = Tensor.empty(32).realize(), Tensor.empty(32).realize()
-    r0, r1 = f(a[4:8]), f(b[8:12])
-    from tinygrad.tensor import transform_to_call
-    sink, _ = transform_to_call(UOp.sink(r0.uop, r1.uop))
-    calls = [u for u in sink.toposort() if u.op is Ops.CALL and u.arg.precompile]
-    self.assertEqual(len(calls), 2)
-    self.assertEqual(calls[0].src[0].key, calls[1].src[0].key)
+    base = Tensor.empty(12).realize().uop
+    def view(name:str, offset:int) -> Tensor:
+      return Tensor(UOp(Ops.SHRINK, dtypes.float, (base, UOp.variable(name, 0, 8).bind(offset), UOp.const(4))).reshape(2, 2))
+    linear, _ = Tensor.linear_with_vars(f(view("offset0", 2)), f(view("offset1", 6)))
+    self.assertEqual(len(linear.src), 2)
+    self.assertTrue(all(c.src[-1].op is Ops.SHRINK for c in linear.src))
+    self.assertEqual(linear.src[0].src[0].key, linear.src[1].src[0].key)
 
   def test_precompile_multiple_views_same_buffer(self):
     data = np.arange(1, 4, dtype=np.float32)

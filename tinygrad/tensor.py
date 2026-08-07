@@ -108,7 +108,8 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
-  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+  input_buffers = tuple(x.src[0] if x.op is Ops.RESHAPE and x.src[0].op is Ops.SHRINK and x.src[0].has_buffer_identity()
+                        else x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
 
   # add the outputs to the call
   srcs = c.src[0].src
