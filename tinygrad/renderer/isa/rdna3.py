@@ -1718,7 +1718,10 @@ def insts_from_linear(lin:UOp):
       items.append((inst, u.tag, byte))
       byte += len(inst.to_bytes())
       continue
-    if _needs_vm_flush(u): flush_regs(set().union(*(_reg_idxs(s) for s in u.src), _reg_idxs(u)))
+    if _needs_vm_flush(u):
+      # Soft allow can no-op when dest ACC intersects an early pending batch. Drain VM before WMMA.
+      if u.op is Ops.INS and u.arg is AMDOps.WMMA: flush("vm")
+      else: flush_regs(set().union(*(_reg_idxs(s) for s in u.src), _reg_idxs(u)))
     if u.op is Ops.INS and u.arg is AMDOps.IF_MASK:
       store_addr_cache.clear()
       emitted = list(insts_for_uop(u, skip))
@@ -2030,10 +2033,11 @@ pm_stage_wmma_ab = PatternMatcher([(UPat(Ops.WMMA, name="wmma"), stage_wmma_ab_t
 def apply_tc_hand_opts(tk, rngs):
   from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
   lds_ab = getenv("TC_LDS_AB", 0)
-  up_cap = getenv("TC_UPCAST", 4)
-  loc_cap = getenv("TC_LOCAL", 2 if lds_ab else 4)
+  # Register path: UPCAST>=4 wrong; LOCAL wrong/NaN. LDS path keeps prior caps.
+  up_cap = getenv("TC_UPCAST", 4 if lds_ab else 2)
+  loc_cap = getenv("TC_LOCAL", 2 if lds_ab else 0)
   up16 = _allow_upcast16()
-  max_tiles = min(getenv("TC_UPCAST_TILES", 8 if lds_ab else 4), 8 if not up16 else 10**9)  # product>=8 hangs on gfx1100
+  max_tiles = min(getenv("TC_UPCAST_TILES", 8 if lds_ab else 4), 8 if not up16 else 10**9)
   if lds_ab and getenv("ALLOW_LDS_PRODUCT8", 1) == 0:
     up_cap, max_tiles = min(up_cap, 2), min(max_tiles, 4)
   local_dims, loc_szs = ([0, 1], [8, 4, 2]) if lds_ab else ([0], [4, 2])

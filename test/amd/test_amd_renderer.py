@@ -1275,10 +1275,11 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path, product ≤4 (product≥8 hangs gfx1100) → 4 WMMA, spill-free.
+    # Default ISA: register path UPCAST=2×2, no LOCAL (LOCAL/UPCAST≥4 wrong on gfx1100) → 4 WMMA.
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
-    for k in ("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB"): os.environ.pop(k, None)
+    old_loc = os.environ.get("TC_LOCAL")
+    for k in ("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB", "TC_LOCAL"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1294,7 +1295,7 @@ class TestAMDRenderer(unittest.TestCase):
       self.assertNotIn(AMDOps.SLOAD, linear_ops)
       self.assertNotIn(AMDOps.SSTORE, linear_ops)
     finally:
-      for k, old in (("TC_UPCAST", old_u), ("TC_UPCAST_TILES", old_t), ("TC_LDS_AB", old_l)):
+      for k, old in (("TC_UPCAST", old_u), ("TC_UPCAST_TILES", old_t), ("TC_LDS_AB", old_l), ("TC_LOCAL", old_loc)):
         if old is None: os.environ.pop(k, None)
         else: os.environ[k] = old
       getenv.cache_clear()
@@ -1303,7 +1304,7 @@ class TestAMDRenderer(unittest.TestCase):
   def test_half_matmul_c_stores_share_peeled_base(self):
     # Soft-peel nested ADD+imm so C stores share one addr base; large byte offs use v_lshl_add.
     import os
-    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES")}
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES", "TC_LOCAL")}
     for k in old: os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
@@ -1441,13 +1442,11 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_register_path_strided_operand_is_u16(self):
-    # Contiguous A → B128×8; strided B → u16+d16_hi into pack VGPR (default).
-    # TC_LOCAL=4 (register default) + d16_hi; opt out with AMD_D16_HI=0 / TC_LOCAL=0.
+    # Contiguous A → B128; strided B → u16+d16_hi. Default: UPCAST 2×2, no LOCAL.
     import os
-    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL")}
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
-    os.environ.pop("AMD_D16_HI", None)
-    os.environ.pop("TC_LOCAL", None)
+    for k in ("AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1456,14 +1455,14 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       inst_names = _amd_inst_names(prg)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 8)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 8)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 4)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 16)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 16)
       self.assertEqual(inst_names.count("V_PACK_B32_F16"), 0)
       self.assertGreaterEqual(inst_names.count("S_CLAUSE"), 2)
       self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 4)
-      self.assertTrue(any(o.op is OptOps.LOCAL and o.arg == 4 for o in prg.src[0].arg.applied_opts))
-      self.assertEqual(prg.arg.local_size, (32, 4, 1))
+      self.assertFalse(any(o.op is OptOps.LOCAL for o in prg.src[0].arg.applied_opts))
+      self.assertEqual(prg.arg.local_size, (32, 1, 1))
     finally:
       for k, v in old.items():
         if v is None: os.environ.pop(k, None)
@@ -1472,12 +1471,12 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_register_path_vpack_opt_out(self):
-    # AMD_D16_HI=0 + TC_LOCAL=0 → legacy u16×64 + v_pack (no LOCAL).
+    # AMD_D16_HI=0 → legacy u16 + v_pack (register default already has no LOCAL).
     import os
-    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL")}
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
     os.environ["AMD_D16_HI"] = "0"
-    os.environ["TC_LOCAL"] = "0"
+    for k in ("TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1486,8 +1485,8 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       inst_names = _amd_inst_names(prg)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 8)
-      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 16)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_B128"), 4)
+      self.assertEqual(inst_names.count("GLOBAL_LOAD_U16"), 32)
       self.assertEqual(inst_names.count("GLOBAL_LOAD_D16_HI_B16"), 0)
       self.assertGreater(inst_names.count("V_PACK_B32_F16"), 0)
       self.assertEqual(inst_names.count("V_WMMA_F32_16X16X16_F16"), 4)
@@ -1887,8 +1886,8 @@ class TestAMDRenderer(unittest.TestCase):
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL")}
     os.environ["TC_LDS_AB"] = "0"
+    os.environ["TC_LOCAL"] = "4"  # force 2D local (register default is TC_LOCAL=0)
     os.environ.pop("AMD_D16_HI", None)
-    os.environ.pop("TC_LOCAL", None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
