@@ -795,6 +795,59 @@ def _pack_f16_half2_load(lo:UOp, hi:UOp) -> tuple[UOp, int]|None:
   if lo_lane is None or hi_lane != lo_lane + 1 or lo_lane % 2: return None
   return base, lo_lane // 2
 
+def _pack_f16_d16_hi_pair(lo:UOp, hi:UOp) -> bool:
+  # Two scalar global half LOADs → global_load_u16 + global_load_d16_hi_b16 into one VGPR (LLVM).
+  # Default on for register path (with TC_LOCAL=4). Opt out with AMD_D16_HI=0.
+  if not getenv("AMD_D16_HI", 1): return False
+  if not (lo.op is Ops.INS and lo.arg is AMDOps.LOAD and hi.op is Ops.INS and hi.arg is AMDOps.LOAD): return False
+  if _elem_count(lo) != 1 or _elem_count(hi) != 1: return False
+  if lo.dtype.scalar() is not dtypes.half or hi.dtype.scalar() is not dtypes.half: return False
+  if _is_lds_ref(lo.src[0]) or _is_scratch_ref(lo.src[0]): return False
+  if _is_lds_ref(hi.src[0]) or _is_scratch_ref(hi.src[0]): return False
+  return True
+
+def _pack_f16_has_d16_hi(u:UOp) -> bool:
+  if _pack_f16_is_vec_load(u) or len(u.src) < 2 or len(u.src) % 2: return False
+  return any(_pack_f16_d16_hi_pair(u.src[2 * i], u.src[2 * i + 1]) for i in range(len(u.src) // 2))
+
+def _pack_f16_emit_d16_burst(u:UOp) -> list|None:
+  # LLVM-style: hoist byte-addr scales, then s_clause + tight VMEM bursts (no LSHL between loads).
+  # Lo: scale into pack lane, load u16 (dest-as-addr). Hi: scale hi idx in place (idx dead after), d16_hi.
+  if not _pack_f16_has_d16_hi(u): return None
+  n = len(u.src) // 2
+  pairs = [(u.src[2 * i], u.src[2 * i + 1]) for i in range(n)]
+  if not all(_pack_f16_d16_hi_pair(lo, hi) for lo, hi in pairs): return None
+  item = _mem_itemsize(pairs[0][0].dtype)
+  if item != 2: return None
+  base = greg(u)
+  ret: list = []
+  # --- lo u16: addr in pack lane ---
+  for i, (lo, _) in enumerate(pairs):
+    dst = _reg_lane(base, i)
+    pre, addr = _scaled_addr(dst, lo.src[1], item)
+    if addr != dst: ret += pre + [r3.v_mov_b32_e32(dst, addr)]
+    else: ret += pre
+  if n: ret.append(r3.s_clause(simm16=n - 1))
+  for i, (lo, _) in enumerate(pairs):
+    dst = _reg_lane(base, i)
+    ret.append(r3.global_load_u16(dst, dst, saddr=_src(lo.src[0])))
+  # --- hi d16_hi: scale hi element idx in place (idx dead after), then clause+loads ---
+  hi_addrs: list[Reg] = []
+  scaled: set[int] = set()
+  for _, hi in pairs:
+    src = _src(hi.src[1])
+    if not isinstance(src, Reg) or src.offset < 256:
+      # SGPR/imm index — fall back to TMP path for this pack
+      return None
+    if src.offset not in scaled:
+      ret.append(r3.v_lshlrev_b32_e64(src, 1, src))
+      scaled.add(src.offset)
+    hi_addrs.append(src)
+  if n: ret.append(r3.s_clause(simm16=n - 1))
+  for i, (_, hi) in enumerate(pairs):
+    ret.append(r3.global_load_d16_hi_b16(_reg_lane(base, i), hi_addrs[i], saddr=_src(hi.src[0])))
+  return ret
+
 def _pack_f16_identity_load(u:UOp) -> UOp|None:
   # PACK_F16(EXTRACT(L,0)..EXTRACT(L,2n-1)) with L = half×n LLOAD → reuse L's VGPRs.
   if len(u.src) < 2 or len(u.src) % 2: return None
@@ -828,7 +881,8 @@ def _pack_f16_insts(u:UOp) -> list:
       return []
     return [r3.v_mov_b32_e32(_dst(u), _src(src))]
   if len(u.src) < 2 or len(u.src) % 2: raise CompileError(f"pack_f16 needs even src, got {len(u.src)}")
-  ret = []
+  if (burst := _pack_f16_emit_d16_burst(u)) is not None: return burst
+  ret, d16_hi = [], []
   for i in range(len(u.src) // 2):
     lo, hi = u.src[2*i], u.src[2*i+1]
     if (got := _pack_f16_half2_load(lo, hi)) is not None:
@@ -836,12 +890,20 @@ def _pack_f16_insts(u:UOp) -> list:
       src_slot, dst_slot = _reg_lane(greg(base), slot), _reg_lane(greg(u), i)
       if src_slot != dst_slot: ret.append(r3.v_mov_b32_e32(dst_slot, src_slot))
       continue
+    # Fallback when burst cannot in-place scale hi idx (SGPR/imm).
+    if _pack_f16_d16_hi_pair(lo, hi):
+      dst = _reg_lane(greg(u), i)
+      pre0, a0 = _scaled_addr(TMP_VADDR, lo.src[1], _mem_itemsize(lo.dtype))
+      pre1, a1 = _scaled_addr(TMP_VDATA, hi.src[1], _mem_itemsize(hi.dtype))
+      ret += pre0 + [r3.global_load_u16(dst, a0, saddr=_src(lo.src[0]))]
+      d16_hi += pre1 + [r3.global_load_d16_hi_b16(dst, a1, saddr=_src(hi.src[0]))]
+      continue
     # Always v_pack from lo/hi. Do not shortcut through the half2 load VGPR: EXTRACT(hi)
     # may LSHR that load in place, so a later mov from the load reg sees [hi,0] (2026-07-20).
     pre0, a = _vgpr_data(TMP_VDATA, lo)
     pre1, b = _vgpr_data(TMP_VADDR, hi)
     ret += pre0 + pre1 + [r3.v_pack_b32_f16(_reg_lane(greg(u), i), a, b)]
-  return ret
+  return ret + d16_hi
 
 AMD_ATOMIC_ADD = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
 def _atomic_add_ins(x:UOp) -> UOp|None:
@@ -1230,7 +1292,10 @@ def _max(u:UOp):
 def _cmp_lt(u:UOp):
   pre, a = _vgpr_data(TMP_VDATA, u.src[0])
   sc = u.src[0].dtype.scalar()
-  cmp = r3.v_cmp_gt_f16_e32 if sc is dtypes.float16 else r3.v_cmp_gt_f32_e32 if sc is dtypes.float32 else r3.v_cmp_gt_i32_e32 if sc in dtypes.sints else r3.v_cmp_gt_u32_e32
+  if sc is dtypes.float16: cmp = r3.v_cmp_gt_f16_e32
+  elif sc is dtypes.float32: cmp = r3.v_cmp_gt_f32_e32
+  elif sc in dtypes.sints: cmp = r3.v_cmp_gt_i32_e32
+  else: cmp = r3.v_cmp_gt_u32_e32
   return pre + [cmp(_src(u.src[1]), a)]
 def _cmp_ne(u:UOp):
   pre, b = _vgpr_data(TMP_VDATA, u.src[1])
