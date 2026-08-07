@@ -221,7 +221,7 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.CMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
-  def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
+  def div(self, x: 'Self|ConstType|UOp', reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.

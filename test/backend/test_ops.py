@@ -1535,6 +1535,8 @@ class TestOps(unittest.TestCase):
 
   def test_prod(self):
     helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
+    helper_test_op(None, lambda x: x.prod(), vals=[[0.0, 2.0, 3.0]])
+    helper_test_op(None, lambda x: x.prod(), vals=[[0.0, 0.0, 3.0]])
     with Context(NOOPT=1): helper_test_op(None, lambda x: x.prod(), vals=[[1.0, 2.0, 3.0]])
     helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=3), lambda x: x.prod(axis=3))
     helper_test_op([(3,4,5,6)], lambda x: x.prod(dim=1), lambda x: x.prod(axis=1))
