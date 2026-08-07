@@ -2,6 +2,7 @@
 import gc, unittest, time
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
+from tinygrad.device import MultiBuffer
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.engine.realize import run_linear, compile_linear
@@ -37,6 +38,11 @@ class TestBufferUOp(unittest.TestCase):
     add.realize()
     self.assertIsNotNone(add.uop.buffer)
     self.assertEqual(add.uop.shape, (1, 1))
+
+  def test_multi_buffer_view_allowed(self):
+    view = Tensor.empty(8, device=("NULL", "NULL:1"))[2:6]
+    self.assertIsInstance(buf:=view.uop.buffer, MultiBuffer)
+    self.assertEqual([(x.size, x.offset) for x in buf.bufs], [(4, 2*dtypes.float.itemsize)]*2)
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)

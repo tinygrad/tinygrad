@@ -935,7 +935,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self is not self.base or self.op is Ops.BITCAST:
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
       buf, offset = (b:=cv[0]).base.buffer, cv[1]
-      assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
+      if isinstance(buf, MultiBuffer):
+        mbuf = MultiBuffer.__new__(MultiBuffer)
+        mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
+        return mbuf
       return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
