@@ -514,7 +514,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    return numerator.div(denominator).cast(output_dtype)  # type: ignore[arg-type]
+    return numerator.div(denominator).cast(output_dtype)
 
   def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
     """
