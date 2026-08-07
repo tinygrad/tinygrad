@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, \
@@ -72,7 +72,7 @@ def _make_buffer_view(ctx:AllocCtx, src:UOp) -> UOp|None:
   if buf.op is not Ops.BUFFER or buf.nbytes() == src.nbytes(): return None
   name = f"buf{buf.arg.slot}_offset{next(ctx.offset_counts.setdefault(buf, count()))}"
   offset = UOp.variable(name, 0, buf.max_numel() - (size:=src.max_numel() * src.element_size() // buf.element_size()),
-                        multiple_of=min(offset & -offset or 1, 16), offset_for=buf.arg.slot).bind(offset) # don't assume alignment more than 16 bytes
+                        multiple_of=min(offset & -offset or 1, 16)).bind(offset) # don't assume alignment more than 16 bytes
   return UOp(Ops.SHRINK, buf.dtype, (buf, offset, UOp.const(size))).bitcast(src.dtype).reshape(src.shape)
 
 def contiguous_mops_to_view(ctx: AllocCtx, c:UOp, src:UOp):
@@ -214,9 +214,6 @@ pm_replace_buf = PatternMatcher([
                        if s.op is Ops.SHRINK and (b:=s.src[0]).op is Ops.BUFFER and (off:=s.src[1]).op is Ops.BIND else s for s in c.src))),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
-  # associate an offset PARAM with the buffer PARAM it indexes
-  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="b"), UPat(Ops.PARAM, name="off"), UPat()), name="s"), lambda s,b,off:
-   s.replace(src=(b, off.replace(arg=replace(off.arg, offset_for=b.arg.slot)), s.src[2])) if off.arg.offset_for is not None else None),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")

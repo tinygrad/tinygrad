@@ -1,5 +1,4 @@
 import time, inspect
-from dataclasses import replace
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
@@ -102,7 +101,7 @@ pm_post_sched_cache = PatternMatcher([
 def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   binds = {f"p{i}":x.src[0] for i,x in enumerate(linear_call.src[1:]) if x.op is Ops.BIND}
-  subs = {v:binds[v.expr].replace(arg=replace(binds[v.expr].arg, offset_for=v.arg.offset_for)) for v in linear.variables() if v.expr in binds}
+  subs = {v:binds[v.expr] for v in linear.variables() if v.expr in binds}
   return linear.replace(src=tuple(c if c.src[0].op is Ops.LINEAR else c.replace(src=(c.src[0].substitute(subs), *c.src[1:])) for c in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([

@@ -136,7 +136,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[str, int] = {k.expr:int(k.vmin) if k.arg.offset_for is not None else int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
+    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:
