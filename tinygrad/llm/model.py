@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, itertools, pathlib
+import functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.nn import Linear
@@ -7,18 +7,30 @@ from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
 @functools.cache
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
-  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None, yarn:tuple[float,int,float,float]|None=None) -> Tensor:
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2) / dim))
+  concentration = 1.0
+  if yarn is not None:
+    scale, orig_ctx, beta_fast, beta_slow = yarn
+    if scale > 1.0:
+      concentration = 0.1 * math.log(scale) + 1.0
+      d_half = dim // 2
+      low = d_half * math.log(orig_ctx / (beta_fast * 2 * math.pi)) / math.log(theta)
+      high = d_half * math.log(orig_ctx / (beta_slow * 2 * math.pi)) / math.log(theta)
+      interp = 1 - ((Tensor.arange(d_half).float() - low) / (high - low)).clamp(0, 1)
+      freqs = freqs * interp + (freqs / scale) * (1 - interp)
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return freqs.cos().cat(freqs.sin(), dim=-1).clone(device)
+  return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
 
 class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
-  def __init__(self, num_experts:int, in_features:int, out_features:int):
+  def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
+    if bias: self.bias = Tensor.zeros(num_experts, out_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -56,16 +68,21 @@ class TransformerConfig:
   rope_theta: float
   rope_dim: int
   v_head_dim: int
+  yarn: tuple[float, int, float, float]|None = None
   max_context: int = 0
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  # 1: softmax, 2: sigmoid, 3: softmax over top-k logits, 4: sqrt-softplus
+  expert_gating_func: int = 1
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
   ssm_layers: tuple[bool, ...] = ()
   attn_output_gate: bool = False
+  attn_output_bias: bool = False
+  attn_sinks: bool = False
   ssm: SSMConfig|None = None
   shared_expert_gate: bool = True
   leading_dense_blocks: int = 0
@@ -73,6 +90,10 @@ class TransformerConfig:
   routed_scaling_factor: float = 1.0
   qkv_bias: bool = False
   expert_bias: bool = False
+  expert_proj_bias: bool = False
+  oai_swiglu: bool = False
+  sliding_window: int = 0
+  swa_layers: tuple[bool, ...] = ()
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -84,11 +105,11 @@ class FFNBlock:
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
-      self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=False)  # router
+      self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=config.expert_proj_bias)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
+      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim, bias=config.expert_proj_bias)
+      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim, bias=config.expert_proj_bias)
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
@@ -103,16 +124,25 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+      bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
+      # gating
+      if self.config.expert_gating_func == 3 or (self.config.expert_gating_func == 1 and bias is None and self.config.norm_topk_prob):
+        _, sel = pairwise_topk(logits if bias is None else logits + bias, self.config.num_experts_per_tok)
+        probs = logits.gather(-1, sel).softmax(-1)
+      else:
+        if self.config.expert_gating_func == 4: probs = logits.softplus().sqrt()
+        else: probs = logits.sigmoid() if self.config.expert_gating_func == 2 else logits.softmax(-1)
+        _, sel = pairwise_topk(probs if bias is None else probs + bias, self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
-      else:
-        vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
-        probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+      # scale
       probs = probs * self.config.routed_scaling_factor
-      x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
+      gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
+      if self.config.oai_swiglu:  # gpt-oss: swish(alpha*gate) * (up+1), clamped
+        gate, up = gate.clamp(max_=7.0), up.clamp(min_=-7.0, max_=7.0)
+        act = gate * (gate*1.702).sigmoid() * (up+1)
+      else: act = gate.silu() * up
+      x_down = self.ffn_down_exps(sel, act.contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
         shexp = self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x))
@@ -149,8 +179,9 @@ class TransformerBlock(FFNBlock):
     self.attn_q      = Linear(config.dim, q_proj_out,  bias=config.qkv_bias)
     self.attn_k      = Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
     self.attn_v      = Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
-    self.attn_output = Linear(config.head_dim * config.n_heads, config.dim, bias=False)
+    self.attn_output = Linear(config.head_dim * config.n_heads, config.dim, bias=config.attn_output_bias)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
+    if config.attn_sinks: self.attn_sinks = {"weight": Tensor.zeros(config.n_heads)}
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
@@ -179,8 +210,15 @@ class TransformerBlock(FFNBlock):
 
     # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
     # TODO: this if statement should be removed and it shouldn't generate extra kernels
-    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) \
-      if resolve(T != 1) else None
+    mask, window = None, self.config.sliding_window
+    if resolve(T != 1) or window:
+      mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False)
+      mask = mask.triu(start_pos+1) + mask.tril(start_pos-window) if window else mask.triu(start_pos+1)
+    if hasattr(self, 'attn_sinks'):
+      k, v = k.cat(k[..., :1, :].const_like(0), dim=-2), v.cat(v[..., :1, :].const_like(0), dim=-2)
+      sink_col = self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(1, self.config.n_heads, T, 1)
+      if mask is None: mask = Tensor.zeros(1, 1, T, start_pos+T, dtype=x.dtype, buffer=False)
+      mask = mask.expand(1, self.config.n_heads, T, start_pos+T).cat(sink_col, dim=-1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
@@ -189,7 +227,8 @@ class TransformerBlock(FFNBlock):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
+                                            device=x.device, yarn=self.config.yarn)
 
 class MLATransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -310,9 +349,11 @@ class Transformer:
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-    self.blk:list[FFNBlock] = [GatedDeltaNetBlock(dense_config if i < config.leading_dense_blocks else config, config.ssm)
-                               if config.ssm and config.ssm_layers[i] else
-                               block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
+    self.blk:list[FFNBlock] = []
+    for i in range(config.num_blocks):
+      c = dense_config if i < config.leading_dense_blocks else config
+      if config.swa_layers and not config.swa_layers[i]: c = replace(c, sliding_window=0)
+      self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = Linear(config.dim, config.vocab_size, bias=False)
@@ -365,12 +406,17 @@ class Transformer:
         state_dict[f"blk.{i}.ssm_conv1d.weight"] = state_dict.pop(f"blk.{i}.ssm_conv1d_q.weight").cat(
           state_dict.pop(f"blk.{i}.ssm_conv1d_k.weight"), state_dict.pop(f"blk.{i}.ssm_conv1d_v.weight"), dim=0).squeeze(1).contiguous()
         state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
-    if arch in ('qwen35', 'qwen35moe', 'glm4moe'):
+    if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
     rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
+    yarn = (kv[f'{arch}.rope.scaling.factor'],
+            kv.get(f'{arch}.rope.scaling.original_context_length', kv[f'{arch}.context_length']),
+            kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
+            kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) \
+      if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
@@ -390,13 +436,13 @@ class Transformer:
       n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
       vocab_size=len(kv['tokenizer.ggml.tokens']),
       head_dim=head_dim,
-      rope_theta=kv[f'{arch}.rope.freq_base'],
-      rope_dim=rope_dim,
+      rope_theta=kv[f'{arch}.rope.freq_base'], rope_dim=rope_dim, yarn=yarn,
       v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', head_dim)),
       max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
+      expert_gating_func=kv.get(f'{arch}.expert_gating_func', 3 if arch == 'gpt-oss' else 2 if arch == 'glm4moe' else 1),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
@@ -407,7 +453,11 @@ class Transformer:
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
-      expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
+      expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
+      expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
+      oai_swiglu=arch == 'gpt-oss', attn_sinks=arch == 'gpt-oss',
+      sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
+      swa_layers = tuple(i % 2 == 0 for i in range(kv[f'{arch}.block_count'])) if arch == 'gpt-oss' else ())
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
