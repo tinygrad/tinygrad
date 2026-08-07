@@ -226,11 +226,19 @@ def _signext_from_bit(val: UOp, w: UOp) -> UOp:
   ext_mask = ((one << w_val) - one) ^ mask_all
   return sign_bit.ne(_const(dt, 0)).where(val_u | ext_mask, val_u)
 
+def _f16_via_f32(op: Ops):
+  # Mock infra: half transcendentals via f32. Avoids clang-18 SIGSEGV on dense half soft-float (CI gfx950).
+  def f(a: UOp) -> UOp:
+    if a.dtype.scalar() == dtypes.half:
+      return UOp(op, src=(a.cast(dtypes.float32),)).cast(dtypes.half)
+    return UOp(op, src=(a,))
+  return f
+
 def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
   if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
-  return val * UOp(Ops.EXP2, src=(exp.cast(val.dtype),))
+  return val * _f16_via_f32(Ops.EXP2)(exp.cast(val.dtype))
 
 def _frexp_mant(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
@@ -288,8 +296,8 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
   return result
 
 _FUNCS: dict[str, Callable[..., UOp]] = {
-  'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
-  'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
+  'sqrt': _f16_via_f32(Ops.SQRT), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
+  'log2': _f16_via_f32(Ops.LOG2), 'sin': lambda a: _trig_reduce(a),
   'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
@@ -507,7 +515,7 @@ class Parser:
           left, right = left.cast(pdt), right.cast(pdt)
         if op == '*': return left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
-      case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if left.op == Ops.CONST and left.val == 2.0 else left
+      case '**': return _f16_via_f32(Ops.EXP2)(right.cast(left.dtype)) if left.op == Ops.CONST and left.val == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
 

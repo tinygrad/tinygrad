@@ -18,6 +18,13 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
+def _wmma_uops_in_program(pu:UOp) -> list[UOp]:
+  from tinygrad.renderer.isa.amd import AMDOps
+  lin = pu.src[1].src
+  if any(u.op is Ops.INS and u.arg is AMDOps.WMMA for u in lin):
+    return [u for u in lin if u.op is Ops.INS and u.arg is AMDOps.WMMA]
+  return [u for u in lin if u.op is Ops.WMMA]
+
 def _tc_rand(*shape, dtype:DType) -> Tensor:
   return Tensor.randint(*shape, low=dtype.min, high=dtype.max+1, dtype=dtype) if dtypes.is_int(dtype) else Tensor.rand(*shape, dtype=dtype)
 
@@ -42,7 +49,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
 
   if ensure_triggered:
     program = to_program(replace_opts(realized_ast, opts_to_apply), Device[Device.DEFAULT].renderer)
-    wmmas = len([uop for uop in tuple(program.src[1].src) if uop.op is Ops.WMMA])
+    wmmas = len(_wmma_uops_in_program(program))
     tcs = len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC])
     assert wmmas > 0, "tensor core not triggered"
     assert tcs == 1, "tensor core opt not included"
@@ -62,7 +69,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
   ast = replace_opts(realized_ast, opts)
   pu = to_program(ast, Device[Device.DEFAULT].renderer)
-  if use_tensor_cores == 1: assert len([uop for uop in pu.src[1].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  if use_tensor_cores == 1: assert len(_wmma_uops_in_program(pu)) > 0, "wmma not triggered"
   assert len([x for x in pu.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   run_program(ast, bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -103,6 +110,8 @@ class TestTensorCores(unittest.TestCase):
       elif Device.DEFAULT == "AMD" and DEV.renderer == "LLVM":
         # RDNA emits wmma intrinsics, CDNA emits mfma intrinsics
         assert ("@llvm.amdgcn.wmma" in prg.src[2].arg) or ("@llvm.amdgcn.mfma" in prg.src[2].arg)
+      elif Device.DEFAULT == "AMD" and DEV.renderer == "AMD":  # asm backend emits WMMA ins, not a C/LLVM string
+        assert len(_wmma_uops_in_program(prg)) > 0
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
       else:
@@ -164,7 +173,7 @@ class TestTensorCores(unittest.TestCase):
 
         ast = replace_opts(realized_ast, [Opt(OptOps.TC, axis, (-1, 2, 1))])
         program = to_program(ast, Device[Device.DEFAULT].renderer)
-        assert len([uop for uop in tuple(program.src[1].src) if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+        assert len(_wmma_uops_in_program(program)) > 0, "tensor core not triggered"
         assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
         # TODO: support this even if numpy doesn't

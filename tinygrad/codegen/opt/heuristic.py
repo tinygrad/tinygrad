@@ -31,11 +31,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # check TC first and apply hand-coded opts if successful
       try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
       except KernelOptError: continue
+      if (fn:=getattr(tk.ren, "apply_tc_hand_opts", None)) is not None: return fn(tk, rngs) or tk
       for tc_dim in [1,0]: # attempt to upcast M and N
         szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-        if szs:
-          # set it to the replaced range
-          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
+        if szs: rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
       if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
         tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk
@@ -76,6 +75,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k
+
+  if k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and (pg:=getattr(k.ren, 'preferred_reduce_group', None)) is not None and \
+     len(k.axes_of(AxisType.REDUCE)) == 1 and k.reduceop.src[0].op is Ops.INDEX and resolve(prod(k.output_shape) > 1, False):
+    try: k.apply_opt(Opt(OptOps.GROUP, 0, pg))
+    except KernelOptError: pass
+    else: return k
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):

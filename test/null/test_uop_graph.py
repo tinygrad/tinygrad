@@ -564,6 +564,22 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual(result.op, Ops.INDEX)
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
 
+  def test_pm_index_mops_reshape_0d_and_scalar(self):
+    """codegen-only INDEX through RESHAPE: no crash on (); no scalar[0]."""
+    from tinygrad.codegen.late.index_mops import pm_index_mops, _index_through_reshape
+    buf1 = UOp.param(0, dtypes.float, shape=(1,))
+    r0 = buf1.reshape(())
+    idx0 = UOp(Ops.INDEX, dtypes.float, src=(r0,))
+    self.assertIsNone(_index_through_reshape(r0, idx0))
+    self.assertEqual(graph_rewrite(idx0, pm_index_mops, name="test").op, Ops.INDEX)
+    scalar = UOp.const(1.0, dtypes.float)
+    out1 = graph_rewrite(scalar.reshape((1,)).index(UOp.const(0, dtypes.weakint)), pm_index_mops, name="test")
+    self.assertIs(out1, scalar)
+    buf = UOp.param(0, dtypes.float, shape=(2, 3))
+    out2 = graph_rewrite(buf.reshape((6,)).index(UOp.const(4, dtypes.weakint)), pm_index_mops, name="test")
+    self.assertEqual(out2.op, Ops.INDEX)
+    self.assertIs(out2.src[0], buf)
+
 class TestConstBufferize(unittest.TestCase):
   def test_const_bufferize_with_ranges(self):
     """Test that CONST.BUFFERIZE with ranges is folded correctly.

@@ -100,16 +100,31 @@ pm_simplify_add_image = PatternMatcher([
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
+  uops = list(sink.toposort())
+  # Optional ISARenderer / AMD hooks (no amd_lib import here).
+  if (gate:=getattr(ctx, "coalesce_gate", None)) is not None:
+    f4, float4_safe, abort, uses = gate(uops)
+    if abort: return sink
+  else:
+    f4, float4_safe, abort, uses = None, True, False, None
+  if uses is None:
+    uses = defaultdict(list)
+    for u in uops:
+      for su in u.src: uses[su].append(u)
+  mem_ok = getattr(ctx, "coalesce_mem_ok", None)
+  vec_lengths = getattr(ctx, "coalesce_vec_lengths", None)
+
   # collect
   memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
-  for u in sink.toposort():
-    # TODO: this should handle images too, it's just memory coalescing
+  for u in uops:
     if u.op in {Ops.LOAD, Ops.STORE}:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
+      value_dtype = u.src[1].dtype if u.op is Ops.STORE else u.dtype
+      if mem_ok is not None and not mem_ok(f4, float4_safe, buf, value_dtype, u, uses, valid): continue
       root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
       elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].val
@@ -121,45 +136,36 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   # build replacements
   replacements = {}
   for (op,buf,base,valid),offsets in memory.items():
-    # allowed lengths (copied in)
-    lengths = []
-    must_divide = True
+    lengths, must_divide = [], True
     if ctx is not None and ctx.target.device == "DSP":
-      lengths = [128,64,32,16,8,4]
-      must_divide = False
+      lengths, must_divide = [128,64,32,16,8,4], False
     elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass
     elif is_image_shape(buf._shape):
       lengths = [4]
-    elif ctx is not None and ctx.supports_float4:
-      # TODO: a better way to get this than ctx
-      lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
+    elif ctx is not None and ctx.supports_float4 and (f4 is None or buf.dtype.scalar() in f4):
+      if vec_lengths is not None and (L:=vec_lengths(buf, f4)) is not None: lengths = L
+      else: lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
-    # do the grouping
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
-        # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
         idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
-          datas = []
-          for i,g in enumerate(grp):
-            assert len(offsets[g]) == 1, f"attempting multiple stores: {len(offsets[g])}"
-            datas.append(offsets[g][0].src[1])
+          datas = [offsets[g][0].src[1] for g in grp]
+          assert all(len(offsets[g]) == 1 for g in grp)
           store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
-          for i,g in enumerate(grp): replacements[offsets[g][0]] = store
+          for g in grp: replacements[offsets[g][0]] = store
         else:
           ld = idx.load()
           for i,g in enumerate(grp):
-            for oo in offsets[g]:
-              replacements[oo] = ld.index(i) if len(grp) > 1 else ld
+            for oo in offsets[g]: replacements[oo] = ld.index(i) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
-  # apply
   return sink.substitute(replacements, name="memory coalescing")

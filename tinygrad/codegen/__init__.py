@@ -1,7 +1,8 @@
 from dataclasses import replace, dataclass
 import itertools, functools
+from typing import Callable
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TracingKey, Context, panic, getenv
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak, pm_cast_weak
 from tinygrad.uop.render import pyrender
@@ -14,6 +15,11 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_fold_cast_const, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
 from tinygrad.uop.movement import mop_cleanup
+from tinygrad.codegen.late.index_mops import pm_index_mops
+codegen_mops = mop_cleanup + pm_index_mops  # INDEX→RESHAPE/PERMUTE; not mop_cleanup (breaks JIT)
+# AMD LDS WMMA tile expand — installed by renderer.isa.amd (avoid importing amd_lib here).
+expand_wmma_lds_hook: Callable|None = None
+_WMMA_LDS_LOOP_BASE = 200  # must match amd_lib._WMMA_LDS_LOOP_BASE (probe_stage_loop)
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
@@ -63,23 +69,28 @@ def expand_reduce(r:UOp):
   return r.src[0].permute(perm).reduce(*range_srcs, arg=(r.arg[0], len(new_axes))).reshape(out_shape)
 
 def contract_axis(ctx:dict[int, int], u:UOp, arg):
-  permute_tail = [ctx[rn] for rn,_ in arg]
+  if not arg: return u  # already contracted (TC_LDS_AB pre-contracts A/B)
+  permute_tail = [ctx[rn] for rn,_ in arg if rn in ctx]
+  if not permute_tail: return u
   permute_head = [i for i in range(len(u.shape)) if i not in permute_tail]
   out = u.permute(permute_head+permute_tail)
   return out.reshape(*out.shape[:len(permute_head)], -1)
 
 def unroll_axis(ctx:dict[int, int], u:UOp, arg):
-  permute_tail = [ctx[rn] for rn,_ in arg]
-  out = u.reshape(*u.shape[:-1], *[nm for _,nm in arg])
+  permute_tail = [ctx[rn] for rn,_ in arg if rn in ctx]
+  if not permute_tail: return u
+  out = u.reshape(*u.shape[:-1], *[nm for rn,nm in arg if rn in ctx])
   permute_head = [i for i in range(len(out.shape)) if i not in permute_tail]
   return out.permute(argsort(permute_head+permute_tail))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
   if u.arg[4] is None: return None
   in0, in1, out0 = u.arg[4]
-  wmma = u.replace(src=(contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]),
-                   arg=(*u.arg[:4], None))
-  return unroll_axis(ctx, wmma, out0)
+  a, b, c = contract_axis(ctx, u.src[0], in0), contract_axis(ctx, u.src[1], in1), u.src[2]
+  done_arg = (*u.arg[:4], None)
+  if expand_wmma_lds_hook is not None and (ret := expand_wmma_lds_hook(u, a, b, c, done_arg, unroll_axis, ctx)) is not None:
+    return ret
+  return unroll_axis(ctx, u.replace(src=(a, b, c), arg=done_arg), out0)
 
 expander2 = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
@@ -87,7 +98,7 @@ expander2 = PatternMatcher([
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
-])+pm_flatten_range+mop_cleanup
+])+pm_flatten_range+codegen_mops
 
 def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
@@ -145,7 +156,7 @@ ew_devectorizer = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
+devectorizer2 = codegen_mops+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
@@ -242,7 +253,7 @@ pm_add_loads = PatternMatcher([
 
 def add_local_buffer(ctx, x:UOp):
   buf = UOp.placeholder(x.max_shape, x.dtype, slot=next(ctx), addrspace=x.arg.addrspace)
-  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
+  return buf.after(buf.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))  # barrier via pm_implicit_barriers
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
@@ -257,12 +268,37 @@ pm_cast_float_alu = PatternMatcher([
 
 def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
 
-def add_raw_barrier(after:UOp):
-  # loads from a LOCAL buffer that depend (via AFTER) on stores to LOCAL memory need a workgroup barrier
+def local_afters_covered_by_nested(sink:UOp) -> set[UOp]:
+  # Nested LOCAL AFTER(inner, A_fill, B_fill) already orders both operand fills. Cover the per-buffer
+  # AFTER(BUFFER, fill) nodes so we emit one s_barrier after both fills (not an inter-fill barrier).
+  covered: set[UOp] = set()
+  afters = [u for u in sink.toposort() if u.op is Ops.AFTER and u.addrspace is AddrSpace.LOCAL]
+  for u in afters:
+    if u.src[0].op is not Ops.AFTER: continue
+    parent_deps = set(u.src[1:])
+    covered.add(u.src[0])
+    for o in afters:
+      if o is u or o.src[0].op is Ops.AFTER: continue
+      if set(o.src[1:]).issubset(parent_deps): covered.add(o)
+  return covered
+
+def add_raw_barrier(ctx, after:UOp):
+  # loads from a LOCAL buffer that depend (via AFTER) on stores to THAT buffer need a workgroup barrier.
   if after.addrspace is not AddrSpace.LOCAL: return None
-  # one toposort over all the deps
-  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op is not Ops.BARRIER)
-  if not any(_is_local_store(x) for x in deps): return None
+  if ctx and after in ctx: return None  # subsumed by nested multi-fill AFTER
+  buf = after.buf_uop
+  # Don't walk LOAD/WMMA — A-batch AFTER(e, prev_wmma) otherwise rediscovers fill stores via prior LDS loads.
+  stop = {Ops.LOAD, Ops.WMMA}
+  deps = UOp.sink(*after.src[1:]).toposort(gate=lambda x: x.op not in stop and x.op is not Ops.BARRIER)
+  stores = {x for x in deps if _is_local_store(x) and x.buf_uop is buf}
+  foreign = any(_is_local_store(x) and x.buf_uop is not buf for x in deps)
+  if not stores: return None
+  # Nested AFTER: skip pure rediscovery of inner fill stores; emit when foreign LOCAL fills are included
+  # (merged A+B fill barrier — barrier deps wait for both before any LLOAD).
+  if after.src[0].op is Ops.AFTER and after.src[0].addrspace is AddrSpace.LOCAL:
+    inner_src = tuple(s for d in after.src[0].src[1:] for s in (d.src if d.op is Ops.BARRIER else (d,)))
+    inner_deps = UOp.sink(*inner_src).toposort(gate=lambda x: x.op not in stop)
+    if stores <= {x for x in inner_deps if _is_local_store(x) and x.buf_uop is buf} and not foreign: return None
   return after.src[0].after(UOp(Ops.BARRIER, src=after.src[1:]))
 
 def add_war_barrier(end:UOp):
@@ -309,15 +345,18 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
+    if getenv("TC_LDS_AB", 0) and (pm := getattr(ren, "pm_stage_wmma_ab", None)) is not None:
+      sink = graph_rewrite(sink, pm, name="stage wmma ab lds")
+
   # ** expander (expand_rewrite) **
   # reduce_unparented: a REDUCE whose src folded to a CONST (e.g. x*0) has no parented ranges, collapse it before the expander
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented, name="postopt symbolic")
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_index_mops+pm_reduce_unparented, name="postopt symbolic")
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
 
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
+  sink = graph_rewrite(sink, codegen_mops+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
@@ -365,6 +404,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
+  if any(dt not in ren.supported_dtypes() or dt in EMULATED_DTYPES.tolist(dtypes) for dt in (dtypes.long, dtypes.ulong)):
+    sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren), name="decomp dtypes (late)")
+    sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions (post-dtype)")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
@@ -373,7 +415,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  sink = graph_rewrite(sink, pm_implicit_barriers, ctx=local_afters_covered_by_nested(sink), name="add implicit barriers")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
@@ -401,7 +443,8 @@ pm_linearize_cleanups = PatternMatcher([
 def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
-  for u in lst:
+  for i, u in enumerate(lst):
+    if hasattr(ctx, "regalloc_i"): ctx.regalloc_i = i
     nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
     ret: tuple[UOp, list[UOp]] = pm.rewrite(nu, ctx) or (nu, [nu])
     replaced[u] = ret[0]
@@ -413,7 +456,11 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    if ctx.pre_regalloc_matcher is not None:
+      lst, scratch = ctx.prepare_pre_regalloc(lst)
+      pa_ctx = PreRegAllocContext(lst)
+      pa_ctx.scratch.update(scratch)
+      lst = line_rewrite(lst, ctx.pre_regalloc_matcher, pa_ctx)
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
     regalloc_ctx = LinearScanRegallocContext(lst, ctx)
@@ -468,8 +515,9 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
-    # instruction selection
     if isinstance(renderer, ISARenderer):
+      if full_sink.arg.estimates is None:
+        full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(full_sink.toposort()), ignore_indexing=True)))
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)

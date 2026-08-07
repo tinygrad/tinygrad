@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Gaming-PC checks for half GEMM (ASM + LLVM).
+
+  # ASM (RDNA3 ISA)
+  DEV=AMD:AMD PYTHONPATH=. ./tiny-tests --bench --bench-lds
+
+  # LLVM — cooperative tid-fill LDS when --bench-lds (selector is LLVM, class AMDLLVMRenderer)
+  DEV=AMD:LLVM PYTHONPATH=. ./tiny-tests --bench --bench-lds
+  DEV=AMD:LLVM N=4096 PYTHONPATH=. ./tiny-tests --counts
+
+  # force bounce instead of tid-fill on LLVM: TC_LDS_TID=0 DEV=AMD:LLVM ./tiny-tests --bench --bench-lds
+
+# UPCAST16 hangs display GPUs — do not run without ALLOW_UPCAST16=1
+# TC_LDS_AB remains opt-in until LDS @4096 beats register (Step C).
+# Product-8 LDS: ALLOW_LDS_PRODUCT8=1 (serialized A batches; check mse before bench).
+# HW loop: --counts (inst mix) → N=1024 CNT=1 --bench → N=4096 only if stable.
+"""
+from __future__ import annotations
+import argparse, os, subprocess, sys
+
+def _clear_tc(*keep: str):
+  from tinygrad.helpers import getenv
+  from tinygrad.codegen import to_program_cache
+  # Preserve user overrides (TC_UPCAST=2 AMD_REMAT=0 …) — only drop unset TC_* knobs.
+  for k in list(os.environ):
+    if k.startswith("TC_") and k not in keep: os.environ.pop(k)
+  getenv.cache_clear()
+  to_program_cache.clear()
+
+def _is_llvm_renderer() -> bool:
+  from tinygrad.device import Device
+  from tinygrad.renderer.llvmir import AMDLLVMRenderer
+  return isinstance(Device["AMD"].renderer, AMDLLVMRenderer)
+
+def _set_tc_lds_ab(on: bool):
+  # Keep TC_UPCAST / TC_UPCAST_TILES / TC_LOCAL / TC_LDS_* when already set on the CLI.
+  keep = {"TC_LDS_AB"} | {k for k in os.environ if k.startswith("TC_")}
+  os.environ["TC_LDS_AB"] = "1" if on else "0"
+  # LLVM speed path: prefer tid-partitioned coop fill (writers ≠ WMMA readers). Bounce is the ASM default.
+  if on and _is_llvm_renderer() and "TC_LDS_TID" not in os.environ:
+    os.environ["TC_LDS_TID"] = "1"
+    keep.add("TC_LDS_TID")
+  _clear_tc(*keep)
+
+def _set_upcast16(on: bool):
+  if on:
+    os.environ["TC_UPCAST"] = "4"
+    os.environ["TC_UPCAST_TILES"] = "16"
+    os.environ["ALLOW_UPCAST16"] = "1"
+    os.environ["TC_LDS_AB"] = "0"
+    _clear_tc("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB")
+  else:
+    _clear_tc()
+    os.environ.pop("ALLOW_UPCAST16", None)
+
+def _mse(n: int = 256) -> float:
+  from tinygrad import Tensor, Context, dtypes
+  with Context(BEAM=0):
+    a = Tensor.randn(n, n, dtype=dtypes.half).realize()
+    b = Tensor.randn(n, n, dtype=dtypes.half).realize()
+    c = (a @ b).cast(dtypes.float).realize()
+    ref = (a.float() @ b.float()).realize()
+    return float((c - ref).square().mean().item())
+
+def _bench_half(n: int, cnt: int, label: str) -> float:
+  from tinygrad import Tensor, Context, dtypes, GlobalCounters, Device
+  # Same kernel as mse/counts: half WMMA → float out. Raw half@half stores B16 and MMU-faults on gfx1100.
+  a = Tensor.randn(n, n, dtype=dtypes.half).realize()
+  b = Tensor.randn(n, n, dtype=dtypes.half).realize()
+  Device["AMD"].synchronize()
+  # Untimed warm: first launch is cold (~half GFLOPS on display GPUs).
+  print(f"{label:24s} warming float-out GEMM N={n} ...", flush=True)
+  with Context(BEAM=0, DEBUG=0):
+    (a @ b).cast(dtypes.float).realize()
+    Device["AMD"].synchronize()
+  ets = []
+  with Context(BEAM=0, DEBUG=2):
+    for _ in range(cnt):
+      GlobalCounters.reset()
+      (a @ b).cast(dtypes.float).realize()
+      Device["AMD"].synchronize()
+      ets.append(GlobalCounters.time_sum_s)
+  gflops = (2.0 * n * n * n) / min(ets) * 1e-9
+  print(f"{label:24s} N={n}  TC_LDS_AB={os.environ.get('TC_LDS_AB','?')}  "
+        f"TC_LDS_TID={os.environ.get('TC_LDS_TID','?')}  "
+        f"min={min(ets)*1e6:8.2f} us  {gflops:9.1f} GFLOPS")
+  return gflops
+
+def _counts_half_asm(n: int, label: str) -> dict[str, int]:
+  from tinygrad import Tensor, Context, dtypes
+  from tinygrad.codegen import to_program, to_program_cache
+  from tinygrad.device import Device
+  from tinygrad.renderer.isa.amd import AMDRenderer, AMDOps
+  from tinygrad.uop import Ops
+  to_program_cache.clear()
+  ren = Device["AMD"].renderer
+  assert isinstance(ren, AMDRenderer)
+  with Context(BEAM=0):
+    ast = (Tensor.empty(n, n, dtype=dtypes.half, device="AMD") @
+           Tensor.empty(n, n, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
+    prg = to_program(ast.schedule_linear().src[-1].src[0], ren)
+  los = [u.arg for u in prg.src[1].src if u.op is Ops.INS]
+  keys = ("LOAD", "LLOAD", "LSTORE", "STORE", "WMMA", "SPILL", "FILL", "BARRIER")
+  cnt = {k: los.count(getattr(AMDOps, k)) for k in keys}
+  print(f"{label:24s} N={n}  TC_LDS_AB={os.environ.get('TC_LDS_AB','?')}  {cnt}")
+  print(f"{'':24s}      opts={tuple(prg.src[0].arg.applied_opts)}")
+  try:
+    from test.amd.test_amd_renderer import _amd_inst_names
+    names = _amd_inst_names(prg)
+    mem = {k: sum(1 for x in names if x == k) for k in
+           ("GLOBAL_LOAD_B32", "GLOBAL_LOAD_B128", "GLOBAL_LOAD_U16",
+            "DS_LOAD_B32", "DS_LOAD_B64", "DS_LOAD_B128", "DS_LOAD_U16",
+            "DS_STORE_B16", "DS_STORE_B128")}
+    print(f"{'':24s}      mem={mem}")
+    # Register path: B128 (A) + U16 (strided B) is expected — not a coalesce bug.
+    # LDS path: GLOBAL U16 must be 0; DS_LOAD_U16 may remain for B peer gather.
+  except Exception as e:
+    print(f"{'':24s}      mem=(skip: {e})")
+  if cnt["SPILL"] or cnt["FILL"]:
+    print(f"{'':24s}      WARN: SPILL/FILL nonzero — address spills hang gfx1100 desktops")
+  return cnt
+
+def _counts_half_llvm(n: int, label: str) -> dict[str, int]:
+  from tinygrad import Tensor, Context, dtypes
+  from tinygrad.codegen import full_rewrite_to_sink, to_program_cache
+  from tinygrad.device import Device
+  from tinygrad.dtype import AddrSpace
+  from tinygrad.uop import Ops
+  to_program_cache.clear()
+  ren = Device["AMD"].renderer
+  with Context(BEAM=0):
+    ast = (Tensor.empty(n, n, dtype=dtypes.half, device="AMD") @
+           Tensor.empty(n, n, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
+    sink = full_rewrite_to_sink(ast.schedule_linear().src[-1].src[0], ren)
+  local_bufs = [u for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL]
+  barriers = sum(1 for u in sink.toposort() if u.op is Ops.BARRIER)
+  wmmas = sum(1 for u in sink.toposort() if u.op is Ops.WMMA)
+  cnt = {"LOCAL_BUF": len(local_bufs), "BARRIER": barriers, "WMMA": wmmas, "SPILL": 0, "FILL": 0}
+  local_elems = sum(u.max_numel() for u in local_bufs)
+  print(f"{label:24s} N={n}  TC_LDS_AB={os.environ.get('TC_LDS_AB','?')}  "
+        f"TC_LDS_TID={os.environ.get('TC_LDS_TID','?')}  {cnt}  local_elems={local_elems}")
+  print(f"{'':24s}      opts={tuple(sink.arg.applied_opts)}")
+  print(f"{'':24s}      renderer={type(ren).__name__}")
+  return cnt
+
+def _counts_half(n: int, label: str) -> dict[str, int]:
+  if _is_llvm_renderer(): return _counts_half_llvm(n, label)
+  return _counts_half_asm(n, label)
+
+def main():
+  p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+  p.add_argument("--upcast16", action="store_true",
+                 help="spill-gate + mse + bench default vs TC_UPCAST_TILES=16 (needs ALLOW_UPCAST16=1)")
+  p.add_argument("--bench", action="store_true", help="bench register path (TC_LDS_AB=0) @N")
+  p.add_argument("--bench-lds", action="store_true", help="also bench TC_LDS_AB=1 after --bench")
+  p.add_argument("--bench-reg", action="store_true", help="alias of --bench (register is default)")
+  p.add_argument("--counts", action="store_true", help="compile @N and print SPILL/WMMA/mem (or LOCAL_BUF on LLVM)")
+  p.add_argument("--uop", action="store_true", help="run extra/gemm/rdna3_uop_wmma_lds.py VERIFY=1")
+  p.add_argument("--skip-mse", action="store_true")
+  p.add_argument("--abort-on-spill", action="store_true", help="exit nonzero on SPILL/FILL (ASM)")
+  args = p.parse_args()
+  n = int(os.environ.get("N", "4096"))
+  cnt = int(os.environ.get("CNT", "3"))
+  from tinygrad.device import Device
+  ren_name = type(Device["AMD"].renderer).__name__
+  rev = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+  print(f"DEV={os.environ.get('DEV', '(unset)')}  renderer={ren_name}  N={n}  CNT={cnt}  rev={rev}  bench=float-out", flush=True)
+
+  if args.upcast16:
+    if os.environ.get("ALLOW_UPCAST16", "0") != "1":
+      raise SystemExit(
+        "REFUSED: UPCAST16 disconnects gfx1100 display GPUs (2026-07-20) even with SPILL=0 offline.\n"
+        "Stay on default tiles=8. Override only on compute-only: ALLOW_UPCAST16=1 ./tiny-tests --upcast16"
+      )
+    print("WARNING: ALLOW_UPCAST16=1 — may TDR/disconnect", flush=True)
+    _set_upcast16(False)
+    d = _counts_half(256, "default@256")
+    _set_upcast16(True)
+    u = _counts_half(256, "UPCAST16@256")
+    if d["SPILL"] or d["FILL"] or u["SPILL"] or u["FILL"]:
+      raise SystemExit("SPILL/FILL nonzero — abort UPCAST16")
+    if u["WMMA"] < 16:
+      raise SystemExit(f"expected >=16 WMMA, got {u['WMMA']}")
+    if not args.skip_mse:
+      mse = _mse(256)
+      print(f"UPCAST16 mse@256 = {mse}")
+      if mse > 1e-2: raise SystemExit(f"mse too high: {mse}")
+    _set_upcast16(False)
+    _bench_half(n, cnt, "default")
+    _set_upcast16(True)
+    _bench_half(n, cnt, "UPCAST16")
+    return
+
+  # mse on the path we are about to time (register unless --bench-lds / --counts needs both)
+  if not args.skip_mse and (args.bench_lds or args.counts or args.uop or args.bench or args.bench_reg):
+    _set_tc_lds_ab(False)
+    mse = _mse(256)
+    print(f"register mse@256 = {mse}")
+    if mse > 1e-2: raise SystemExit(f"mse too high: {mse}")
+    if args.bench_lds or args.counts:
+      _set_tc_lds_ab(True)
+      mse = _mse(256)
+      tid = os.environ.get("TC_LDS_TID", "?")
+      print(f"TC_LDS_AB=1 TC_LDS_TID={tid} mse@256 = {mse}")
+      if mse > 1e-2: raise SystemExit(f"mse too high: {mse}")
+
+  if args.uop:
+    env = {**os.environ, "COMPUTE": "1", "VERIFY": "1"}
+    cmd = [sys.executable, "extra/gemm/rdna3_uop_wmma_lds.py"]
+    print("+", " ".join(cmd))
+    subprocess.check_call(cmd, env=env)
+
+  if args.counts:
+    _set_tc_lds_ab(False)
+    d = _counts_half(n, "register")
+    _set_tc_lds_ab(True)
+    l = _counts_half(n, "TC_LDS_AB=1")
+    if args.abort_on_spill and (d["SPILL"] or d["FILL"] or l["SPILL"] or l["FILL"]):
+      raise SystemExit("SPILL/FILL nonzero")
+    if _is_llvm_renderer() and l["LOCAL_BUF"] < 1:
+      raise SystemExit("TC_LDS_AB=1 produced no LOCAL buffers on LLVM — staging did not fire")
+
+  if args.bench or args.bench_reg:
+    _set_tc_lds_ab(False)
+    if args.abort_on_spill and not _is_llvm_renderer():
+      d = _counts_half(256, "register@256")
+      if d["SPILL"] or d["FILL"]:
+        raise SystemExit("register spills — abort before bench")
+    _bench_half(n, cnt, "register")
+    if args.bench_lds:
+      _set_tc_lds_ab(True)
+      if args.abort_on_spill and not _is_llvm_renderer():
+        l = _counts_half(256, "LDS@256")
+        if l["SPILL"] or l["FILL"]:
+          raise SystemExit("LDS spills — abort before bench")
+      _bench_half(n, cnt, "TC_LDS_AB=1")
+
+if __name__ == "__main__":
+  main()

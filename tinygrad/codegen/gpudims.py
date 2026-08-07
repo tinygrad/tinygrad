@@ -49,6 +49,10 @@ def add_gpudims(ctx:Renderer, s:UOp):
   # extract global/local dims
   global_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)])
   local_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+  from tinygrad.renderer.isa import ISARenderer
+  # WARP as lidx0 (size 32): with 2D local_max → local_size (32, N, …) and hardware lane == lidx0.
+  if isinstance(ctx, ISARenderer):
+    local_dims = sorted(local_dims, key=lambda r: (all_ranges[r].arg[-1] is not AxisType.WARP, r))
   if not global_dims and not local_dims: return None
 
   # get global and local shape

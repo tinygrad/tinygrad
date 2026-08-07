@@ -153,8 +153,10 @@ class Scheduler:
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
         # We currently dont support a group within another rudece, TODO: fix if-contexts
         reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
-        check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
-          "cannot have a GROUP_REDUCE inside another reduce")
+        from tinygrad.renderer.isa import ISARenderer
+        bad: tuple[AxisType, ...] = (AxisType.REDUCE, AxisType.GROUP_REDUCE) if isinstance(self.ren, ISARenderer) else \
+                                    (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE)
+        check(not any(u.arg[-1] in bad for u in reduce.ranges), "cannot have a GROUP_REDUCE inside another reduce")
 
       if opt.op is OptOps.UNROLL:
         check(amt <= 32, "don't unroll more than 32")
@@ -171,9 +173,13 @@ class Scheduler:
         check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
         check(rng in self._globalizable_rngs(), "can't apply range to this dim")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
-        check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
+        from tinygrad.renderer.isa import ISARenderer
+        if not isinstance(self.ren, ISARenderer): check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
+      if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} and (lpm:=getattr(self.ren, 'local_prod_max', None)) is not None:
+        local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]) * amt
+        check(local_sz <= lpm, f"exceeds maximum local workgroup size: needs {local_sz}, max {lpm}")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
