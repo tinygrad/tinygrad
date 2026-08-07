@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType
+from tinygrad.dtype import DType, ConstType, truncate
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
 import numpy as np
@@ -50,6 +50,17 @@ class TestWeakConstFolding(unittest.TestCase):
 
   def test_invalid_poison(self):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
+
+  def test_cast_commits_to_dtype_grid(self):
+    # committing a weak const to a stated width puts the value on that width's grid, same as storage packing and native compilers
+    v = 1/123008  # not representable in float16
+    out = UOp.const(v).cast(dtypes.half).simplify()
+    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.half, truncate[dtypes.half](v)))
+    self.assertNotEqual(out.val, v)
+    # the grid commit preserves the sign of zero
+    self.assertEqual(math.copysign(1, UOp.const(-0.0).cast(dtypes.half).simplify().val), -1)
+    # observable at tensor level: the const-folded comparison agrees with the committed value
+    self.assertTrue((Tensor(-3.2).cast(dtypes.float32) <= truncate[dtypes.float32](-3.2)).item())
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):

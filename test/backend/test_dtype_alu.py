@@ -399,9 +399,10 @@ class TestDTypeALU(unittest.TestCase):
     if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
-  @unittest.expectedFailure
-  def test_unsafe_cast_float_to_int_failure(self):
-    val = float(dtypes.int32.max - 1)
+  def test_unsafe_cast_float_to_int(self):
+    # the value is off the float32 grid but rounds in-range: the buffer and const-fold paths must agree
+    # (out-of-range float->int cast stays undefined: hardware may saturate where the fold wraps)
+    val = 2147483000.0
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
     np.testing.assert_equal(t1.item(), t2.item())
