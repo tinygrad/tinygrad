@@ -919,7 +919,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # see contiguous_view
     if self.op is Ops.BITCAST: return all(not d.startswith(("WEBGPU", "CL")) for d in ((self.device,) if isinstance(self.device, str)
                                                                                        else self.device or ())) and self.src[0].has_buffer_identity()
-    if self.op is Ops.SHRINK: return self.src[0].op is Ops.PARAM and self.src[1].op is Ops.PARAM
+    if self.op is Ops.SHRINK: return (self.src[0].op, self.src[1].op) in {(Ops.PARAM, Ops.PARAM), (Ops.BUFFER, Ops.BIND)}
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
