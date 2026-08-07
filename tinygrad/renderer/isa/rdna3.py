@@ -2074,8 +2074,17 @@ def apply_tc_hand_opts(tk, rngs):
         except KernelOptError: pass
   def do_upcast() -> int:
     tiles = 1
-    for tc_dim in [1, 0]:
-      if (szs := [sz for sz in [5,4,3,2] if sz <= up_cap and tiles * sz <= max_tiles and rngs[tc_dim].src[0].divides(sz) is not None]):
+    for i, tc_dim in enumerate([1, 0]):
+      other = rngs[0 if tc_dim == 1 else 1]
+      # Avoid single-axis UPCAST=4 (product-4 as 4×1): wrong on register path. Leave a factor ≥2
+      # for the other dim when it can still upcast.
+      szs = []
+      for sz in [5, 4, 3, 2]:
+        if sz > up_cap or tiles * sz > max_tiles or rngs[tc_dim].src[0].divides(sz) is None: continue
+        rem = max_tiles // (tiles * sz)
+        if i == 0 and rem == 1 and other.src[0].divides(2) is not None and sz > 2: continue
+        szs.append(sz)
+      if szs:
         rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
         tiles *= szs[0]
     return tiles

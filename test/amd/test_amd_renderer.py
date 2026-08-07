@@ -57,12 +57,16 @@ def _amd_inst_names(prg):
   return [getattr(i, "op_name", "") for i in _REN._insts_from_linear(_prg_lin(prg))]
 
 def _assert_abi_reg_isolation(testcase, prg):
-  fixed_sgpr, packed_lidx = {0, 1, 2, 3, 4}, {256}  # v0 holds packed work-item IDs on gfx11
+  # v0 = packed work-item IDs. WGID at s2 when USER_SGPR=2; s15 when gfx1100 pads for lidx1/2.
+  need_yi = any(u.op is Ops.SPECIAL and u.arg.startswith("lidx") and u.arg[-1] in "12"
+                for u in prg.src[0].toposort())
+  wgid = {15, 16, 17} if need_yi else {2, 3, 4}
+  fixed_sgpr, packed_lidx = {0, 1} | wgid, {256}
   for u in _prg_lin(prg).src:
     if not isinstance((reg_uop:=greg(u)), Register): continue
     reg = reg_uop.index
     if u.op is Ops.INS and u.arg is AMDOps.MOV and u.src and u.src[0].op is Ops.SPECIAL:
-      if u.src[0].arg.startswith("gidx"): testcase.assertIn(reg, fixed_sgpr)
+      if u.src[0].arg.startswith("gidx"): testcase.assertIn(reg, wgid)
       else: testcase.assertNotIn(reg, packed_lidx | fixed_sgpr)  # lidx BFE dest is a normal VGPR
     else:
       testcase.assertNotIn(reg, fixed_sgpr | packed_lidx)
@@ -1275,7 +1279,7 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path UPCAST=2×2, no LOCAL → 4 WMMA (UPCAST≥4 wrong; product≥8 hangs).
+    # Default ISA: register path UPCAST=4×2 (product 8), no LOCAL → 8 WMMA.
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
     old_loc = os.environ.get("TC_LOCAL")
@@ -1288,7 +1292,7 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       linear_ops = _lin_ops(prg)
-      self.assertEqual(linear_ops.count(AMDOps.WMMA), 4)
+      self.assertEqual(linear_ops.count(AMDOps.WMMA), 8)
       self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
       self.assertNotIn(AMDOps.SPILL, linear_ops)
       self.assertNotIn(AMDOps.FILL, linear_ops)
@@ -1314,12 +1318,12 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       stores = [u for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.STORE]
-      self.assertEqual(len(stores), 32)  # product-4 default (was 128 at product-16)
+      self.assertEqual(len(stores), 64)  # product-8 default (4×2)
       self.assertEqual(len({id(u.src[1]) for u in stores}), 1)
-      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 28)
+      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 56)
       names = _amd_inst_names(prg)
-      self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 20)
-      self.assertEqual(names.count("GLOBAL_STORE_B32"), 32)
+      self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 40)
+      self.assertEqual(names.count("GLOBAL_STORE_B32"), 64)
       # Float EXTRACT coalesces onto WMMA pack+lane — stores read ACC VGPRs directly.
       self.assertLess(names.count("V_MOV_B32_E32"), 200)
       self.assertGreater(sum(1 for i in _REN._insts_from_linear(_prg_lin(prg))
@@ -1447,8 +1451,9 @@ class TestAMDRenderer(unittest.TestCase):
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
     os.environ["TC_LOCAL"] = "0"
+    os.environ["TC_UPCAST"] = "2"
+    os.environ["TC_UPCAST_TILES"] = "4"
     os.environ["AMD_D16_HI"] = "1"
-    for k in ("TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1473,12 +1478,14 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_register_path_vpack_default(self):
-    # Default AMD_D16_HI off → u16 + v_pack (correct on gfx1100). Force 1D locals to pin load counts.
+    # Default AMD_D16_HI off → u16 + v_pack. Pin product-4 1D locals for load counts.
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
     os.environ["TC_LOCAL"] = "0"
-    for k in ("AMD_D16_HI", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
+    os.environ["TC_UPCAST"] = "2"
+    os.environ["TC_UPCAST_TILES"] = "4"
+    os.environ.pop("AMD_D16_HI", None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1512,7 +1519,7 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       self.assertEqual(_lin_ops(prg).count(AMDOps.LLOAD), 0)
-      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 4)  # register default product-4
+      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 8)  # register default product-8 (4×2)
     finally:
       if old is None: os.environ.pop("TC_LDS_AB", None)
       else: os.environ["TC_LDS_AB"] = old
@@ -2042,10 +2049,11 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertIn(0, offs)
     self.assertIn(10, offs)
     linear_regs = {greg(u).index for u in _prg_lin(prg).src if isinstance(greg(u), Register)}
-    self.assertIn(3, linear_regs)  # gidx1 → s3
+    self.assertIn(16, linear_regs)  # gidx1 → s16 after USER_SGPR=15 pad
     desc = _amd_desc(prg)
     self.assertTrue(desc.compute_pgm_rsrc2 & (1 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT))
     self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT) & 0x3, 1)
+    self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) & 0x1f, 15)
 
   def test_z_dim_specials_set_descriptor_bits(self):
     prg = _z_dim_program()
@@ -2054,10 +2062,11 @@ class TestAMDRenderer(unittest.TestCase):
     bfes = [i for i in _REN._insts_from_linear(_prg_lin(prg)) if getattr(i, "op_name", "") == "V_BFE_U32" and i.src0 == amd_lib.v[0]]
     self.assertIn(20, [_bfe_off(i) for i in bfes])  # lidx2
     linear_regs = {greg(u).index for u in _prg_lin(prg).src if isinstance(greg(u), Register)}
-    self.assertIn(4, linear_regs)  # gidx2 → s4
+    self.assertIn(17, linear_regs)  # gidx2 → s17 after USER_SGPR=15 pad
     desc = _amd_desc(prg)
     self.assertTrue(desc.compute_pgm_rsrc2 & (1 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT))
     self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT) & 0x3, 2)
+    self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) & 0x1f, 15)
 
   @unittest.skipUnless(_has_amd_asm_runtime(), "requires DEV=AMD:AMD or DEV=MOCKKFD+AMD:AMD on gfx11")
   def test_hardware_tensor_smoke(self):
