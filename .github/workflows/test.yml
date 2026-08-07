@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - master
+      - amd-asm-backend
   pull_request:
   workflow_dispatch:
 
