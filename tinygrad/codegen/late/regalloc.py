@@ -51,7 +51,7 @@ class LinearScanRegallocContext:
 
     def alloc(cons:tuple[Register, ...], i:int, v:Register|None=None, *, pin:bool=True) -> Register:
       if self.wide:
-        from tinygrad.runtime.autogen.amd.rdna3.amd_lib import wide_alloc
+        from tinygrad.renderer.isa.amd import wide_alloc
         assert v is not None
         return wide_alloc(cons, i, slots(v), v.cons, live, lr, len(uops), slots, pinned if pin else frozenset())
       live_inv = {rv:k for k,rv in live.items()}
@@ -138,7 +138,7 @@ class LinearScanRegallocContext:
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if ctx.wide:
-    from tinygrad.runtime.autogen.amd.rdna3.amd_lib import wide_regalloc_rewrite
+    from tinygrad.renderer.isa.amd import wide_regalloc_rewrite
     return wide_regalloc_rewrite(ctx, x)
   if x.op in (Ops.LOAD, Ops.STORE, Ops.SHRINK): return None
   i = next(ctx.idx)
