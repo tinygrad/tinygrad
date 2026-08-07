@@ -14,11 +14,13 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop import Ops, FastEnum, auto
 from tinygrad.uop.ops import AxisType, PatternMatcher, UOp, UPat
 
-# RDNA3: kernarg in s[0:1], wg ids s[2:4], local ids v0-v2. Even SGPR bases for 64-bit kernarg loads.
+# RDNA3: kernarg in s[0:1], local ids packed in v0. Even SGPR bases for 64-bit kernarg loads.
+# WGID follows USER_SGPR_COUNT: s2 when count=2 (1D locals); s15 when gfx1100 pads to 15 (2D locals).
 KERNARG_REG = s[0:1]
-WGID = tuple(Register(f"s{i}", i) for i in range(2, 5))
+WGID = tuple(Register(f"s{i}", i) for i in range(2, 5))  # 1D default; 2D uses s15+ via _wgid_reg
 LID = tuple(Register(f"v{i}", 256+i) for i in range(3))
-SGPR = tuple(Register(f"s{i}", i) for i in range(6, 104, 2))
+# Skip s16 — reserved as WGID_Y when USER_SGPR=15 (gfx1100 2D locals).
+SGPR = tuple(Register(f"s{i}", i) for i in range(6, 104, 2) if i != 16)
 VGPR = tuple(Register(f"v{i}", 256+i) for i in range(3, 254))
 # Hand kernel parks ACC at v128+; use v126..v253 (128 regs) so low VGPRs stay contiguous for addresses.
 WMMA_ACC_VGPR = VGPR[123:]
@@ -797,8 +799,8 @@ def _pack_f16_half2_load(lo:UOp, hi:UOp) -> tuple[UOp, int]|None:
 
 def _pack_f16_d16_hi_pair(lo:UOp, hi:UOp) -> bool:
   # Two scalar global half LOADs → global_load_u16 + global_load_d16_hi_b16 into one VGPR (LLVM).
-  # Default on for register path (with TC_LOCAL=4). Opt out with AMD_D16_HI=0.
-  if not getenv("AMD_D16_HI", 1): return False
+  # Default off: d16 burst still NaNs identity@B on gfx1100; v_pack path is correct. Opt in AMD_D16_HI=1.
+  if not getenv("AMD_D16_HI", 0): return False
   if not (lo.op is Ops.INS and lo.arg is AMDOps.LOAD and hi.op is Ops.INS and hi.arg is AMDOps.LOAD): return False
   if _elem_count(lo) != 1 or _elem_count(hi) != 1: return False
   if lo.dtype.scalar() is not dtypes.half or hi.dtype.scalar() is not dtypes.half: return False
@@ -914,10 +916,21 @@ def _atomic_add_ins(x:UOp) -> UOp|None:
   if _is_lds_ref(a.src[0]) or _is_scratch_ref(a.src[0]): raise CompileError("global atomic only")
   return x.ins(AMDOps.ATOMIC_ADD, src=(a.src[0], a.src[1], val))
 
-def _special_reg(name:str) -> Register:
+def _need_yi(ctx:IselContext) -> bool:
+  # lidx1/lidx2 → ENABLE_VGPR_WORKITEM_ID≥1 → gfx1100 USER_SGPR pad to 15 (elf.py).
+  return any(u.op is Ops.SPECIAL and u.arg.startswith("lidx") and u.arg[-1] in "12" for u in ctx.func_args)
+
+def _wgid_reg(ctx:IselContext, dim:int) -> Register:
+  # HSA: workgroup IDs are placed immediately after user SGPRs.
+  base = 15 if _need_yi(ctx) else 2
+  return Register(f"s{base + dim}", base + dim)
+
+def _special_reg(name:str, ctx:IselContext|None=None) -> Register:
   if len(name) != 5 or name[:4] not in ("lidx", "gidx") or name[-1] not in "012":
     raise CompileError(f"bad special {name}")
-  return LID[int(name[-1])] if name[0] == "l" else WGID[int(name[-1])]
+  if name[0] == "l": return LID[int(name[-1])]
+  if ctx is None: return WGID[int(name[-1])]
+  return _wgid_reg(ctx, int(name[-1]))
 
 def _emit_lidx(dst, dim:int) -> list:
   # gfx11+: packed work-item IDs in v0 (X:0..9, Y:10..19, Z:20..29). Unpacked v1/v2 are unused.
@@ -944,8 +957,8 @@ def _alloc_vregs(ctx:IselContext, x:UOp, sgpr_pool:tuple[Register, ...], vgpr_po
     if x.arg.addrspace is AddrSpace.ALU: return x.replace(src=tuple(s.rtag() for s in x.src), tag=(ctx.vreg(sgpr_pool),))
     return x.replace(dtype=dtypes.uint64, src=tuple(s.rtag() for s in x.src), tag=(ctx.vreg(sgpr_pool),))
   if x.op is Ops.SPECIAL:
-    # gidx → WGID SGPR. lidx → normal VGPR; MOV emit unpacks from packed v0.
-    if x.arg.startswith("gidx"): return x.replace(tag=(ctx.vreg(_special_reg(x.arg)),))
+    # gidx → WGID SGPR (s2 or s15). lidx → normal VGPR; MOV emit unpacks from packed v0.
+    if x.arg.startswith("gidx"): return x.replace(tag=(ctx.vreg(_special_reg(x.arg, ctx)),))
     return None
   if x.arg is AMDOps.PACK_F16:
     # Vec-load PACK shares the general VGPR pool with its LOAD so two-address coalesce can alias.
@@ -1087,7 +1100,7 @@ def make_isel_matcher(sgpr_pool:tuple[Register, ...]=SGPR, vgpr_pool:tuple[Regis
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x,vgpr_pool=vgpr_pool:
      None if x.tag is not None else
      UOp(Ops.INS, dtypes.uint32, (x.rtag(),), AMDOps.MOV,
-         (ctx.vreg(vgpr_pool if x.arg.startswith("lidx") else _special_reg(x.arg)),))),
+         (ctx.vreg(vgpr_pool if x.arg.startswith("lidx") else _special_reg(x.arg, ctx)),))),
     (UPat(Ops.INDEX, name="x"), _extract_vec_lane),
     (UPat(Ops.STACK, name="x"), _pack_vec),
     # Int/bool CONST stay as CONST (_src inlines / _vgpr_data temps at use). Avoids
@@ -1616,6 +1629,8 @@ def _sink_wmma_past_loads(ops:list[UOp]) -> list[UOp]:
 
 def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
   # Bubble LOAD/PACK_F16 (+ int addr) above preceding WMMAs when independent.
+  # Must not clobber a WMMA's A/B/ACC — UPCAST≥4 reuses PACK VGPRs across tiles; hoisting
+  # the next tile's load above a prior WMMA left only the last A in those regs (wrong results).
   out = list(ops)
   i = 0
   while i < len(out):
@@ -1636,8 +1651,8 @@ def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
     end = i + 1
     if end < len(out) and out[end].op is Ops.INS and out[end].arg is AMDOps.PACK_F16:
       end += 1
-    # Walk back over WMMAs (+ their EXTRACTs); stop if a WMMA writes something we read.
     chunk_src = set().union(*(set().union(*(_reg_idxs(s) for s in out[k].src)) for k in range(start, end)))
+    chunk_dst = set().union(*(_reg_idxs(out[k]) for k in range(start, end)))
     dest = start
     while dest > 0:
       p = out[dest - 1]
@@ -1645,7 +1660,9 @@ def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
         dest -= 1
         continue
       if p.op is Ops.INS and p.arg is AMDOps.WMMA:
+        wmma_src = set().union(*(_reg_idxs(s) for s in p.src))
         if _reg_idxs(p) & chunk_src: break
+        if chunk_dst & (wmma_src | _reg_idxs(p)): break
         dest -= 1
         continue
       break
@@ -2033,11 +2050,12 @@ pm_stage_wmma_ab = PatternMatcher([(UPat(Ops.WMMA, name="wmma"), stage_wmma_ab_t
 def apply_tc_hand_opts(tk, rngs):
   from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
   lds_ab = getenv("TC_LDS_AB", 0)
-  # Register path: UPCAST>=4 wrong; LOCAL wrong/NaN. LDS path keeps prior caps.
-  up_cap = getenv("TC_UPCAST", 4 if lds_ab else 2)
+  # Register path: WGID@s15 fixes LOCAL; hoist-vs-WMMA fix makes product-8 (4×2) correct.
+  # Single-axis UPCAST=4 still wrong; product-16 still hangs. Override via TC_*.
+  up_cap = getenv("TC_UPCAST", 4)
   loc_cap = getenv("TC_LOCAL", 2 if lds_ab else 0)
   up16 = _allow_upcast16()
-  max_tiles = min(getenv("TC_UPCAST_TILES", 8 if lds_ab else 4), 8 if not up16 else 10**9)
+  max_tiles = min(getenv("TC_UPCAST_TILES", 8), 8 if not up16 else 10**9)
   if lds_ab and getenv("ALLOW_LDS_PRODUCT8", 1) == 0:
     up_cap, max_tiles = min(up_cap, 2), min(max_tiles, 4)
   local_dims, loc_szs = ([0, 1], [8, 4, 2]) if lds_ab else ([0], [4, 2])

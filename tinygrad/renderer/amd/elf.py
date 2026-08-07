@@ -50,7 +50,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
   # Kernarg ptr is 2 user SGPRs. gfx1100 wave32 CP bug (LLVM UserSGPRInit16Bug): when
   # workitem Y/Z are enabled, pad USER_SGPR to 15 or those VGPRs stay uninitialized.
-  # Do NOT pad for 1D locals — hand kernels (and LLVM) hardcode WGID at s2/s3 after 2 user SGPRs.
+  # Do NOT pad for 1D locals — WGID stays at s2. With pad=15, WGID moves to s15 (rdna3._wgid_reg).
   need_yi = max(lids, default=0) >= 1
   user_sgpr = 15 if raw_arch.startswith("gfx1100") and need_yi else 2
   desc.compute_pgm_rsrc2 = (user_sgpr << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |

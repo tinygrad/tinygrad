@@ -1275,7 +1275,7 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path UPCAST=2×2, no LOCAL (LOCAL/UPCAST≥4 wrong on gfx1100) → 4 WMMA.
+    # Default ISA: register path UPCAST=2×2, no LOCAL → 4 WMMA (UPCAST≥4 wrong; product≥8 hangs).
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
     old_loc = os.environ.get("TC_LOCAL")
@@ -1442,11 +1442,13 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_register_path_strided_operand_is_u16(self):
-    # Contiguous A → B128; strided B → u16+d16_hi. Default: UPCAST 2×2, no LOCAL.
+    # Contiguous A → B128; strided B → u16+d16_hi when opted in. Default is v_pack (identity@B NaN on HW).
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
-    for k in ("AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
+    os.environ["TC_LOCAL"] = "0"
+    os.environ["AMD_D16_HI"] = "1"
+    for k in ("TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1470,13 +1472,13 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-  def test_half_matmul_register_path_vpack_opt_out(self):
-    # AMD_D16_HI=0 → legacy u16 + v_pack (register default already has no LOCAL).
+  def test_half_matmul_register_path_vpack_default(self):
+    # Default AMD_D16_HI off → u16 + v_pack (correct on gfx1100). Force 1D locals to pin load counts.
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
     os.environ["TC_LDS_AB"] = "0"
-    os.environ["AMD_D16_HI"] = "0"
-    for k in ("TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
+    os.environ["TC_LOCAL"] = "0"
+    for k in ("AMD_D16_HI", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1882,11 +1884,11 @@ class TestAMDRenderer(unittest.TestCase):
     self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) & 0x1f, 2)
 
   def test_half_matmul_2d_locals_pads_user_sgpr_on_gfx1100(self):
-    # gfx1100 UserSGPRInit16Bug: 2D locals need USER_SGPR=15 so workitem Y is initialized.
+    # gfx1100 UserSGPRInit16Bug: 2D locals pad USER_SGPR=15; WGID then lands at s15 (not s2).
     import os
     old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "AMD_D16_HI", "TC_LOCAL")}
     os.environ["TC_LDS_AB"] = "0"
-    os.environ["TC_LOCAL"] = "4"  # force 2D local (register default is TC_LOCAL=0)
+    os.environ["TC_LOCAL"] = "4"
     os.environ.pop("AMD_D16_HI", None)
     getenv.cache_clear()
     to_program_cache.clear()
@@ -1899,6 +1901,8 @@ class TestAMDRenderer(unittest.TestCase):
       desc = _amd_desc(prg)
       self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT) & 0x3, 1)
       self.assertEqual((desc.compute_pgm_rsrc2 >> amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT) & 0x1f, 15)
+      # WGID follows USER_SGPR pad → s15 (SPECIAL in sink is tagged True; phys lives on MOV).
+      self.assertTrue(any(getattr(greg(u), "name", None) == "s15" for u in _prg_lin(prg).src))
     finally:
       for k, v in old.items():
         if v is None: os.environ.pop(k, None)
