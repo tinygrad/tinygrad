@@ -9,7 +9,7 @@ from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
 
 def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
-  from tinygrad.renderer.isa.amd import scratch_inst_size, scan_elf_meta, scan_elf_regs
+  from tinygrad.renderer.isa.rdna3 import scratch_inst_size, scan_elf_meta, scan_elf_regs
   insts = [u.arg for u in lin.src]
   max_vgpr, max_sgpr, max_accvgpr, private_segment_size = scan_elf_regs(insts, scratch_inst_size)
   n_bufs, n_vars, kernarg_size, param_sizes, lds_size, gids, lids, private_segment_size = scan_elf_meta(prg, private_segment_size)

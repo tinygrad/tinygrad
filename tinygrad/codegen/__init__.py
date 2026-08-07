@@ -17,7 +17,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_fold_cast_c
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.late.index_mops import pm_index_mops
 codegen_mops = mop_cleanup + pm_index_mops  # INDEX→RESHAPE/PERMUTE; not mop_cleanup (breaks JIT)
-# AMD LDS WMMA tile expand — installed by renderer.isa.amd (avoid circular import).
+# AMD LDS WMMA tile expand — installed by renderer.isa.rdna3 (avoid circular import).
 expand_wmma_lds_hook: Callable|None = None
 _WMMA_LDS_LOOP_BASE = 200  # must match amd._WMMA_LDS_LOOP_BASE (probe_stage_loop)
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps

@@ -11,7 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import VIZ, ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.renderer.isa.amd import AMDRenderer
+from tinygrad.renderer.isa.rdna3 import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
