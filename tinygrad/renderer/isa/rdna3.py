@@ -456,8 +456,8 @@ isel_matcher = PatternMatcher([
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
-  (UPat(Ops.RANGE, src=(UPat.cvar("bnd"),), allow_any_len=True, name="x"), \
-    lambda ctx,x,bnd: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS)),))
+  (UPat(Ops.RANGE, name="x"), \
+    lambda ctx,x: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS)),))
     if x.src[-1].op is not Ops.INS else None),
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
