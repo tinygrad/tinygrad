@@ -1811,7 +1811,8 @@ def insts_from_linear(lin:UOp):
       oi += 1
       continue
     # Cluster scalar half loads: all dest-as-addr scales, then s_clause + tight VMEM (LLVM-style B).
-    if getenv("AMD_LOAD_CLAUSE", 1) and _clauseable_half_gload(u, skip, mask_depth):
+    # ~+40% @2048 vs no clause on gfx1100 — always on (no opt-out knob).
+    if _clauseable_half_gload(u, skip, mask_depth):
       j = oi + 1
       while j < len(scheduled) and _clauseable_half_gload(scheduled[j], skip, mask_depth): j += 1
       if j - oi >= 2:

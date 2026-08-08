@@ -1324,6 +1324,8 @@ class TestAMDRenderer(unittest.TestCase):
       self.assertNotIn(AMDOps.FILL, linear_ops)
       self.assertNotIn(AMDOps.SLOAD, linear_ops)
       self.assertNotIn(AMDOps.SSTORE, linear_ops)
+      # Scalar half A loads are s_clause-clustered (~+40% vs no clause on gfx1100).
+      self.assertGreaterEqual(_amd_inst_names(prg).count("S_CLAUSE"), 1)
     finally:
       for k, old in (("TC_UPCAST", old_u), ("TC_UPCAST_TILES", old_t), ("TC_LDS_AB", old_l),
                      ("TC_LOCAL", old_loc), ("ALLOW_UPCAST16", old_a)):
