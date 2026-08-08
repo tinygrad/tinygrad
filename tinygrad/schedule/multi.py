@@ -126,7 +126,7 @@ def reshape_multi(root:UOp, multi:UOp):
   new_shardings = []
   for ax, rng in multi.sharding:
     count = int(rng.vmax)+1
-    target = prod(multi.shape[:ax])
+    target = ssimplify(prod(multi.shape[:ax]))
     if target not in arg_acc: raise RuntimeError(f"reshape {multi.shape} -> {new_shape} moved items between shards")
     new_ax = len(arg_acc) - arg_acc[::-1].index(target) - 1
     if new_shape[new_ax] % count != 0: raise RuntimeError(f"reshape {multi.shape} -> {new_shape} moved items between shards")
