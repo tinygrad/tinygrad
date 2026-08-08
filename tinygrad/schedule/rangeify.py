@@ -193,6 +193,7 @@ ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
+  if not b.arg.removable: return None
   # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
   if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
 

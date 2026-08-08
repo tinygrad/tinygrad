@@ -1106,12 +1106,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
     if self.op is Ops.CAST:
-      # an int destination truncates a float source toward zero. trunc is monotone
+      # rounding is monotone (truncation toward zero into an int, to-nearest onto the value grid into a float)
       smin, smax = self.src[0]._min_max
-      if dtypes.is_int(self.dtype) and dtypes.is_float(self.src[0].dtype) and all(math.isfinite(v) for v in (smin, smax)):
-        smin, smax = math.trunc(smin), math.trunc(smax)
-      # a cast to unsigned keeps exact bounds when the source fits
-      # TODO: can do more based on new dtype window
+      trunc = truncate.get(self.dtype) if dtypes.is_float(self.dtype) else math.trunc if dtypes.is_int(self.dtype) else None
+      if trunc is not None and all(math.isfinite(v) for v in (smin, smax)): smin, smax = trunc(smin), trunc(smax)
       if dtypes.is_unsigned(self.dtype) and 0 <= smin and smax <= self.dtype.max: return smin, smax
       if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,): return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
@@ -1196,10 +1194,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
     return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
-    kernel = fxn(*placeholders).call(*contig_srcs, grad_fxn=grad_fxn)
-    return [s.after(kernel) for s in contig_srcs]
+    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
+    return [s.after(kernel) for s in srcs]
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
