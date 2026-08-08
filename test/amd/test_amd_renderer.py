@@ -1344,6 +1344,8 @@ class TestAMDRenderer(unittest.TestCase):
       names = _amd_inst_names(prg)
       self.assertEqual(names.count("V_CVT_F16_F32_E32"), 128)
       self.assertEqual(names.count("GLOBAL_STORE_B16"), 128)
+      # CAST must not clobber store-addr CSE (TMP_VADDR page base).
+      self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 20)
     finally:
       for k, v in old.items():
         if v is None: os.environ.pop(k, None)

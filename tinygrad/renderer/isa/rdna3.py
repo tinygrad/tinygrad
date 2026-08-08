@@ -1816,10 +1816,13 @@ def insts_from_linear(lin:UOp):
       src = set().union(*(_reg_idxs(s) for s in u.src))
       if src and _pending_src(src): flush_regs(src)
     # EXTRACT between C-stores often emits nothing (pack+lane alias); only clobber CSE on real emits.
+    # Keep page CSE across CAST (uses TMP_VDATA, not TMP_VADDR) — cast-before-store otherwise
+    # re-scales the C base for every half store (~100 extra V_LSHL_ADD).
     # half×16 STORE may V_ADD into TMP_VADDR for the second b128 — drop page CSE.
     if is_store and any(getattr(i, "op_name", "") == "V_ADD_NC_U32_E64" for i in emitted):
       store_addr_cache.clear()
-    elif not is_store and emitted: store_addr_cache.clear()
+    elif not is_store and any(getattr(i, "vdst", None) == TMP_VADDR for i in emitted):
+      store_addr_cache.clear()
     for inst in emitted: emit(inst)
     if u.op is Ops.INS and u.arg is AMDOps.END_MASK: mask_depth -= 1
     if (domain:=_wait_domain_for_load(u)) is not None:
