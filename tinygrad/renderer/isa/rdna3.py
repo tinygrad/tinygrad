@@ -96,8 +96,13 @@ def stack2regs(ctx, x:UOp):
     else: mvs.append(vmov(x.src[i]))
   return UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
 
-# NOTE: this should just be triggered in to_vgpr??
+# NOTE: should this just be triggered in to_vgpr??
 def gethalf(x:UOp, buf:UOp, idx:UOp):
+  bb = buf
+  while bb.op is Ops.AFTER: bb = bb.src[0]
+  # only trigger on value uses, ex. b16 alu stack inputs/outputs
+  # NOT index into memory/buffers
+  if bb.op is Ops.BUFFER: return None
   b32 = buf.index(const(idx.val // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
   # NOTE: manual construction, needs to be cleaned
   if idx.val % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype)
