@@ -327,6 +327,12 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
+# sometimes if call srcs have children the call will get an INDEX. we remove it here.
+pm_no_indexing_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="u"), lambda u:
+   u.replace(src=tuple(x.src[0] if x.op is Ops.INDEX else x for x in u.src))),
+])
+
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
 def limit_bufs(ctx:IndexingContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
@@ -563,7 +569,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
-  tsink = graph_rewrite(tsink, symbolic+pm_fold_cast_const+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
+  tsink = graph_rewrite(tsink,
+                        symbolic+pm_fold_cast_const+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls,
                         name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
