@@ -819,7 +819,7 @@ def _pack_f16_half2_load(lo:UOp, hi:UOp) -> tuple[UOp, int]|None:
 
 def _pack_f16_d16_hi_pair(lo:UOp, hi:UOp) -> bool:
   # Two scalar global half LOADs → global_load_u16 + global_load_d16_hi_b16 into one VGPR (LLVM).
-  # Default off: d16 burst still NaNs identity@B on gfx1100; v_pack path is correct. Opt in AMD_D16_HI=1.
+  # Default off: AMD_D16_HI=1 can hang ones@ones on gfx1100 (wait timeout); v_pack path is correct.
   if not getenv("AMD_D16_HI", 0): return False
   if not (lo.op is Ops.INS and lo.arg is AMDOps.LOAD and hi.op is Ops.INS and hi.arg is AMDOps.LOAD): return False
   if _elem_count(lo) != 1 or _elem_count(hi) != 1: return False
