@@ -1303,6 +1303,32 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+
+  def test_half_matmul_keeps_wmma_tile_local(self):
+    # Do not sink WMMA past scalar A loads / hoist those above WMMA — keeps first WMMA
+    # after one A pack (≤16 U16), enabling A/B overlap vs all-A-then-B.
+    import os
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES", "ALLOW_UPCAST16")}
+    for k in old: os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        ast = (Tensor.empty(256, 256, dtype=dtypes.half, device="AMD") @
+               Tensor.empty(256, 256, dtype=dtypes.half, device="AMD"))
+        prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+      names = _amd_inst_names(prg)
+      w0 = next(i for i, n in enumerate(names) if "WMMA" in n)
+      pre = names[:w0]
+      self.assertLessEqual(pre.count("GLOBAL_LOAD_U16"), 16)
+      self.assertGreaterEqual(pre.count("GLOBAL_LOAD_B128"), 1)
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
     # Default ISA: register path UPCAST=4×4 (product 16) + LOCAL=4 → 16 WMMA.
     import os

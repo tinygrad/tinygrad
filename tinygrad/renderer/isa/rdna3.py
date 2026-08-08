@@ -1635,6 +1635,9 @@ def _sink_wmma_past_loads(ops:list[UOp]) -> list[UOp]:
     while j < len(out):
       v = out[j]
       if v.op is not Ops.INS or v.arg not in _SINKABLE_PAST_WMMA: break
+      # Keep tile-local schedule: don't sink past scalar half A loads. Otherwise all A packs
+      # first and B B128 lands after a full wait — loses A/B VMEM overlap vs LLVM.
+      if v.arg is AMDOps.LOAD and v.dtype.scalar() is dtypes.half and _elem_count(v) == 1: break
       v_dst = _reg_idxs(v)
       v_src = set().union(*(_reg_idxs(s) for s in v.src))
       if v_src & wmma_dst: break
@@ -1662,6 +1665,14 @@ def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
   while i < len(out):
     u = out[i]
     if not (u.op is Ops.INS and u.arg in (AMDOps.LOAD, AMDOps.PACK_F16)):
+      i += 1
+      continue
+    # Only hoist wide B (half×8+) / vec-load packs above WMMA — not scalar A loads.
+    # Hoisting scalar A above prior WMMA collapsed the schedule to all-A-then-B (no A/B overlap).
+    if u.arg is AMDOps.LOAD and u.dtype.scalar() is dtypes.half and _elem_count(u) == 1:
+      i += 1
+      continue
+    if u.arg is AMDOps.PACK_F16 and not _pack_f16_is_vec_load(u):
       i += 1
       continue
     # Grow a hoistable prefix of addr ALU ending at this LOAD/PACK (and following PACK).
