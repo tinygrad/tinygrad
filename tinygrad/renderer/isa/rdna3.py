@@ -2176,9 +2176,7 @@ def apply_tc_hand_opts(tk, rngs):
   else:
     do_upcast()
     do_local()
-  if (g:=getenv("TC_LDS_GROUP", 0)) and prod(tk.full_shape[i] for i in tk.axes_of(AxisType.REDUCE)) >= getenv("TC_LDS_BLOCK", 2048):
-    try: tk.apply_opt(Opt(OptOps.GROUP, 0, g))
-    except KernelOptError: pass
+  # TC_LDS_GROUP omitted: GROUP≥2 on WMMA half GEMM needs >64KB LDS (always KernelOptError).
 
 def llvm_tc_hand_opts(tk, rngs):
   # AMDLLVM: stock TC schedule unless TC_LDS_AB (shared staging with AMDRenderer).
