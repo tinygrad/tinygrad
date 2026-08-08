@@ -61,6 +61,7 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  expert_gating_func: int = 1
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -103,14 +104,17 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+      bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
+      # 1: softmax, 2: sigmoid, 3: softmax over top-k logits, 4: sqrt-softplus
+      if self.config.expert_gating_func == 3 or (self.config.expert_gating_func == 1 and bias is None and self.config.norm_topk_prob):
+        _, sel = pairwise_topk(logits if bias is None else logits + bias, self.config.num_experts_per_tok)
+        probs = logits.gather(-1, sel).softmax(-1)
+      else:
+        if self.config.expert_gating_func == 4: probs = logits.softplus().sqrt()
+        else: probs = logits.sigmoid() if self.config.expert_gating_func == 2 else logits.softmax(-1)
+        _, sel = pairwise_topk(probs if bias is None else probs + bias, self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
-      else:
-        vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
-        probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
       x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
@@ -397,6 +401,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
+      expert_gating_func=kv.get(f'{arch}.expert_gating_func', 2 if arch == 'glm4moe' else 1),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
