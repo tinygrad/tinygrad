@@ -542,6 +542,8 @@ class AMDDevice(HCQ2Compiled):
 
   ifaces = [KFDIface, PCIIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface)]
 
+  def device_props(self): return self.iface.props
+
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
 
