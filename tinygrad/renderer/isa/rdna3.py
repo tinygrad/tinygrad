@@ -61,7 +61,7 @@ def getsign(u:UOp, nbits):
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
   return nx if r is None else nx.replace(tag=(r,))
-def _smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
+def smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 
 # ---- register classes/kernel init state ----
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
@@ -165,7 +165,8 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 
 # NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
 def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
-  if idx.addrspace is AddrSpace.REG: return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
+  if idx.addrspace is AddrSpace.REG:
+    return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
@@ -191,7 +192,7 @@ def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
       if idx.dtype.itemsize == 8:
         image = UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype)
         return ctx.ren.copy(image, vregs[i])
-      return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
+      else: return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
       # else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
     else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
 
@@ -385,17 +386,17 @@ extra_matcher = PatternMatcher([
 
 pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
-  (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32))),
-  (UPat.var("y", dtypes.float32).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(_smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int32, dtypes.uint32))),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
   (UPat.var("y", dtypes.double).cast(dtypes.int64s).named("x"), lambda y,x: f64_to_int64(y, x.dtype)),
 ])
 
 pm_int_to_float = PatternMatcher([
   (UPat.var("y", dtypes.int32s).cast(dtypes.half), lambda y: y.float().cast(dtypes.half)),
-  (UPat.var("y", dtypes.int8s).cast(dtypes.half), lambda y: y.cast(_smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(dtypes.half)),
-  (UPat.var("y", dtypes.int8s+dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+  (UPat.var("y", dtypes.int8s).cast(dtypes.half), lambda y: y.cast(smux(y.dtype, dtypes.int16, dtypes.uint16)).cast(dtypes.half)),
+  (UPat.var("y", dtypes.int8s+dtypes.int16s).cast((dtypes.float,dtypes.double), name="x"), lambda y,x: y.cast(smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.int64s).cast((dtypes.float, dtypes.half), name="x"), lambda y,x: long2double(y).cast(dtypes.float).cast(x.dtype)),
   (UPat.var("x", dtypes.int64s).cast(dtypes.float64), long2double),
 ])
@@ -411,13 +412,13 @@ pre_isel_matcher = PatternMatcher([
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
   # --- int8 alu is int16 ---
-  (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=_smux(x.dtype, dtypes.int16, dtypes.uint16))),
+  (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int16, dtypes.uint16))),
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"),
-    lambda x,y: x.replace(src=(y.bitcast(_smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
+    lambda x,y: x.replace(src=(y.bitcast(smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
   # -- int -> int casts ---
   (UPat.var("y", dtypes.int8s+dtypes.int16s+dtypes.int32s).cast(dtypes.int64s, name="x"), lambda y,x: int_to_int64(y, x.dtype)),
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
-    lambda y,x: y.index(0).replace(dtype=_smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+    lambda y,x: y.index(0).replace(dtype=smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), intcast),
   # narrowing long goes through b32
   (UPat(Ops.MUL, dtypes.int16, name="x"), lambda x: x.replace(dtype=dtypes.int32)),
@@ -527,6 +528,10 @@ def encode(ctx, x:UOp):
 
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
+  elif group is RDNA3Ops.SCRATCH:
+    kw = dict(offset=_immorreg(oprs[0]))
+    if rdef(x) is not None: kw["vdst"] = _fuse(rdefs(x))
+    else: kw["data"] = _fuse(rdefs(oprs[1]))
   elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]),  offset=_immorreg(oprs[1]))
     if rdef(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
@@ -578,6 +583,22 @@ class RDNA3Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
   def stack_alloc(self, uops:list[UOp]): return uops
+
+  # use scratch memory space for spilling thread local memory, addressed as:
+  # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
+  def spill(self, spill_offset:int, x:UOp) -> UOp:
+    sz = x.dtype.itemsize # TODO: handle GROUP case
+    opc = getattr(RDNA3Ops, f"scratch_store_b{sz*8}")
+    ioffs = const(spill_offset, dtypes.uint32)
+    return UOp(Ops.INS, arg=opc, src=(ioffs,x))
+
+  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp:
+    ioffs = const(spill_offset, dtypes.uint32)
+    sz = x.dtype.itemsize
+    suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
+    opc = getattr(RDNA3Ops, f"scratch_load_{suffix}{sz*8}")
+    return UOp(Ops.INS, x.dtype, arg=opc, src=(ioffs,), tag=regs)
+
   def copy(self, u:UOp, r:VRegister|Register) -> UOp:
     if u.dtype.itemsize == 8:
       return UOp.group(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype, tag=(r,))
@@ -607,4 +628,4 @@ class RDNA3Renderer(ISARenderer):
 
     lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
       u.replace(arg=RDNA3Ops.SOPP(u.arg.op, (targets[u.tag] - upc[u]) // 4)) for u in nuops]))
-    return assemble_linear(prg, lin, self.target.arch, scratch_size=0)
+    return assemble_linear(prg, lin, self.target.arch, scratch_size=self.spill_size)

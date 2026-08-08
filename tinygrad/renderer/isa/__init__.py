@@ -44,7 +44,7 @@ class PreRegallocContext:
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
-    self.regbufs: dict[tuple[UOp, int], VRegister] = {}
+    self.regbufs: dict[tuple[UOp, int], VRegister] = {} # maps regbuf ptr to cached vregister
 
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
@@ -67,5 +67,5 @@ class ISARenderer(Renderer):
   def stack_alloc(self, uops:list[UOp]) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
