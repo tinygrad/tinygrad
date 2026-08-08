@@ -1656,6 +1656,7 @@ def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
   # Bubble LOAD/PACK_F16 (+ int addr) above preceding WMMAs when independent.
   # Must not clobber a WMMA's A/B/ACC — UPCAST≥4 reuses PACK VGPRs across tiles; hoisting
   # the next tile's load above a prior WMMA left only the last A in those regs (wrong results).
+  if not any(u.op is Ops.INS and u.arg is AMDOps.WMMA for u in ops): return ops
   out = list(ops)
   i = 0
   while i < len(out):
