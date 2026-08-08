@@ -567,8 +567,8 @@ def _wmma_acc_zero_inits(uops:list[UOp]) -> tuple[list[UOp], dict[int, UOp], dic
   """Zero-init WMMA ACC packs before the K-loop.
 
   Returns (inits, tile->init, reg_idx->(init, lane)).
-  tile->init uses the 4×4 interleaved formula (product-8). Product-16's 16 packs collide
-  under that formula (only keys 0..7), so epilogue SLOADs also use reg_idx->init.
+  tile->init uses the 4×4 interleaved formula. Consecutive product-16 SLOAD packs collide
+  on first-idx tile keys (4 keys for 16 packs), so epilogue SLOADs use reg_idx->init.
   """
   ctx = PreRegAllocContext(uops)
   bufs = _wmma_acc_buffers(ctx)

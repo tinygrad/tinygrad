@@ -1305,6 +1305,38 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_wmma_acc_idx_map_survives_tile_key_collision(self):
+    # Product-16 REG ACC: 16 consecutive SLOAD packs. First-idx tile keys collide (4 keys for
+    # 16 packs), so epilogue must use reg_idx→(init,lane) — not tiles[tile] alone.
+    from tinygrad.renderer.isa.rdna3 import _wmma_acc_zero_inits, _wmma_slot_tile_lane
+    buf = UOp.placeholder((128,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
+    zero = UOp.const(0.0, dtypes.float32)
+    ab = UOp(Ops.INS, dtypes.float, tuple(
+      UOp(Ops.INS, dtypes.float, (zero,), AMDOps.MOV, (Register(f"ab{i}", i),)) for i in range(8)),
+      AMDOps.PACK, (Register("ab", 10),))
+    uops: list[UOp] = []
+    for p in range(16):
+      loads = []
+      for lane in range(8):
+        idx = p * 8 + lane
+        ld = UOp(Ops.INS, dtypes.float, (buf, UOp.const(idx, dtypes.int32)), AMDOps.SLOAD,
+                 (Register(f"l{idx}", 100 + idx),))
+        loads.append(ld)
+        uops.append(ld)
+      tag = (Register(f"acc{p}", 200 + p * 8),)
+      pack = UOp(Ops.INS, dtypes.float, tuple(loads), AMDOps.PACK, tag)
+      uops += [pack, UOp(Ops.INS, dtypes.float, (pack, ab, ab), AMDOps.WMMA, tag)]
+    inits, tiles, idx_map = _wmma_acc_zero_inits(uops)
+    self.assertEqual(len(inits), 16)
+    self.assertEqual(len(idx_map), 128)
+    # tiles[first_idx_tile] alone cannot name 16 packs
+    self.assertLess(len(tiles), 16)
+    self.assertEqual(len({_wmma_slot_tile_lane(p * 8)[0] for p in range(16)}), len(tiles))
+    for p in range(16):
+      init_ids = {id(idx_map[p * 8 + lane][0]) for lane in range(8)}
+      self.assertEqual(len(init_ids), 1)
+      self.assertEqual([idx_map[p * 8 + lane][1] for lane in range(8)], list(range(8)))
+
   def test_after_pre_regalloc_schedules_cast_before_store(self):
     # Product-16 epilogue: f32→f16 CAST must sit immediately before its STORE so half temps
     # do not all live at once (else regalloc spills into WMMA ACC and clobbers unread lanes).
