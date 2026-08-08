@@ -384,6 +384,12 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
 
+  def test_symbolic_broadcast_copy(self):
+    rows = Variable("rows", 1, 4).bind(3)
+    out = Tensor.ones(rows, 8).to(devices_2).realize()
+    self.assertEqual(out.shape, (rows, 8))
+    np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.ones((3, 8)))
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
