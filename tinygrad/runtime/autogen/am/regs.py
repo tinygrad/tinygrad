@@ -1,4 +1,4 @@
-__all__ = ['gc_9_4_3', 'gc_10_3_0', 'gc_11_0_0', 'gc_11_0_3', 'gc_11_5_0', 'gc_12_0_0', 'mmhub_1_8_0', 'mmhub_3_0_0', 'mmhub_3_0_1', 'mmhub_3_0_2', 'mmhub_3_3_0', 'mmhub_4_1_0', 'nbio_2_3_0', 'nbio_4_3_0', 'nbio_7_2_0', 'nbio_7_4', 'nbio_7_7_0', 'nbio_7_9_0', 'nbio_7_11_0', 'nbif_6_3_1', 'mp_11_0_0', 'mp_13_0_0', 'mp_14_0_2', 'hdp_4_4_2', 'hdp_5_0_0', 'hdp_6_0_0', 'hdp_7_0_0', 'osssys_4_4_2', 'osssys_6_0_0', 'osssys_6_1_0', 'osssys_7_0_0', 'sdma_4_4_2', 'sdma_5_0_0']
+__all__ = ['gc_9_4_3', 'gc_10_3_0', 'gc_11_0_0', 'gc_11_0_3', 'gc_11_5_0', 'gc_12_0_0', 'mmhub_1_8_0', 'mmhub_3_0_0', 'mmhub_3_0_1', 'mmhub_3_0_2', 'mmhub_3_3_0', 'mmhub_4_1_0', 'nbio_2_3_0', 'nbio_3_3_1', 'nbio_4_3_0', 'nbio_7_2_0', 'nbio_7_4', 'nbio_7_7_0', 'nbio_7_9_0', 'nbio_7_11_0', 'nbif_6_3_1', 'mp_11_0_0', 'mp_13_0_0', 'mp_14_0_2', 'hdp_4_4_2', 'hdp_5_0_0', 'hdp_6_0_0', 'hdp_7_0_0', 'osssys_4_4_2', 'osssys_6_0_0', 'osssys_6_1_0', 'osssys_7_0_0', 'sdma_4_4_2', 'sdma_5_0_0']
 gc_9_4_3 = {
   'regGRBM_CNTL': (0, 0, {'read_timeout': (0, 7), 'report_last_rderr': (31, 31)}),
   'regGRBM_SKEW_CNTL': (1, 0, {'skew_top_threshold': (0, 5), 'skew_count': (6, 11)}),
@@ -10286,6 +10286,11 @@ nbio_7_2_0 = {
   'regBIF_BX_PF1_GPU_HDP_FLUSH_DONE': (36391, 5, {'cp0': (0, 0), 'cp1': (1, 1), 'cp2': (2, 2), 'cp3': (3, 3), 'cp4': (4, 4), 'cp5': (5, 5), 'cp6': (6, 6), 'cp7': (7, 7), 'cp8': (8, 8), 'cp9': (9, 9), 'sdma0': (10, 10), 'sdma1': (11, 11), 'rsvd_eng0': (12, 12), 'rsvd_eng1': (13, 13), 'rsvd_eng2': (14, 14), 'rsvd_eng3': (15, 15), 'rsvd_eng4': (16, 16), 'rsvd_eng5': (17, 17), 'rsvd_eng6': (18, 18), 'rsvd_eng7': (19, 19), 'rsvd_eng8': (20, 20), 'rsvd_eng9': (21, 21), 'rsvd_eng10': (22, 22), 'rsvd_eng11': (23, 23), 'rsvd_eng12': (24, 24), 'rsvd_eng13': (25, 25), 'rsvd_eng14': (26, 26), 'rsvd_eng15': (27, 27), 'rsvd_eng16': (28, 28), 'rsvd_eng17': (29, 29), 'rsvd_eng18': (30, 30), 'rsvd_eng19': (31, 31)}),
   'regRCC_DEV0_EPF2_STRAP2': (53506, 5, {'strap_no_soft_reset_dev0_f2': (7, 7), 'strap_resize_bar_en_dev0_f2': (8, 8), 'strap_max_pasid_width_dev0_f2': (9, 13), 'strap_msi_pervector_mask_cap_dev0_f2': (14, 14), 'strap_aer_en_dev0_f2': (16, 16), 'strap_acs_en_dev0_f2': (17, 17), 'strap_cpl_abort_err_en_dev0_f2': (20, 20), 'strap_dpa_en_dev0_f2': (21, 21), 'strap_vc_en_dev0_f2': (23, 23), 'strap_msi_multi_cap_dev0_f2': (24, 26), 'strap_pasid_en_dev0_f2': (28, 28), 'strap_pasid_exe_permission_supported_dev0_f2': (29, 29), 'strap_pasid_global_invalidate_supported_dev0_f2': (30, 30), 'strap_pasid_priv_mode_supported_dev0_f2': (31, 31)}),
 }
+nbio_3_3_1 = {
+  'regBIF_BX_PF0_GPU_HDP_FLUSH_REQ': (0x106, 2, {}),
+  'regBIF_BX_PF0_GPU_HDP_FLUSH_DONE': (0x107, 2, {}),
+}
+
 nbio_2_3_0 = {
   'regBIF_BX_PF0_GPU_HDP_FLUSH_REQ': (0x106, 2, {}),
   'regBIF_BX_PF0_GPU_HDP_FLUSH_DONE': (0x107, 2, {}),
