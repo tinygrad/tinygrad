@@ -99,7 +99,7 @@ class TestMoEFeedForward(unittest.TestCase):
   def test_moe_feed_forward_gating_funcs(self):
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2
-    logits = np.array([4.0, 3.0, 0.0, -1.0])
+    logits = np.array([4.0, 3.0, 0.0, -1.0], dtype=np.float32)
     def softmax(x):
       probs = np.exp(x - x.max())
       return probs / probs.sum()
