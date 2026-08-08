@@ -1305,6 +1305,29 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_half_matmul_acc_zero_uses_vopd(self):
+    # Product-16 ACC packs zero-init via v_dual_mov (even/odd banks), not 128 scalar movs.
+    import os
+    from tinygrad.runtime.autogen.amd.rdna3.ins import VOPD
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES", "TC_LOCAL", "ALLOW_UPCAST16")}
+    for k in old: os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        ast = (Tensor.empty(256, 256, dtype=dtypes.half, device="AMD") @
+               Tensor.empty(256, 256, dtype=dtypes.half, device="AMD"))
+        prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+      insts = _REN._insts_from_linear(_prg_lin(prg))
+      self.assertEqual(sum(1 for i in insts if isinstance(i, VOPD)), 64)  # 16 packs × 4 duals
+      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 16)
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_8x8_extracts_before_clobbering_addr_adds(self):
     # Non-TC half 8×8: hoisting B addr ADDs through A’s EXTRACTs used to rewrite A’s B128
     # VGPRs in-flight (sq_intr hang). EXTRACT unpack must complete before those ADDs.

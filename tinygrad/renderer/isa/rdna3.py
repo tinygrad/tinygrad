@@ -8,6 +8,7 @@ from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext, 
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.amd.dsl import Reg, s, v, NULL, EXEC, VCC, Inst
 from tinygrad.runtime.autogen.amd.rdna3 import ins as r3
+from tinygrad.runtime.autogen.amd.rdna3.enum import VOPDOp
 from tinygrad.codegen.decomp.op import fast_idiv
 from tinygrad.codegen.opt import tc
 from tinygrad.schedule.rangeify import BufferizeOpts
@@ -147,6 +148,16 @@ def _parallel_vmov(moves:list[tuple[Reg, Reg|int|float]]) -> list:
   pending = [(dst, src) for dst,src in moves if not isinstance(src, Reg) or dst != src]
   ret = []
   while pending:
+    # Pair zero-imm into VOPD on even/odd VGPR banks (hand WMMA ACC init).
+    if len(pending) >= 2:
+      (d0, s0), (d1, s1) = pending[0], pending[1]
+      n0 = d0.offset - 256 if d0.sz == 1 and 256 <= d0.offset < 512 else None
+      n1 = d1.offset - 256 if d1.sz == 1 and 256 <= d1.offset < 512 else None
+      if (n0 is not None and n1 == n0 + 1 and n0 % 2 == 0 and
+          not isinstance(s0, Reg) and not isinstance(s1, Reg) and s0 == 0 and s1 == 0):
+        ret.append(r3.v_dual_mov_b32(opy=VOPDOp.V_DUAL_MOV_B32, vdstx=d0, vdsty=d1, srcx0=0, srcy0=0))
+        pending = pending[2:]
+        continue
     src_regs = {src for _,src in pending if isinstance(src, Reg)}
     for i,(dst,src) in enumerate(pending):
       if not isinstance(src, Reg) or dst not in src_regs:
