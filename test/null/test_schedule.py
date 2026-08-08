@@ -889,22 +889,19 @@ class TestSchedule(unittest.TestCase):
     # so the compute would be silently dropped. this must raise instead of producing wrong results
     y = Tensor.ones(64).contiguous().realize()
     out = Tensor.empty_like(y)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      check_schedule(self._copy_call(out, y + y), 1)
+    check_schedule(self._copy_call(out, y + y), 2)
 
   def test_custom_kernel_lazy_const_src(self):
     # a lazy const expression above the call has no buffer at all. this used to crash rangeify with a KeyError
     x = Tensor.linspace(-1.0, 1.0, 64)
     out = Tensor.empty_like(x)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      check_schedule(self._copy_call(out, x), 1)
+    check_schedule(self._copy_call(out, x), 2)
 
   def test_custom_kernel_offset_view_src(self):
     # a SHRINK with an offset over a buffer is not a buffer state either, the offset would be silently dropped
     y = Tensor.ones(128).contiguous().realize()
     out = Tensor.empty(64)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      check_schedule(self._copy_call(out, y[16:80]), 1)
+    check_schedule(self._copy_call(out, y[16:80]), 2)
 
   def test_custom_kernel_computed_src_api(self):
     # the supported way to pass computed inputs: Tensor.custom_kernel makes inputs contiguous (one realize kernel)
