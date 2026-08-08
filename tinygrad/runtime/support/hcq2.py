@@ -197,12 +197,13 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
       epoch = make_signal(devices, tag="timeline_value").index(0) - 1
       q = [UOp(Ops.INS, arg="barrier", src=()), UOp(Ops.INS, arg="wait", src=(make_signal(devices, tag="timeline_signal"), epoch))] + q
 
-    # and make hcq call, wrapped in timestamps when profiling
+    # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
-    ts = [next(UOp.unique_num) for _ in range(2)] if profile else []
-    tss = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts]
-    prof += [ProfileGraphEntry(d, name, *ts) for d in devices if ts]
-    q += tss[:1] + [call.replace(arg=replace(call.arg, aux=info))] + tss[1:]
+    ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
+    prof += [ProfileGraphEntry(d, name, *ts_ids) for d in devices if ts_ids]
+
+    ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts_ids]
+    q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in signal_tags: q += [UOp(Ops.INS, arg="store", src=(make_signal(devices, slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
