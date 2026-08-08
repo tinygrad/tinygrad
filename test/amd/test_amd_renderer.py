@@ -1293,6 +1293,7 @@ class TestAMDRenderer(unittest.TestCase):
       linear_ops = _lin_ops(prg)
       self.assertEqual(linear_ops.count(AMDOps.WMMA), 16)
       self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
+      self.assertIn(Opt(OptOps.LOCAL, 1, 4), prg.src[0].arg.applied_opts)
       self.assertNotIn(AMDOps.SPILL, linear_ops)
       self.assertNotIn(AMDOps.FILL, linear_ops)
       self.assertNotIn(AMDOps.SLOAD, linear_ops)
