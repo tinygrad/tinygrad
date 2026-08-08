@@ -60,7 +60,7 @@ def getsign(u:UOp, nbits):
   return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
-  return nx if r is None else nx.replace(tag=(r,))
+  return nx.rtag() if r is None else nx.replace(tag=(r,))
 def smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
 
 # ---- register classes/kernel init state ----
@@ -435,7 +435,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s, src=(UPat.var("val"), UPat.var("shft")), name="x"),
     lambda x,val,shft: x.replace(src=(val, shft.cast(dtypes.uint32)))),
   # --- other ---
-  (UPat(Ops.STACK, name="x"), stack2regs),
+  (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) else None),
   (UPat(Ops.CDIV, name="x"), idiv),
   # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
   # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
