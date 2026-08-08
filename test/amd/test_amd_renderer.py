@@ -1279,7 +1279,7 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path UPCAST=4×2 (product 8), no LOCAL → 8 WMMA.
+    # Default ISA: register path UPCAST=4×2 (product 8) + LOCAL=2 → 8 WMMA.
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
     old_loc = os.environ.get("TC_LOCAL")
