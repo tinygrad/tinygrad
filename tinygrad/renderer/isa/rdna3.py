@@ -2377,7 +2377,7 @@ class AMDRenderer(ISARenderer):
     """
     uses: dict[UOp, list[UOp]] = {}
     for u in lst:
-      for s in u.src: uses.setdefault(s, []).append(u)
+      for src in u.src: uses.setdefault(src, []).append(u)
     store_cast: dict[UOp, UOp] = {}  # store -> cast
     for u in lst:
       if u.op is not Ops.INS or u.arg is not AMDOps.CAST: continue
