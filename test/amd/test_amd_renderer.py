@@ -1328,6 +1328,33 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_lds_ab_waits_lgkm_before_wmma(self):
+    # TC_LDS_AB: DS_LOAD dests feed WMMA A/B — must s_waitcnt_lgkmcnt before first WMMA.
+    import os
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "ALLOW_LDS_PRODUCT8", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES")}
+    os.environ["TC_LDS_AB"] = "1"
+    os.environ["ALLOW_LDS_PRODUCT8"] = "0"
+    for k in ("TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES"): os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        ast = (Tensor.empty(256, 256, dtype=dtypes.half, device="AMD") @
+               Tensor.empty(256, 256, dtype=dtypes.half, device="AMD"))
+        prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+      names = [getattr(i, "op_name", type(i).__name__) for i in _REN._insts_from_linear(_prg_lin(prg))]
+      self.assertGreater(sum(1 for n in names if n.startswith("DS_LOAD")), 0)
+      wmma_i = next(i for i, n in enumerate(names) if "WMMA" in n)
+      prev_ds = max(i for i, n in enumerate(names[:wmma_i]) if n.startswith("DS_LOAD"))
+      self.assertTrue(any(n == "S_WAITCNT_LGKMCNT" for n in names[prev_ds:wmma_i]),
+                      f"no lgkm wait between DS_LOAD@{prev_ds} and WMMA@{wmma_i}")
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_8x8_extracts_before_clobbering_addr_adds(self):
     # Non-TC half 8×8: hoisting B addr ADDs through A’s EXTRACTs used to rewrite A’s B128
     # VGPRs in-flight (sq_intr hang). EXTRACT unpack must complete before those ADDs.

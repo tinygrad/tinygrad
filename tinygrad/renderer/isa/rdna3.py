@@ -1784,7 +1784,11 @@ def insts_from_linear(lin:UOp):
       continue
     if _needs_vm_flush(u):
       # Soft allow can no-op when dest ACC intersects an early pending batch. Drain VM before WMMA.
-      if u.op is Ops.INS and u.arg is AMDOps.WMMA: flush("vm")
+      # Also drain lgkm on WMMA srcs — TC_LDS_AB feeds A/B from DS_LOAD; skipping that wait
+      # left WMMA reading in-flight LDS data (NaN/inf). Hand kernel waits lgkmcnt(0) first.
+      if u.op is Ops.INS and u.arg is AMDOps.WMMA:
+        flush("vm")
+        flush_regs(set().union(*(_reg_idxs(s) for s in u.src)))
       else: flush_regs(set().union(*(_reg_idxs(s) for s in u.src), _reg_idxs(u)))
     if u.op is Ops.INS and u.arg is AMDOps.IF_MASK:
       store_addr_cache.clear()
