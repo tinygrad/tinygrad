@@ -1305,6 +1305,37 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_half_matmul_8x8_extracts_before_clobbering_addr_adds(self):
+    # Non-TC half 8×8: hoisting B addr ADDs through A’s EXTRACTs used to rewrite A’s B128
+    # VGPRs in-flight (sq_intr hang). EXTRACT unpack must complete before those ADDs.
+    import os
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "NOLOCALS")}
+    for k in old: os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        ast = (Tensor.empty(8, 8, dtype=dtypes.half, device="AMD") @
+               Tensor.empty(8, 8, dtype=dtypes.half, device="AMD"))
+        prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+      self.assertEqual(prg.arg.local_size, (8, 8, 1))
+      names = _amd_inst_names(prg)
+      i_b128 = names.index("GLOBAL_LOAD_B128")
+      i_first_u16 = names.index("GLOBAL_LOAD_U16")
+      # Between A’s B128 and B’s first U16: wait + unpack, then addr ADDs — not ADDs first.
+      window = names[i_b128:i_first_u16]
+      self.assertIn("S_WAITCNT_VMCNT", window)
+      self.assertTrue(any(n.startswith("V_MOV") or n.startswith("V_LSHR") for n in window))
+      add_i = next(i for i, n in enumerate(window) if n == "V_ADD_NC_U32_E64")
+      unpack_i = next(i for i, n in enumerate(window) if n.startswith("V_MOV") or n.startswith("V_LSHR"))
+      self.assertLess(unpack_i, add_i)
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_wmma_acc_idx_map_survives_tile_key_collision(self):
     # Product-16 REG ACC: 16 consecutive SLOAD packs. First-idx tile keys collide (4 keys for
     # 16 packs), so epilogue must use reg_idx→(init,lane) — not tiles[tile] alone.

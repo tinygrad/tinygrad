@@ -1671,6 +1671,11 @@ def _hoist_loads_before_wmma(ops:list[UOp]) -> list[UOp]:
     while dest > 0:
       p = out[dest - 1]
       if p.op is Ops.INS and p.arg is AMDOps.EXTRACT:
+        # Walk through ACC EXTRACTs glued after WMMA, but never past EXTRACTs of a still-live
+        # vector LOAD whose VGPRs the hoisted chunk would clobber (half 8×8: B addr ADDs into
+        # A’s B128 dests → sq_intr hang / wrong mul).
+        ext_src = set().union(*(_reg_idxs(s) for s in p.src))
+        if chunk_dst & (ext_src | _reg_idxs(p)): break
         dest -= 1
         continue
       if p.op is Ops.INS and p.arg is AMDOps.WMMA:
