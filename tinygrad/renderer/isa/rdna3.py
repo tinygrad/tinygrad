@@ -2103,12 +2103,12 @@ pm_stage_wmma_ab = PatternMatcher([(UPat(Ops.WMMA, name="wmma"), stage_wmma_ab_t
 def apply_tc_hand_opts(tk, rngs):
   from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
   lds_ab = getenv("TC_LDS_AB", 0)
-  # Register path: WGID@s15 + hoist-vs-WMMA → product-8 (4×2) correct. LOCAL=2 wins on HW.
-  # Product-16 still hangs/NaNs at large N. Override via TC_*.
+  # Register path: ALLOW_UPCAST16 defaults on → product-16 (4×4). LOCAL=2. TC_UPCAST_TILES=8 for p8.
+  # LDS path keeps ALLOW_UPCAST16 off (spills); product-8 remains the LDS default.
   up_cap = getenv("TC_UPCAST", 4)
   loc_cap = getenv("TC_LOCAL", 2)
   up16 = _allow_upcast16()
-  max_tiles = min(getenv("TC_UPCAST_TILES", 8), 8 if not up16 else 10**9)
+  max_tiles = min(getenv("TC_UPCAST_TILES", 16 if up16 else 8), 8 if not up16 else 10**9)
   if lds_ab and getenv("ALLOW_LDS_PRODUCT8", 1) == 0:
     up_cap, max_tiles = min(up_cap, 2), min(max_tiles, 4)
   local_dims, loc_szs = ([0, 1], [8, 4, 2]) if lds_ab else ([0], [4, 2])

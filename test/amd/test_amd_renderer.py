@@ -1148,8 +1148,7 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_upcast4_without_spill(self):
-    # Full 4×4 (16 WMMA) is ALLOW_UPCAST16-only. Even SPILL=0 offline can TDR display GPUs
-    # (vgpr_span≈254). Register path; expect ≥16 WMMA. Scratch may be high — do not ship.
+    # Explicit product-16 (4×4) register path — also the register default when ALLOW_UPCAST16.
     import os
     old_u, old_l, old_t, old_r, old_a = (os.environ.get("TC_UPCAST"), os.environ.get("TC_LDS_AB"),
                                         os.environ.get("TC_UPCAST_TILES"), os.environ.get("AMD_REMAT"),
@@ -1279,11 +1278,11 @@ class TestAMDRenderer(unittest.TestCase):
       to_program_cache.clear()
 
   def test_half_matmul_default_is_spill_free_sixteen_wmma(self):
-    # Default ISA: register path UPCAST=4×2 (product 8) + LOCAL=2 → 8 WMMA.
+    # Default ISA: register path UPCAST=4×4 (product 16) + LOCAL=2 → 16 WMMA.
     import os
     old_u, old_t, old_l = os.environ.get("TC_UPCAST"), os.environ.get("TC_UPCAST_TILES"), os.environ.get("TC_LDS_AB")
-    old_loc = os.environ.get("TC_LOCAL")
-    for k in ("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB", "TC_LOCAL"): os.environ.pop(k, None)
+    old_loc, old_a = os.environ.get("TC_LOCAL"), os.environ.get("ALLOW_UPCAST16")
+    for k in ("TC_UPCAST", "TC_UPCAST_TILES", "TC_LDS_AB", "TC_LOCAL", "ALLOW_UPCAST16"): os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
     try:
@@ -1292,14 +1291,15 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       linear_ops = _lin_ops(prg)
-      self.assertEqual(linear_ops.count(AMDOps.WMMA), 8)
+      self.assertEqual(linear_ops.count(AMDOps.WMMA), 16)
       self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
       self.assertNotIn(AMDOps.SPILL, linear_ops)
       self.assertNotIn(AMDOps.FILL, linear_ops)
       self.assertNotIn(AMDOps.SLOAD, linear_ops)
       self.assertNotIn(AMDOps.SSTORE, linear_ops)
     finally:
-      for k, old in (("TC_UPCAST", old_u), ("TC_UPCAST_TILES", old_t), ("TC_LDS_AB", old_l), ("TC_LOCAL", old_loc)):
+      for k, old in (("TC_UPCAST", old_u), ("TC_UPCAST_TILES", old_t), ("TC_LDS_AB", old_l),
+                     ("TC_LOCAL", old_loc), ("ALLOW_UPCAST16", old_a)):
         if old is None: os.environ.pop(k, None)
         else: os.environ[k] = old
       getenv.cache_clear()
@@ -1308,7 +1308,7 @@ class TestAMDRenderer(unittest.TestCase):
   def test_half_matmul_c_stores_share_peeled_base(self):
     # Soft-peel nested ADD+imm so C stores share one addr base; large byte offs use v_lshl_add.
     import os
-    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES", "TC_LOCAL")}
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES", "TC_LOCAL", "ALLOW_UPCAST16")}
     for k in old: os.environ.pop(k, None)
     getenv.cache_clear()
     to_program_cache.clear()
@@ -1318,14 +1318,14 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       stores = [u for u in _prg_lin(prg).src if u.op is Ops.INS and u.arg is AMDOps.STORE]
-      self.assertEqual(len(stores), 64)  # product-8 default (4×2)
+      self.assertEqual(len(stores), 128)  # product-16 default (4×4)
       self.assertEqual(len({id(u.src[1]) for u in stores}), 1)
-      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 56)
+      self.assertGreaterEqual(sum(1 for u in stores if len(u.src) >= 4), 112)
       names = _amd_inst_names(prg)
-      self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 40)
-      self.assertEqual(names.count("GLOBAL_STORE_B32"), 64)
+      self.assertLessEqual(names.count("V_LSHL_ADD_U32"), 80)
+      self.assertEqual(names.count("GLOBAL_STORE_B32"), 128)
       # Float EXTRACT coalesces onto WMMA pack+lane — stores read ACC VGPRs directly.
-      self.assertLess(names.count("V_MOV_B32_E32"), 200)
+      self.assertLess(names.count("V_MOV_B32_E32"), 400)
       self.assertGreater(sum(1 for i in _REN._insts_from_linear(_prg_lin(prg))
                              if getattr(i, "op_name", "") == "GLOBAL_STORE_B32" and getattr(i, "offset", 0)), 10)
     finally:
@@ -1519,7 +1519,7 @@ class TestAMDRenderer(unittest.TestCase):
                Tensor.empty(256, 256, dtype=dtypes.half, device="AMD")).cast(dtypes.float)
         prg = _to_prg(ast.schedule_linear().src[-1].src[0])
       self.assertEqual(_lin_ops(prg).count(AMDOps.LLOAD), 0)
-      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 8)  # register default product-8 (4×2)
+      self.assertEqual(_lin_ops(prg).count(AMDOps.WMMA), 16)  # register default product-16 (4×4)
     finally:
       if old is None: os.environ.pop("TC_LDS_AB", None)
       else: os.environ["TC_LDS_AB"] = old
