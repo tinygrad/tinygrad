@@ -10287,6 +10287,8 @@ nbio_7_2_0 = {
   'regRCC_DEV0_EPF2_STRAP2': (53506, 5, {'strap_no_soft_reset_dev0_f2': (7, 7), 'strap_resize_bar_en_dev0_f2': (8, 8), 'strap_max_pasid_width_dev0_f2': (9, 13), 'strap_msi_pervector_mask_cap_dev0_f2': (14, 14), 'strap_aer_en_dev0_f2': (16, 16), 'strap_acs_en_dev0_f2': (17, 17), 'strap_cpl_abort_err_en_dev0_f2': (20, 20), 'strap_dpa_en_dev0_f2': (21, 21), 'strap_vc_en_dev0_f2': (23, 23), 'strap_msi_multi_cap_dev0_f2': (24, 26), 'strap_pasid_en_dev0_f2': (28, 28), 'strap_pasid_exe_permission_supported_dev0_f2': (29, 29), 'strap_pasid_global_invalidate_supported_dev0_f2': (30, 30), 'strap_pasid_priv_mode_supported_dev0_f2': (31, 31)}),
 }
 nbio_7_4 = {
+  'regBIF_BX_PF0_GPU_HDP_FLUSH_REQ': (0x106, 2, {}),
+  'regBIF_BX_PF0_GPU_HDP_FLUSH_DONE': (0x107, 2, {}),
 }
 nbio_7_7_0 = {
   'regBIF_BX_PF0_RSMU_INDEX': (0, 1, {'rsmu_index': (0, 31)}),
