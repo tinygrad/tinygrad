@@ -1063,12 +1063,16 @@ class TestAMDRenderer(unittest.TestCase):
     to_program_cache.clear()
     try:
       with Context(BEAM=0):
-        prg = _to_prg((Tensor.eye(256, dtype=dtypes.half) @
-                       Tensor.empty(256, 256, dtype=dtypes.half)).schedule_linear().src[-1].src[0])
-      linear_ops = _lin_ops(prg)
-      self.assertGreaterEqual(linear_ops.count(AMDOps.WMMA), 4)
-      self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
-      self.assertNotIn(AMDOps.SPILL, linear_ops)
+        for ast in (
+          (Tensor.eye(256, dtype=dtypes.half) @ Tensor.empty(256, 256, dtype=dtypes.half)),
+          (Tensor.empty(256, 256, dtype=dtypes.half) @ Tensor.eye(256, dtype=dtypes.half)),
+        ):
+          to_program_cache.clear()
+          prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+          linear_ops = _lin_ops(prg)
+          self.assertGreaterEqual(linear_ops.count(AMDOps.WMMA), 4)
+          self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
+          self.assertNotIn(AMDOps.SPILL, linear_ops)
     finally:
       if old is None: os.environ.pop("TC_LDS_AB", None)
       else: os.environ["TC_LDS_AB"] = old
