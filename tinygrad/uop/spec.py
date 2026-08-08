@@ -258,10 +258,12 @@ spec_full = PatternMatcher([
 spec_kernel_graph = PatternMatcher([
   # sink
   (UPat(Ops.SINK, dtypes.void), lambda: True),
+  # bind
+  (UPat(Ops.BIND), lambda: True),
   # const + stack to make vconsts
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.STACK, src=()), lambda: True),
-  (UPat(Ops.STACK, src=UPat(Ops.CONST)), lambda: True),
+  (UPat(Ops.STACK, src=UPat((Ops.CONST, Ops.BIND, Ops.PARAM))), lambda: True),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer

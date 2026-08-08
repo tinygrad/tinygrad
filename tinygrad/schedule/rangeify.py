@@ -334,8 +334,9 @@ def no_indexing_calls(u:UOp):
       # sometimes if call srcs have children the call will get an INDEX. we remove it here.
       # TODO: we should add safety checks here for contiguous
       new_srcs.append(x.src[0])
-    elif x.op is Ops.SHRINK and x.contiguous_view_offset() == 0:
+    elif x.op is Ops.SHRINK:
       # SHRINK with offset 0 is fine
+      # TODO: check offset
       new_srcs.append(x.src[0])
     else:
       # everything else we pass through
