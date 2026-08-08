@@ -48,7 +48,7 @@ OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
-V_ASHR = { 2:RDNA3Ops.v_ashrrev_i16, 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
+V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
 
 # ---- helpers ----
 lane_ctr = itertools.count()
@@ -471,7 +471,7 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.ADD, Ops.SUB), dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: arith64(ctx, x, x.op == Ops.ADD)),
   # --- general alu ---
   (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
-    if dtypes.is_unsigned(x.dtype) else V_ASHR[x.dtype.itemsize]))),
+    if dtypes.is_unsigned(x.dtype) else V_ASHR[max(4, x.dtype.itemsize)]))),
   (UPat(Ops.SHL, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHL[max(2, x.dtype.itemsize)]))),
   (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
   (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: \
