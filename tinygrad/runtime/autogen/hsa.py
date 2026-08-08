@@ -45,6 +45,10 @@ class union_COMPUTE_TMPRING_SIZE_GFX11_bitfields(c.Struct):
   WAVESIZE: int
 union_COMPUTE_TMPRING_SIZE_GFX11_bitfields.register_fields([('WAVES', ctypes.c_uint32, 0, 12, 0), ('WAVESIZE', ctypes.c_uint32, 1, 15, 4)])
 union_COMPUTE_TMPRING_SIZE_GFX11.register_fields([('bitfields', union_COMPUTE_TMPRING_SIZE_GFX11_bitfields, 0), ('bits', union_COMPUTE_TMPRING_SIZE_GFX11_bitfields, 0), ('u32All', ctypes.c_uint32, 0), ('i32All', ctypes.c_int32, 0), ('f32All', ctypes.c_float, 0)])
+
+# GFX10 (RDNA2) uses the same format as GFX11
+union_COMPUTE_TMPRING_SIZE_GFX10 = union_COMPUTE_TMPRING_SIZE_GFX11
+union_COMPUTE_TMPRING_SIZE_GFX10_bitfields = union_COMPUTE_TMPRING_SIZE_GFX11_bitfields
 @c.record
 class union_COMPUTE_TMPRING_SIZE_GFX12(c.Struct):
   SIZE = 4

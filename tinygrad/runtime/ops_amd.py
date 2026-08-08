@@ -131,9 +131,8 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def memory_barrier(self):
-    pf = '0' if self.nbio.version[:2] != (7, 11) else '1'
-    self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
-                      reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
+    # RDNA2 workaround: skip HDP flush until NBIO registers are properly generated
+    # TODO: implement proper HDP flush for RDNA2
     return self.acquire_mem()
 
   def spi_config(self, tracing:bool):
@@ -646,6 +645,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
                      supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
+    # RDNA2 workaround: if cpu_access is True and not host, force uncached to use GTT
+    if self.dev.target[0] == 10 and options.cpu_access and not options.host:
+      options = BufferSpec(uncached=True, cpu_access=options.cpu_access, host=options.host, nolru=options.nolru, external_ptr=options.external_ptr)
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
