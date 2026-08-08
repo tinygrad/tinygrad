@@ -772,6 +772,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
+  # base with UNSHARD
+  @property
+  def unsharded_base(self) -> UOp:
+    if self.op in GroupOp.Movement: return self.src[0].base
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
+    # TODO: why can't this be in normal base?
+    if self.op is Ops.UNSHARD: return self.src[0].base
+    return self
+
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
