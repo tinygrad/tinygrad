@@ -1680,6 +1680,17 @@ def _vm_load_count(insts:list) -> int:
              (n.startswith("GLOBAL_LOAD") or n.startswith("SCRATCH_LOAD") or
               n.startswith("BUFFER_LOAD") or n.startswith("FLAT_LOAD")))
 
+def _split_scale_and_loads(emitted:list) -> tuple[list, list]:
+  """Split dest-as-addr scalar load emit into addr ALU vs trailing VMEM loads."""
+  i = len(emitted)
+  while i > 0 and _vm_load_count([emitted[i - 1]]): i -= 1
+  return emitted[:i], emitted[i:]
+
+def _clauseable_half_gload(u:UOp, skip:set[UOp], mask_depth:int) -> bool:
+  # Scalar half global LOAD with dest-as-addr (no mask/TMP). Streak → hoist scales + s_clause.
+  if u in skip or mask_depth or u.op is not Ops.INS or u.arg is not AMDOps.LOAD: return False
+  return _reg_slots(u) == 1 and u.dtype.scalar() is dtypes.half
+
 def insts_from_linear(lin:UOp):
   ops = list(lin.src)
   skip = _compute_amd_skip(ops) | _fused_d16_hi_loads(ops)
@@ -1722,11 +1733,15 @@ def insts_from_linear(lin:UOp):
     if (n:=_vm_load_count(insts)) and regs: pending_vm.append((regs, n))
   def _pending_src(regs:set[int]) -> bool:
     return any(pr & regs for pr, _ in pending_vm) or bool(pending["lgkm"] & regs)
-  for u in _hoist_loads_before_wmma(_sink_wmma_past_loads(_hoist_lloads_before_extracts(ops))):
+  scheduled = _hoist_loads_before_wmma(_sink_wmma_past_loads(_hoist_lloads_before_extracts(ops)))
+  oi = 0
+  while oi < len(scheduled):
+    u = scheduled[oi]
     if u.op is Ops.INS and u.arg is AMDOps.LABEL:
       flush("vm", "lgkm", "vs")
       store_addr_cache.clear()
       targets[u.tag] = byte
+      oi += 1
       continue
     if u.op is Ops.INS and u.arg in (AMDOps.BRANCH, AMDOps.CBRANCH_SCC1):
       flush("vm", "lgkm", "vs")
@@ -1734,6 +1749,7 @@ def insts_from_linear(lin:UOp):
       inst = r3.s_branch(0) if u.arg is AMDOps.BRANCH else r3.s_cbranch_scc1(0)
       items.append((inst, u.tag, byte))
       byte += len(inst.to_bytes())
+      oi += 1
       continue
     if _needs_vm_flush(u):
       # Soft allow can no-op when dest ACC intersects an early pending batch. Drain VM before WMMA.
@@ -1747,6 +1763,7 @@ def insts_from_linear(lin:UOp):
       if (domain:=_wait_domain_for_load(u)) is not None:
         if domain == "vm": note_vm(_reg_idxs(u), emitted)
         else: pending[domain] |= _reg_idxs(u)
+      oi += 1
       continue
     # LDS stores must complete before s_barrier / next LLOAD (hand: waitcnt then barrier).
     if u.op is Ops.INS and u.arg is AMDOps.BARRIER:
@@ -1756,7 +1773,28 @@ def insts_from_linear(lin:UOp):
     masked = mask_depth > 0 and u.op is Ops.INS and u.arg in _MASKED_MEM
     if u in skip:
       if u.op is Ops.INS and u.arg is AMDOps.END_MASK: mask_depth -= 1
+      oi += 1
       continue
+    # Cluster scalar half loads: all dest-as-addr scales, then s_clause + tight VMEM (LLVM-style B).
+    if getenv("AMD_LOAD_CLAUSE", 1) and _clauseable_half_gload(u, skip, mask_depth):
+      j = oi + 1
+      while j < len(scheduled) and _clauseable_half_gload(scheduled[j], skip, mask_depth): j += 1
+      if j - oi >= 2:
+        parts = [list(insts_for_uop(scheduled[k], skip, False)) for k in range(oi, j)]
+        if all(_vm_load_count(p) == 1 for p in parts):
+          store_addr_cache.clear()
+          scales, loads = [], []
+          for p in parts:
+            sc, ld = _split_scale_and_loads(p)
+            scales.extend(sc)
+            loads.extend(ld)
+          for inst in scales: emit(inst)
+          emit(r3.s_clause(simm16=len(loads) - 1))
+          for inst in loads: emit(inst)
+          for k, p in enumerate(parts):
+            note_vm(_reg_idxs(scheduled[oi + k]), p)
+          oi = j
+          continue
     is_store = u.op is Ops.INS and u.arg is AMDOps.STORE
     emitted = list(insts_for_uop(u, skip, masked, store_addr_cache if is_store else None))
     # VALU copy of an outstanding VMEM/LDS dest must wait first (PACK/MOV across pools).
@@ -1775,6 +1813,7 @@ def insts_from_linear(lin:UOp):
       else: pending[domain] |= _reg_idxs(u)
     if (domain:=_wait_domain_for_store(u)) is not None:
       pending[domain] |= _store_src_regs(u)
+    oi += 1
   # Drain outstanding global stores before s_endpgm (appended by the renderer).
   flush("vs")
   insts = []
