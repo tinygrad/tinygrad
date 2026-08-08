@@ -193,9 +193,10 @@ def _global_load_insts(u:UOp, addr:Reg) -> list:
   if slots == 2: return [r3.global_load_b64(_dst(u), addr, saddr=saddr)]
   if slots == 4: return [r3.global_load_b128(_dst(u), addr, saddr=saddr)]
   if slots == 8:
-    return [r3.global_load_b128(_reg_chunk(greg(u), 0, 4), addr, saddr=saddr),
-            r3.v_add_nc_u32_e64(TMP_VADDR, 16, addr),
-            r3.global_load_b128(_reg_chunk(greg(u), 4, 4), TMP_VADDR, saddr=saddr)]
+    # offset+16 keeps addr live (no TMP bump) so the pair can s_clause.
+    return [r3.s_clause(simm16=1),
+            r3.global_load_b128(_reg_chunk(greg(u), 0, 4), addr, saddr=saddr),
+            r3.global_load_b128(_reg_chunk(greg(u), 4, 4), addr, saddr=saddr, offset=16)]
   raise CompileError(f"no global load {u.dtype}")
 
 def _apply_byte_off(addr:Reg, byte_off:int, idx:UOp|None=None, itemsize:int=1) -> tuple[list, Reg, int]:
@@ -255,8 +256,7 @@ def _global_store_insts(u:UOp, addr:Reg, byte_off:int=0) -> list:
               r3.v_add_nc_u32_e64(TMP_VADDR, 16, addr),
               r3.global_store_b128(addr=TMP_VADDR, data=hi, saddr=saddr, offset=o)]
     return [r3.global_store_b128(addr=addr, data=lo, saddr=saddr),
-            r3.v_add_nc_u32_e64(TMP_VADDR, 16, addr),
-            r3.global_store_b128(addr=TMP_VADDR, data=hi, saddr=saddr)]
+            r3.global_store_b128(addr=addr, data=hi, saddr=saddr, offset=16)]
   raise CompileError(f"no global store {val.dtype}")
 
 def _reg_idxs(x:UOp) -> set[int]:
