@@ -7,8 +7,8 @@ from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak, pm_cast_weak
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.renderer.isa import ISARenderer, PreRegallocContext
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -394,7 +394,7 @@ pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, name="u", src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
@@ -414,12 +414,13 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, ctx.pre_regalloc_context)
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
     regalloc_ctx = LinearScanRegallocContext(lst, ctx)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
-    lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
+    lst = ctx.stack_alloc(lst)
+    lst = line_rewrite(lst, ctx.post_regalloc_matcher, ctx.post_regalloc_ctx)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
@@ -472,7 +473,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      renderer.pre_regalloc_context = PreRegallocContext(full_sink, renderer)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
