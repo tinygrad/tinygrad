@@ -2012,12 +2012,13 @@ def stage_wmma_ab_bounce(wmma:UOp, coop:list[UOp]) -> UOp|None:
   news: list[UOp] = []
   changed = False
   for i, ab in enumerate(wmma.src[:2]):
-    if ab.op is not Ops.INDEX or ab.addrspace != AddrSpace.GLOBAL or any(u.op is Ops.STAGE for u in ab.toposort()):
+    if any(u.op is Ops.STAGE for u in ab.toposort()):
       news.append(ab)
       continue
-    if not any(u in coop for u in ab.toposort() if u.op is Ops.RANGE):
-      news.append(ab)
-      continue
+    # Both A and B must be GLOBAL INDEX to stage. Computed operands (eye/WHERE) stay
+    # unstaged; mixing with a staged peer breaks expand_broadcast (eye@B IndexError).
+    if ab.op is not Ops.INDEX or ab.addrspace != AddrSpace.GLOBAL: return None
+    if not any(u in coop for u in ab.toposort() if u.op is Ops.RANGE): return None
     frag_rns = {rn for rn, _ in wmma.arg[4][i]}
     frag = list(dict.fromkeys(u for u in ab.toposort() if u.op is Ops.RANGE and u.arg[0] in frag_rns))
     tile = list(dict.fromkeys(u for u in ab.toposort()
@@ -2052,12 +2053,11 @@ def stage_wmma_ab_tid(wmma:UOp, coop:list[UOp]) -> UOp|None:
   news: list[UOp] = []
   changed = False
   for i, ab in enumerate(wmma.src[:2]):
-    if ab.op is not Ops.INDEX or ab.addrspace != AddrSpace.GLOBAL or any(u.op is Ops.STAGE for u in ab.toposort()):
+    if any(u.op is Ops.STAGE for u in ab.toposort()):
       news.append(ab)
       continue
-    if not any(u in coop for u in ab.toposort() if u.op is Ops.RANGE):
-      news.append(ab)
-      continue
+    if ab.op is not Ops.INDEX or ab.addrspace != AddrSpace.GLOBAL: return None
+    if not any(u in coop for u in ab.toposort() if u.op is Ops.RANGE): return None
     buf, stride = ab.src[0], _index_row_stride(ab)
     if stride is None: return None
     frag_rns = {rn for rn, _ in wmma.arg[4][i]}

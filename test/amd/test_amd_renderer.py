@@ -1053,6 +1053,28 @@ class TestAMDRenderer(unittest.TestCase):
     # TC_LOCAL=4 → asymmetric LOCAL 4×2 (symmetric 4×4 historically TDR on display).
     self._half_matmul_tc_lds_ab_pre_regalloc(tc_local=4)
 
+  def test_tc_lds_ab_skips_stage_for_eye_operand(self):
+    # eye/WHERE A is not a GLOBAL INDEX — partial staging mixed with staged B and broke
+    # expand_broadcast. Fall back to register path (no LLOAD) so identity@B compiles.
+    import os
+    old = os.environ.get("TC_LDS_AB")
+    os.environ["TC_LDS_AB"] = "1"
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        prg = _to_prg((Tensor.eye(256, dtype=dtypes.half) @
+                       Tensor.empty(256, 256, dtype=dtypes.half)).schedule_linear().src[-1].src[0])
+      linear_ops = _lin_ops(prg)
+      self.assertGreaterEqual(linear_ops.count(AMDOps.WMMA), 4)
+      self.assertEqual(linear_ops.count(AMDOps.LLOAD), 0)
+      self.assertNotIn(AMDOps.SPILL, linear_ops)
+    finally:
+      if old is None: os.environ.pop("TC_LDS_AB", None)
+      else: os.environ["TC_LDS_AB"] = old
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_tc_lds_tid_fill_peer_lds_reads(self):
     # Opt-in tid-fill (TC_LDS_TID=1): peer remap → DS_LOAD_U16 when A block==threads
     # (needs A tile_prod=local_n*2). Default LDS tiles 2×2 → tile_prod=2 → bounce fallback.
