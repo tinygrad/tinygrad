@@ -303,7 +303,9 @@ def render_wmma(ctx, wmma:UOp):
 def cvt(ctx, y:UOp, x:UOp):
   # NOTE: this is hacky
   def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  def _cvt_ins(dtin:DType, dtout:DType): return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
+  def _cvt_ins(dtin:DType, dtout:DType):
+    try: return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
+    except Exception as e: raise Exception(f"isa doesn't support requested cast from: {dtin} -> {dtout}")
 
   if x.dtype in dtypes.int64s and y.dtype.itemsize == 4: # b32 -> b64
     targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
@@ -386,10 +388,11 @@ extra_matcher = PatternMatcher([
 
 pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int16, dtypes.uint16)).bitcast(x.dtype)),
+  (UPat.var("y", dtypes.half).cast(dtypes.int8s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
   (UPat.var("y", dtypes.float32).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int32, dtypes.uint32))),
   (UPat.var("y", dtypes.float32).cast(dtypes.int64s, name="x"), lambda y,x: y.cast(smux(x.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
-  (UPat.var("y", dtypes.double).cast((dtypes.half,)+dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(dtypes.half).cast(x.dtype)),
+  (UPat.var("y", dtypes.double).cast(dtypes.half), lambda y: y.float().half()),
+  (UPat.var("y", dtypes.double).cast(dtypes.int16s+dtypes.int8s, name="x"), lambda y,x: y.float().cast(smux(x.dtype, dtypes.int32, dtypes.uint32))),
   (UPat.var("y", dtypes.double).cast(dtypes.int64s).named("x"), lambda y,x: f64_to_int64(y, x.dtype)),
 ])
 
