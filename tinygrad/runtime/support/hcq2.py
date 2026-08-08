@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any, Sequence
-import struct, functools, time, collections, itertools, decimal
+import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
@@ -536,13 +536,16 @@ class HCQ2Compiled(Compiled):
 
   def _at_profile_finalize(self):
     from tinygrad.tensor import Tensor
-    with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
-    if not (ents:=list(self.prof_ents.values())): return
-    self.prof_ents.clear()
-    st = perf_counter_us()
-    self.synchronize()
-    gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
-    Compiled.profile_events.append(ProfileDeviceEvent(self.device, (st+perf_counter_us())/2 - gpu, self.device_props()))
+    tdiffs = []
+    for _ in range(5):
+      with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
+      if not (ents:=list(self.prof_ents.values())): return
+      self.prof_ents.clear()
+      st = perf_counter_us()
+      self.synchronize()
+      gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
+      tdiffs.append((st+perf_counter_us())/2 - gpu)
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
