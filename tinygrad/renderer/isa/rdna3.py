@@ -428,6 +428,9 @@ pre_isel_matcher = PatternMatcher([
     lambda pred,a,b: UOp.group(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y")), name="x"), # prevent 64 bit immediate from being realized into 2 regs for shift
     lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
+  # shift distance must be in single vgpr
+  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s, src=(UPat.var("val"), UPat.var("shft")), name="x"),
+    lambda x,val,shft: x.replace(src=(val, shft.cast(dtypes.uint32)))),
   # --- other ---
   (UPat(Ops.STACK, name="x"), stack2regs),
   (UPat(Ops.CDIV, name="x"), idiv),
