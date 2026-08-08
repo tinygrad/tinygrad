@@ -526,14 +526,13 @@ class HCQ2Compiled(Compiled):
     self.rt_allocator = BumpAllocator(64 << 20)
     self.prof_ents:dict[int, ProfileGraphEntry] = {}
 
-  def collect_prof(self) -> float:
+  def collect_prof(self):
     es = list(self.prof_ents.values())
     sigs = [self.signal(i).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0]/decimal.Decimal(self.timestamp_divider)
             for e in es for i in (e.st_id, e.en_id)]
     if PROFILE: Compiled.profile_events += [ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs),
                                             ProfileDeviceEvent(self.device, perf_counter_us()-max(sigs), self.device_props())]
     self.prof_ents.clear()
-    return float(max(sigs)-min(sigs))/1e6
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
@@ -546,7 +545,7 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
-  def synchronize(self, timeout:int|None=None) -> float|None:
+  def synchronize(self, timeout:int|None=None):
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
     sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
@@ -555,7 +554,7 @@ class HCQ2Compiled(Compiled):
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
-    return self.collect_prof() if self.prof_ents else None
+    if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
 

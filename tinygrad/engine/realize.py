@@ -223,9 +223,12 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   tms:list[float|None] = []
   for e in (aux:=call.arg.aux).prof: cast(Any, Device[e.device]).prof_ents[e.st_id] = e
-  for d in aux.device:
-    with track_stats(ctx, call, d, [], ctx.var_vals) as et:
-      if ctx.wait: et[0] = cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
+  for d in [cast(Any, Device[x]) for x in aux.device]:
+    with track_stats(ctx, call, d.device, [], ctx.var_vals) as et:
+      if ctx.wait:
+        d.synchronize(timeout=ctx.timeout)
+        ts = [d.signal(i)._buf.cpu_view().view(fmt='Q')[0] for e in aux.prof if e.device == d.device for i in (e.st_id, e.en_id)]
+        if ts: et[0] = float(max(ts)-min(ts))/d.timestamp_divider/1e6
       tms += et
   return tms[0]
 
