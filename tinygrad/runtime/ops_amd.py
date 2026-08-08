@@ -131,9 +131,8 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def memory_barrier(self):
-    pf = '0' if self.nbio.version[:2] != (7, 11) else '1'
-    self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
-                      reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
+    # RDNA2 workaround: skip HDP flush until NBIO registers are properly generated
+    # TODO: implement proper HDP flush for RDNA2
     return self.acquire_mem()
 
   def spi_config(self, tracing:bool):
