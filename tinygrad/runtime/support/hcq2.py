@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any, Sequence
 import struct, functools, time, collections, itertools, decimal
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
@@ -531,9 +531,18 @@ class HCQ2Compiled(Compiled):
     if PROFILE:
       es = list(self.prof_ents.values())
       sigs = [self.signal(i)._buf.cpu_view().view(fmt='Q')[0]/decimal.Decimal(self.timestamp_divider) for e in es for i in (e.st_id, e.en_id)]
-      Compiled.profile_events += [ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs),
-                                  ProfileDeviceEvent(self.device, perf_counter_us()-max(sigs), self.device_props())]
+      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs))
     self.prof_ents.clear()
+
+  def _at_profile_finalize(self):
+    from tinygrad.tensor import Tensor
+    with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
+    if not (ents:=list(self.prof_ents.values())): return
+    self.prof_ents.clear()
+    st = perf_counter_us()
+    self.synchronize()
+    gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, (st+perf_counter_us())/2 - gpu, self.device_props()))
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
