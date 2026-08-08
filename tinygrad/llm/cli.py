@@ -12,7 +12,7 @@ class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4"):
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
@@ -105,6 +105,7 @@ class FallbackTemplate:
       if role == 'user': return "[INST]"
       if role == 'assistant': return ""
       raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.tok.preset}'")
+    if self.tok.preset == 'gpt-4o': return "<|start|>" + role + "<|message|>"
     return "<|start_header_id|>" + role + "<|end_header_id|>\n\n"
   def end_turn(self) -> str:
     if self.tok.preset == 'olmo': return "\n"
@@ -112,11 +113,13 @@ class FallbackTemplate:
     if self.tok.preset == 'qwen2': return self.tok.decode([self.tok.eos_id]) + "\n"
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
+    if self.tok.preset == 'gpt-4o': return "<|end|>"
     return self.tok.decode([self.tok.eos_id])
   def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
+      if self.tok.preset == 'gpt-4o' and msg["role"] == "assistant": out = out.removesuffix("<|message|>") + "<|channel|>final<|message|>"
       content = msg.get("content")
       if isinstance(content, str): out += content
       elif isinstance(content, list):
@@ -125,7 +128,8 @@ class FallbackTemplate:
           else: raise RuntimeError(f"unhandled type: {c['type']}")
       elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
       out += self.end_turn()
-    return out + self.role("assistant") if add_generation_prompt else out
+    if add_generation_prompt: return out + ("<|start|>assistant" if self.tok.preset == 'gpt-4o' else self.role("assistant"))
+    return out
 
 from tinygrad.llm.serve import LLMServer
 
