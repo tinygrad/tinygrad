@@ -86,6 +86,13 @@ def stack2regs(ctx, x:UOp):
     if x.dtype.itemsize == 2:
       if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
       else: mvs.append(vmov(x.src[i*2]))
+    elif x.dtype.itemsize == 1:
+      def _pk(j:int):
+        p = x.src[i*4+j].bitcast(dtypes.uint32) & const(0xFF)
+        return p if j == 0 else p << const(8 * j)
+      out = _pk(0)
+      for j in range(3): out = out | _pk(j+1)
+      mvs.append(out)
     else: mvs.append(vmov(x.src[i]))
   return UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
 
