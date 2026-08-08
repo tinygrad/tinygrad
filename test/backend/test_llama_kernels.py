@@ -5,6 +5,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu, assert_kernel_count
@@ -97,6 +98,23 @@ class TestLocalAmax(unittest.TestCase):
     out = (x * local_abs_max(x)).clone().realize()
     assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
+
+class TestSwiGLU(unittest.TestCase):
+  def test_forward_backward(self):
+    Tensor.manual_seed(1)
+    x = Tensor.randn(2, 32, 64).cast(dtypes.bfloat16).contiguous().realize()
+    x.requires_grad = True
+    grad = Tensor.randn(2, 32, 32).cast(dtypes.bfloat16).contiguous().realize()
+    out = swiglu(x)
+    actual_grad = out.gradient(x, gradient=grad)[0].realize()
+
+    act, gate = x[..., :32].float(), x[..., 32:].float()
+    sig, upstream = act.sigmoid(), grad.float()
+    expected = (act * sig * gate).cast(dtypes.bfloat16).realize()
+    expected_grad = Tensor.cat(upstream * sig * (1.0 + act * (1.0 - sig)) * gate, upstream * act * sig, dim=-1).cast(dtypes.bfloat16).realize()
+    with Context(DEBUG=0):
+      self.assertTrue(out.allclose(expected, atol=0.25, rtol=0.03).item(), "forward mismatch")
+      self.assertTrue(actual_grad.allclose(expected_grad, atol=0.25, rtol=0.03).item(), "backward mismatch")
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):
