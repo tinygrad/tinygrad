@@ -91,7 +91,7 @@ spec_shared = PatternMatcher([
    isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END, Ops.ENDIF))), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
@@ -217,7 +217,7 @@ spec_program = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
   # control flow
-  (UPat(Ops.IF, dtypes.bool, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.IF, dtypes.void, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(Ops.ENDIF, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.RANGE, Ops.ENDIF, Ops.START)),)), lambda: True),
   (UPat((Ops.THEN, Ops.ELSE), dtypes.void, (UPat(Ops.IF),), allow_any_len=True), lambda: True),

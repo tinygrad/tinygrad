@@ -384,7 +384,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if isinstance(ren, LLVMRenderer):
-    sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store")
+    sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store", bottom_up=True)
     sink = graph_rewrite(sink, pm_add_control_flow2, ctx=CFGContext2(sink), name="add control flow", bottom_up=True)
     sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
   else: sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
@@ -398,8 +398,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 # TODO: rm when all renderers are refactored
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))

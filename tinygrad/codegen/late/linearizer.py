@@ -123,20 +123,20 @@ def linearize2(sink:UOp) -> list[UOp]:
   sched: dict[UOp, UOp|None] = {}
   cfg: dict[UOp|None, list[UOp]] = {None: []}
 
-  # early schedule, here we find the earliest/highest block u can go in
+  # early schedule, here we find the earliest block u can go in
   for u in topo:
     # control ops are pinned to themselves
     if u.op in GroupOp.Control: cfg[u] = []
-    # the highest block for u is the lowest block of all its srcs
+    # the earliest block for u is the latest block of all its srcs
     else: sched[u] = max((sched.get(s, s) for s in u.src), key=block_depth, default=None)
 
-  # late schedule, here we find the latest/lowest block u can go in, then we pick the best block for u in the range of earliest to latest
+  # late schedule, here we find the latest block u can go in, then we pick the best block for u in the range of earliest to latest
   for u in reversed(sched):
-    # GETTUPLE is pinned to the block with the argument it extracts
+    # GETTUPLE is pinned to the block whose argument it extracts
     if u.op is Ops.GETTUPLE: continue
-    # the lowest block for u is the lowest block that dominates all users of u
+    # the latest block for u is the latest block that dominates all users of u
     best = last = lca(tuple(sched.get(s, s if s.op in (Ops.THEN, Ops.ELSE) else idom(s)) for s in users[u]))
-    # we pick the block with lowest loop nest and most depth, so we hoist out of loops and into branches
+    # we pick the block with least loop nest and most depth, so we hoist out of loops and into branches
     while True:
       if loop_depth(last) < loop_depth(best) or block_depth(last) > block_depth(best) or best is not None and best.op is Ops.IF: best = last
       if last is sched[u]: break
@@ -146,19 +146,8 @@ def linearize2(sink:UOp) -> list[UOp]:
 
   # get the uops in each block
   for k,v in sched.items(): cfg[v].append(k)
-
-  #print("BEFORE BLOCK SCHEDULE")
-  #for k,v in cfg.items():
-  #  print("BLOCK: ", (k.op, k.arg) if k is not None else None)
-  #  for x in v: print("  ", x.op)
-
   # schedule the uops in each block
   for k in cfg: cfg[k] = block_linearize(cfg[k], users)
-
-  #print("AFTER BLOCK SCHEDULE")
-  #for k,v in cfg.items():
-  #  print("BLOCK: ", (k.op, k.arg) if k is not None else None)
-  #  for x in v: print("  ", x.op)
 
   ret = []
   for k,v in cfg.items(): ret.extend(([k] if k is not None else []) + v)

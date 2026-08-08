@@ -117,7 +117,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.THEN | Ops.ELSE | Ops.START | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
@@ -158,7 +158,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
     case Ops.GETTUPLE:
-      # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+      # GETTUPLE extracts a block argument
       return src[0].get_arg(arg).dtype
     case Ops.GETADDR:
       return dtypes.uint64
@@ -357,7 +357,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return self.src[0]._shape if len(self.src) >= 1 else None
 
       case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+        # GETTUPLE extracts a block argument
         inner_shape = self.src[0].get_arg(self.arg)._shape
         if inner_shape is None: return None
         # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
@@ -714,7 +714,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
-    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
     if self.op is Ops.GETTUPLE: return self.src[0].get_arg(self.arg).axis
     if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
