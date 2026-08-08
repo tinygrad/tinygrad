@@ -1334,6 +1334,30 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_half_matmul_irregular_n_compiles_spill_free(self):
+    # Multi-WG / non-power-of-two N still lowers to product-16 register WMMA without spills.
+    import os
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_LOCAL", "TC_UPCAST", "TC_UPCAST_TILES", "ALLOW_UPCAST16")}
+    for k in old: os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      for n in (320, 512, 768):
+        with Context(BEAM=0):
+          ast = (Tensor.empty(n, n, dtype=dtypes.half, device="AMD") @
+                 Tensor.empty(n, n, dtype=dtypes.half, device="AMD"))
+          prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+        ops = _lin_ops(prg)
+        self.assertEqual(ops.count(AMDOps.WMMA), 16, n)
+        self.assertNotIn(AMDOps.SPILL, ops, n)
+        self.assertEqual(ops.count(AMDOps.LLOAD), 0, n)
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_acc_zero_uses_vopd(self):
     # Product-16 ACC packs zero-init via v_dual_mov (even/odd banks), not 128 scalar movs.
     import os
