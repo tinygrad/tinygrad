@@ -31,6 +31,7 @@ nav:
       - developer/runtime.md
       - HCQ: developer/hcq.md
       - AM Driver: developer/am.md
+      - ASM2464 USB3 GPUs: developer/usb3_gpu.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 
