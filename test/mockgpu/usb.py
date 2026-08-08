@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes, mmap, struct, sys
+from tinygrad.runtime.autogen import pci
 if sys.platform != "win32": from tinygrad.runtime.autogen import libc
 
 class MockUSB:
@@ -51,8 +52,16 @@ class MockASM24State:
     }
     self._bar_addrs: dict[int, tuple[int, int]] = {}  # reg_offset -> (addr, size)
 
+    # Initialize a four-bridge chain followed by the GPU, matching the original ASM24 test topology.
+    for bus in range(4):
+      bridge_cfg = self._get_cfg(bus, 0, 0)
+      struct.pack_into('<HH', bridge_cfg, pci.PCI_VENDOR_ID, 0x1B21, 0x2463)
+      bridge_cfg[pci.PCI_HEADER_TYPE] = pci.PCI_HEADER_TYPE_BRIDGE
+
     # Initialize GPU config space (bus=4, dev=0, fn=0) with BAR type bits and REBAR capability
     gpu_cfg = self._get_cfg(4, 0, 0)
+    struct.pack_into('<HH', gpu_cfg, pci.PCI_VENDOR_ID, 0x1002, 0x74A1)
+    gpu_cfg[pci.PCI_HEADER_TYPE] = pci.PCI_HEADER_TYPE_NORMAL
     for reg_off, (sz, type_bits, _) in self._gpu_bars.items():
       if sz > 0: struct.pack_into('<I', gpu_cfg, reg_off, type_bits)
     struct.pack_into('<I', gpu_cfg, 0x100, 0x15 | (1 << 16))  # REBAR cap header: id=0x15, version=1, next=0

@@ -2,7 +2,7 @@ from __future__ import annotations
 import time, functools, tinygrad.runtime.autogen.nv_regs
 from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, VirtMapping, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -63,18 +63,47 @@ class NVPageTableEntry:
     return self.read_fields(entry_id)['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
 
   def address(self, entry_id:int) -> int:
+    if self.is_page(entry_id): return self.read_fields(entry_id)['address_sys'] << 12
     small, sys = ("_small" if self._is_dual_pde() else ""), "_sys" if self.nvdev.mmu_ver == 2 or self.lv == self.nvdev.mm.level_cnt - 1 else ""
     return self.read_fields(entry_id)[f'address{small}{sys}'] << 12
 
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 44), base=0x1000000000) # global for all devices.
 
+  def __init__(self, *args, cpu_visible_limit:int|None=None, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.cpu_visible_pa_allocator = None
+    if cpu_visible_limit is not None:
+      pa_base = self.pa_allocator.base
+      self.cpu_visible_pa_allocator = TLSFAllocator(cpu_visible_limit - pa_base, base=pa_base)
+      self.pa_allocator = TLSFAllocator(self.vram_size - cpu_visible_limit, base=cpu_visible_limit)
+
+  def palloc_cpu_visible(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
+    assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
+    if self.cpu_visible_pa_allocator is None: raise MemoryError("CPU-visible VRAM allocation is not supported")
+    paddr = self.cpu_visible_pa_allocator.alloc(round_up(size, 0x1000), align)
+    if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
+    return paddr
+
+  def valloc_cpu_visible(self, size:int, align=0x1000, uncached=False, zero=True) -> VirtMapping:
+    palloc = self.palloc_cpu_visible if self.cpu_visible_pa_allocator is not None else self.palloc
+    if not getenv("GMMU", 1):
+      paddr = palloc(size:=round_up(size, 0x1000), align, zero=False)
+      return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+    va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
+    paddr = palloc(size, zero=zero)
+    return self.map_range(va, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+
+  def pfree(self, paddr:int, ptable=False):
+    cpu_visible = self.cpu_visible_pa_allocator
+    if cpu_visible is not None and cpu_visible.base <= paddr < cpu_visible.base + cpu_visible.size: cpu_visible.free(paddr)
+    else: super().pfree(paddr, ptable)
+
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
-
     self.smi_dev, self.is_booting, self.is_err_state = False, True, False
     self._early_ip_init()
     self._early_mmu_init()
@@ -85,8 +114,33 @@ class NVDev:
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
 
-  def fini(self):
-    for ip in [self.gsp, self.flcn]: ip.fini_hw()
+  def _recover_stale_wpr(self):
+    if not isinstance(flcn:=self.flcn, NV_FLCN):
+      raise RuntimeError("Stale NVIDIA WPR2 recovery is only implemented for pre-Hopper Falcon GSP boot")
+    flr = getattr(self.pci_dev, "function_level_reset")
+    flr()
+    self.mmio = self.pci_dev.map_bar(0, fmt='I')
+    flcn.wait_for_reset()
+
+  def fini(self, client_root:int|None=None):
+    if not getattr(self.pci_dev, "gsp_full_teardown", False):
+      self.gsp.fini_hw()
+      return
+    if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() == 0: return
+    if not isinstance(self.flcn, NV_FLCN):
+      raise RuntimeError("Full NVIDIA USB teardown is only implemented for pre-Hopper Falcon GSP boot")
+
+    actions = ([lambda: self.gsp.rpc_rm_free(client_root, client=client_root)] if client_root is not None else []) + \
+      [self.gsp.fini_hw, self.flcn.shutdown_fwsec, self.flcn.shutdown_booter]
+    errors:list[Exception] = []
+    for action in actions:
+      try: action()
+      except Exception as exc: errors.append(exc)
+    try:
+      if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0: raise RuntimeError("WPR2 remains active after NVIDIA teardown")
+    except Exception as exc: errors.append(exc)
+    if len(errors) == 1: raise errors[0]
+    if errors: raise ExceptionGroup("NVIDIA teardown failed", errors)
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr:int, value:int):
@@ -102,11 +156,17 @@ class NVDev:
     self.include("dev_fb", "tu102")
     self.include("dev_gc6_island", "ga102")
 
+    recover_wpr = False
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
-      self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
-      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
-      self.pci_dev.reset()
-      time.sleep(0.1) # wait until device can respond again
+      if getattr(self.pci_dev, "gsp_flr_recovery", False): recover_wpr = True
+      elif getattr(self.pci_dev, "gsp_full_teardown", False):
+        raise RuntimeError("NVIDIA USB device has active WPR2 state without a supported reset; "
+                           "physically power-cycle the GPU and USB bridge")
+      else:
+        self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
+        if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
+        self.pci_dev.reset()
+        time.sleep(0.1) # wait until device can respond again
 
     self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
@@ -118,7 +178,8 @@ class NVDev:
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
-    self.flcn.wait_for_reset()
+    if recover_wpr: self._recover_stale_wpr()
+    else: self.flcn.wait_for_reset()
 
   def _early_mmu_init(self):
     self.include("dev_vm", "tu102")
@@ -143,18 +204,22 @@ class NVDev:
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
 
     # tail vram reserved for falcon structs
+    cpu_visible_limit = self.pci_dev.bar_info(1)[1] if getattr(self.pci_dev, "boot_mem_in_vram", False) else None
     self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
-      va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
+      va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar,
+      cpu_visible_limit=cpu_visible_limit)
 
   def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface,int|None,list[int]]:
     sz = round_up(size, 0x1000)
-    if sysmem is True or (sysmem is None and not self.large_bar):
+    if sysmem is True or (sysmem is None and not self.large_bar and not getattr(self.pci_dev, "boot_mem_in_vram", False)):
       view, sysaddr = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
       paddr = None
     else:
-      paddr = self.mm.palloc(sz, boot=False)
+      cpu_visible = getattr(self.pci_dev, "boot_mem_in_vram", False)
+      paddr = self.mm.palloc_cpu_visible(sz, boot=False) if cpu_visible else self.mm.palloc(sz, boot=False)
       view = self.vram.view(paddr, sz)
-      sysaddr = [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
+      base = paddr if cpu_visible else self.pci_dev.bar_info(1)[0] + paddr
+      sysaddr = [base + i * 0x1000 for i in range(sz // 0x1000)]
     if data is not None: view[:size] = data
     return view, paddr, sysaddr
 
