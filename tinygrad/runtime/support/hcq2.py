@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any, Sequence
 import struct, functools, time, collections, itertools, decimal
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
@@ -530,8 +530,8 @@ class HCQ2Compiled(Compiled):
     es = list(self.prof_ents.values())
     sigs = [self.signal(i).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0]/decimal.Decimal(self.timestamp_divider)
             for e in es for i in (e.st_id, e.en_id)]
-    Compiled.profile_events += [ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs),
-                                ProfileDeviceEvent(self.device, perf_counter_us()-max(sigs), self.device_props())]
+    if PROFILE: Compiled.profile_events += [ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs),
+           -                                ProfileDeviceEvent(self.device, perf_counter_us()-max(sigs), self.device_props())]
     self.prof_ents.clear()
     return float(max(sigs)-min(sigs))/1e6
 

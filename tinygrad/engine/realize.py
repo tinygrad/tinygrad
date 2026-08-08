@@ -224,8 +224,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for e in (aux:=call.arg.aux).prof: cast(Any, Device[e.device]).prof_ents[e.st_id] = e
   for d in aux.device:
     with track_stats(ctx, call, d, [], ctx.var_vals) as et:
-      if ctx.wait: et[0] = cast(Any, Device[d]).synchronize(timeout=ctx.timeout) # time the kernels took: last timestamp - first
-      tms += et # NOTE: read inside the with, track_stats fills et with wall time after it
+      if ctx.wait: et[0] = cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
+      tms += et
   return tms[0]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
@@ -290,5 +290,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
   return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)
