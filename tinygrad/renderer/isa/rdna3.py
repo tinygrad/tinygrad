@@ -605,12 +605,14 @@ class RDNA3Renderer(ISARenderer):
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
   def spill(self, spill_offset:int, x:UOp) -> UOp:
+    raise NotImplementedError()
     sz = x.dtype.itemsize # TODO: handle GROUP case
     opc = getattr(RDNA3Ops, f"scratch_store_b{sz*8}")
     ioffs = const(spill_offset, dtypes.uint32)
     return UOp(Ops.INS, arg=opc, src=(ioffs,x))
 
   def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp:
+    raise NotImplementedError()
     ioffs = const(spill_offset, dtypes.uint32)
     sz = x.dtype.itemsize
     suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
