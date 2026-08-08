@@ -563,14 +563,20 @@ def _wmma_slot_tile_lane(idx:int) -> tuple[int, int]:
   # 4×4 UPCAST packs floats as tile=(idx//32)*4+(idx%4), lane=(idx%32)//4
   return (idx // 32) * 4 + (idx % 4), (idx % 32) // 4
 
-def _wmma_acc_zero_inits(uops:list[UOp]) -> tuple[list[UOp], dict[int, UOp]]:
-  """Zero-init WMMA ACC packs before the K-loop. Returns (inits, tile->init)."""
+def _wmma_acc_zero_inits(uops:list[UOp]) -> tuple[list[UOp], dict[int, UOp], dict[int, tuple[UOp, int]]]:
+  """Zero-init WMMA ACC packs before the K-loop.
+
+  Returns (inits, tile->init, reg_idx->(init, lane)).
+  tile->init uses the 4×4 interleaved formula (product-8). Product-16's 16 packs collide
+  under that formula (only keys 0..7), so epilogue SLOADs also use reg_idx->init.
+  """
   ctx = PreRegAllocContext(uops)
   bufs = _wmma_acc_buffers(ctx)
-  if not bufs: return [], {}
+  if not bufs: return [], {}, {}
   seen: set[int] = set()
   inits: list[UOp] = []
   tiles: dict[int, UOp] = {}
+  idx_map: dict[int, tuple[UOp, int]] = {}
   next_tile = 0
   for u in uops:
     if u.op is not Ops.INS or u.arg is not AMDOps.WMMA: continue
@@ -579,11 +585,12 @@ def _wmma_acc_zero_inits(uops:list[UOp]) -> tuple[list[UOp], dict[int, UOp]]:
     if not isinstance(pack.tag, tuple) or not pack.tag: continue
     if (tid:=id(pack.tag)) in seen: continue
     # SLOAD-cin: tile from REG indices. Zero-MOV cin: enumerate in expand order.
+    sload_idxs: list[int|None] = []
     if all(s.op is Ops.INS and s.arg is AMDOps.SLOAD for s in pack.src):
       if not any((b:=_reg_buffer_base(s.src[0])) is not None and b in bufs for s in pack.src): continue
-      idxs = [_const_int(s.src[1]) for s in pack.src]
-      if any(i is None for i in idxs): continue
-      tile, _ = _wmma_slot_tile_lane(idxs[0])  # type: ignore[arg-type]
+      sload_idxs = [_const_int(s.src[1]) for s in pack.src]
+      if any(i is None for i in sload_idxs): continue
+      tile, _ = _wmma_slot_tile_lane(sload_idxs[0])  # type: ignore[arg-type]
     else:
       tile = next_tile
       next_tile += 1
@@ -591,7 +598,9 @@ def _wmma_acc_zero_inits(uops:list[UOp]) -> tuple[list[UOp], dict[int, UOp]]:
     init = UOp(Ops.INS, dtypes.float, tuple(UOp.const(0.0, dtypes.float32) for _ in range(8)), AMDOps.PACK, pack.tag)
     inits.append(init)
     tiles[tile] = init
-  return inits, tiles
+    for lane, idx in enumerate(sload_idxs):
+      if idx is not None: idx_map[idx] = (init, lane)
+  return inits, tiles, idx_map
 
 def _reg_promotable_buffers(ctx:PreRegAllocContext) -> set[UOp]:
   if (promotable:=ctx.scratch.get("reg_promotable")) is not None: return promotable
@@ -1240,9 +1249,13 @@ def _promote_reg_access(ctx:PreRegAllocContext, x:UOp) -> tuple[UOp, list[UOp]]|
       # Loop-body SLOADs only feed WMMA PACK (redirected); post-loop reads need EXTRACT.
       if not ctx.scratch.get("wmma_past_acc"): return x, []
       if (idx:=_const_int(x.src[1])) is None: return None
-      tile, lane = _wmma_slot_tile_lane(idx)
-      tiles = ctx.scratch.get("wmma_acc_tiles") or {}
-      if (init:=tiles.get(tile)) is None: return None
+      # Prefer exact REG-index map (product-16: interleaved tile keys collide at 0..7).
+      idx_map = ctx.scratch.get("wmma_acc_idx_map") or {}
+      if (got:=idx_map.get(idx)) is not None: init, lane = got
+      else:
+        tile, lane = _wmma_slot_tile_lane(idx)
+        tiles = ctx.scratch.get("wmma_acc_tiles") or {}
+        if (init:=tiles.get(tile)) is None: return None
       n = ctx.scratch.get("wmma_ext_n", 0)
       ctx.scratch["wmma_ext_n"] = n + 1
       ext = UOp(Ops.INS, dtypes.float32, (init, UOp.const(lane, dtypes.int32).rtag()), AMDOps.EXTRACT,
@@ -1584,7 +1597,8 @@ def _hoist_lloads_before_extracts(ops:list[UOp]) -> list[UOp]:
 # Addr / pack ops that can issue while a prior WMMA's inputs stay live.
 _SINKABLE_PAST_WMMA = frozenset({
   AMDOps.LOAD, AMDOps.PACK_F16, AMDOps.PACK, AMDOps.EXTRACT, AMDOps.MOV,
-  AMDOps.ADD, AMDOps.SUB, AMDOps.MUL, AMDOps.SHL, AMDOps.SHR, AMDOps.AND, AMDOps.OR, AMDOps.XOR,
+  # ADD excluded: sinking past loop S_ADD reorders the trip counter vs the last WMMA.
+  AMDOps.SUB, AMDOps.MUL, AMDOps.SHL, AMDOps.SHR, AMDOps.AND, AMDOps.OR, AMDOps.XOR,
 })
 
 def _sink_wmma_past_loads(ops:list[UOp]) -> list[UOp]:
@@ -2313,12 +2327,13 @@ class AMDRenderer(ISARenderer):
     return None
 
   def prepare_pre_regalloc(self, lst:list[UOp]) -> tuple[list[UOp], dict]:
-    inits, tiles = _wmma_acc_zero_inits(lst)
+    inits, tiles, idx_map = _wmma_acc_zero_inits(lst)
     if not inits: return lst, {}
     loop_i = next((i for i,u in enumerate(lst) if u.op is Ops.RANGE), 0)
     return lst[:loop_i] + inits + lst[loop_i:], {
       "wmma_acc_inits": {id(u.tag): u for u in inits},
       "wmma_acc_tiles": tiles,
+      "wmma_acc_idx_map": idx_map,
     }
 
   def is_two_address(self, x:UOp) -> bool:
@@ -2333,6 +2348,31 @@ class AMDRenderer(ISARenderer):
     if (lane := _lane_const(x.src[1])) is None: return None
     want = src_phys[0].index + int(lane)
     return next((r for r in x.tag[0].cons if r.index == want), None)
+
+  def after_pre_regalloc(self, lst:list[UOp]) -> list[UOp]:
+    """Schedule each f32→f16 CAST immediately before its STORE.
+
+    Product-16 epilogue otherwise keeps 128 half temps live at once; regalloc spills them into
+    live WMMA ACC (v126+) and clobbers unread lanes (half rows 62–63).
+    """
+    uses: dict[UOp, list[UOp]] = {}
+    for u in lst:
+      for s in u.src: uses.setdefault(s, []).append(u)
+    store_cast: dict[UOp, UOp] = {}  # store -> cast
+    for u in lst:
+      if u.op is not Ops.INS or u.arg is not AMDOps.CAST: continue
+      if u.dtype.scalar() is not dtypes.float16 or not u.src or u.src[0].dtype.scalar() is not dtypes.float32: continue
+      us = uses.get(u, [])
+      if len(us) == 1 and us[0].op is Ops.INS and us[0].arg is AMDOps.STORE and len(us[0].src) > 2 and us[0].src[2] is u:
+        store_cast[us[0]] = u
+    if not store_cast: return lst
+    skip = set(store_cast.values())
+    out: list[UOp] = []
+    for u in lst:
+      if u in skip: continue
+      if u in store_cast: out.append(store_cast[u])
+      out.append(u)
+    return out
   def _pure_addr(self, x:UOp) -> bool:
     if x.op in (Ops.CONST, Ops.SPECIAL): return True
     if x.op is not Ops.INS or x.dtype.scalar() not in (dtypes.int32, dtypes.uint32): return False
