@@ -1303,7 +1303,6 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
-
   def test_half_matmul_keeps_wmma_tile_local(self):
     # Do not sink WMMA past scalar A loads / hoist those above WMMA — keeps first WMMA
     # after one A pack (≤16 U16), enabling A/B overlap vs all-A-then-B.
