@@ -839,7 +839,7 @@ class X86Renderer(ISARenderer):
     return UOp(Ops.INS, dtypes.void, fold_address(self.spill_pointer().index(disp)) + (x,), op, x.tag)
 
   def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp:
-    is_xmm = reg.size == 16
+    is_xmm = regs[0].size == 16
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
     disp = UOp.const(spill_offset, dtypes.uint32)
     return UOp(Ops.INS, dt, fold_address(self.spill_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, tag=regs)
