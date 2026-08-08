@@ -71,7 +71,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        buf_uops = tuple(s if s.op is Ops.SHRINK and s.src[1].op is Ops.BIND else _unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -101,7 +101,8 @@ pm_post_sched_cache = PatternMatcher([
 def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   binds = {f"p{i}":x.src[0] for i,x in enumerate(linear_call.src[1:]) if x.op is Ops.BIND}
-  return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
+  subs = {v:binds[v.expr] for v in linear.variables() if v.expr in binds}
+  return linear.replace(src=tuple(c if c.src[0].op is Ops.LINEAR else c.replace(src=(c.src[0].substitute(subs), *c.src[1:])) for c in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
@@ -142,8 +143,9 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, off:UOp|None=None, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  if off is not None: src = UOp(Ops.SHRINK, src.dtype, (src, off, UOp.const(dst.numel())))
   return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
@@ -160,12 +162,13 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
   # replace this with a copy if it's a copy
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.PARAM, name="dst").index(r:=UPat(Ops.RANGE, name="r")).store(UPat.any(
+    data:=UPat(Ops.PARAM, name="src").index(UPat.any(r, UPat(Ops.PARAM, name="off")+r)), UPat(Ops.BITCAST, src=(data,))))
+   .end(r).sink().f(Ops.CALL, name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
+  (UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0)).store(UPat.any(
+    data:=UPat(Ops.PARAM, name="src").index(UPat.any(UPat(Ops.CONST, arg=0), UPat(Ops.PARAM, name="off"))), UPat(Ops.BITCAST, src=(data,))))
+   .sink().f(Ops.CALL, name="call", allow_any_len=True), copy_kernel_to_copy_uop),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),

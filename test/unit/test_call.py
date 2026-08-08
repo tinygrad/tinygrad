@@ -237,6 +237,27 @@ class TestCallSchedule(unittest.TestCase):
     # the function bodies (src[0]) should have identical keys
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 
+  def test_precompile_view_schedule_cache_hit(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return (x + 1).contiguous()
+    base = Tensor.empty(12).realize().uop
+    def view(name:str, offset:int) -> Tensor:
+      return Tensor(UOp(Ops.SHRINK, dtypes.float, (base, UOp.variable(name, 0, 8).bind(offset), UOp.const(4))).reshape(2, 2))
+    linear, _ = Tensor.linear_with_vars(f(view("offset0", 2)), f(view("offset1", 6)))
+    self.assertEqual(len(linear.src), 2)
+    self.assertTrue(all(c.src[-1].op is Ops.SHRINK for c in linear.src))
+    self.assertEqual(linear.src[0].src[0].key, linear.src[1].src[0].key)
+
+  def test_precompile_multiple_views_same_buffer(self):
+    data = np.arange(1, 4, dtype=np.float32)
+    base = Tensor(data).realize()
+    w0, w1, w2 = (base[i:i+1].contiguous() for i in range(3))
+
+    @function(precompile=True, allow_implicit=True)
+    def f(x:Tensor) -> Tensor: return (x * w0 * w1).contiguous() * w2
+
+    np.testing.assert_equal(f(Tensor.ones(1).realize()).item(), np.prod(data))
+
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
     @function(precompile=True)

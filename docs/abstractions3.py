@@ -37,7 +37,7 @@ with Context(TRAINING=1):
 # l1.uop and l2.uop define a computation graph
 
 from tinygrad.engine.realize import run_linear
-linear = Tensor.schedule_linear(l1, l2)
+linear, var_vals = Tensor.linear_with_vars(l1, l2)
 
 print(f"The schedule contains {len(linear.src)} items.")
 for call in linear.src: print(str(call)[:80])
@@ -45,7 +45,7 @@ for call in linear.src: print(str(call)[:80])
 # *****
 # 4. Lower and run the schedule (linear uop).
 
-run_linear(linear)
+run_linear(linear, var_vals)
 
 # *****
 # 5. Print the weight change

@@ -140,7 +140,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.SLICE, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
+  if b.op in (Ops.SLICE, Ops.SHRINK, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
@@ -162,7 +162,9 @@ def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return None
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+  for bufs, _ in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    if ast.src[0].op is Ops.SHRINK and (offset:=ast.src[0].src[1]).op is Ops.PARAM:
+      bufs[1] = bufs[1].view(bufs[0].nbytes // bufs[1].dtype.itemsize, bufs[1].dtype, ctx.var_vals[offset.expr] * bufs[1].dtype.itemsize)
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
       if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:

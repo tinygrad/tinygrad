@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, UPat, PatternMatcher, AxisType, ssimplify, remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, Invalid
@@ -332,9 +332,20 @@ class Scheduler:
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
+def update(ctx:tuple[dict[UOp, int], set[UOp]], buf:UOp, idx:UOp, out:UOp, off:UOp|None=None) -> UOp:
+  ctx[0][buf] = max(min(buf.max_numel(), int(idx.vmax) + 1), ctx[0].get(buf, 0))
+  if off is not None: ctx[1].add(off)
+  return out
+
+pm_args_from_ast = PatternMatcher([
+  (UPat(Ops.PARAM, name="buf").index(UPat.any(UPat(Ops.PARAM, name="off")+(idx:=UPat.var("idx")), idx), name="out"), update)
+])
+
 def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
+  ctx:tuple[dict[UOp, int], set[UOp]] = {}, set()
+  graph_rewrite(ast, pm_args_from_ast, ctx=ctx, name="args from ast", walk=True)
+  return [Buffer(dname, ctx[0][x], x.dtype) for x in glbls], {k.expr:0 if k in ctx[1] else int(k.vmax+k.vmin)//2 for k in ast.variables()}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
