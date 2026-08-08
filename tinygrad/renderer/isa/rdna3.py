@@ -561,10 +561,14 @@ def encode(ctx, x:UOp):
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
   elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
-  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST, RDNA3Ops.VOP3P]: # alu
+  elif group is RDNA3Ops.VOP3P:
+    kw = {f"src{i}":_immorreg(oprs[i]) for i in range(3)}
+    kw["vdst"] = _fuse(rdefs(x))
+    def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
+    kw["neg"] = _signed(oprs[0].dtype) | (_signed(oprs[1].dtype) << 1)
+  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
-    if group in [RDNA3Ops.VOP3, RDNA3Ops.VOP3P]: oprs = oprs[:3]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
