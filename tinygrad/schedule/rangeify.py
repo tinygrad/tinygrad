@@ -327,10 +327,23 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
-# sometimes if call srcs have children the call will get an INDEX. we remove it here.
+def no_indexing_calls(u:UOp):
+  new_srcs = []
+  for x in u.src:
+    if x.op is Ops.INDEX:
+      # sometimes if call srcs have children the call will get an INDEX. we remove it here.
+      # TODO: we should add safety checks here for contiguous
+      new_srcs.append(x.src[0])
+    elif x.op is Ops.SHRINK and x.contiguous_view_offset() == 0:
+      # SHRINK with offset 0 is fine
+      new_srcs.append(x.src[0])
+    else:
+      # everything else we pass through
+      new_srcs.append(x)
+  return u.replace(src=tuple(new_srcs))
+
 pm_no_indexing_calls = PatternMatcher([
-  (UPat(Ops.CALL, name="u"), lambda u:
-   u.replace(src=tuple(x.src[0] if x.op is Ops.INDEX else x for x in u.src))),
+  (UPat(Ops.CALL, name="u"), no_indexing_calls),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
