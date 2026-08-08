@@ -262,6 +262,8 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.STACK, src=()), lambda: True),
   (UPat(Ops.STACK, src=UPat(Ops.CONST)), lambda: True),
+  # linear for more kernels (TODO: we should enter non sink calls)
+  #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace == AddrSpace.GLOBAL),
@@ -270,8 +272,8 @@ spec_kernel_graph = PatternMatcher([
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-  # all calls are on sink
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True), lambda: True),
+  # all calls are on various sinks
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
