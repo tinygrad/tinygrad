@@ -115,7 +115,7 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), *ctx.reals[i][v]))
+    if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
     else: nsrc.append(s)
 
   ndefs = []
@@ -125,7 +125,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
 
   after = [ctx.ren.spill(ctx.spills[v],nx) for v in rdefs(x) if v in ctx.spills]
-  before = [ctx.ren.fill(ctx.spills[v],ctx.vdef(v),*rs) for v,rs in ctx.insert_before.get(i, [])]
+  before = [ctx.ren.fill(ctx.spills[v],ctx.vdef(v),rs) for v,rs in ctx.insert_before.get(i, [])]
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
