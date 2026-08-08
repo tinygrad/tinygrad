@@ -986,7 +986,13 @@ class AMDDevice(HCQCompiled):
     self.gc = AMDIP('gc', self.iface.ip_versions[am.GC_HWIP],
                     bases={i: tuple(getattr(self.ip_off, f'GC_BASE__INST{i}_SEG{s}', 0) for s in range(6)) for i in range(6)})
 
-    self.nbio = AMDIP('nbio' if self.target[0] < 12 else 'nbif', self.iface.ip_versions[am.NBIF_HWIP],
+    # RDNA2 workaround: force NBIO version to 2.3.0 for Navi 2x
+    nbio_version = self.iface.ip_versions[am.NBIF_HWIP]
+    if self.target[0] == 10 and nbio_version == (3,3,1):
+      import sys
+      print(f"WARNING: Overriding NBIO version from {nbio_version} to (2,3,0) for RDNA2", file=sys.stderr)
+      nbio_version = (2,3,0)
+    self.nbio = AMDIP('nbio' if self.target[0] < 12 else 'nbif', nbio_version,
                       bases={i: tuple(getattr(self.ip_off, f'NBIO_BASE__INST{i}_SEG{s}', 0) for s in range(9)) for i in range(6)})
 
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
