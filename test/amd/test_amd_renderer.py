@@ -1305,6 +1305,52 @@ class TestAMDRenderer(unittest.TestCase):
       getenv.cache_clear()
       to_program_cache.clear()
 
+  def test_after_pre_regalloc_schedules_cast_before_store(self):
+    # Product-16 epilogue: f32→f16 CAST must sit immediately before its STORE so half temps
+    # do not all live at once (else regalloc spills into WMMA ACC and clobbers unread lanes).
+    buf = UOp(Ops.INS, dtypes.ulong, (), AMDOps.KERNARG, (0,))
+    addr = UOp(Ops.INS, dtypes.int, (), AMDOps.MOV, (Register("v1", 257),))
+    acc0 = UOp(Ops.INS, dtypes.float, (), AMDOps.MOV, (Register("v2", 258),))
+    acc1 = UOp(Ops.INS, dtypes.float, (), AMDOps.MOV, (Register("v3", 259),))
+    c0 = UOp(Ops.INS, dtypes.half, (acc0,), AMDOps.CAST, (Register("v4", 260),))
+    c1 = UOp(Ops.INS, dtypes.half, (acc1,), AMDOps.CAST, (Register("v5", 261),))
+    s0 = UOp(Ops.INS, dtypes.void, (buf, addr, c0), AMDOps.STORE)
+    s1 = UOp(Ops.INS, dtypes.void, (buf, addr, c1), AMDOps.STORE)
+    # Pathological: both casts first, then both stores (pre-fix schedule).
+    out = _REN.after_pre_regalloc([acc0, acc1, c0, c1, s0, s1])
+    self.assertEqual(out, [acc0, acc1, c0, s0, c1, s1])
+
+  def test_half_matmul_epilogue_cast_adjacent_to_store(self):
+    # Default half GEMM keeps CAST glued to STORE in the final linear list + emits cvt+b16.
+    import os
+    old = {k: os.environ.get(k) for k in ("TC_LDS_AB", "TC_UPCAST", "TC_UPCAST_TILES", "TC_LOCAL", "ALLOW_UPCAST16")}
+    for k in old: os.environ.pop(k, None)
+    getenv.cache_clear()
+    to_program_cache.clear()
+    try:
+      with Context(BEAM=0):
+        ast = (Tensor.empty(256, 256, dtype=dtypes.half, device="AMD") @
+               Tensor.empty(256, 256, dtype=dtypes.half, device="AMD"))
+        prg = _to_prg(ast.schedule_linear().src[-1].src[0])
+      lin = [u for u in _prg_lin(prg).src if u.op is Ops.INS]
+      stores = [u for u in lin if u.arg is AMDOps.STORE]
+      self.assertEqual(len(stores), 128)
+      for i, u in enumerate(lin):
+        if u.arg is not AMDOps.STORE: continue
+        self.assertGreater(i, 0)
+        prev = lin[i - 1]
+        self.assertIs(prev.arg, AMDOps.CAST)
+        self.assertIs(u.src[2], prev)
+      names = _amd_inst_names(prg)
+      self.assertEqual(names.count("V_CVT_F16_F32_E32"), 128)
+      self.assertEqual(names.count("GLOBAL_STORE_B16"), 128)
+    finally:
+      for k, v in old.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+      getenv.cache_clear()
+      to_program_cache.clear()
+
   def test_half_matmul_c_stores_share_peeled_base(self):
     # Soft-peel nested ADD+imm so C stores share one addr base; large byte offs use v_lshl_add.
     import os
