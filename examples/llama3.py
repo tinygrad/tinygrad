@@ -243,7 +243,7 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
           else: v.shard_(device, axis=None)
 
       # replace weights in model
-      load_state_dict(model, weights, strict=False, consume=True)
+      load_state_dict(model, weights, strict=False, consume=True, realize=False)
   return model
 
 # default settings

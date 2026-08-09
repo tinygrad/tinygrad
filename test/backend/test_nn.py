@@ -476,6 +476,31 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  def test_load_state_dict_realize_false(self):
+    # gguf expands a small quantized buffer into a big float one, realize=False keeps that lazy
+    layer = Linear(3, 5, bias=False)
+    src = Tensor.full((5, 3), 2, dtype=dtypes.uint8).contiguous().realize()
+    load_state_dict(layer, {'weight': src.float() * 0.5}, realize=False)
+    self.assertFalse(layer.weight.uop.is_realized)
+    np.testing.assert_allclose(layer.weight.numpy(), np.ones((5, 3)))
+
+  def test_load_state_dict_realize_true(self):
+    layer = Linear(3, 5, bias=False)
+    src = Tensor.full((5, 3), 2, dtype=dtypes.uint8).contiguous().realize()
+    load_state_dict(layer, {'weight': src.float() * 0.5})
+    self.assertTrue(layer.weight.uop.is_realized)
+    np.testing.assert_allclose(layer.weight.numpy(), np.ones((5, 3)))
+
+  def test_load_state_dict_realize_false_allocates_nothing(self):
+    layer = Linear(1024, 1024, bias=False)
+    src = Tensor.full((1024, 1024), 2, dtype=dtypes.uint8).contiguous().realize()
+    state_dict = {'weight': src.float() * 0.5}
+    mem = GlobalCounters.mem_used
+    load_state_dict(layer, state_dict, realize=False)
+    self.assertEqual(GlobalCounters.mem_used, mem)
+    load_state_dict(layer, state_dict)
+    self.assertEqual(GlobalCounters.mem_used, mem + 1024*1024*4)
+
   #https://github.com/pytorch/pytorch/blob/d38164a545b4a4e4e0cf73ce67173f70574890b6/torch/nn/modules/module.py#L2425
   def test_load_conv_num_batches_tracked(self):
     layer = BatchNorm(sz=1, track_running_stats=False)
