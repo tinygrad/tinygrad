@@ -4,8 +4,8 @@
 #include <hip/hip_runtime.h>
 #include <cstdint>
 
-#if !defined(KERNEL_NAME) || !defined(M_DIM) || !defined(N_DIM) || !defined(SHUFFLE_ROWWISE_FP4_VALUE) || \
-    !defined(SHUFFLE_COLWISE_FP4_VALUE)
+#if !defined(KERNEL_NAME) || !defined(M_DIM) || !defined(N_DIM) || !defined(WRITE_ROWWISE_VALUE) || \
+    !defined(WRITE_COLWISE_VALUE) || !defined(SHUFFLE_ROWWISE_FP4_VALUE) || !defined(SHUFFLE_COLWISE_FP4_VALUE)
 #error kernel dimensions and layouts must be defined
 #endif
 
@@ -24,6 +24,8 @@ constexpr int M_PACKED = M / 2;
 constexpr int N_PACKED = N / 2;
 constexpr int M_SCALES = M / BLOCK;
 constexpr int N_SCALES = N / BLOCK;
+constexpr bool WRITE_ROWWISE = WRITE_ROWWISE_VALUE;
+constexpr bool WRITE_COLWISE = WRITE_COLWISE_VALUE;
 constexpr bool SHUFFLE_ROWWISE_FP4 = SHUFFLE_ROWWISE_FP4_VALUE;
 constexpr bool SHUFFLE_COLWISE_FP4 = SHUFFLE_COLWISE_FP4_VALUE;
 
@@ -178,15 +180,17 @@ void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwis
         load_tile(tile, input, tile_m, tile_n);
         __syncthreads();
 
-        quantize_row(tile, rowwise_fp4, rowwise_scale, tile_m, tile_n, line, lane);
-        const Quantized4 result = quantize_col(tile, line, lane);
-        col_fp4[chunk_n][chunk_m] = result.fp4;
-        col_scale[chunk_n][chunk_m] = result.scale;
+        if constexpr (WRITE_ROWWISE) quantize_row(tile, rowwise_fp4, rowwise_scale, tile_m, tile_n, line, lane);
+        if constexpr (WRITE_COLWISE) {
+          const Quantized4 result = quantize_col(tile, line, lane);
+          col_fp4[chunk_n][chunk_m] = result.fp4;
+          col_scale[chunk_n][chunk_m] = result.scale;
+        }
         __syncthreads();
       }
     }
 
-    for (int chunk_n = 0; chunk_n < TILE_N / BLOCK; chunk_n++) {
+    if constexpr (WRITE_COLWISE) for (int chunk_n = 0; chunk_n < TILE_N / BLOCK; chunk_n++) {
       for (int chunk_m = 0; chunk_m < TILE_M / BLOCK; chunk_m++)
         tile[line * BLOCK + chunk_m * THREADS_PER_ROW + lane] = col_fp4[chunk_n][chunk_m];
       __syncthreads();
@@ -213,12 +217,14 @@ void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwis
         load_tile(tile, input, tile_m, tile_n);
         __syncthreads();
 
-        quantize_row(tile, rowwise_fp4, rowwise_scale, tile_m, tile_n, line, lane);
-        const int row = lane * VALUES_PER_THREAD;
-        const int col = tile_n + line;
-        const Quantized4 result = quantize_col(tile, line, lane);
-        store_fp4<true>(colwise_fp4, col, (tile_m + row) / 2, M_PACKED, result.fp4);
-        if (lane == 0) store_scale(colwise_scale, col, tile_m / BLOCK, M_SCALES, result.scale);
+        if constexpr (WRITE_ROWWISE) quantize_row(tile, rowwise_fp4, rowwise_scale, tile_m, tile_n, line, lane);
+        if constexpr (WRITE_COLWISE) {
+          const int row = lane * VALUES_PER_THREAD;
+          const int col = tile_n + line;
+          const Quantized4 result = quantize_col(tile, line, lane);
+          store_fp4<true>(colwise_fp4, col, (tile_m + row) / 2, M_PACKED, result.fp4);
+          if (lane == 0) store_scale(colwise_scale, col, tile_m / BLOCK, M_SCALES, result.scale);
+        }
         __syncthreads();
       }
     }

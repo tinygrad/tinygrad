@@ -39,7 +39,8 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
-           next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None) -> tuple[Tensor,...]:
+           next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+           save_original_input:bool=False) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
@@ -48,7 +49,8 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if MXFP4:
     assert x is not None, "MXFP4 matmul requires an unquantized input"
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
-    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True, mxfp4_w=mxfp4_w),)
+    if can_use_asm_gemm(x, w.T):
+      return (asm_gemm(x, w.T, mxfp4=True, mxfp4_w=mxfp4_w, save_original_input=save_original_input),)
     return (x @ w.T,)
   assert w_inv_scale is not None, "fp8 matmul requires w_inv_scale (weights must be stored in fp8 with per-tensor scale)"
   if MXFP8:
@@ -243,7 +245,8 @@ class FlatTransformer:
     attn = attn.reshape(bsz, seqlen, -1)
 
     out, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo,
-                               next_grad_amax_state=next_grad_amax_xo, next_amax_x=next_amax_xo, mxfp4_w=mxfp4_wo)
+                               next_grad_amax_state=next_grad_amax_xo, next_amax_x=next_amax_xo, mxfp4_w=mxfp4_wo,
+                               save_original_input=bool(MXFP4))
     saves.extend([*s, out])
     return out, saves
 
