@@ -1,8 +1,9 @@
+import functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer, OptimizerGroup
 from tinygrad.helpers import FUSE_OPTIM, getenv
-from tinygrad.uop.ops import UOp, Ops, AxisType
+from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
@@ -27,6 +28,29 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> Tensor:
   for g in grads: g.assign((g * (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
   return total_norm
 
+@functools.cache
+def _adamw_master_kernel(m:UOp, v:UOp, master:UOp, param:UOp, grad:UOp, lr:UOp, b1_t:UOp, b2_t:UOp,
+                         *, b1:float, b2:float, eps:float, wd:float) -> UOp:
+  m, v, master, param, grad = (x.flatten() for x in (m, v, master, param, grad))
+  assert m.shape == v.shape == master.shape == param.shape and grad.numel() % m.numel() == 0
+  idx = UOp.range(m.numel(), 0)
+  grad_idx = idx if grad.numel() == m.numel() else idx + UOp.range(grad.numel() // m.numel(), -1, AxisType.DEVICE) * m.numel()
+  g, old_m, old_v, old_w = (grad[grad_idx].cast(dtypes.float32), m[idx].cast(dtypes.float32),
+                             v[idx].cast(dtypes.float32), master[idx].cast(dtypes.float32))
+  new_m = b1 * old_m + (1.0 - b1) * g
+  new_v = b2 * old_v + (1.0 - b2) * g * g
+  update = (new_m / (1.0 - b1_t.flatten()[0])) / ((new_v / (1.0 - b2_t.flatten()[0])).sqrt() + eps)
+  new_w = old_w - lr.flatten()[0] * (update + wd * old_w)
+  stores = (m[idx].store(new_m.cast(m.dtype)), v[idx].store(new_v.cast(v.dtype)), master[idx].store(new_w.cast(master.dtype)),
+            param[idx].store(new_w.cast(param.dtype)))
+  return UOp.group(*stores).end(idx).sink(arg=KernelInfo(f"adamw_master_{m.numel()}"))
+
+def _adamw_master_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, master:Tensor, lr:Tensor, b1_t:Tensor, b2_t:Tensor,
+                       *, b1:float, b2:float, eps:float, wd:float) -> None:
+  fxn = functools.partial(_adamw_master_kernel, b1=b1, b2=b2, eps=eps, wd=wd)
+  updated = Tensor.custom_kernel(m, v, master, param, grad, lr, b1_t, b2_t, fxn=fxn)
+  for dst, src in zip((m, v, master, param), updated): dst.replace(src)
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
@@ -40,6 +64,7 @@ class GradAccClipAdamW(Optimizer):
       self.master_params:list[Tensor]|None = [self._zero_shard(p.to(self.device).float().contiguous()) for p in self.params]
     else:
       self.master_params = None
+    self.param_shards = [self._zero_shard(p) for p in self.params] if self.zero else self.params
 
   def _zero_shard(self, t:Tensor) -> Tensor:
     if not self.zero or t.ndim < 2 or (t.shape[0] % len(self.device)) != 0: return t
@@ -51,6 +76,18 @@ class GradAccClipAdamW(Optimizer):
     return Tensor.cat(*[t[p*sz:(p+1)*sz] for p in range(n)], dim=0)
 
   def fschedule_step(self, grads:list[Tensor]) -> list[Tensor]:
+    if self.master_params is not None and not STOCHASTIC_ROUND and all(
+      p.dtype == g.dtype == dtypes.bfloat16 and m.dtype in (dtypes.bfloat16, dtypes.float32) and v.dtype == m.dtype and
+      master.dtype == dtypes.float32 and p.device == g.device == m.device == v.device == master.device
+      for p, g, m, v, master in zip(self.params, grads, self.m, self.v, self.master_params)
+    ):
+      self.b1_t *= self.b1
+      self.b2_t *= self.b2
+      for p, p_shard, g, m, v, master in zip(self.params, self.param_shards, grads, self.m, self.v, self.master_params):
+        _adamw_master_step(p_shard, g, m, v, master, self.lr, self.b1_t, self.b2_t,
+                           b1=self.b1, b2=self.b2, eps=self.eps, wd=self.wd if p.ndim >= 3 else 0.0)
+        if p_shard is not p: p.assign(self._zero_gather(p_shard))
+      return [self.b1_t, self.b2_t] + self.m + self.v + self.params + self.master_params
     updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]

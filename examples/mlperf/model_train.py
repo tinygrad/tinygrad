@@ -1458,6 +1458,7 @@ def train_llama3():
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*optim.m, *optim.v, *optim.param_shards)
   Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
