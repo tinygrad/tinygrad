@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -131,26 +131,38 @@ from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
+  parser.add_argument("--model", "-m", default=list(models.keys())[0],
+                      help=f"Model choice ({', '.join(models.keys())}), local GGUF file, or converted Kimi directory")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
+  parser.add_argument("--devices", type=int, default=1, help="Tensor-parallel device count (Kimi MXFP4 requires 4)")
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
-  model_name = kv.get('general.name') or kv.get('general.basename') or args.model
+  model_path = pathlib.Path(args.model)
+  kv:dict[str, typing.Any]
+  if model_path.is_dir() and (model_path / "tinygrad-kimi.json").exists():
+    from tinygrad.llm.kimi import load_kimi, load_kimi_tokenizer_data
+    model, kv = load_kimi(model_path, args.max_context, args.devices), {}
+    normal, special, bos, eos = load_kimi_tokenizer_data(model_path)
+    tok = SimpleTokenizer(normal, special, "kimi-k2", bos_id=bos, eos_id=eos, eot_id=eos)
+    model_name = "Kimi-Linear-48B-A3B-Instruct-MXFP4"
+    ct = (model_path / "chat_template.jinja").read_text() if (model_path / "chat_template.jinja").exists() else None
+  else:
+    if args.devices != 1: raise ValueError("--devices is currently supported by the native Kimi MXFP4 loader only")
+    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
+    model_name = kv.get('general.name') or kv.get('general.basename') or args.model
+    tok = SimpleTokenizer.from_gguf_kv(kv)
+    ct = kv.get('tokenizer.chat_template')
   file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
-  # get tokenizer
-  tok = SimpleTokenizer.from_gguf_kv(kv)
-
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
-  if (ct := kv.get('tokenizer.chat_template')) is not None:
+  if ct is not None:
     try:
       import jinja2
       env = jinja2.Environment()

@@ -1,9 +1,11 @@
 import unittest
+from types import SimpleNamespace
 import numpy as np
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, nn
+from tinygrad.llm.kimi import _shard_kimi
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, l2norm, precompute_freqs_cis, pairwise_topk,
 )
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -41,6 +43,11 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
+  def test_kda_l2norm_matches_fla(self):
+    x = np.array([[1e-4, -2e-4, 3e-4], [1.0, 2.0, -3.0]], dtype=np.float32)
+    expected = x / np.sqrt((x*x).sum(axis=-1, keepdims=True) + 1e-6)
+    np.testing.assert_allclose(l2norm(Tensor(x)).numpy(), expected, rtol=1e-6, atol=1e-6)
+
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
@@ -189,6 +196,53 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block._attention(x, 0).realize()
     alpha = np.exp(-self._softplus_np(np.arange(1, 5)).reshape(1, 2, 1, 2))
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha, rtol=1e-5, atol=1e-5)
+
+  def test_kda_chunked_prefill_matches_decode(self):
+    config = self._make_config(max_context=4, n_heads=2,
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True), kda_split_qkv=True)
+    x = Tensor.linspace(-1, 1, 4*config.dim, dtype=dtypes.float32).reshape(1, 4, config.dim).cast(dtypes.bfloat16)
+
+    chunked = GatedDeltaNetBlock(config, config.ssm)
+    sequential = GatedDeltaNetBlock(config, config.ssm)
+    for value in nn.state.get_state_dict(chunked).values(): value.replace(value.cast(dtypes.bfloat16).realize())
+    sequential_state = nn.state.get_state_dict(sequential)
+    for name, value in nn.state.get_state_dict(chunked).items(): sequential_state[name].replace(value)
+
+    chunked._init_state(x)
+    chunk_out = chunked._attention(x, 0).realize()
+    sequential._init_state(x)
+    seq_out = Tensor.cat(*[sequential._attention(x[:, t:t+1], t).realize() for t in range(x.shape[1])], dim=1).realize()
+
+    np.testing.assert_allclose(chunk_out.numpy(), seq_out.numpy(), rtol=1e-5, atol=1e-5)
+    for name in ("conv_state_q", "conv_state_k", "conv_state_v"):
+      np.testing.assert_allclose(getattr(chunked, name).numpy(), getattr(sequential, name).numpy(), rtol=2e-2, atol=4e-3)
+    np.testing.assert_allclose(chunked.recurrent_state.numpy(), sequential.recurrent_state.numpy(), rtol=2e-3, atol=2e-3)
+
+  def test_kda_tp_final_token_matches_unsharded(self):
+    config = self._make_config(dim=8, hidden_dim=16, n_heads=4, n_kv_heads=4, head_dim=2, rope_dim=2, v_head_dim=2,
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=4, time_step_rank=4, inner_size=8, kda=True), kda_split_qkv=True)
+    single, tp = GatedDeltaNetBlock(config, config.ssm), GatedDeltaNetBlock(config, config.ssm)
+    for name, value in nn.state.get_state_dict(single).items():
+      data = np.full(value.shape, 1.0, np.float32) if "norm.weight" in name else \
+             np.linspace(-0.2, 0.2, value.numel(), dtype=np.float32).reshape(value.shape)
+      if name == "ssm_a": data.fill(-0.1)
+      value.replace(Tensor(data, device="CPU", dtype=dtypes.bfloat16).realize())
+    tp_state = nn.state.get_state_dict(tp)
+    for name, value in nn.state.get_state_dict(single).items(): tp_state[name].replace(value)
+    devices = ("CPU", "CPU:1")
+    _shard_kimi(SimpleNamespace(blk=[tp]), devices)
+
+    x = Tensor(np.linspace(-1, 1, 32, dtype=np.float32).reshape(1, 4, 8), device="CPU", dtype=dtypes.bfloat16)
+    single._init_state(x)
+    expected = single._attention(x, 0).realize()
+    x_tp = x.shard(devices, axis=None)
+    tp._init_state(x_tp)
+    actual = tp._attention(x_tp, 0).realize()
+
+    np.testing.assert_equal(actual.numpy(), expected.numpy())
+    np.testing.assert_equal(tp.recurrent_state.numpy(), single.recurrent_state.numpy())
+    for name in ("conv_state_q", "conv_state_k", "conv_state_v"):
+      np.testing.assert_equal(getattr(tp, name).numpy(), getattr(single, name).numpy())
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):

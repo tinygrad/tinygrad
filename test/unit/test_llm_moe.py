@@ -72,6 +72,20 @@ class TestMoEFeedForward(unittest.TestCase):
     expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
 
+  def test_kimi_correction_bias_affects_route_weights(self):
+    dim, hidden, n_heads, num_experts, k = 8, 16, 2, 4, 2
+    config = replace(_moe_config(dim, hidden, n_heads, num_experts, k), norm_topk_prob=True, expert_bias=True)
+    block = TransformerBlock(config)
+    block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
+    block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
+    block.ffn_down_exps.weight = Tensor.stack(*[Tensor.eye(dim, hidden) for _ in range(num_experts)])
+    block.ffn_gate_inp.weight = Tensor.zeros(num_experts, dim)
+    block.exp_probs_b["bias"] = Tensor([0.2, 0.1, 0.0, -0.1])
+
+    out = block._feed_forward(Tensor.ones(1, 1, dim))
+    expected = (Tensor([1.0]).silu().item() * 0.7 + Tensor([2.0]).silu().item() * 0.6) / 1.3
+    np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
+
   def test_moe_feed_forward_shared_expert(self):
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2

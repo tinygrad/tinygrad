@@ -1,9 +1,10 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.quant import dequantize_mxfp4, quantize_dequantize_mxfp8
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -20,11 +21,30 @@ class ExpertWeights:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
 
+class MXFP4ExpertWeights:
+  """Routed-expert weights stored as packed OCP MXFP4 with one E8M0 scale per 32 values."""
+  def __init__(self, num_experts:int, in_features:int, out_features:int):
+    if in_features % 32: raise ValueError(f"MXFP4 expert input size must be divisible by 32, got {in_features}")
+    self.in_features, self.out_features = in_features, out_features
+    self.weight = Tensor.zeros(num_experts, out_features, in_features//2, dtype=dtypes.uint8)
+    self.weight_scale = Tensor.full((num_experts, out_features, in_features//32), 127, dtype=dtypes.uint8)
+  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
+    # Only selected weights are expanded, so packed storage remains resident during generation.
+    if isinstance(self.weight.device, tuple) and not isinstance(sel.device, tuple): sel = sel.shard(self.weight.device, axis=None)
+    weight = dequantize_mxfp4(self.weight[sel], self.weight_scale[sel], dtype=dtypes.bfloat16)
+    x = quantize_dequantize_mxfp8(x.cast(dtypes.bfloat16))
+    return (x.unsqueeze(-2) @ weight.transpose(-1, -2)).contiguous().squeeze(-2)
+
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+
+def l2norm(x:Tensor, eps:float=1e-6) -> Tensor:
+  """FLA-compatible L2 normalization: FP32 reduction and epsilon inside the square root."""
+  dtype, x = x.dtype, x.float()
+  return (x * (x.square().sum(axis=-1, keepdim=True, dtype=dtypes.float32) + eps).rsqrt()).cast(dtype)
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
@@ -73,6 +93,9 @@ class TransformerConfig:
   routed_scaling_factor: float = 1.0
   qkv_bias: bool = False
   expert_bias: bool = False
+  expert_mxfp4: bool = False
+  bf16_activations: bool = False
+  kda_split_qkv: bool = False
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -86,9 +109,10 @@ class FFNBlock:
     if config.num_experts > 0:
       self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=False)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      expert_cls = MXFP4ExpertWeights if config.expert_mxfp4 else ExpertWeights
+      self.ffn_gate_exps = expert_cls(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_up_exps = expert_cls(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_down_exps = expert_cls(config.num_experts, config.hidden_dim, config.dim)
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
@@ -102,18 +126,21 @@ class FFNBlock:
   def _feed_forward(self, x:Tensor) -> Tensor:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(x)
+      # Kimi computes router logits in FP32 even though the residual stream and weights are BF16.
+      logits = x.float().linear(self.ffn_gate_inp.weight.float().transpose()) if self.config.bf16_activations else self.ffn_gate_inp(x)
       if hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-        probs = probs.gather(-1, sel)
-        if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+        # Kimi's reference mutates the sigmoid-score view when adding the correction bias,
+        # so the corrected values determine both selection and the normalized route weights.
+        scores = logits.sigmoid() + self.exp_probs_b["bias"]
+        _, sel = pairwise_topk(scores, self.config.num_experts_per_tok)
+        probs = scores.gather(-1, sel)
+        if self.config.norm_topk_prob: probs = probs / (probs.sum(axis=-1, keepdim=True) + 1e-20)
       else:
         vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
         probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
       x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=2).cast(x_down.dtype)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
         shexp = self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x))
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
@@ -131,6 +158,11 @@ class FFNBlock:
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     self._init_state(x)
+    # Kimi's heterogeneous TP shards are captured by the outer TinyJit; per-block precompilation
+    # cannot represent their differently shaped local buffers as one implicit parameter bundle.
+    if self.config.bf16_activations:
+      h = x + self._attention(self.attn_norm(x), start_pos)
+      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
@@ -188,7 +220,8 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
+                                   device=x.device, dtype=x.dtype)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -229,13 +262,15 @@ class MLATransformerBlock(FFNBlock):
       if resolve(T != 1) else None
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
     if mask is not None: attn = attn + mask
-    attn = attn.softmax(-1)
+    # Match eager Kimi MLA: normalize attention scores in FP32, then return to the query dtype.
+    attn = attn.softmax(-1, dtype=dtypes.float32).cast(q.dtype)
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
+      self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim,
+                                  device=x.device, dtype=x.dtype)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class GatedDeltaNetBlock(FFNBlock):
@@ -245,7 +280,15 @@ class GatedDeltaNetBlock(FFNBlock):
     assert self.num_v_heads % self.num_k_heads == 0
     self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
-    self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
+    if ssm.kda and config.kda_split_qkv:
+      self.attn_q, self.attn_k = Linear(config.dim, self.q_dim, bias=False), Linear(config.dim, self.q_dim, bias=False)
+      self.attn_v = Linear(config.dim, ssm.inner_size, bias=False)
+      self.ssm_q_conv1d = {"weight": Tensor.zeros(self.q_dim, self.ssm_conv_kernel)}
+      self.ssm_k_conv1d = {"weight": Tensor.zeros(self.q_dim, self.ssm_conv_kernel)}
+      self.ssm_v_conv1d = {"weight": Tensor.zeros(ssm.inner_size, self.ssm_conv_kernel)}
+    else:
+      self.attn_qkv = Linear(config.dim, self.conv_channels, bias=False)
+      self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
     if ssm.kda:
       self.ssm_g_a, self.ssm_g_b = Linear(config.dim, self.head_v_dim, bias=False), Linear(self.head_v_dim, ssm.inner_size, bias=False)
       self.ssm_f_a, self.ssm_f_b = Linear(config.dim, self.head_k_dim, bias=False), Linear(self.head_k_dim, ssm.inner_size, bias=False)
@@ -253,60 +296,110 @@ class GatedDeltaNetBlock(FFNBlock):
       self.attn_gate = Linear(config.dim, ssm.inner_size, bias=False)
       self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
-    self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
-    assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
 
     # input processing
-    x = x.half()
+    # Kimi-Linear is a BF16 model. Qwen 3.5 GGDN checkpoints historically use FP16 here.
+    x = x.cast(dtypes.bfloat16) if self.config.ssm and self.config.ssm.kda else x.half()
     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if hasattr(self, "ssm_g_a") else self.attn_gate(x)
-    out_gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-    alpha = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
-    alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, self.num_v_heads, -1) *
-             self.ssm_a.reshape(1, self.num_v_heads, -1)).exp().unsqueeze(-2)
+    beta_logits = self.ssm_beta(x)
+    alpha_logits = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
 
-    # qkv conv
-    conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
-    conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
-    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
-    k = k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
-    v = v.reshape(B, self.num_v_heads, self.head_v_dim)
-    q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+    # Causal depthwise Q/K/V convolution. Keeping the recurrence explicit gives exactly the
+    # same cache transition for prefill and decode (and supports arbitrary static T).
+    split_qkv = hasattr(self, "attn_q")
+    if split_qkv:
+      projected_q, projected_k, projected_v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
+      # Snapshot mutable caches before constructing the recurrence. Otherwise the final store can
+      # overwrite their buffers before earlier outputs in a multi-token lazy graph consume them.
+      conv_state_q, conv_state_k, conv_state_v = self.conv_state_q.clone(), self.conv_state_k.clone(), self.conv_state_v.clone()
+    else: projected, conv_state = self.attn_qkv(x), self.conv_state
+    recurrent_state, outputs = self.recurrent_state.clone() if split_qkv else self.recurrent_state, []
+    for t in range(T):
+      if split_qkv:
+        conv_window_q, conv_window_k = conv_state_q.cat(projected_q[:, t:t+1], dim=1), conv_state_k.cat(projected_k[:, t:t+1], dim=1)
+        conv_window_v = conv_state_v.cat(projected_v[:, t:t+1], dim=1)
+        q = (conv_window_q * self.ssm_q_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+        k = (conv_window_k * self.ssm_k_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+        v = (conv_window_v * self.ssm_v_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+      else:
+        conv_window = conv_state.cat(projected[:, t:t+1], dim=1)
+        conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+        q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+      q, k = q.reshape(B, self.num_k_heads, self.head_k_dim), k.reshape(B, self.num_k_heads, self.head_k_dim)
+      q, k = (l2norm(q), l2norm(k)) if self.config.ssm and self.config.ssm.kda else (q.normalize(dim=-1), k.normalize(dim=-1))
+      q, k = q.repeat(1, self.num_v_heads//self.num_k_heads, 1), k.repeat(1, self.num_v_heads//self.num_k_heads, 1)
+      v = v.reshape(B, self.num_v_heads, self.head_v_dim)
+      q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
 
-    # recurrent
-    recurrent_state = self.recurrent_state * alpha
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      alpha = ((alpha_logits[:, t:t+1].float() + self.ssm_dt["bias"]).softplus().reshape(B, self.num_v_heads, -1) *
+               self.ssm_a.reshape(1, self.num_v_heads, -1)).exp().unsqueeze(-2)
+      beta = beta_logits[:, t:t+1]
+      beta = (beta.float() if self.config.ssm and self.config.ssm.kda else beta).sigmoid().reshape(B, self.num_v_heads, 1, 1)
+      recurrent_state = recurrent_state * alpha
+      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      if t != T-1:
+        core_input = (recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim)
+        core_attn_out = self.ssm_norm(core_input.cast(x.dtype) if self.config.ssm and self.config.ssm.kda else core_input)
+        gate = out_gate[:, t:t+1].reshape(B, 1, self.num_v_heads, self.head_v_dim)
+        gate = gate.float().sigmoid().cast(core_attn_out.dtype) if hasattr(self, "ssm_g_a") else gate.silu()
+        outputs.append((core_attn_out * gate).reshape(B, 1, -1))
+      if split_qkv:
+        conv_state_q, conv_state_k, conv_state_v = conv_window_q[:, 1:, :], conv_window_k[:, 1:, :], conv_window_v[:, 1:, :]
+      else: conv_state = conv_window[:, 1:, :]
 
-    # store the updated state
-    conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
-    recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
-    recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+    # Store each cache with its own AFTER. Multi-device lowering handles one sharded STORE per
+    # AFTER; grouping these effects under one cache silently drops stores on the other shards.
+    state_updates:list[Tensor]
+    if split_qkv:
+      state_updates = [self.conv_state_q.assign(conv_state_q.cast(self.conv_state_q.dtype)),
+                       self.conv_state_k.assign(conv_state_k.cast(self.conv_state_k.dtype)),
+                       self.conv_state_v.assign(conv_state_v.cast(self.conv_state_v.dtype))]
+    else: state_updates = [self.conv_state.assign(conv_state.cast(self.conv_state.dtype))]
+    state_updates.append(self.recurrent_state.assign(recurrent_state.cast(self.recurrent_state.dtype)))
 
-    # output
-    core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-    out_gate = out_gate.sigmoid() if hasattr(self, "ssm_g_a") else out_gate.silu()
-    return self.ssm_out((core_attn_out * out_gate).reshape(B, 1, -1).cast(x.dtype))
+    # Use the computed state for the final output. Re-reading a just-stored MULTI buffer loses
+    # shard-local values. The output and independent cache assignments are realized together below.
+    core_input = (recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim)
+    core_attn_out = self.ssm_norm(core_input.cast(x.dtype) if self.config.ssm and self.config.ssm.kda else core_input)
+    gate = out_gate[:, -1:].reshape(B, 1, self.num_v_heads, self.head_v_dim)
+    gate = gate.float().sigmoid().cast(core_attn_out.dtype) if hasattr(self, "ssm_g_a") else gate.silu()
+    outputs.append((core_attn_out * gate).reshape(B, 1, -1))
+    out = outputs[0].cat(*outputs[1:], dim=1) if len(outputs) > 1 else outputs[0]
+    ret = self.ssm_out(out.cast(x.dtype))
+    return ret.realize(*state_updates)
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
   def _state_reset_ops(self):
-    return [self.conv_state.assign(self.conv_state.const_like(0)),
-            self.recurrent_state.assign(self.recurrent_state.const_like(0))] if hasattr(self, "conv_state") else []
+    if hasattr(self, "conv_state_q"):
+      return [s.assign(s.const_like(0)) for s in (self.conv_state_q, self.conv_state_k, self.conv_state_v, self.recurrent_state)]
+    return [self.conv_state.assign(self.conv_state.const_like(0)), self.recurrent_state.assign(self.recurrent_state.const_like(0))] \
+      if hasattr(self, "conv_state") else []
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
 
   def _init_state(self, x):
-    if not hasattr(self, "conv_state"):
-      self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
-      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
+    if not hasattr(self, "conv_state") and not hasattr(self, "conv_state_q"):
+      if hasattr(self, "attn_q"):
+        device = x.device[0] if isinstance(x.device, tuple) else x.device
+        self.conv_state_q = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.q_dim, device=device, dtype=x.dtype).clone()
+        self.conv_state_k = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.q_dim, device=device, dtype=x.dtype).clone()
+        self.conv_state_v = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.num_v_heads*self.head_v_dim, device=device, dtype=x.dtype).clone()
+        self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=device).clone()
+        if isinstance(x.device, tuple):
+          for state in (self.conv_state_q, self.conv_state_k, self.conv_state_v): state.shard_(x.device, axis=2)
+          self.recurrent_state.shard_(x.device, axis=1)
+      else:
+        self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device, dtype=x.dtype).clone()
+        self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
+    self.config = config
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
@@ -324,8 +417,14 @@ class Transformer:
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    x = self.token_embd(tokens).float()                   # (B, T, D)
-    for block in self.blk: x = block(x, start_pos)
+    x = self.token_embd(tokens).cast(dtypes.bfloat16) if self.config.bf16_activations else self.token_embd(tokens).float()
+    for block in self.blk:
+      x = block(x, start_pos)
+      # Tensor indexing lowers selected experts through a fused one-hot reduction. Keeping all 26
+      # of those high-level graphs alive until the final output is scheduled exhausts host memory.
+      # A realization boundary lowers one block at a time; TinyJit still captures and memory-plans
+      # the resulting schedules for rollout replay.
+      if self.config.expert_mxfp4: x.realize()
     logits = self.output(self.output_norm(x))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
@@ -428,9 +527,10 @@ class Transformer:
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
-    temp = Tensor([temperature])
+    model_device = self.token_embd.weight.device
+    temp = Tensor([temperature], device=model_device)
     # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
+    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32", device=model_device).reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
     if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
