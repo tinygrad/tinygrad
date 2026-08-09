@@ -213,6 +213,20 @@ class TestMXFP4(unittest.TestCase):
     np.testing.assert_array_equal(a_recompute.grad.numpy(), a_ref.grad.numpy())
     np.testing.assert_array_equal(w_recompute.grad.numpy(), w_ref.grad.numpy())
 
+  def test_return_mxfp4_saves(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(3)
+    a = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    w = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    ret = asm_gemm(a, w.T, mxfp4=True, return_mxfp4_saves=True)
+    assert isinstance(ret, tuple)
+    out, a_col, scale_a_col = ret
+    _, _, expected_col, expected_scale_col = quantize_mxfp4(a, shuffle_col=True)
+    Tensor.realize(out, a_col, scale_a_col, expected_col, expected_scale_col)
+    np.testing.assert_array_equal(a_col.numpy(), expected_col.numpy())
+    np.testing.assert_array_equal(scale_a_col.numpy(), expected_scale_col.numpy())
+
   def test_empty(self):
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
     a = Tensor.empty(M, K, dtype=dtypes.bfloat16)

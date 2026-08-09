@@ -402,8 +402,10 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None, mxfp4:bool=False,
-             mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, save_original_input:bool=False) -> Tensor:
+             mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, save_original_input:bool=False,
+             return_mxfp4_saves:bool=False) -> Tensor|tuple[Tensor, Tensor, Tensor]:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
+  assert not return_mxfp4_saves or (mxfp4 and not save_original_input)
   if mxfp4:
     assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
     assert a.dtype == dtypes.bfloat16, f"cannot quantize {a.dtype} to mxfp4"
@@ -487,4 +489,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   out = out.squeeze(0) if squeeze else out
   if unfold_batch: out = out.reshape(orig_batch, -1, out.shape[-1])
   if w_post_scale is not None: out = (out * w_post_scale.reshape(*([1]*(out.ndim-1)), -1)).cast(out.dtype)
+  if return_mxfp4_saves:
+    assert a_col is not None and scale_a_col is not None
+    return out, a_col, scale_a_col
   return out
