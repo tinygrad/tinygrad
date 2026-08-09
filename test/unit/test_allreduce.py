@@ -26,7 +26,15 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      self.assertEqual(len(sinks), 26)
+      # four reductions, four final consumers, and two input/output kernels; source shards go directly to SDMA
+      self.assertEqual(len(sinks), 10)
+
+  def test_correct_all2all_direct_slices(self):
+    with Context(ALL2ALL=2):
+      N, W = 4, 512
+      ds = tuple(f"CPU:{i}" for i in range(N))
+      t = (Tensor.arange(N*W).reshape(N, W).shard(ds, axis=0) * 2 + 1).contiguous().realize()
+      self.assertListEqual(t.sum(0).tolist(), [8*i + 4*W*3 + 4 for i in range(W)])
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):

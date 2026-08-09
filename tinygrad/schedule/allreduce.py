@@ -9,6 +9,20 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
   use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   return use_all2all, use_ring
 
+def _allreduce_slice(buf:UOp, device_idx:int, start:int, end:int) -> UOp:
+  """A physical per-device slice which still carries the state producing ``buf``."""
+  selected = buf.mselect(device_idx)
+  view = UOp(Ops.SLICE, buf.dtype, (selected.buf_uop, UOp.const(start, dtypes.weakint)), end-start, tag=("allreduce",))
+  # buf_uop intentionally strips AFTER dependencies to expose storage. Reattach the state separately so the scheduler
+  # retains the producer edge while split_copy_slice can pass the physical view (and offset) directly to SDMA.
+  state = buf
+  while state.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: state = state.src[0]
+  if state.op is not Ops.AFTER: return view
+  # Narrow the state to this lane's physical buffer. Keeping the tuple-device AFTER itself as the copy argument
+  # pollutes a single-device reduction with parameters from every device; the producer dependencies are its tail.
+  lane_state = selected.buf_uop.after(*state.src[1:])
+  return view.after(lane_state)
+
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
@@ -26,7 +40,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if not concrete: buf = buf.pad_to(buf.max_shape)
   # Copies need stable storage. AFTER only adds dependencies to an existing buffer, so preserve that
   # identity instead of materializing a second full-size buffer before reduce-scatter.
-  if not buf.has_buffer_identity(after_ok=True): buf = buf.contiguous()
+  direct_slices = buf.has_buffer_identity(after_ok=True)
+  if not direct_slices: buf = buf.contiguous()
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
@@ -44,7 +59,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   reduced_chunks:list[UOp] = []
   for i,(s,e) in enumerate(chunks):
     if use_all2all:
-      chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
+      chunks_on_i = [(_allreduce_slice(buf, j, s, e) if direct_slices else buf.mselect(j).reshape((numel,)).shrink(((s,e),)))
+                     .copy_to_device(buf.device[i]) for j in range(ndev)]
       reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
     else:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))

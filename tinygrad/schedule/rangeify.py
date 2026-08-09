@@ -576,9 +576,11 @@ split_kernels = PatternMatcher([
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
-  # Preserve hardware slice copies until split_copy_slice can lower them to one SDMA call with source and destination offsets.
-  if ((input_src.op is Ops.SLICE and input_src.tag == ("allreduce",)) or
-      (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SLICE and input_src.src[0].tag == ("allreduce",))): return None
+  # A hardware-slice COPY already under STORE is ready for split_copy_slice. A standalone COPY still needs its
+  # destination buffer; its generated STORE will then take the same direct SDMA lowering path.
+  is_slice_copy = ((input_src.op is Ops.SLICE and input_src.tag == ("allreduce",)) or
+                   (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SLICE and input_src.src[0].tag == ("allreduce",)))
+  if is_slice_copy and existing_buf is not None: return None
   if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:

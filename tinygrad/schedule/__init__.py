@@ -41,6 +41,12 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
     raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
 
+def _call_buf_uop(s:UOp) -> UOp:
+  """Resolve a call argument's storage, preserving a dependency-wrapped hardware slice as the actual view."""
+  s = _unwrap_src(s)
+  if s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",): return s.src[0]
+  return s.buf_uop
+
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
@@ -90,7 +96,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        buf_uops = tuple(_call_buf_uop(s) for s in k.src[1:] if s.op is not Ops.BIND)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
