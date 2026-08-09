@@ -115,11 +115,16 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  # TODO: rm this gated load/store version once all renderers have been refactored
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+
+  # gated LOAD/STORE, gate stops load/store from being hoisted by the linearizer
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat(Ops.IF, src=(UPat(), UPat.var("gate")))), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat(Ops.IF, src=(UPat(), UPat.var("gate")))), validate_index),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),

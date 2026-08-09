@@ -86,10 +86,10 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
 
   # load/store
-  (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
+  (UPat.var('idx').load(name="x", allow_any_len=True), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
    f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
-  (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
+  (UPat.var('idx').store(UPat.var("var"), allow_any_len=True), lambda ctx,idx,var:
    f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
    f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 

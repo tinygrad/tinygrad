@@ -10,12 +10,11 @@ pm_split_ends = PatternMatcher([
   (UPat(Ops.END, name="e"), do_split_ends),
 ])
 
-# TODO: load/store should be pinned to the IF because the linearizer isn't free to pull them out, use Ops.AFTER
 def lower_gated_load(ctx:dict[UOp, dict[UOp, None]], load:UOp, cond:UOp):
-  gated_loads = [x for x in ctx[cond] if x.op is Ops.LOAD]
-  in_if_then = tuple(x.replace(src=x.src[:1]) for x in gated_loads)
-  in_if_else = tuple(x.src[1] for x in gated_loads)
   branch = UOp(Ops.IF, dtypes.void, (cond,))
+  gated_loads = [x for x in ctx[cond] if x.op is Ops.LOAD]
+  in_if_then = tuple(x.replace(src=x.src[:1] + (branch,)) for x in gated_loads)
+  in_if_else = tuple(x.src[1] for x in gated_loads)
   if_then = UOp(Ops.THEN, dtypes.void, src=(branch,) + in_if_then)
   if_else = UOp(Ops.ELSE, dtypes.void, src=(branch,) + in_if_else)
   merge = UOp(Ops.ENDIF, dtypes.void, src=(if_then, if_else))
@@ -23,8 +22,8 @@ def lower_gated_load(ctx:dict[UOp, dict[UOp, None]], load:UOp, cond:UOp):
   return phi
 
 def lower_gated_store(store:UOp, addr:UOp, val:UOp, cond:UOp):
-  store = store.replace(src=(addr, val))
   branch = UOp(Ops.IF, dtypes.void, (cond,))
+  store = store.replace(src=(addr, val, branch))
   if_then = UOp(Ops.THEN, dtypes.void, src=(branch, store))
   if_else = UOp(Ops.ELSE, dtypes.void, src=(branch,))
   merge = UOp(Ops.ENDIF, dtypes.void, src=(if_then, if_else))
