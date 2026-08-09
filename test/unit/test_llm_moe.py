@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.llm.model import TransformerBlock, TransformerConfig
+from tinygrad.llm.model import ExpertGating, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
   return TransformerConfig(
@@ -103,7 +103,7 @@ class TestMoEFeedForward(unittest.TestCase):
     def softmax(x):
       probs = np.exp(x - x.max())
       return probs / probs.sum()
-    for gating_func in (1, 2, 3, 4):
+    for gating_func in ExpertGating:
       for norm_topk_prob in (False, True):
         block = TransformerBlock(replace(_moe_config(dim, hidden, n_heads, num_experts, k),
                                          expert_gating_func=gating_func, norm_topk_prob=norm_topk_prob))
@@ -113,12 +113,12 @@ class TestMoEFeedForward(unittest.TestCase):
         block.ffn_gate_inp.weight = Tensor((logits / dim)[None, :].repeat(dim, 0).T)
         out = block._feed_forward(Tensor.ones(1, 1, dim)).numpy()[0, 0, 0]
 
-        if gating_func == 1: selection_scores = softmax(logits)
-        elif gating_func == 2: selection_scores = 1 / (1 + np.exp(-logits))
-        elif gating_func == 3: selection_scores = logits
+        if gating_func == ExpertGating.SOFTMAX: selection_scores = softmax(logits)
+        elif gating_func == ExpertGating.SIGMOID: selection_scores = 1 / (1 + np.exp(-logits))
+        elif gating_func == ExpertGating.SOFTMAX_WEIGHT: selection_scores = logits
         else: selection_scores = np.sqrt(np.logaddexp(0, logits))
         sel = np.argsort(selection_scores)[-k:]
-        weights = softmax(logits[sel]) if gating_func == 3 else selection_scores[sel]
+        weights = softmax(logits[sel]) if gating_func == ExpertGating.SOFTMAX_WEIGHT else selection_scores[sel]
         if norm_topk_prob: weights /= weights.sum()
         expected = (weights * (sel + 1)).sum() / (1 + np.exp(-1))
         np.testing.assert_allclose(out, expected, rtol=1e-3)

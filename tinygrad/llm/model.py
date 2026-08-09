@@ -1,10 +1,16 @@
 from __future__ import annotations
-import functools, itertools, pathlib
+import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
+
+class ExpertGating(enum.IntEnum):
+  SOFTMAX = 1
+  SIGMOID = 2
+  SOFTMAX_WEIGHT = 3  # softmax over the top-k selected logits
+  SQRT_SOFTPLUS = 4
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -61,7 +67,7 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
-  expert_gating_func: int = 1
+  expert_gating_func: ExpertGating = ExpertGating.SOFTMAX
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -105,13 +111,13 @@ class FFNBlock:
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
-      # 1: softmax, 2: sigmoid, 3: softmax over top-k logits, 4: sqrt-softplus
-      if self.config.expert_gating_func == 3 or (self.config.expert_gating_func == 1 and bias is None and self.config.norm_topk_prob):
+      if self.config.expert_gating_func == ExpertGating.SOFTMAX_WEIGHT or \
+         (self.config.expert_gating_func == ExpertGating.SOFTMAX and bias is None and self.config.norm_topk_prob):
         _, sel = pairwise_topk(logits if bias is None else logits + bias, self.config.num_experts_per_tok)
         probs = logits.gather(-1, sel).softmax(-1)
       else:
-        if self.config.expert_gating_func == 4: probs = logits.softplus().sqrt()
-        else: probs = logits.sigmoid() if self.config.expert_gating_func == 2 else logits.softmax(-1)
+        if self.config.expert_gating_func == ExpertGating.SQRT_SOFTPLUS: probs = logits.softplus().sqrt()
+        else: probs = logits.sigmoid() if self.config.expert_gating_func == ExpertGating.SIGMOID else logits.softmax(-1)
         _, sel = pairwise_topk(probs if bias is None else probs + bias, self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
@@ -401,7 +407,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
-      expert_gating_func=kv.get(f'{arch}.expert_gating_func', 2 if arch == 'glm4moe' else 1),
+      expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func', ExpertGating.SOFTMAX)),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
