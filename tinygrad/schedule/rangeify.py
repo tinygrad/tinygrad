@@ -124,6 +124,15 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
+  """Retarget a complete set of disjoint slice writes to an already allocated output buffer."""
+  while target.op is Ops.RESHAPE: target = target.src[0]
+  while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
+  if (target is not output or src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}
+      or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device): return None
+  if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
+  return output.after(*(s.substitute({src.src[0].base:output}) for s in src.src[1:]))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
@@ -132,6 +141,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # resolve allreduce (must be bottom up)
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
   # split_reduceop
@@ -291,6 +301,12 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
+def normalize_slice_source(x:UOp) -> UOp|None:
+  # Rangeify can wrap a physical slice's buffer in INDEX. Keep the slice attached to the buffer itself so
+  # scheduling and runtime argument resolution retain the physical offset.
+  if x.tag != ("allreduce",) or x.src[0].op is not Ops.INDEX or x.src[1].op is not Ops.CONST: return None
+  return UOp(Ops.SLICE, x.dtype, (x.src[0].src[0], x.src[1]), x.arg, tag=x.tag)
+
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
   # check all ranges are used (no expand), and same size (no pad and shrink)
@@ -299,6 +315,7 @@ def after_all_invalid(after:UOp):
     and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
+  (UPat(Ops.SLICE, name="x"), normalize_slice_source),
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
@@ -481,6 +498,7 @@ def find_bufs(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat(Ops.SLICE, name="buf"), lambda ctx,buf: debuf(ctx, buf) if buf.tag == ("allreduce",) else None),
   (UPat(Ops.PARAM, name="v"), lambda v:
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
@@ -518,6 +536,28 @@ pm_add_param_range_tags = PatternMatcher([
   (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
 ])
 
+def copy_slice_src(x:UOp) -> tuple[UOp, UOp]|None:
+  """Recover a hardware slice and retain the state that produced it."""
+  state = x
+  while x.op is Ops.AFTER: x = x.src[0]
+  if x.op is Ops.INDEX and x.src[0].op is Ops.SLICE: x = x.src[0]
+  if x.op is not Ops.SLICE or x.tag != ("allreduce",) or x.src[1].op is not Ops.CONST: return None
+  src = x.src[0].src[0] if x.src[0].op is Ops.INDEX else x.src[0]
+  return (x if src is x.src[0] else UOp(Ops.SLICE, x.dtype, (src, x.src[1]), x.arg, tag=x.tag)), state
+
+def split_copy_slice(x:UOp) -> UOp|None:
+  """Lower STORE(COPY(SLICE)) directly to a copy call with sliced source and destination arguments."""
+  if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  store = x.src[0] if x.op is Ops.END else x
+  if store.op is not Ops.STORE or store.src[1].op is not Ops.COPY or (slice_src:=copy_slice_src(store.src[1].src[0])) is None: return None
+  src, source_state = slice_src
+  copy = store.src[1]
+  psrc = UOp(Ops.PARAM, src=(UOp.const(prod(src.max_shape), dtypes.int),),
+             arg=ParamArg(1, src.dtype, addrspace=src.addrspace)).reshape(src.max_shape)
+  if src.max_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
+  target = store.src[0].src[0] if store.src[0].op is Ops.INDEX else store.src[0]
+  return copy.replace(src=(psrc,)).call(target, source_state)
+
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
@@ -530,11 +570,15 @@ def split_store(x:UOp) -> UOp|None:
   return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
 
 split_kernels = PatternMatcher([
+  (UPat((Ops.STORE, Ops.END), name="x"), split_copy_slice),
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
+  # Preserve hardware slice copies until split_copy_slice can lower them to one SDMA call with source and destination offsets.
+  if ((input_src.op is Ops.SLICE and input_src.tag == ("allreduce",)) or
+      (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SLICE and input_src.src[0].tag == ("allreduce",))): return None
   if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
