@@ -114,13 +114,13 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
     out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, amax_x=amax_x,
                        grad_amax_state=grad_amax_state, next_grad_amax_state=next_grad_amax_state)
     return out, h, x_normed, rrms, ret
-  h = x + residual
   if MXFP4:
-    from extra.llama_kernels.rmsnorm import rmsnorm_mul
-    normed, rrms = rmsnorm_mul(h, norm, eps)
+    from extra.llama_kernels.rmsnorm import rmsnorm_add_mul
+    normed, h, rrms = rmsnorm_add_mul(x, residual, norm, eps)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                        next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
     return out, h, h, rrms, ret
+  h = x + residual
   x_normed, rrms = rmsnorm(h, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                      next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
