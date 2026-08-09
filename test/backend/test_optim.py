@@ -45,6 +45,16 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
   return net.x.detach().numpy(), net.W.detach().numpy()
 
 class TestMLPerfAdamWKernel(unittest.TestCase):
+  def test_replicated_clip_grads(self):
+    from examples.mlperf.optim import clip_grads
+    rng, devices = np.random.default_rng(11), tuple(f"CPU:{i}" for i in range(4))
+    arrays = [rng.standard_normal((16, 7), dtype=np.float32), rng.standard_normal((3,), dtype=np.float32)]
+    grads = [Tensor(x, dtype=dtypes.bfloat16).shard(devices).realize() for x in arrays]
+    norm, _ = clip_grads(grads, grad_acc=2, clip_norm=1.0)
+    rounded = [Tensor(x, dtype=dtypes.bfloat16).numpy().astype(np.float32) / 2 for x in arrays]
+    expected = np.sqrt(sum(np.square(x).sum(dtype=np.float32) for x in rounded))
+    np.testing.assert_allclose(norm.numpy(), expected, rtol=2e-4, atol=2e-4)
+
   def test_master_weight_transition(self):
     from examples.mlperf.optim import _adamw_master_step
     rng = np.random.default_rng(7)
