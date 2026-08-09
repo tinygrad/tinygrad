@@ -66,7 +66,9 @@ def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   for u in lst:
     # NOTE: we skip STACK here, it can't actually be accessed
     if u.op is Ops.STACK: continue
-    z3_rewritten: tuple[z3.ExprRef, z3.BoolRef|None]|None = z3_renderer.rewrite(u, ctx=(solver.ctx, z3map))
+    x = u
+    if u.op is Ops.GETTUPLE: x = u.src[0].get_arg(u.arg)
+    z3_rewritten: tuple[z3.ExprRef, z3.BoolRef|None]|None = z3_renderer.rewrite(x, ctx=(solver.ctx, z3map))
     if z3_rewritten is None: raise NotImplementedError(f"{u.op} is not supported by z3")
     new_u, constraint = z3_rewritten
     if constraint is not None: solver.add(constraint)
