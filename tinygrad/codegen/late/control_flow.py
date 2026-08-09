@@ -85,15 +85,15 @@ def lower_end(ctx:CFGContext2, x:UOp) -> UOp|None:
   return end
 
 pm_add_control_flow2 = PatternMatcher([
+  (UPat(Ops.END, name="x"), lower_end),
+  (UPat(Ops.RANGE, name="x"), lower_range),
+  (UPat((Ops.IF, Ops.SINK), name="x"), lambda ctx,x: x.replace(src=(y,)+x.src) if (y:=ctx.idom.get(x)) is not None else None),
   # the uses of RANGE that aren't control are really using the iterator
   (UPat(GroupOp.All - GroupOp.Control - {Ops.GETTUPLE, Ops.AFTER}, name="x"), lambda x:
    x.replace(src=tuple(s if s.op is not Ops.RANGE else UOp(Ops.GETTUPLE, s.dtype, (s,), 0) for s in x.src))),
    # the uses of PARAM now use its projection
   (UPat(GroupOp.All - {Ops.START, Ops.GETTUPLE}, name="x"), lambda ctx,x:
    x.replace(src=tuple(s if s.op is not Ops.PARAM else UOp(Ops.GETTUPLE, s.dtype, (ctx.start,), s.arg.slot) for s in x.src))),
-  (UPat(Ops.END, name="x"), lower_end),
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat((Ops.IF, Ops.SINK), name="x"), lambda ctx,x: x.replace(src=(y,)+x.src) if (y:=ctx.idom.get(x)) is not None else None),
 ])
 
 class LowerRegBufferContext:
