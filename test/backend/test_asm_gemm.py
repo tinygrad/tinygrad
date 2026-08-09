@@ -172,6 +172,13 @@ class TestMXFP4(unittest.TestCase):
     self.assertTrue((row_scale == 127).any())
     self.assertTrue((row_scale != 127).any())
 
+    updated = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    expected = quantize_mxfp4(updated)
+    cached = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    refresh = quantize_mxfp4(updated, out=cached)
+    Tensor.realize(*expected, *refresh)
+    for actual, reference in zip(cached, expected): np.testing.assert_array_equal(actual.numpy(), reference.numpy())
+
   def test_correctness(self):
     import numpy as np
     M = N = K = 256

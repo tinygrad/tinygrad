@@ -21,16 +21,18 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
                                              f"-DSHUFFLE_ROWWISE_FP4_VALUE={int(shuffle_row)}",
                                              f"-DSHUFFLE_COLWISE_FP4_VALUE={int(shuffle_col)}"]))))
 
-def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, flatten_row:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, flatten_row:bool=False,
+                   out:tuple[Tensor, Tensor, Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   assert x.dtype == dtypes.bfloat16 and x.ndim >= 2, f"expected BF16 matrix, got {x.dtype} {x.shape}"
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   row_axis = 0 if flatten_row and axis is not None else axis
   col_axis = None if axis is None else (0 if axis == x.ndim-1 else 1)
-  outputs = (alloc_like((M, N//2) if flatten_row else (*x.shape[:-1], N//2), dtypes.uint8, x.device, row_axis),
-             alloc_like((M, N//32) if flatten_row else (*x.shape[:-1], N//32), dtypes.uint8, x.device, row_axis),
-             alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
-             alloc_like((N, M//32), dtypes.uint8, x.device, col_axis))
+  outputs = out if out is not None else (
+    alloc_like((M, N//2) if flatten_row else (*x.shape[:-1], N//2), dtypes.uint8, x.device, row_axis),
+    alloc_like((M, N//32) if flatten_row else (*x.shape[:-1], N//32), dtypes.uint8, x.device, row_axis),
+    alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
+    alloc_like((N, M//32), dtypes.uint8, x.device, col_axis))
   fxn = functools.partial(_custom_quantize_mxfp4, shuffle_row=shuffle_row, shuffle_col=shuffle_col)
   return tuple(Tensor.custom_kernel(*outputs, x, fxn=fxn)[:4])
