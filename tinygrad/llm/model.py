@@ -1,24 +1,30 @@
 from __future__ import annotations
-import functools, itertools, math, pathlib
+import enum, functools, itertools, math, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
+@dataclass(frozen=True)
+class YaRNConfig:
+  factor: float
+  orig_ctx_len: int
+  beta_fast: float
+  beta_slow: float
+
 @functools.cache
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None, yarn:tuple[float,int,float,float]|None=None) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None, yarn:YaRNConfig|None=None) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2) / dim))
   concentration = 1.0
   if yarn is not None:
-    scale, orig_ctx, beta_fast, beta_slow = yarn
-    if scale > 1.0:
-      concentration = 0.1 * math.log(scale) + 1.0
+    if yarn.factor > 1.0:
+      concentration = 0.1 * math.log(yarn.factor) + 1.0
       d_half = dim // 2
-      low = d_half * math.log(orig_ctx / (beta_fast * 2 * math.pi)) / math.log(theta)
-      high = d_half * math.log(orig_ctx / (beta_slow * 2 * math.pi)) / math.log(theta)
+      low = d_half * math.log(yarn.orig_ctx_len / (yarn.beta_fast * 2 * math.pi)) / math.log(theta)
+      high = d_half * math.log(yarn.orig_ctx_len / (yarn.beta_slow * 2 * math.pi)) / math.log(theta)
       interp = 1 - ((Tensor.arange(d_half).float() - low) / (high - low)).clamp(0, 1)
-      freqs = freqs * interp + (freqs / scale) * (1 - interp)
+      freqs = freqs * interp + (freqs / yarn.factor) * (1 - interp)
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return (freqs.cos() * concentration).cat(freqs.sin() * concentration, dim=-1).clone(device)
 
@@ -46,6 +52,12 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+class ExpertGating(enum.IntEnum):
+  SOFTMAX = 1
+  SIGMOID = 2
+  SOFTMAX_WEIGHT = 3  # softmax over the top-k selected logits
+  SQRT_SOFTPLUS = 4
+
 @dataclass(frozen=True)
 class SSMConfig:
   conv_kernel: int
@@ -68,14 +80,13 @@ class TransformerConfig:
   rope_theta: float
   rope_dim: int
   v_head_dim: int
-  yarn: tuple[float, int, float, float]|None = None
+  yarn: YaRNConfig|None = None
   max_context: int = 0
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
-  # 1: softmax, 2: sigmoid, 3: softmax over top-k logits, 4: sqrt-softplus
-  expert_gating_func: int = 1
+  expert_gating_func: ExpertGating = ExpertGating.SOFTMAX
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -126,19 +137,20 @@ class FFNBlock:
       logits = self.ffn_gate_inp(x)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
       # gating
-      if self.config.expert_gating_func == 3 or (self.config.expert_gating_func == 1 and bias is None and self.config.norm_topk_prob):
+      if self.config.expert_gating_func == ExpertGating.SOFTMAX_WEIGHT or \
+         (self.config.expert_gating_func == ExpertGating.SOFTMAX and bias is None and self.config.norm_topk_prob):
         _, sel = pairwise_topk(logits if bias is None else logits + bias, self.config.num_experts_per_tok)
         probs = logits.gather(-1, sel).softmax(-1)
       else:
-        if self.config.expert_gating_func == 4: probs = logits.softplus().sqrt()
-        else: probs = logits.sigmoid() if self.config.expert_gating_func == 2 else logits.softmax(-1)
+        if self.config.expert_gating_func == ExpertGating.SQRT_SOFTPLUS: probs = logits.softplus().sqrt()
+        else: probs = logits.sigmoid() if self.config.expert_gating_func == ExpertGating.SIGMOID else logits.softmax(-1)
         _, sel = pairwise_topk(probs if bias is None else probs + bias, self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
       # scale
       probs = probs * self.config.routed_scaling_factor
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
-      if self.config.oai_swiglu:  # gpt-oss: swish(alpha*gate) * (up+1), clamped
+      if self.config.oai_swiglu:  # gpt-oss clamps the projections before applying its SwiGLU variant
         gate, up = gate.clamp(max_=7.0), up.clamp(min_=-7.0, max_=7.0)
         act = gate * (gate*1.702).sigmoid() * (up+1)
       else: act = gate.silu() * up
@@ -412,11 +424,10 @@ class Transformer:
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
     rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
-    yarn = (kv[f'{arch}.rope.scaling.factor'],
-            kv.get(f'{arch}.rope.scaling.original_context_length', kv[f'{arch}.context_length']),
-            kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
-            kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) \
-      if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
+    yarn = YaRNConfig(factor=kv[f'{arch}.rope.scaling.factor'],
+                      orig_ctx_len=kv.get(f'{arch}.rope.scaling.original_context_length', kv[f'{arch}.context_length']),
+                      beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
+                      beta_slow=kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
@@ -442,7 +453,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
-      expert_gating_func=kv.get(f'{arch}.expert_gating_func', 3 if arch == 'gpt-oss' else 2 if arch == 'glm4moe' else 1),
+      expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func', ExpertGating.SOFTMAX)),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
@@ -455,7 +466,7 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
-      oai_swiglu=arch == 'gpt-oss', attn_sinks=arch == 'gpt-oss',
+      oai_swiglu=arch == 'gpt-oss', attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       swa_layers = tuple(i % 2 == 0 for i in range(kv[f'{arch}.block_count'])) if arch == 'gpt-oss' else ())
     model = Transformer(config)
