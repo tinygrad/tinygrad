@@ -539,8 +539,11 @@ class AMDDevice(HCQ2Compiled):
   ])
 
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
+  max_scratch_psize = 0
 
   ifaces = [KFDIface, PCIIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface)]
+
+  def device_props(self): return self.iface.props
 
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
@@ -691,7 +694,7 @@ class AMDDevice(HCQ2Compiled):
     return tmpring
 
   def scratch_buffer(self, private_segment_size):
-    private_segment_size = max(private_segment_size, 128)
+    AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
     if self.max_private_segment_size < private_segment_size:
       lanes_per_wave = 64 # wave64
       mem_alignment_size = 256 if self.target[0] != 9 else 1024
