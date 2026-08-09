@@ -24,8 +24,9 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
   if not concrete: buf = buf.pad_to(buf.max_shape)
-  # contiguous before we copy it
-  buf = buf.contiguous()
+  # Copies need stable storage. AFTER only adds dependencies to an existing buffer, so preserve that
+  # identity instead of materializing a second full-size buffer before reduce-scatter.
+  if not buf.has_buffer_identity(after_ok=True): buf = buf.contiguous()
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
