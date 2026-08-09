@@ -65,6 +65,19 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
   if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
 
+def lift_full_buffer_reshape_after(r:UOp, a:UOp) -> UOp|None:
+  if r.numel() != a.numel() or r.dtype != a.dtype or not a.src[0].has_buffer_identity(after_ok=True): return None
+  return r.replace(src=(a.src[0], *r.src[1:])).after(*a.src[1:])
+
+def lift_unshard_after(u:UOp, a:UOp) -> UOp|None:
+  if not a.src[0].has_buffer_identity(after_ok=True): return None
+  return u.replace(src=(a.src[0], *u.src[1:])).after(*a.src[1:])
+
+lift_full_buffer_after_views = PatternMatcher([
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="r"), lift_full_buffer_reshape_after),
+  (UPat(Ops.UNSHARD, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="u"), lift_unshard_after),
+])
+
 def _make_buffer_view(src:UOp) -> UOp|None:
   """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
@@ -100,21 +113,28 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   return None
 
-def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
+def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|None:
   # how output s lands in the caller's buffer t, or None if it must be copied into t
   # materialize straight into t
-  if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
+  if s.op is Ops.CONTIGUOUS:
+    placed = t.after(t.store(s.src[0]))
+    return placed, {s:placed}
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t
+  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t, {s:t}
+  # a full-buffer reshape is the same storage with a different logical shape, so rebind both the view and its base
+  if (s.op is Ops.RESHAPE and s.has_buffer_identity() and s.contiguous_view_offset() == 0 and s.numel() == s.base.numel()
+      and s.base.op in {Ops.BUFFER, Ops.SLICE, Ops.UNSHARD}):
+    return t, {s:t, s.base:t.reshape(s.base.shape)}
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
+  body = graph_rewrite(c.src[0], lift_full_buffer_after_views, name="lift full-buffer AFTER views")
   input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
 
   # add the outputs to the call
-  srcs = c.src[0].src
+  srcs = body.src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
@@ -126,8 +146,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     while s.op is Ops.AFTER:
       after_deps.extend(s.src[1:])
       s = s.src[0]
-    if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
-      subs[s] = placed
+    redirect = _precompiled_output_redirect(s, t)
+    if redirect is not None and all(old not in subs for old in redirect[1]):
+      placed, redirect_subs = redirect
+      subs.update(redirect_subs)
       items.append(s.after(*after_deps) if after_deps else s)
     else:
       items.append(t.after(t.store(s.after(*after_deps))))
