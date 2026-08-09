@@ -117,6 +117,26 @@ class TestSwiGLU(unittest.TestCase):
       self.assertTrue(actual_grad.allclose(expected_grad, atol=0.25, rtol=0.03).item(), "backward mismatch")
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+class TestRMSNormMul(unittest.TestCase):
+  def test_forward_backward(self):
+    from extra.llama_kernels.rmsnorm import rmsnorm, rmsnorm_mul
+    Tensor.manual_seed(1)
+    x = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    weight = Tensor.randn(4096, dtype=dtypes.bfloat16)
+    gradient = Tensor.randn(64, 4096, dtype=dtypes.bfloat16)
+    out, rrms = rmsnorm_mul(x, weight, 1e-5)
+    normalized, ref_rrms = rmsnorm(x, 1e-5)
+    ref = normalized * weight
+    dx, dw = out.gradient(x, weight, gradient=gradient)
+    ref_dx, ref_dw = ref.gradient(x, weight, gradient=gradient)
+    Tensor.realize(out, rrms, ref, ref_rrms, dx, dw, ref_dx, ref_dw)
+    with Context(DEBUG=0):
+      self.assertTrue(out.allclose(ref, atol=0.07, rtol=0.02).item(), "forward mismatch")
+      self.assertTrue(rrms.allclose(ref_rrms.squeeze(-1), atol=1e-6, rtol=1e-6).item(), "rrms mismatch")
+      self.assertTrue(dx.allclose(ref_dx, atol=0.07, rtol=0.02).item(), "input gradient mismatch")
+      self.assertTrue(dw.allclose(ref_dw, atol=0.3, rtol=0.03).item(), "weight gradient mismatch")
+
+@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):
   SHAPE = (2, 8192, 32, 8, 128)
 

@@ -91,6 +91,12 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
     out, *ret = matmul(None, w, w_inv_scale=w_inv_scale, x_fp8=x_fp8, amax_x=amax_x,
                        grad_amax_state=grad_amax_state, next_grad_amax_state=next_grad_amax_state)
     return out, x_normed, rrms, ret
+  if MXFP4:
+    from extra.llama_kernels.rmsnorm import rmsnorm_mul
+    normed, rrms = rmsnorm_mul(x, norm, eps)
+    out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
+                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
+    return out, x, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                      next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
@@ -105,6 +111,12 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
                        grad_amax_state=grad_amax_state, next_grad_amax_state=next_grad_amax_state)
     return out, h, x_normed, rrms, ret
   h = x + residual
+  if MXFP4:
+    from extra.llama_kernels.rmsnorm import rmsnorm_mul
+    normed, rrms = rmsnorm_mul(h, norm, eps)
+    out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
+                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
+    return out, h, h, rrms, ret
   x_normed, rrms = rmsnorm(h, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                      next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
@@ -213,7 +225,7 @@ class FlatTransformer:
                                                                   amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv,
                                                                   next_grad_amax_state=next_grad_amax_xqkv, next_amax_x=next_amax_xqkv,
                                                                   mxfp4_w=mxfp4_wqkv)
-    saves.extend([x_normed, rrms, *s, xqkv])
+    saves.extend(([rrms] if MXFP4 else [x_normed, rrms]) + [*s, xqkv])
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
       xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim)
@@ -270,7 +282,7 @@ class FlatTransformer:
                                                                           grad_amax_state=kwargs["grad_amax_xw13"],
                                                                           next_grad_amax_state=kwargs["next_grad_amax_xw13"],
                                                                           mxfp4_w=kwargs.get("mxfp4_w13"))
-      saves.extend([x_normed, rrms, *s, x_w13])
+      saves.extend(([rrms] if MXFP4 else [x_normed, rrms]) + [*s, x_w13])
       out, s = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
                                                      next_amax_x2=kwargs["next_amax_x2"],
                                                      grad_amax_xw13=kwargs["grad_amax_xw13"],
