@@ -471,6 +471,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):
+      full_sink = renderer.early(full_sink)
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       renderer.pre_regalloc_context = PreRegallocContext(full_sink, renderer)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)

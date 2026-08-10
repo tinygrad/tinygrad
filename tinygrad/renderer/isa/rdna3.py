@@ -2,7 +2,7 @@ from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_s
 from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import InsOp
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
@@ -157,8 +157,8 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
   vaddr, offs = idx, const(0, dtypes.uint16)
-  if idx.op is Ops.CONST: vaddr = idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(idx.arg, dtypes.int32),))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and -(1 << 12) <= (_offs := idx.src[1].arg * disp_scale) < (1 << 12):
+  def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and foldable((_offs := idx.src[1].val * disp_scale)):
     vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
   vaddr = UOp(Ops.SHL, dtype=dtypes.uint64, src=(int_to_int64(vaddr, dtypes.uint64), shft))
   return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
@@ -387,6 +387,33 @@ def lower_end(ctx, x:UOp, acc:UOp):
   return inc, [inc, jmp_back, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # ---- lowering passes ----
+class BiasMemoryCtx:
+# - should this be put in codegen? most good compilers already optimize this in the renderer ex. LLVM, probably HIP
+  def __init__(self, sink:UOp):
+    # shared base op -> idx and optional const arg
+    self.mgroups: dict[ParamArg, list[tuple[UOp|None, int|None]]] = {}
+    for u in sink.toposort():
+      if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace is not AddrSpace.REG:
+        base,idx = u.src[0].src[:2]
+        arg = None
+        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
+          arg = idx.src[1].val
+        self.mgroups.setdefault(base.arg, []).append((idx,arg))
+
+    self.normalized: dict[UOp, UOp] = {}
+    for b, uses in self.mgroups.items():
+      args = [v[1] for v in uses if v[1] is not None]
+      if len(args) == 0: continue
+      mean = sum(args) // len(args)
+      if mean == 0: continue
+      for idx,v in uses:
+        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
+          self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
+
+pm_bias_memory_addrs = PatternMatcher([
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[x.src[1]], *x.src[2:])) if x.src[1] in ctx.normalized else None),
+])
+
 extra_matcher = PatternMatcher([
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(to_storage_scalar(x.arg, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
@@ -539,6 +566,8 @@ def encode(ctx, x:UOp):
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
   kw = args = None
 
+  # print("encodiong", opc, rdefs(x), [(s.op, s.arg, rdefs(s)) for s in oprs])
+
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.SCRATCH:
@@ -599,7 +628,9 @@ class RDNA3Renderer(ISARenderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
-  def stack_alloc(self, uops:list[UOp]): return uops
+
+  def early(self, full_sink:UOp) -> UOp:
+    return graph_rewrite(full_sink, pm_bias_memory_addrs, ctx=BiasMemoryCtx(full_sink))
 
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!

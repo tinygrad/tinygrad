@@ -847,7 +847,7 @@ class X86Renderer(ISARenderer):
   # NOTE: kinda dirty, where does this belong in pipeline?
   # - buffers have to be rewritten/stack size updated before FRAME_INDEX in post_regalloc
   # - make this a seperate line rewrite pattern matcher?
-  def stack_alloc(self, uops:list[UOp]):
+  def stack_alloc(self, uops:list[UOp]) -> list[UOp]:
     sp = self.spill_pointer()
     # allocate buffers
     for i, u in enumerate(uops):
