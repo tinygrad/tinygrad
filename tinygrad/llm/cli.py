@@ -227,8 +227,9 @@ def main():
       template = env.from_string(ct)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
-  # warmup the JIT
-  if args.warmup or args.serve:
+  # Recurrent models specialize prefill by prompt chunk length and their eager AMD capture takes
+  # longer than loading the model. Start serving immediately; --warmup remains available when desired.
+  if args.warmup or (args.serve and not model.has_recurrent_block):
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
