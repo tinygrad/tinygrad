@@ -1459,11 +1459,11 @@ def train_llama3():
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
   Tensor.realize(*optim.m, *optim.v, *optim.param_shards)
-  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+  loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
+  Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
   if mxfp4_weights is not None:
     Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
-  loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device).contiguous().realize()
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1497,8 +1497,8 @@ def train_llama3():
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    loss_acc.assign(0)
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc, *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax, *refreshed_mxfp4)
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+                   *refreshed_mxfp4)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 
