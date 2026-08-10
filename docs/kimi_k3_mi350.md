@@ -4,6 +4,34 @@ This branch targets text generation directly from the official `moonshotai/Kimi-
 
 The checked TP8 layout consumes 196.78 GB (183.27 GiB) of text weights per GPU. The compressed MLA cache adds 28.99 GB (27 GiB) per GPU at the full 1,048,576-token context, leaving approximately 62.23 GB of each nominal 288 GB MI350X for execution buffers and allocator overhead. Start much smaller.
 
+## Resume the current optimization session
+
+Work on branch `kimi_slop`. It was cleanly rebased onto `origin/kimi_slop` commit `553bdf68e` on 2026-08-10. The retained K3 commits after that base are `1b3732a6e`, `c6ac4961d`, `1d8620471`, `224bac031`, `f53f0e7e7`, and `2b1b8c22a`; verify the current hashes with `git log` because a later rebase may rewrite them. Before starting any benchmark, check that the worktree is clean and that no model process remains:
+
+```sh
+git status --short --branch
+git log --oneline --decorate -10
+pgrep -af 'tinygrad.llm.cli|benchmark_kimi_k3' || true
+```
+
+The active acceptance target is **more than 100 tok/s decode, more than 200 tok/s prefill, and less than 180 seconds cold startup** on TP8/gfx950. None is currently met. The authoritative official-checkpoint baseline is 389.84 seconds startup, 38.65 tok/s prefill, and 6.25 tok/s decode. The 1.56 TB checkpoint has a measured 6.9 GB/s single-XFS-NVMe read ceiling, giving a roughly 227-second physical cold-read floor; meeting the startup target therefore also requires a faster storage path, not only loader code.
+
+Use the fake-weight, one-layer loop for development. Do not repeatedly load the official checkpoint while optimizing:
+
+```sh
+DEV=AMD python extra/benchmark_kimi_k3_fake.py --mode attention --iterations 30
+DEV=AMD python extra/benchmark_kimi_k3_fake.py --mode block --iterations 30
+PROFILE=1 DEV=AMD python extra/benchmark_kimi_k3_fake.py --mode block --iterations 5
+```
+
+The clean retained baseline is about 0.630 ms per attention layer and 1.37 ms per complete block, with fake initialization taking about 0.9/2 seconds respectively after the rebase. Since K3 has 93 sequential blocks, a 100 tok/s projection requires at most approximately 0.108 ms per complete block. Only run another 96-shard official validation after a candidate produces a large whole-block gain, remains finite and deterministic, and passes a direct numerical comparison. Test one candidate at a time and remove failed experiments before moving on.
+
+The immediate bottleneck is launch and synchronization granularity: an official four-token decode profile contained 6,304 kernel events, while packed expert work was only a small fraction of total GPU time. Continue with whole-component or whole-block fusion/replay work, not isolated expert microkernels. The latest fake-loop A/B retested the previously rejected dual gate/up and weighted-down MFMA prototypes: 1.374 ms baseline versus 1.375 ms fused, so they were removed again. A fused whole-core KDA recurrence was also slower in the exact fake attention gate (0.665 versus 0.633 ms) and must not be restored unchanged.
+
+Preserve these invariants when official validation resumes: use `/raid/weights/kimi-k3` directly, keep all 96 shards byte-for-byte untouched, run only one model process, begin at context 128, verify all eight devices are `gfx950`, and preserve the first failure instead of retrying over it. The most recent preserved official failure from a rejected KDA experiment was the invalid sequence `[198, 163840, 163840, 163840]`; token 163840 is outside the valid vocabulary. The retained path before that experiment produced deterministic in-range replay.
+
+After a synthetic candidate passes, run correctness and performance in this order: NULL gfx950 compile coverage, focused tests with `-n12` where supported, TP8 fake numerical comparison, official context-128 deterministic tokens, load/prefill/decode timing, and then context admission at 4K, 32K, 131K, and 262K. Run `python -m mypy tinygrad/` and `python -m ruff check .` when those tools are installed. Read `tinygrad/viz/README.md` before inspecting rewrite or device profiles.
+
 ## Before renting the machine
 
 - Keep the existing 96 shards in `/raid/weights/kimi-k3`; no additional model-sized free space is required. Leave ordinary headroom for logs and temporary files.
