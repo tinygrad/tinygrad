@@ -1556,8 +1556,7 @@ def train_llama3():
 
       stopped = False
       data_time, dev_time = 0, 0
-      accum_steps = grad_acc if i >= 2 else 1
-      for _ in range(accum_steps):
+      for _ in range(accum_steps:=grad_acc if i >= 2 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
