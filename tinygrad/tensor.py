@@ -71,7 +71,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   (buf, offset), size = cv, src.max_numel() * src.element_size() // cv[0].element_size()
   if buf.op is not Ops.BUFFER or buf.nbytes() == src.nbytes(): return None
   # NB: make offset a UOp.variable here to do the offset computation in the kernels
-  return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(offset), UOp.const(size))).bitcast(src.dtype).reshape(src.shape)
+  return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(offset), UOp.const(size))).bitcast(src.dtype)
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -83,8 +83,8 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
-    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
     ctx.views.add(view)
+    view = view.reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
@@ -94,7 +94,7 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
     if resolved.op is not Ops.UNSHARD: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     ctx.views.add(view)
-    return view.unshard(resolved.arg, resolved.src[1:])
+    return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1:])
 
   return None
 
