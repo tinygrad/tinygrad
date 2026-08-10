@@ -6,6 +6,18 @@ from tinygrad.llm.kernels.amd import q8_quantize, quantized_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
+  def test_word_quant_weights_use_typed_buffer_view(self):
+    for ggml_type, type_size in ((13, 176), (23, 136)):
+      with self.subTest(ggml_type=ggml_type):
+        raw = Tensor(np.zeros(type_size + 4, dtype=np.uint8), device="CPU").contiguous().realize()[4:]
+        decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
+        linear = Linear(256, 1, bias=False)
+        linear.set_quantized(decoded)
+        self.assertEqual(linear.ggml_type, ggml_type)
+        self.assertEqual(linear.weight.dtype, dtypes.uint32)
+        self.assertEqual(linear.weight.nbytes(), type_size)
+        self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
+
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     x = np.linspace(-3.1, 2.7, 64, dtype=np.float32).reshape(2, 32)

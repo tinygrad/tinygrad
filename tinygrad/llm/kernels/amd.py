@@ -432,14 +432,14 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
 
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device).uop
   if layer.ggml_type == Q5_K and use_wmma:
-    return run(_q5_linear_f16_wmma_kernel, out, raw.bitcast(dtypes.uint32), x.cast(dtypes.float16).contiguous().uop)
+    return run(_q5_linear_f16_wmma_kernel, out, raw, x.cast(dtypes.float16).contiguous().uop)
   if layer.ggml_type == IQ4_XS and use_wmma:
-    return run(_iq4_linear_f16_wmma_kernel, out, raw.bitcast(dtypes.uint32), x.cast(dtypes.float16).contiguous().uop,
+    return run(_iq4_linear_f16_wmma_kernel, out, raw, x.cast(dtypes.float16).contiguous().uop,
                iq4_half_lut(str(x.device)).uop)
   xq, xd = q8_quantize(x, tokens, layer.in_features)
   decode = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
   out = Tensor.empty(tokens, layer.out_features, (layer.in_features+1023)//1024, dtype=dtypes.float32, device=x.device).uop
-  return run(decode, out, raw if layer.ggml_type == Q6_K else raw.bitcast(dtypes.uint32), xq.uop, xd.uop)
+  return run(decode, out, raw, xq.uop, xd.uop)
 
 @functools.cache
 def iq4_half_lut(device:str) -> Tensor:

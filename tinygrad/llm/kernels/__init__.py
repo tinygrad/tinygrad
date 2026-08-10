@@ -25,8 +25,12 @@ class Linear(nn.Linear):
     if raw is None: return
     raw_offset = raw.contiguous_view_offset()
     assert raw_offset is not None and raw_offset % 4 == 0 and raw.buf_uop.dtype == dtypes.uint8
-    self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(raw.max_numel(), dtypes.uint8, raw_offset)))
     self.ggml_type = packed_sizes[prod(raw.shape)]
+    # Q5_K and IQ4_XS kernels consume words. Store a typed buffer view directly: a lazy BITCAST is decomposed into
+    # byte-combining ALU before custom-kernel scheduling and would copy the entire packed weight on every JIT graph.
+    packed_dtype = dtypes.uint8 if self.ggml_type == 14 else dtypes.uint32
+    self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(raw.max_numel() * raw.dtype.itemsize // packed_dtype.itemsize,
+                                                                              packed_dtype, raw_offset)))
   def __call__(self, x:Tensor) -> Tensor:
     static = isinstance(x.numel(), int)
     supported = self.use_custom_quant and amd_custom_kernels_supported(cast(str, self.weight.device))
