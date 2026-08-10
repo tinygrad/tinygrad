@@ -227,10 +227,10 @@ def main():
       template = env.from_string(ct)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
-  # Recurrent models specialize prefill by prompt chunk length and their eager AMD capture takes
-  # longer than loading the model. Start serving immediately; --warmup remains available when desired.
-  if args.warmup or (args.serve and not model.has_recurrent_block):
+  # Capture the default greedy serving shapes before accepting requests.
+  if args.warmup:
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
+  elif args.serve: model.warmup()
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()

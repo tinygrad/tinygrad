@@ -697,7 +697,9 @@ class Transformer:
     return model, kv
 
   def warmup(self):
-    prompt = [0] * max(1, min(8, self.max_context-1)) if self.has_recurrent_block else [0]
+    # Capture the only two shapes used by recurrent serving: a full prefill chunk and one-token rollout.
+    recurrent_chunk = self.config.recurrent_prefill_chunk_size or 32
+    prompt = [0] * max(1, min(recurrent_chunk, self.max_context-2)) if self.has_recurrent_block else [0]
     for _ in range(2): list(zip(range(2), self.generate(prompt)))
 
   def _reset_amd_state(self) -> None:
@@ -742,7 +744,10 @@ class Transformer:
     out, prompt_len = None, len(tokens)
     token_host = memoryview(bytearray(4)) if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device) else None
     while len(tokens) < self.max_context:
-      n_toks = min(chunk_size, len(tokens) - start_pos)
+      remaining = len(tokens) - start_pos
+      # Full recurrent chunks use the high-throughput prefill graph. Process the tail through the
+      # rollout graph so every request uses only the two shapes captured during server warmup.
+      n_toks = chunk_size if chunked_recurrent and remaining >= chunk_size else 1 if chunked_recurrent else min(chunk_size, remaining)
       # Recurrent blocks execute an explicit recurrence over T. Give them a static chunk length so
       # Python constructs the recurrence once per encountered size; decode remains the T=1 JIT.
       if chunked_recurrent:

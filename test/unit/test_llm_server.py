@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 from tinygrad import Tensor, UOp
 from tinygrad.schedule import schedule_cache
@@ -24,6 +25,17 @@ class TestTransformerGenerate(unittest.TestCase):
     model.has_recurrent_block = True
     with patch.object(Transformer, '__call__', return_value=Tensor([[42]])):
       self.assertEqual(next(model.generate([0])), 42)
+
+  def test_recurrent_prefill_tail_uses_rollout_shape(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    model.config = replace(model.config, recurrent_prefill_chunked=True)
+    calls = []
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      calls.append(tokens.shape)
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call): next(model.generate([1, 2, 3, 4, 5, 6], chunk_size=4))
+    self.assertEqual(calls, [(1, 4), (1, 1), (1, 1)])
 
   def test_recurrent_live_state_reuse(self):
     model = Transformer(TEST_CONFIG)
