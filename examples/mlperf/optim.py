@@ -98,7 +98,7 @@ class GradAccClipAdamW(Optimizer):
       self.b2_t *= self.b2
       for p, p_shard, g, m, v, master in zip(self.params, self.param_shards, grads, self.m, self.v, self.master_params):
         _adamw_master_step(p_shard, g, m, v, master, self.lr, self.b1_t, self.b2_t, b1=self.b1, b2=self.b2, eps=self.eps,
-                           wd=self.wd if p.ndim >= 3 else 0.0, clip_coeff=clip_coeff, grad_acc=self.grad_acc)
+                           wd=self.wd, clip_coeff=clip_coeff, grad_acc=self.grad_acc)
         if p_shard is not p: p.assign(self._zero_gather(p_shard))
       return [self.b1_t, self.b2_t] + self.m + self.v + self.params + self.master_params
     grads = [((g / self.grad_acc).cast(g.dtype) * clip_coeff).cast(g.dtype) for g in grads]
@@ -132,8 +132,7 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
-    wd = self.wd if t.ndim >= 3 else 0.0
-    up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
+    up = up.float().shard_like(w) + self.lr.to(w.device) * self.wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
     if self.zero and not (MXFP8 and t.dtype in dtypes.fp8s): new_w = self._zero_gather(new_w)

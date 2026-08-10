@@ -1285,7 +1285,7 @@ def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1414,8 +1414,14 @@ def train_llama3():
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
-                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+  params_wd = [p for p in params if p.ndim >= 3 or p is model.tok_embeddings.weight]
+  params_no_wd = [p for p in params if p.ndim < 3 and p is not model.tok_embeddings.weight]
+  optim = GradAccClipAdamWGroup(
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                     eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                     eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+  )
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
@@ -1458,7 +1464,7 @@ def train_llama3():
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
-  Tensor.realize(*optim.m, *optim.v, *optim.param_shards)
+  Tensor.realize(*[x for o in optim.optimizers for x in o.m + o.v + o.param_shards])
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
@@ -1549,14 +1555,14 @@ def train_llama3():
 
   while i < MAX_STEPS:
     GlobalCounters.reset()
-    actual_gbs = GBS if i >= 2 else BS
+    actual_gbs = GBS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       data_time, dev_time = 0, 0
-      for _ in range(accum_steps:=grad_acc if i >= 2 else 1):
+      for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1570,7 +1576,7 @@ def train_llama3():
 
       gt = time.perf_counter()
       ret = optim_step()
-      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / accum_steps
+      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
       et = time.perf_counter()
 
       optim_time = et - gt
