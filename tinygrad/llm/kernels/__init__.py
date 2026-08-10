@@ -11,6 +11,83 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   with Context(ALLOW_DEVICE_USAGE=1):
     return (target:=getattr(Device[device], "target", None)) is not None and target[0] == 11
 
+def mxfp4_expert_linear(sel:Tensor, x:Tensor, weight:Tensor, scale:Tensor, partial:bool=False) -> Tensor:
+  """Run a TP routed projection without materializing selected BF16 weights."""
+  from tinygrad.llm.kernels.amd import _mxfp4_expert_linear_kernel
+  batch, tokens, topk = sel.shape
+  out_features = weight.shape[1]
+  weight_axis = weight.uop.axis
+  if isinstance(weight.device, tuple):
+    devices = weight.device
+    # Gate/up shard their output dimension. Down shards its reduction dimension;
+    # represent each GPU's partial as a size-one device axis, then all-reduce it.
+    axis = 3 if weight_axis == 1 else 4
+    shard_shape: tuple[int|UOp, ...]
+    if weight_axis == 1:
+      if out_features % len(devices): raise ValueError(f"expert output {out_features} is not divisible by {len(devices)} devices")
+      shard_shape = (batch, tokens, topk, out_features//len(devices))
+    elif weight_axis == 2:
+      shard_shape = (batch, tokens, topk, out_features, 1)
+    else: raise ValueError(f"unsupported expert TP axis {weight_axis}")
+    partial_dtype = dtypes.float32 if weight_axis == 2 else dtypes.bfloat16
+    parts = [Tensor.empty(*shard_shape, dtype=partial_dtype, device=device).uop for device in devices]
+    out = Tensor(parts[0].mstack(*parts[1:]).unshard(axis))
+  else:
+    out = Tensor.empty(batch, tokens, topk, out_features, dtype=dtypes.bfloat16, device=weight.device)
+  out = Tensor.custom_kernel(out, sel.contiguous(), x.contiguous(), weight, scale, fxn=_mxfp4_expert_linear_kernel)[0]
+  return out if weight_axis == 2 and partial else out.sum(4).cast(dtypes.bfloat16) if weight_axis == 2 else out
+
+def bf16_partial_linear(x:Tensor, weight:Tensor) -> Tensor:
+  """Return output-shaped FP32 TP partials with a final device axis, without all-reduce."""
+  from tinygrad.llm.kernels.amd import _bf16_partial_linear_kernel
+  if not isinstance(weight.device, tuple) or weight.uop.axis != 1: raise ValueError("partial linear expects input-sharded TP weight")
+  batch, tokens, _ = x.shape
+  devices, out_features = weight.device, weight.shape[0]
+  shard_shape = (batch, tokens, out_features, 1)
+  parts = [Tensor.empty(*shard_shape, dtype=dtypes.float32, device=device).uop for device in devices]
+  out = Tensor(parts[0].mstack(*parts[1:]).unshard(3))
+  return Tensor.custom_kernel(out, x.contiguous(), weight, fxn=_bf16_partial_linear_kernel)[0]
+
+def bf16_matvec(x:Tensor, weight:Tensor) -> Tensor:
+  from tinygrad.llm.kernels.amd import _bf16_matvec_kernel
+  batch, tokens, _ = x.shape
+  out_features = weight.shape[0]
+  if isinstance(weight.device, tuple):
+    if weight.uop.axis != 0: raise ValueError("bf16_matvec expects output-sharded TP weight")
+    devices = weight.device
+    shard_shape = (batch, tokens, out_features//len(devices))
+    parts = [Tensor.empty(*shard_shape, dtype=dtypes.bfloat16, device=device).uop for device in devices]
+    out = Tensor(parts[0].mstack(*parts[1:]).unshard(2))
+  else: out = Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=weight.device)
+  return Tensor.custom_kernel(out, x.contiguous(), weight, fxn=_bf16_matvec_kernel)[0]
+
+def mxfp8_quantize_dequantize(x:Tensor) -> Tensor:
+  """gfx11 software MXFP8 round trip without a multi-kernel reduction graph."""
+  from tinygrad.llm.kernels.amd import _mxfp8_qdq_kernel
+  out = Tensor.empty_like(x, dtype=dtypes.bfloat16)
+  return Tensor.custom_kernel(out, x.contiguous(), fxn=_mxfp8_qdq_kernel)[0]
+
+def kda_qkv_linear(x:Tensor, qw:Tensor, kw:Tensor, vw:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+  """Fuse equal-sized output-sharded KDA Q/K/V decode projections."""
+  from tinygrad.llm.kernels.amd import _kda_qkv_kernel
+  batch, tokens, _ = x.shape
+  out_features = qw.shape[0]
+  if not (qw.shape == kw.shape == vw.shape): raise ValueError("fused KDA Q/K/V weights must have equal shapes")
+  if isinstance(qw.device, tuple):
+    devices = qw.device
+    if qw.uop.axis != 0 or out_features % len(devices): raise ValueError("fused KDA Q/K/V expects output-sharded weights")
+    shard_shape = (batch, tokens, out_features//len(devices))
+    def make_out() -> Tensor:
+      parts = [Tensor.empty(*shard_shape, dtype=dtypes.bfloat16, device=device).uop for device in devices]
+      return Tensor(parts[0].mstack(*parts[1:]).unshard(2))
+    outs: tuple[Tensor, Tensor, Tensor] = (make_out(), make_out(), make_out())
+  else:
+    outs = (Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=qw.device),
+            Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=qw.device),
+            Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=qw.device))
+  ret = Tensor.custom_kernel(*outs, x.contiguous(), qw, kw, vw, fxn=_kda_qkv_kernel)
+  return ret[0], ret[1], ret[2]
+
 @functools.cache
 def _gated_delta_prefill_kernel(core:UOp, next_state:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)

@@ -15,7 +15,7 @@ def kimi_config(max_context:int, expert_mxfp4:bool=True) -> TransformerConfig:
     num_experts=256, num_experts_per_tok=8, norm_topk_prob=True, shared_expert_dim=1024, leading_dense_blocks=1,
     dense_hidden_dim=9216, routed_scaling_factor=2.446, expert_bias=True, max_context=max_context, expert_mxfp4=expert_mxfp4,
     shared_expert_gate=False, bf16_activations=True, kda_split_qkv=True,
-    recurrent_prefill_chunked=True, recurrent_prefill_chunk_size=8,
+    recurrent_prefill_chunked=True, recurrent_prefill_chunk_size=32,
     ssm=SSMConfig(conv_kernel=4, state_size=128, group_count=32, time_step_rank=32, inner_size=4096, kda=True),
     ssm_layers=KIMI_SSM_LAYERS)
 

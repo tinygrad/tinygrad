@@ -13,6 +13,12 @@ def timed_next(gen, devices:int) -> tuple[int, float]:
   sync(devices)
   return token, time.perf_counter()-begin
 
+def fresh_generate(model, prompt:list[int], chunk_size:int):
+  # Force recurrent/KV state reset so repeated runs and chunk sweeps measure the entire prompt,
+  # rather than silently reusing the prefix cached by the previous measurement.
+  model._cached_tokens = [-1] * len(prompt)
+  return model.generate(prompt.copy(), chunk_size=chunk_size)
+
 def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("model", help="converted Kimi-Linear-48B-A3B MXFP4-v2 directory")
@@ -40,10 +46,10 @@ def main() -> None:
     # Recurrent prefill has a static token dimension. Give each swept shape its own capture;
     # the rollout JIT remains shared and independently benchmarks chunk 1/decode.
     if chunk != 1: model.prefill_jit = TinyJit(model.forward)
-    cold = model.generate(prompt.copy(), chunk_size=chunk)
+    cold = fresh_generate(model, prompt, chunk)
     first, cold_prefill = timed_next(cold, args.devices)
     print(f"chunk {chunk}: cold prefill {cold_prefill:.3f}s, token={first}", flush=True)
-    warm = model.generate(prompt.copy(), chunk_size=chunk)
+    warm = fresh_generate(model, prompt, chunk)
     warm_first, prefill = timed_next(warm, args.devices)
     if first != warm_first: raise RuntimeError(f"chunk {chunk} is not repeatable: cold={first}, warm={warm_first}")
     timings.append((prefill, chunk))
@@ -52,7 +58,7 @@ def main() -> None:
 
   prefill, best_chunk = min(timings)
   if best_chunk != 1: model.prefill_jit = prefill_jits[best_chunk]
-  warm = model.generate(prompt.copy(), chunk_size=best_chunk)
+  warm = fresh_generate(model, prompt, best_chunk)
   first, replay_prefill = timed_next(warm, args.devices)
   _, cold_decode = timed_next(warm, args.devices)
   _, capture_decode = timed_next(warm, args.devices)

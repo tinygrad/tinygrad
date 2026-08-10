@@ -1,11 +1,13 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
+from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.llm.quant import dequantize_mxfp4, quantize_dequantize_mxfp8
-from tinygrad.llm.kernels import gated_delta_prefill
+from tinygrad.llm.kernels import amd_custom_kernels_supported, bf16_matvec, bf16_partial_linear, gated_delta_prefill, kda_qkv_linear, \
+  mxfp4_expert_linear, mxfp8_quantize_dequantize
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -29,11 +31,17 @@ class MXFP4ExpertWeights:
     self.in_features, self.out_features = in_features, out_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features//2, dtype=dtypes.uint8)
     self.weight_scale = Tensor.full((num_experts, out_features, in_features//32), 127, dtype=dtypes.uint8)
-  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
+  def __call__(self, sel:Tensor, x:Tensor, quantized:bool=False, partial:bool=False) -> Tensor:
     # Only selected weights are expanded, so packed storage remains resident during generation.
     if isinstance(self.weight.device, tuple) and not isinstance(sel.device, tuple): sel = sel.shard(self.weight.device, axis=None)
+    if not quantized:
+      x = mxfp8_quantize_dequantize(x.cast(dtypes.bfloat16)) if amd_custom_kernels_supported(x.device) else \
+        quantize_dequantize_mxfp8(x.cast(dtypes.bfloat16))
+    # gfx11 has no native FP4 instructions, but decoding nibbles inside the dot product still avoids
+    # the much larger selected-expert BF16 temporary. Gate/up weights are output-sharded in TP.
+    if amd_custom_kernels_supported(self.weight.device):
+      return mxfp4_expert_linear(sel, x, self.weight, self.weight_scale, partial=partial)
     weight = dequantize_mxfp4(self.weight[sel], self.weight_scale[sel], dtype=dtypes.bfloat16)
-    x = quantize_dequantize_mxfp8(x.cast(dtypes.bfloat16))
     return (x.unsqueeze(-2) @ weight.transpose(-1, -2)).contiguous().squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
@@ -168,29 +176,46 @@ class FFNBlock:
       logits = x.float().linear(self.ffn_gate_inp.weight.float().transpose()) if self.config.bf16_activations else self.ffn_gate_inp(x)
       if hasattr(self, 'exp_probs_b'):
         scores = logits.sigmoid()
+        adjusted_scores = scores + self.exp_probs_b["bias"]
         topk = iterative_topk if self.config.num_experts >= 512 else pairwise_topk
-        _, sel = topk(scores + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
+        _, sel = topk(adjusted_scores, self.config.num_experts_per_tok)
+        probs = (scores if self.config.route_weights_uncorrected else adjusted_scores).gather(-1, sel)
         # Kimi-Linear-48B's older reference weights corrected scores. K3 selects with the correction
         # but gathers the uncorrected sigmoid scores, so keep this an explicit compatibility switch.
-        probs = (scores if self.config.route_weights_uncorrected else scores + self.exp_probs_b["bias"]).gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / (probs.sum(axis=-1, keepdim=True) + 1e-20)
       else:
         vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
         probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
       if hasattr(self, 'ffn_routed_down'): h = self.ffn_routed_down(x).unsqueeze(2)
-      x_down = self.ffn_down_exps(sel, self._activation(self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)).contiguous())
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2).cast(x_down.dtype)  # (B, T, D)
+      if isinstance(self.ffn_gate_exps, MXFP4ExpertWeights) and amd_custom_kernels_supported(h.device):
+        hq = mxfp8_quantize_dequantize(h.cast(dtypes.bfloat16))
+        gate = self.ffn_gate_exps(sel, hq, quantized=True)
+        up = cast(MXFP4ExpertWeights, self.ffn_up_exps)(sel, hq, quantized=True)
+      else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
+      routed_activation = self._activation(gate, up).contiguous()
+      combine_down = resolve(x.shape[1] == 1) and isinstance(self.ffn_down_exps, MXFP4ExpertWeights) and \
+        hasattr(self, 'ffn_gate_shexp') and not hasattr(self, 'ffn_routed_up') and amd_custom_kernels_supported(x.device)
+      x_down = cast(MXFP4ExpertWeights, self.ffn_down_exps)(sel, routed_activation, partial=True) if combine_down else \
+        self.ffn_down_exps(sel, routed_activation)
+      out = (x_down * probs.unsqueeze(-1).unsqueeze(-1)).sum(axis=2) if combine_down else \
+        (x_down * probs.unsqueeze(-1)).sum(axis=2).cast(x_down.dtype)  # (B, T, D[, devices])
       if hasattr(self, 'ffn_routed_up'):
         if hasattr(self, 'ffn_routed_norm'): out = self.ffn_routed_norm(out)
         out = self.ffn_routed_up(out)
       if hasattr(self, 'ffn_gate_shexp'):
-        shexp = self.ffn_down_shexp(self._activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x)).contiguous())
-        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
-        out = out + shexp
+        shared_gate, shared_up = self.ffn_gate_shexp(x).contiguous(), self.ffn_up_shexp(x).contiguous()
+        shared_activation = self._activation(shared_gate, shared_up).contiguous()
+        if combine_down:
+          out = (out + bf16_partial_linear(shared_activation, self.ffn_down_shexp.weight)).sum(3).cast(dtypes.bfloat16)
+        else:
+          shexp = self.ffn_down_shexp(shared_activation)
+          if hasattr(self, 'ffn_gate_inp_shexp'):
+            shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+          out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    return self.ffn_down(self._activation(self.ffn_gate(x), self.ffn_up(x)).contiguous())
+    return self.ffn_down(self._activation(self.ffn_gate(x).contiguous(), self.ffn_up(x).contiguous()).contiguous())
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -388,7 +413,10 @@ class GatedDeltaNetBlock(FFNBlock):
     # update is fused into one kernel so prefill doesn't build a Python-unrolled graph.
     split_qkv = hasattr(self, "attn_q")
     if split_qkv:
-      projected_q, projected_k, projected_v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
+      if resolve(T == 1) and amd_custom_kernels_supported(x.device) and \
+         self.attn_q.weight.shape == self.attn_k.weight.shape == self.attn_v.weight.shape:
+        projected_q, projected_k, projected_v = kda_qkv_linear(x, self.attn_q.weight, self.attn_k.weight, self.attn_v.weight)
+      else: projected_q, projected_k, projected_v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
       # Snapshot mutable caches before constructing the recurrence. Otherwise the final store can
       # overwrite their buffers before earlier outputs in a multi-token lazy graph consume them.
       conv_state_q, conv_state_k, conv_state_v = self.conv_state_q.clone(), self.conv_state_k.clone(), self.conv_state_v.clone()
@@ -488,8 +516,14 @@ class Transformer:
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
+    self.greedy_prefill_jit = TinyJit(self.forward)
+    self.greedy_rollout_jit = TinyJit(self.forward)
+    self.reset_jit = TinyJit(self._reset_state)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def _reset_state(self) -> None:
+    if resets := [r for b in self.blk for r in b._state_reset_ops()]: Tensor.realize(*resets)
+
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     if len(tokens.shape) == 1: tokens = tokens.reshape(1, -1)
     x = self.token_embd(tokens).cast(dtypes.bfloat16) if self.config.bf16_activations else self.token_embd(tokens).float()
     block_residual = Tensor.zeros(x.shape[0]*x.shape[1], 0, x.shape[2], device=x.device, dtype=x.dtype) \
@@ -505,12 +539,18 @@ class Transformer:
     if block_residual is not None:
       x = FFNBlock._apply_attn_res(x.reshape(-1, x.shape[-1]), block_residual,
                                    self.output_attn_res_proj, self.output_attn_res_norm).reshape(x.shape)
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    final_x = self.output_norm(x)
+    if temperature is None and resolve(tokens.numel() == 1) and amd_custom_kernels_supported(x.device):
+      return bf16_matvec(final_x, self.output.weight).argmax(-1, keepdim=True)
+    logits = self.output(final_x)[:, -1, :]
+    if temperature is None: return logits.argmax(-1, keepdim=True)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     token_count = tokens.numel()
+    if temperature is None:
+      return (self.greedy_prefill_jit if resolve(token_count != 1) else self.greedy_rollout_jit)(tokens.flatten().contiguous(), start_pos, None)
     return (self.prefill_jit if resolve(token_count != 1) else self.rollout_jit)(tokens.flatten().contiguous(), start_pos, temperature)
 
   @staticmethod
@@ -612,12 +652,12 @@ class Transformer:
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     model_device = self.token_embd.weight.device
-    temp = Tensor([temperature], device=model_device)
+    temp = None if temperature == 0.0 else Tensor([temperature], device=model_device)
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32", device=model_device).reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
+    if start_pos < len(self._cached_tokens) and self.has_recurrent_block: self.reset_jit()
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
