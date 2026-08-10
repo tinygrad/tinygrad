@@ -589,7 +589,7 @@ def encode(ctx, x:UOp):
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
-  elif group is RDNA3Ops.SOPP: args = (0,) if len(oprs) == 0 else (_immorreg(oprs[0]),)
+  elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
 
