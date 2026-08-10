@@ -391,7 +391,11 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp, save_original_input:bool=Fals
     a_col, scale_a_col = Tensor(inputs[7], device=a.device), Tensor(inputs[8], device=a.device)
     w_col, scale_w_col = Tensor(inputs[9], device=a.device), Tensor(inputs[10], device=a.device)
   g = Tensor(gradient, device=a.device)[:a.shape[0]].cast(dtypes.bfloat16)
-  g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
+  from extra.llama_kernels.quantize_mxfp4 import _grad_mxfp4_mailbox
+  gbase = gradient.base if hasattr(gradient, "base") else gradient
+  prequant = _grad_mxfp4_mailbox.pop(gbase, None) or _grad_mxfp4_mailbox.pop(gradient, None)
+  if prequant is None: g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
+  else: g_row, scale_g_row, g_col, scale_g_col = (Tensor(x, device=a.device) for x in prequant)
   grad_a = _mxfp4_gemm_quantized(g_row, w_col, scale_g_row, scale_w_col).reshape(*a.shape[:-1], w.shape[-1])
   grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
   return (None, None, None, None, None, grad_a.uop, grad_w.uop) + (None,)*(len(inputs)-7)

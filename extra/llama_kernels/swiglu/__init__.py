@@ -1,8 +1,9 @@
-import functools, math
+import functools, math, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.helpers import getenv
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import alloc_like
+from extra.llama_kernels import alloc_like, compile_hip
 
 LOG2E = 1.4426950408889634
 
@@ -33,12 +34,34 @@ def _custom_swiglu_bwd(grad_out:UOp, x_w13:UOp, grad_act:UOp) -> UOp:
   dgate = grad_out.after(dact)[row, hidden+col].store((grad * silu).cast(grad_out.dtype))
   return dgate.end(i).sink(arg=KernelInfo(f"swiglu_bwd_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=10*n_elems)))
 
+@functools.cache
+def _custom_swiglu_bwd_mxfp4(grad_out:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp,
+                              x_w13:UOp, grad_act:UOp) -> UOp:
+  M, N = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]
+  name = f"swiglu_bwd_mxfp4_{M}_{N}"
+  threads, gidx0, gidx1 = UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1")
+  sink = UOp.sink(grad_out.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base,
+                  x_w13.base, grad_act.base, threads, gidx0, gidx1, arg=KernelInfo(name))
+  src = (pathlib.Path(__file__).parent/"swiglu_bwd_mxfp4.cpp").read_text()
+  inc = pathlib.Path(__file__).parent.parent/"quantize_mxfp4"
+  lib = compile_hip(src, [f"-I{inc}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+
 def _swiglu_bwd(gradient:UOp, kernel:UOp):
   _, x_w13 = kernel.src[1:]
   axis = x_w13.axis if isinstance(x_w13.device, tuple) else None
   grad_out = alloc_like(x_w13.shape, dtypes.bfloat16, x_w13.device, axis)
-  grad_out, *_ = Tensor.custom_kernel(grad_out, Tensor(x_w13, device=x_w13.device), Tensor(gradient, device=x_w13.device),
-                                      fxn=_custom_swiglu_bwd)
+  M, N = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]
+  if getenv("MXFP4") and M % 256 == 0 and N % 256 == 0:
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
+    quant = alloc_mxfp4_outputs(grad_out, flatten_row=True)
+    ret = Tensor.custom_kernel(grad_out, *quant, Tensor(x_w13, device=x_w13.device),
+                               Tensor(gradient, device=x_w13.device), fxn=_custom_swiglu_bwd_mxfp4)
+    grad_out, quant = ret[0], list(ret[1:5])
+    _grad_mxfp4_mailbox[grad_out.uop] = tuple(x.uop for x in quant)
+  else:
+    grad_out, *_ = Tensor.custom_kernel(grad_out, Tensor(x_w13, device=x_w13.device), Tensor(gradient, device=x_w13.device),
+                                        fxn=_custom_swiglu_bwd)
   return (None, grad_out.uop)
 
 def swiglu(x_w13:Tensor) -> Tensor:

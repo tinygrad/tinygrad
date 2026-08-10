@@ -46,6 +46,27 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
+@functools.cache
+def custom_fused_qkv_rope_backward_mxfp4(dxqkv:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp,
+                                         dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
+                                         device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
+  code = (pathlib.Path(__file__).parent / "fused_qkv_rope_bwd.cpp").read_text()
+  threads = 256
+  thread_idx = UOp.special(threads, "lidx0")
+  gsz = (B, N // 64, H + 2 * H_KV)
+  block_idx_x, block_idx_y, block_idx_z = (UOp.special(x, f"gidx{i}") for i, x in enumerate(gsz))
+  sink = UOp.sink(dxqkv.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base,
+                  dq.base, dk.base, dv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y, block_idx_z,
+                  arg=KernelInfo(name="fused_qkv_rope_backward_mxfp4"))
+  include = pathlib.Path(__file__).parent / "include"
+  quant_include = pathlib.Path(__file__).parents[2] / "llama_kernels" / "quantize_mxfp4"
+  compile_args = [f"-I{include}", f"-I{quant_include}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                  "-DWRITE_MXFP4", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
     expected = (Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)
@@ -78,9 +99,18 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, 
   assert fa_native is not None, "fused QKV RoPE backward requires native Flash Attention gradients"
   dq, dk, dv = (Tensor(x, device=x.device) for x in fa_native)
   dxqkv = _sharded_empty_like(xqkv, axis=xqkv.uop.axis if isinstance(xqkv.device, tuple) else None)
-  fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
-                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
-  dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
+  if getenv("MXFP4"):
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
+    quant = alloc_mxfp4_outputs(dxqkv, flatten_row=True)
+    fxn = functools.partial(custom_fused_qkv_rope_backward_mxfp4, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
+    ret = Tensor.custom_kernel(dxqkv, *quant, dq, dk, dv, freqs_cis, fxn=fxn)
+    dxqkv, quant = ret[0], list(ret[1:5])
+    _grad_mxfp4_mailbox[dxqkv.uop] = tuple(x.uop for x in quant)
+  else:
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
+    dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
   return None, None, None, dxqkv.uop, None
 
 def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int) -> tuple[Tensor, Tensor, Tensor]:
