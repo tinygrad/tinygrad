@@ -23,6 +23,7 @@ class AllocCtx:
   bases: set[UOp] = field(default_factory=set)
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
+  views: set[UOp] = field(default_factory=set)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -72,7 +73,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   # NB: make offset a UOp.variable here to do the offset computation in the kernels
   return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(offset), UOp.const(size))).bitcast(src.dtype).reshape(src.shape)
 
-def contiguous_mops_to_view(c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -83,6 +84,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
     view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
+    ctx.views.add(view)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
 
   # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
@@ -91,6 +93,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.UNSHARD: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
+    ctx.views.add(view)
     return view.unshard(resolved.arg, resolved.src[1:])
 
   return None
@@ -196,6 +199,8 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
+def replace_input_view(ctx:AlloctCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
+
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
@@ -206,8 +211,8 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SHRINK with PARAM
-  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_buffer),
-  (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), allow_any_len=True), UPat(Ops.BUFFER)),), name="b"), replace_input_buffer),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_view),
+  (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), allow_any_len=True), UPat(Ops.BUFFER)),), name="b"), replace_input_view),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
@@ -225,7 +230,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
