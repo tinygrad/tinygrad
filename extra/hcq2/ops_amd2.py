@@ -182,7 +182,8 @@ def sdma_copy(ctx, call):
   src_addr, dst_addr = call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs)
   return call.ins(SDMAOps.COPY, src=tuple(UOp.const(x, dtypes.uint32) for off in range(0, sz, ctx.max_copy_size) for x in (
     ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
-    ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0, *data64_le(src_addr+off), *data64_le(dst_addr+off))))
+    ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0,
+    *data64_le(src_addr+UOp.const(off, dtypes.uint64)), *data64_le(dst_addr+UOp.const(off, dtypes.uint64)))))
 
 def sdma_wait(ctx, ins, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
@@ -287,10 +288,10 @@ def amd_build_program(prg:UOp) -> UOp:
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
+    super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb())
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQ2Buffer:
-    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -507,11 +508,12 @@ class PCIIface(PCIIfaceBase):
     if drain_only: d.iface.dev_impl.ih.drain()
     else: d.iface.dev_impl.ih.interrupt_handler()
 
-    if reset and d.iface.dev_impl.recover():
+    if reset and d.iface.dev_impl.recover(force=True):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.signal('timeline')._buf.cpu_view().mv.cast('Q')[0] = d.signal('value', 1).as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.signal('timeline')._buf.cpu_view().mv.cast('Q')[0] = \
+        d.signal('value', 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -537,8 +539,11 @@ class AMDDevice(HCQ2Compiled):
   ])
 
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
+  max_scratch_psize = 0
 
   ifaces = [KFDIface, PCIIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface)]
+
+  def device_props(self): return self.iface.props
 
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
@@ -576,7 +581,7 @@ class AMDDevice(HCQ2Compiled):
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queues:dict = {}
-    self.has_sdma_queue = True # self.sdma_queue(0) is not None, TODO: think of this
+    self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
     super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
 
@@ -689,7 +694,7 @@ class AMDDevice(HCQ2Compiled):
     return tmpring
 
   def scratch_buffer(self, private_segment_size):
-    private_segment_size = max(private_segment_size, 128)
+    AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
     if self.max_private_segment_size < private_segment_size:
       lanes_per_wave = 64 # wave64
       mem_alignment_size = 256 if self.target[0] != 9 else 1024

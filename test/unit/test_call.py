@@ -212,6 +212,18 @@ class TestCallSchedule(unittest.TestCase):
     out = f(a, v.bind(5))
     np.testing.assert_allclose(out.numpy(), [5., 10., 15.])
 
+  def test_precompile_scoped_bind_arg(self):
+    @function(precompile=True)
+    def f(x:Tensor, scale:UOp) -> Tensor: return x * scale
+    a = Tensor.ones(3)
+    x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
+    y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
+    fx = next(u for u in x.uop.toposort() if u.op is Ops.FUNCTION)
+    fy = next(u for u in y.uop.toposort() if u.op is Ops.FUNCTION)
+    self.assertEqual(fx.src[0].key, fy.src[0].key)
+    np.testing.assert_equal(x.numpy(), [2, 2, 2])
+    np.testing.assert_equal(y.numpy(), [3, 3, 3])
+
   def test_precompile_schedule_cache_hit(self):
     """two instances of the same @function should produce identical function body keys (schedule cache hit)"""
     @function(precompile=True)
@@ -346,6 +358,16 @@ class TestCallMultiSharded(unittest.TestCase):
     c.sum().backward()
     np.testing.assert_allclose(a.grad.numpy(), b.numpy(), rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), a.numpy(), rtol=1e-5)
+
+  def test_symbolic_reshape_shard_axis(self):
+    toks = UOp.variable("toks", 1, 2).bind(2)
+    devs = ("CPU:0", "CPU:1")
+    x = Tensor(np.arange(16, dtype=np.float32).reshape(1, 2, 8)).shard(devs, axis=2).realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x.reshape(1, x.shape[1], 2, 4)
+    out = f(x[:, :toks]).realize()
+    self.assertEqual(out.uop.axis, 2)
+    np.testing.assert_equal(out[:1, :2].to(devs[0]).numpy(), np.arange(16, dtype=np.float32).reshape(1, 2, 2, 4))
 
 if __name__ == '__main__':
   unittest.main()

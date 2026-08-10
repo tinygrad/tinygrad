@@ -3,10 +3,10 @@ from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
+from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -150,7 +150,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # SINK only ever references the base
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.base for y in x.src))),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.unsharded_base for y in x.src))),
 
   # ** copy rules **
 
@@ -202,6 +202,7 @@ ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
+  if not b.arg.removable: return None
   # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
   if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
 
@@ -333,6 +334,26 @@ pm_remove_bufferize = PatternMatcher([
   (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
   # END on NOOP is NOOP
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
+])
+
+def no_indexing_calls(u:UOp):
+  new_srcs = []
+  for x in u.src:
+    if x.op is Ops.INDEX:
+      # sometimes if call srcs have children the call will get an INDEX. we remove it here.
+      # TODO: we should add safety checks here for contiguous
+      new_srcs.append(x.src[0])
+    elif x.op is Ops.SHRINK:
+      # SHRINK with offset 0 is fine
+      # TODO: check offset
+      new_srcs.append(x.src[0])
+    else:
+      # everything else we pass through
+      new_srcs.append(x)
+  return u.replace(src=tuple(new_srcs))
+
+pm_no_indexing_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="u"), no_indexing_calls),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
@@ -652,7 +673,7 @@ pm_range_creation = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), rangeify_on_stage),
 ])
 
-@profile_matches
+@rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
@@ -711,7 +732,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
     tsink = tsink.substitute(subs)
     tsink = graph_rewrite(tsink, pm_simple_rangeify, bottom_up=True, name=f"merge kernels ({len(subs)})")
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls, name="symbolic+reduce_collapse+debuf")
   #tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
@@ -723,4 +744,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
+  if SPEC:
+    # validate the kernel graph
+    from tinygrad.uop.spec import type_verify, spec_kernel_graph
+    type_verify(tsink, spec_kernel_graph, enter_calls=False)
   return tsink

@@ -80,14 +80,14 @@ def main(args) -> None:
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
-    data = viz.get_render(viz_data, step["query"])
+    data = viz.get_render(viz_data, step["query"], update_sink=False)
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if print_graph and "graph" in m and not args.json:
           for k,v in m["graph"].items():
             print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
             if v["src"]:
-              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"][:5]])+(f", ... and {len(v['src'])-5} more" if len(v["src"]) > 5 else ""))
+              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
         elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):

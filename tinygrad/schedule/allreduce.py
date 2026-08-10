@@ -15,14 +15,13 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   use_ring = concrete and not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
-  if not concrete: buf = buf.pad_to(buf.max_shape)
+  buf = buf.pad_to(buf.max_shape)
   # contiguous before we copy it
   buf = buf.contiguous()
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
-    out = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)])
-    return out if concrete else out.shrink_to(shape)
+    return functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)]).shrink_to(shape)
 
   # chunk data into ndev pieces
   assert isinstance(numel, int)

@@ -24,6 +24,7 @@ class ElementwiseMixin(CreationMixin):
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
+      if t._uop.base.is_invalid: return t  # invalid bool is weak const
       if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST: return t._wrap_uop(t._uop.const_like(t._uop.base.val, weak_dtype(out_dtype)))
       return t.cast(out_dtype)
     return promote(x), promote(y)
@@ -220,7 +221,7 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.CMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
-  def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
+  def div(self, x: 'Self|ConstType|UOp', reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.

@@ -2,7 +2,7 @@ import unittest, numpy as np
 from tinygrad import Tensor, Variable, Context, Device, TinyJit, GlobalCounters, dtypes, UOp, nn, getenv
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.uop.ops import Ops
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, assert_kernel_count
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -384,6 +384,12 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
 
+  def test_symbolic_broadcast_copy(self):
+    rows = Variable("rows", 1, 4).bind(3)
+    out = Tensor.ones(rows, 8).to(devices_2).realize()
+    self.assertEqual(out.shape, (rows, 8))
+    np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.ones((3, 8)))
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
@@ -583,7 +589,7 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule_linear().src
-    self.assertEqual(len(sched), 0)
+    if len(sched) != 0: raise KernelCountException(0, len(sched))
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
 @unittest.skipIf(not_support_multi_device(), "no multi")

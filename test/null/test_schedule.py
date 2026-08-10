@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from test.helpers import check_schedule, assert_kernel_count
+from test.helpers import check_schedule, assert_kernel_count, KernelCountException
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -592,9 +592,7 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.randn(BS, CIN, 64, 64).realize()
     w = Tensor.uniform(16, CIN, 3, 3).realize()
     ret = Tensor.conv2d(img, w).relu().mean().backward()
-    linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
-    cnt = len([call for call in linear.src if call.src[0].op is Ops.SINK])
-    assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
+    check_schedule([ret, img.grad, w.grad], allowed)
 
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
@@ -615,7 +613,8 @@ class TestSchedule(unittest.TestCase):
         return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
-        self.assertEqual(cnt(), 5)
+        got = cnt()
+        if got != 5: raise KernelCountException(5, got)
 
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -630,7 +629,8 @@ class TestSchedule(unittest.TestCase):
         return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
-        self.assertEqual(cnt(), 9)
+        got = cnt()
+        if got != 9: raise KernelCountException(9, got)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
@@ -857,6 +857,65 @@ class TestSchedule(unittest.TestCase):
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
     check_schedule(x, 1, [Tensor._device_rng_counters[x.device]])
+
+  # **** custom kernel realize tests
+
+  @staticmethod
+  def _copy_fxn(name:str="copy"):
+    def copy_kernel(out:UOp, inp:UOp) -> UOp:
+      i = UOp.range(inp.numel(), 0)
+      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name=name))
+    return copy_kernel
+
+  def _copy_call(self, out:Tensor, expr:Tensor, name:str="copy") -> Tensor:
+    # forge a custom kernel call with params and call args, like llm/kernels does (no Tensor.custom_kernel contiguous)
+    params = tuple(UOp.placeholder_like(u, slot=i) for i,u in enumerate((out.uop, expr.uop)))
+    return Tensor(out.uop.after(self._copy_fxn(name)(*params).call(out.uop, expr.uop)))
+
+  def test_custom_kernel_buffer_src(self):
+    # custom kernels need buffers: a buffer input must never add a realize kernel
+    y = Tensor.ones(64).contiguous().realize()
+    out = Tensor.empty_like(y)
+    check_schedule(self._copy_call(out, y), 1)
+
+  def test_custom_kernel_view_src(self):
+    # a RESHAPE over a buffer resolves to the buffer state (RESHAPEs on call args are stripped), no realize kernel
+    y = Tensor.ones(64).contiguous().realize()
+    out = Tensor.empty_like(y)
+    check_schedule(self._copy_call(out, y.reshape(8, 8).reshape(64)), 1)
+
+  def test_custom_kernel_elementwise_src(self):
+    # a computed input is not a buffer state: the call args are unwrapped to their base buffer,
+    # so the compute would be silently dropped. this must raise instead of producing wrong results
+    y = Tensor.ones(64).contiguous().realize()
+    out = Tensor.empty_like(y)
+    check_schedule(self._copy_call(out, y + y), 2)
+
+  def test_custom_kernel_lazy_const_src(self):
+    # a lazy const expression above the call has no buffer at all. this used to crash rangeify with a KeyError
+    x = Tensor.linspace(-1.0, 1.0, 64)
+    out = Tensor.empty_like(x)
+    check_schedule(self._copy_call(out, x), 2)
+
+  def test_custom_kernel_offset_view_src(self):
+    # a SHRINK with an offset over a buffer is not a buffer state either, the offset would be silently dropped
+    y = Tensor.ones(128).contiguous().realize()
+    out = Tensor.empty(64)
+    check_schedule(self._copy_call(out, y[16:80]), 2)
+
+  def test_custom_kernel_computed_src_api(self):
+    # the supported way to pass computed inputs: Tensor.custom_kernel makes inputs contiguous (one realize kernel)
+    y = Tensor.ones(64).contiguous().realize()
+    out = Tensor.empty_like(y)
+    check_schedule(Tensor.custom_kernel(out, y + y, fxn=self._copy_fxn())[0], 2)
+
+  def test_custom_kernel_on_custom_kernel(self):
+    # the output of a custom kernel is a buffer state, chaining custom kernels must not add kernels
+    y = Tensor.ones(64).contiguous().realize()
+    k1 = self._copy_call(Tensor.empty_like(y), y, name="k1")
+    k2 = self._copy_call(Tensor.empty_like(y), k1, name="k2")
+    sched, _ = check_schedule(k2, 2)
+    self.assertEqual([call.src[0].arg.name for call in sched.src], ["k1", "k2"])
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
