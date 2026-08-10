@@ -83,6 +83,7 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
+    if c.op is Ops.BITCAST: view = view.bitcast(c.dtype)
     ctx.views.add(view)
     view = view.reshape(c.shape)
     return c.replace(src=(view,)) if c.op is Ops.COPY else view
@@ -150,7 +151,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
-  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
