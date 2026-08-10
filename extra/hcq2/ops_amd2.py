@@ -580,7 +580,7 @@ class AMDDevice(HCQ2Compiled):
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queues:dict = {}
-    self.has_sdma_queue = True # self.sdma_queue(0) is not None, TODO: think of this
+    self.has_copy_queue = self.has_sdma_queue = not getenv("AMD_DISABLE_SDMA") # self.sdma_queue(0) is not None, TODO: think of this
 
     super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
 
