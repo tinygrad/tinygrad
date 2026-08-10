@@ -564,8 +564,10 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
-    self._state_zero_hosts:dict[int, memoryview] = {}
+    self._snapshot_tokens: list[int] = []
+    self._state_snapshots:list[Tensor] = []
     self._token_buffer:Tensor|None = None
+    self._temperature_buffer:Tensor|None = None
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
@@ -574,9 +576,23 @@ class Transformer:
     self.recurrent_prefill_jits:dict[int, Callable[..., Tensor]] = {}
     self.recurrent_greedy_prefill_jits:dict[int, Callable[..., Tensor]] = {}
     self.reset_jit = TinyJit(self._reset_state)
+    self.save_state_jit = TinyJit(self._save_state)
+    self.restore_state_jit = TinyJit(self._restore_state)
 
   def _reset_state(self) -> None:
     if resets := [r for b in self.blk for r in b._state_reset_ops()]: Tensor.realize(*resets)
+
+  def _state_tensors(self) -> list[Tensor]:
+    return [s for block in self.blk if isinstance(block, GatedDeltaNetBlock) for s in block._state_tensors()]
+
+  def _init_state_snapshots(self) -> None:
+    if not self._state_snapshots: self._state_snapshots = [s.clone().realize() for s in self._state_tensors()]
+
+  def _save_state(self) -> None:
+    if writes := [dst.assign(src) for dst,src in zip(self._state_snapshots, self._state_tensors())]: Tensor.realize(*writes)
+
+  def _restore_state(self) -> None:
+    if writes := [dst.assign(src) for dst,src in zip(self._state_tensors(), self._state_snapshots)]: Tensor.realize(*writes)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     if len(tokens.shape) == 1: tokens = tokens.reshape(1, -1)
@@ -701,21 +717,24 @@ class Transformer:
     # Two chunks exercise both the initial and nonzero-position prefill paths before the server opens.
     recurrent_chunk = self.config.recurrent_prefill_chunk_size or 32
     prompt = [0] * max(1, min(recurrent_chunk*2, self.max_context-2)) if self.has_recurrent_block else [0]
-    # Recurrent serving also executes one replay so graph creation/lowering cannot leak into request latency.
-    for _ in range(3 if self.has_recurrent_block else 2): list(zip(range(2), self.generate(prompt)))
+    # Recurrent serving captures both greedy and sampled graphs, then executes one replay so graph
+    # creation/lowering cannot leak into request latency for either HTTP temperature path.
+    # generate mutates its token list, so each pass needs a fresh prompt to exercise cache reset.
+    for temperature in ((0.0, 1.0) if self.has_recurrent_block else (0.0,)):
+      for _ in range(3 if self.has_recurrent_block else 2): list(zip(range(2), self.generate(prompt.copy(), temperature=temperature)))
+    # Capture prompt-boundary restore using successively extended prompts so every restore starts
+    # from the checkpoint made by the previous pass.
+    if self.has_recurrent_block:
+      for i in range(1, 4): list(zip(range(2), self.generate(prompt + list(range(1, i+1)), temperature=0.0)))
 
-  def _reset_amd_state(self) -> None:
-    """Zero realized recurrent buffers without changing their UOp identities or invalidating captured graphs."""
-    for state in (s for block in self.blk if isinstance(block, GatedDeltaNetBlock) for s in block._state_tensors()):
-      realized = state.uop.buf_uop.buffer
-      buffers = realized.bufs if isinstance(realized, MultiBuffer) else [realized]
-      for buf in buffers:
-        zero = self._state_zero_hosts.setdefault(buf.nbytes, memoryview(bytearray(buf.nbytes)))
-        buf.ensure_allocated().allocator._copyin(buf._buf, zero)
-
-  def get_start_pos(self, tokens:list[int]) -> int:
+  def _cache_start(self, tokens:list[int]) -> tuple[int, bool]:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
-    return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+    live_start = min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+    snapshot_prefix = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._snapshot_tokens)))
+    snapshot_start = len(self._snapshot_tokens) if snapshot_prefix == len(self._snapshot_tokens) else 0
+    return (snapshot_start, True) if snapshot_start > live_start else (live_start, False)
+
+  def get_start_pos(self, tokens:list[int]) -> int: return self._cache_start(tokens)[0]
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     chunked_recurrent = self.has_recurrent_block and self.config.recurrent_prefill_chunked
@@ -726,10 +745,19 @@ class Transformer:
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     model_device = self.token_embd.weight.device
-    temp = None if temperature == 0.0 else Tensor([temperature], device=model_device)
+    amd_tp = isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device)
+    if temperature == 0.0: temp = None
+    elif amd_tp:
+      if self._temperature_buffer is None: self._temperature_buffer = Tensor.empty(1, device=model_device).realize()
+      temp_storage = self._temperature_buffer.uop.buf_uop.buffer
+      temp_buffers = temp_storage.bufs if isinstance(temp_storage, MultiBuffer) else [temp_storage]
+      temp_host = memoryview(array.array('f', [temperature])).cast('B')
+      for buf in temp_buffers: buf.ensure_allocated().allocator._copyin(buf._buf, temp_host)
+      temp = self._temperature_buffer
+    else: temp = Tensor([temperature], device=model_device)
     # Keep the replicated AMD token buffer identity stable across HTTP requests so captured graphs
     # see the same input topology. Updating this small int32 buffer is cheaper than rebuilding JITs.
-    if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device):
+    if amd_tp:
       if self._token_buffer is None:
         self._token_buffer = Tensor.empty(1, self.max_context, dtype=dtypes.int32, device=model_device).realize()
       token_storage = self._token_buffer.uop.buf_uop.buffer
@@ -739,12 +767,13 @@ class Transformer:
       t = self._token_buffer
     else: t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32", device=model_device).reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
-    start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and self.has_recurrent_block:
-      if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device): self._reset_amd_state()
-      else: self.reset_jit()
+    start_pos, restore_snapshot = self._cache_start(tokens)
+    # This graph is captured by warmup. Resetting on-device avoids hundreds of synchronous copies
+    # to sharded AMD state buffers and guarantees unrelated requests don't schedule new kernels.
+    if restore_snapshot: self.restore_state_jit()
+    elif start_pos < len(self._cached_tokens) and self.has_recurrent_block: self.reset_jit()
     out, prompt_len = None, len(tokens)
-    token_host = memoryview(bytearray(4)) if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device) else None
+    token_host = memoryview(bytearray(4)) if amd_tp else None
     while len(tokens) < self.max_context:
       remaining = len(tokens) - start_pos
       # Full recurrent chunks use the high-throughput prefill graph. Process the tail through the
@@ -765,6 +794,10 @@ class Transformer:
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
+      if self.has_recurrent_block and len(tokens) == prompt_len and self._state_tensors():
+        self._init_state_snapshots()
+        self.save_state_jit()
+        self._snapshot_tokens = tokens.copy()
       tokens.append(amd_int32_item(out, token_host) if token_host is not None else int(out.item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]

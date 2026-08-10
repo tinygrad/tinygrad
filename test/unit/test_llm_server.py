@@ -4,7 +4,7 @@ from unittest.mock import patch
 from tinygrad import Tensor, UOp
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
-from tinygrad.llm.serve import StreamRouter
+from tinygrad.llm.serve import StreamRouter, parse_kimi_tool_call
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
@@ -14,11 +14,29 @@ V_TOKS = UOp.variable("toks", 1, 32)  # 32 is the default chunk_size in generate
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
-    def generate(tokens):
-      calls.append(tokens)
+    def generate(tokens, temperature):
+      calls.append((tokens, temperature))
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0], [0]])
+    self.assertEqual(calls, [([0], 0.0), ([0], 0.0)])
+
+  def test_recurrent_warmup_captures_reset_replay(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    model.has_recurrent_block = True
+    state = Tensor.ones(4).realize()
+    model.blk[0]._state_reset_ops = lambda: [state.assign(state.const_like(0))]
+    def generate(tokens, temperature):
+      if calls: model.reset_jit()
+      calls.append((tokens.copy(), temperature))
+      tokens.append(42)
+      yield from (1, 2)
+    with patch.object(model, "generate", generate): model.warmup()
+    prompt = [0] * (TEST_CONFIG.max_context-2)
+    self.assertEqual(calls, [(prompt, 0.0)] * 3 + [(prompt, 1.0)] * 3 + [(prompt + list(range(1, i+1)), 0.0) for i in range(1, 4)])
+    self.assertEqual(model.reset_jit.cnt, 8)
+    cache_size = len(schedule_cache)
+    model.reset_jit()
+    self.assertEqual(len(schedule_cache), cache_size)
 
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
@@ -50,10 +68,36 @@ class TestTransformerGenerate(unittest.TestCase):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
     self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
 
+  def test_recurrent_prompt_snapshot_reuse(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    state, calls = Tensor.ones(4).realize(), []
+    def mock_call(self, tokens, start_pos, temperature, **kwargs):
+      calls.append(start_pos)
+      return Tensor([[42]])
+    with patch.object(model, "_state_tensors", return_value=[state]), patch.object(model.blk[0], "_reusable_prefix_len", return_value=0), \
+         patch.object(Transformer, '__call__', mock_call):
+      next(model.generate([1, 2, 3]))
+      state.assign(state.const_like(5)).realize()
+      model._cached_tokens = [1, 2, 3, 9, 9]
+      calls.clear()
+      self.assertEqual(model.get_start_pos([1, 2, 3, 7, 8]), 3)
+      next(model.generate([1, 2, 3, 7, 8]))
+    self.assertEqual(calls, [V_START_POS.bind(3), V_START_POS.bind(4)])
+    self.assertEqual(state.tolist(), [1.0] * 4)
+
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)
     self.assertEqual(list(router.route("reasoning</think>answer")),
                      [("reasoning_content", "reasoning"), ("content", "answer")])
+
+  def test_kimi_tool_call_stream(self):
+    router = StreamRouter()
+    self.assertEqual(list(router.route("before<|tool_calls_section_beg")), [("content", "before")])
+    self.assertEqual(list(router.route("in|><|tool_call_begin|>functions.read:0<|tool_call_argument_begin|>"
+                                      '{"path":"/tmp/x"}<|tool_call_end|><|tool_calls_section_end|>')), [])
+    self.assertEqual(parse_kimi_tool_call("functions.read:0<|tool_call_argument_begin|>{\"path\":\"/tmp/x\"}"),
+                     ("read", {"path":"/tmp/x"}))
 
   def test_kv_cache_reuse(self):
     """Test that generate reuses the KV cache when tokens extend the cached prefix."""

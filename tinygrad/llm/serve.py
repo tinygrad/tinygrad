@@ -24,6 +24,11 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
     return fm.group(1), args
   return None
 
+def parse_kimi_tool_call(s:str) -> tuple[str, typing.Any]|None:
+  if (m := re.match(r"\s*(?:functions\.)?([^:\s]+)(?::[^\s]+)?\s*<\|tool_call_argument_begin\|>\s*(.*?)\s*\Z", s, re.DOTALL)) is None: return None
+  try: return m.group(1), json.loads(m.group(2))
+  except json.JSONDecodeError: return None
+
 def normalize_messages(messages:list[dict]) -> None:
   # chat templates expect tool_call arguments as dicts (OpenAI clients send JSON strings)
   for m in messages:
@@ -46,6 +51,15 @@ class StreamRouter:
     hold = max((i for i in range(1, min(len(self.buf), len(tag))+1) if tag.startswith(self.buf[-i:])), default=0) if not final else 0
     emit, self.buf = self.buf[:len(self.buf)-hold], self.buf[len(self.buf)-hold:]
     return emit, False
+  def split_any(self, tags:tuple[str, ...], final:bool) -> tuple[str, str|None]:
+    found = [(self.buf.index(tag), tag) for tag in tags if tag in self.buf]
+    if found:
+      pos, tag = min(found)
+      before, self.buf = self.buf[:pos], self.buf[pos+len(tag):]
+      return before, tag
+    hold = max((i for tag in tags for i in range(1, min(len(self.buf), len(tag))+1) if tag.startswith(self.buf[-i:])), default=0) if not final else 0
+    emit, self.buf = self.buf[:len(self.buf)-hold], self.buf[len(self.buf)-hold:]
+    return emit, None
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
@@ -67,9 +81,9 @@ class StreamRouter:
       if found: self.mode = "done"
       return
     if self.mode == "tool": return
-    emit, found = self.split("<tool_call>", final)
+    emit, tool_tag = self.split_any(("<tool_call>", "<|tool_calls_section_begin|>"), final)
     if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
+    if tool_tag: self.mode, self.buf = "tool", tool_tag + self.buf
 
 class Handler(HTTPRequestHandler):
   server: LLMServer
@@ -117,6 +131,14 @@ class Handler(HTTPRequestHandler):
           name, args = parsed
           tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
                              "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+      for m in re.finditer(r"<\|tool_call_begin\|>(.*?)<\|tool_call_end\|>", router.buf, re.DOTALL):
+        if (parsed := parse_kimi_tool_call(m.group(1))) is None:
+          stderr_log(f"failed to parse Kimi tool call: {m.group(1)[:200]}")
+          yield chunk({"content":m.group(0)})
+        else:
+          name, args = parsed
+          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                             "function":{"name":name, "arguments":json.dumps(args)}})
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"
