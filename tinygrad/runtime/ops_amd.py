@@ -397,12 +397,55 @@ class AMDComputeQueue(HWQueue):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = self.hw_page.cpu_view().view(fmt='I')
-    for i, value in enumerate(self._q): hw_view[i] = value
+    if dev.is_usb(): self.hw_page.cpu_view().view(fmt='B')[:] = bytes(array.array('I', self._q))
+    else:
+      for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
                          len(self._q) | self.pm4.INDIRECT_BUFFER_VALID]
     self._q = hw_view
     return self
+
+  def enable_gpu_patches(self, dev:AMDDevice, arg_pages:list[HCQBuffer]):
+    """Replace scattered host writes to a bound IB and its kernargs with one compact upload plus GPU COPY_DATA packets."""
+    if not dev.is_usb() or not (self.q_sints or self.mv_sints): return
+
+    pages = [self.hw_page, *arg_pages]
+    patch_specs:list[tuple[MMIOInterface, int, int, int|None, int, int]] = []
+    # (source view, source index, symbol index, mask, destination VA, scalar size)
+    for off, sym_idx in self.q_sints: patch_specs.append((self.hw_page.cpu_view().view(fmt='I'), off, sym_idx, None,
+                                                          self.hw_page.va_addr + off*4, 4))
+    for mem, idx, sym_idx, mask in self.mv_sints:
+      scalar_size = struct.calcsize(mem.fmt)
+      owner = next((page for page in pages if page.cpu_view().addr <= mem.addr < page.cpu_view().addr+page.size), None)
+      assert owner is not None, f"dynamic argument at {mem.addr:#x} is outside graph argument pages"
+      base_va = owner.va_addr + mem.addr-owner.cpu_view().addr
+      patch_specs.append((mem, idx, sym_idx, mask, base_va+idx*scalar_size, scalar_size))
+
+    offsets:list[int] = []
+    total = 0
+    for *_, scalar_size in patch_specs:
+      total = round_up(total, scalar_size)
+      offsets.append(total)
+      total += scalar_size
+    self.patch_values = dev.allocator.alloc(round_up(total, 0x1000), BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    patch_view = self.patch_values.cpu_view()
+    if (begin_batch:=getattr(patch_view, "begin_batch", None)) is not None: begin_batch()
+
+    patch_q = AMDComputeQueue(dev)
+    redirected:list[tuple[MMIOInterface, int, int, int|None]] = []
+    for (src_view, src_idx, sym_idx, mask, dst_va, scalar_size), off in zip(patch_specs, offsets):
+      compact = patch_view.view(off, scalar_size, src_view.fmt)
+      compact[0] = src_view[src_idx]
+      redirected.append((compact, 0, sym_idx, mask))
+      control = 2 | (2 << 8) | (int(scalar_size == 8) << 16) | (1 << 20)  # TC_L2 -> TC_L2, wait for write confirmation
+      patch_q.pkt3(self.pm4.PACKET3_COPY_DATA, control, *data64_le(self.patch_values.va_addr+off), *data64_le(dst_va))
+    patch_q.q(*self.indirect_cmd)
+    patch_q.bind(dev)
+    if (end_batch:=getattr(patch_view, "end_batch", None)) is not None: end_batch()
+
+    self.q_sints, self.mv_sints = [], redirected
+    self.indirect_cmd, self.patch_queue = patch_q.indirect_cmd, patch_q
 
   def _submit(self, dev:AMDDevice):
     cmds = self.indirect_cmd if dev == self.binded_device else self._q
@@ -414,7 +457,13 @@ class AMDComputeQueue(HWQueue):
       cmds = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(ib_ptr), len(cmds) | self.pm4.INDIRECT_BUFFER_VALID,
               self.pm4.PACKET3(self.pm4.PACKET3_NOP, ib_pad + len(cmds) - 1), *((0,) * ib_pad), *cmds]
 
-    for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
+    ring_pos = dev.compute_queue.put_value % len(dev.compute_queue.ring)
+    if dev.is_usb():
+      first = min(len(cmds), len(dev.compute_queue.ring)-ring_pos)
+      dev.compute_queue.ring[ring_pos:ring_pos+first] = array.array('I', cmds[:first])
+      if first < len(cmds): dev.compute_queue.ring[:len(cmds)-first] = array.array('I', cmds[first:])
+    else:
+      for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
     dev.compute_queue.signal_doorbell(dev)
@@ -513,7 +562,9 @@ class AMDCopyQueue(HWQueue):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = self.hw_page.cpu_view().view(fmt='I')
-    for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
+    if dev.is_usb(): self.hw_page.cpu_view().view(fmt='B')[:] = bytes(array.array('I', self._q) + array.array('I', [0] * (qsz-len(self._q))))
+    else:
+      for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
     self.indirect_cmd = [self.sdma.SDMA_OP_INDIRECT | self.sdma.SDMA_PKT_INDIRECT_HEADER_VMID(0), *data64_le(self.hw_page.va_addr), qsz,
                          *data64_le(0)]
@@ -571,9 +622,14 @@ class AMDProgram(HCQProgram['AMDDevice']):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
-    self.dev.allocator._copyin(self.lib_gpu, image)
-    self.dev.synchronize()
+    # USB can stream directly through the VRAM BAR. Going through the SDMA staging queue here adds several control round trips and a synchronize
+    # for every distinct kernel while a JIT graph is being constructed.
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000),
+                                            buf_spec:=BufferSpec(nolru=True, cpu_access=self.dev.is_usb()))
+    if self.dev.is_usb(): self.lib_gpu.cpu_view().view(size=image.nbytes, fmt='B')[:] = image
+    else:
+      self.dev.allocator._copyin(self.lib_gpu, image)
+      self.dev.synchronize()
 
     desc_sz = ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)
     desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+desc_sz]))
@@ -652,6 +708,20 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
     self.dev.synchronize()
+
+    # Small results (notably the sampled token) can be read straight through the VRAM BAR. Routing four bytes through an SDMA queue, controller
+    # SRAM, and a second bulk transaction costs more than the entire decode graph over USB.
+    mapping = src.meta.mapping
+    if mapping.aspace is AddrSpace.PHYS and dest.nbytes % 4 == 0:
+      off = int(src.va_addr) - mapping.va_addr
+      for paddr, size in mapping.paddrs:
+        if off < size:
+          if off % 4 == 0 and dest.nbytes <= size-off:
+            bar = self.dev.iface.pci_dev.bar_info(self.dev.iface.vram_bar)[0]
+            dest.cast('B')[:] = self.dev.iface.pci_dev.usb.pcie_mem_read(bar+paddr+off, dest.nbytes)
+            return
+          break
+        off -= size
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
                      dev_suff="SDMA:0"):

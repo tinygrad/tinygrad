@@ -176,8 +176,9 @@ class CustomASM24Controller:
   def scsi_read(self, size:int) -> memoryview: return self.usb.bulk_read(round_up(size, 512), timeout=10000)[:size]
 
 class USBMMIOInterface(MMIOInterface):
-  def __init__(self, usb, addr, size, fmt, pcimem=True): # pylint: disable=super-init-not-called
+  def __init__(self, usb, addr, size, fmt, pcimem=True, batch_state=None): # pylint: disable=super-init-not-called
     self.usb, self.addr, self.nbytes, self.fmt, self.el_sz, self.pcimem = usb, addr, size, fmt, struct.calcsize(fmt), pcimem
+    self.batch_state = batch_state or {"active": False, "shadow_reads": False, "addr": addr, "data": bytearray(size)}
 
   def _off_from_index(self, index):
     if isinstance(index, slice): return ((index.start or 0) * self.el_sz, ((index.stop or len(self))-(index.start or 0)) * self.el_sz)
@@ -185,7 +186,10 @@ class USBMMIOInterface(MMIOInterface):
 
   def __getitem__(self, index):
     off, sz = self._off_from_index(index)
-    if self.pcimem:
+    if self.batch_state["active"] or self.batch_state["shadow_reads"]:
+      start = self.addr + off - self.batch_state["addr"]
+      data = memoryview(self.batch_state["data"])[start:start+sz]
+    elif self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
     else: data = self.usb.scsi_read(sz) if self.addr == 0xf000 else self.usb.read(self.addr + off, sz)
@@ -194,10 +198,26 @@ class USBMMIOInterface(MMIOInterface):
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
-    if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
+    start = self.addr + off - self.batch_state["addr"]
+    self.batch_state["data"][start:start+len(data)] = data
+    if self.batch_state["active"]:
+      pass
+    elif not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
     else: self.usb.pcie_mem_write(self.addr+off, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
-    return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem)
+    return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem,
+                            batch_state=self.batch_state)
+
+  def begin_batch(self):
+    assert self.pcimem and not self.batch_state["active"]
+    self.batch_state["active"] = True
+
+  def enable_shadow_reads(self): self.batch_state["shadow_reads"] = True
+
+  def end_batch(self):
+    assert self.batch_state["active"]
+    self.batch_state["active"] = False
+    self.usb.pcie_mem_write(self.batch_state["addr"], self.batch_state["data"])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

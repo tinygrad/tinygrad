@@ -31,6 +31,8 @@ class HCQGraph(MultiGraphRunner):
       if runtime is None: continue
       kernargs_size[runtime.dev] += round_up(runtime.kernargs_alloc_size, 16)
     self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
+    for buf in self.kernargs_bufs.values():
+      if (begin_batch:=getattr(buf.cpu_view(), "begin_batch", None)) is not None: begin_batch()
 
     # Fill initial arguments.
     self.ji_args: dict[int, HCQArgsState] = {}
@@ -216,9 +218,17 @@ class HCQGraph(MultiGraphRunner):
 
       self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1).bind(dev)
       for copy_q in self._dev_copy_queues(dev): copy_q.bind(dev)
+      if (enable_gpu_patches:=getattr(self.comp_queues[dev], "enable_gpu_patches", None)) is not None:
+        enable_gpu_patches(dev, [buf for fdev,buf in self.kernargs_bufs.items() if fdev == dev])
 
     self.last_timeline: dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
+    for dev in self.devices:
+      for q in [self.comp_queues[dev], *self._dev_copy_queues(dev)]:
+        if hasattr(q, "hw_page") and (enable_shadow_reads:=getattr(q.hw_page.cpu_view(), "enable_shadow_reads", None)) is not None:
+          enable_shadow_reads()
+    for buf in self.kernargs_bufs.values():
+      if (end_batch:=getattr(buf.cpu_view(), "end_batch", None)) is not None: end_batch()
 
   def _resolve_deps(self, bufs, outs, enqueue_queue, enqueue_dev, out_signal, j, is_copy, rdma_qp=None):
     rdeps = self._access_resources(bufs, outs, (enqueue_queue, j + 1))
@@ -285,6 +295,16 @@ class HCQGraph(MultiGraphRunner):
 
     for (var, qp) in self.rdma_vars.values(): hcq_var_vals[var.expr] = qp.head
     for q in self.rdma_queues.values(): q.submit(q.dev, hcq_var_vals)
+
+    # USB kernargs live in VRAM. Coalesce the symbolic updates across every kernel before ringing the graph doorbell.
+    patch_bufs = [q.patch_values for q in self.comp_queues.values() if hasattr(q, "patch_values")]
+    upload_bufs = patch_bufs or list(self.kernargs_bufs.values())
+    batch_bufs:list[HCQBuffer] = [kbuf for kbuf in upload_bufs if hasattr(kbuf.cpu_view(), "begin_batch")]
+    for kbuf in batch_bufs: getattr(kbuf.cpu_view(), "begin_batch")()
+    for dev in self.devices:
+      self.comp_queues[dev]._apply_var_vals(hcq_var_vals|self.device_vars.get(dev, {}))
+      for copy_queue in self._dev_copy_queues(dev): copy_queue._apply_var_vals(hcq_var_vals|self.device_vars.get(dev, {}))
+    for kbuf in batch_bufs: getattr(kbuf.cpu_view(), "end_batch")()
 
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.device_vars.get(dev, {}))
