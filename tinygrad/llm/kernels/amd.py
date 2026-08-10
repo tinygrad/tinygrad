@@ -183,9 +183,11 @@ def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scal
   T = q.shape[2]
   scale = (stacked_kv.float().abs().max(axis=-1, keepdim=True) / 127).maximum(1e-8).half()
   packed_kv = (stacked_kv.float() / scale).round().clip(-127, 127).cast(dtypes.int8)
-  stores = (cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop),
-            cache_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop))
-  assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(*stores)), Tensor(cache_scale.uop.after(*stores))
+  store_kv = cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(packed_kv.uop)
+  store_scale = cache_scale[:, :, :, start_pos:start_pos+T].uop.store(scale.squeeze(-1).uop)
+  # each store goes on its own buffer's AFTER: sharing both stores across both AFTERs leaves
+  # un-ended stores with open ranges in the kernel graph
+  assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(store_kv)), Tensor(cache_scale.uop.after(store_scale))
   valid_end = start_pos.unbind_all()[0]+T if isinstance(start_pos, UOp) else start_pos+T
   return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, assigned_scale, cast(int, cache_kv.shape[3])) if resolve(T == 1) else \
     flash_attention_causal_cached(q.half(), assigned_kv, valid_end, assigned_scale)
