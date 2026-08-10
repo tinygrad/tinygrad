@@ -1549,15 +1549,14 @@ def train_llama3():
 
   while i < MAX_STEPS:
     GlobalCounters.reset()
-    actual_gbs = GBS if i >= 2 else BS
+    actual_gbs = GBS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       data_time, dev_time = 0, 0
-      accum_steps = grad_acc if i >= 2 else 1
-      for _ in range(accum_steps):
+      for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1571,7 +1570,7 @@ def train_llama3():
 
       gt = time.perf_counter()
       ret = optim_step()
-      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / accum_steps
+      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
       et = time.perf_counter()
 
       optim_time = et - gt
