@@ -680,7 +680,7 @@ class RDNA3Renderer(ISARenderer):
       return clauses
 
     for i,(p,l) in enumerate((gather(loads) | gather(stores)).items()):
-      nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l),)))
+      nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
 
     pc = 0
     targets: dict[str, int] = {}
