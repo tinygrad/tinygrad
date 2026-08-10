@@ -1,9 +1,56 @@
-import ctypes, time, contextlib, functools
+import ctypes, time, contextlib, functools, dataclasses, hashlib, struct, zlib
 from typing import Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
+
+@dataclasses.dataclass(frozen=True)
+class GFXFirmwareLoadPlan:
+  ip_version_major:int
+  ip_version_minor:int
+  ucode_feature_version:int
+  code_offset:int
+  code:bytes
+  data_offset:int
+  data:bytes
+  start_pc:int
+  sha256:str
+  declared_crc32:int
+  computed_crc32:int
+  crc32_matches:bool
+
+def parse_gfx_firmware_v2(blob:bytes, expected_ip:tuple[int, int]|tuple[int, int, int]) -> GFXFirmwareLoadPlan:
+  """Validate an unsigned v2 GFX firmware image and return an immutable, side-effect-free load plan."""
+  if type(blob) is not bytes: raise TypeError("GFX firmware must be immutable bytes")
+  if len(expected_ip) < 2: raise ValueError("expected GFX firmware IP must include major and minor")
+  header_size = 60
+  if len(blob) < header_size: raise ValueError("GFX firmware is shorter than its v2 header")
+  size, declared_header_size, ver_major, ver_minor, ip_major, ip_minor, _, _, _, declared_crc = \
+    struct.unpack_from("<IIHHHHIIII", blob)
+  feature, code_size, code_offset, data_size, data_offset, start_lo, start_hi = struct.unpack_from("<IIIIIII", blob, 32)
+  if declared_header_size != header_size: raise ValueError(f"invalid GFX firmware header size {declared_header_size}")
+  if (ver_major, ver_minor) != (2, 0): raise ValueError(f"unsupported GFX firmware version {ver_major}.{ver_minor}")
+  if (ip_major, ip_minor) != tuple(expected_ip[:2]): raise ValueError(f"GFX firmware IP {ip_major}.{ip_minor} does not match {tuple(expected_ip[:2])}")
+  if size != len(blob): raise ValueError(f"declared GFX firmware size {size} does not match file size {len(blob)}")
+
+  ranges = (("code", code_offset, code_size), ("data", data_offset, data_size))
+  for name, offset, length in ranges:
+    if length == 0: raise ValueError(f"GFX firmware {name} range is empty")
+    if offset < header_size or offset % 4 or length % 4: raise ValueError(f"GFX firmware {name} range is not an in-file dword range")
+    if offset > len(blob) or length > len(blob) - offset: raise ValueError(f"GFX firmware {name} range is outside the file")
+  if max(code_offset, data_offset) < min(code_offset + code_size, data_offset + data_size):
+    raise ValueError("GFX firmware code and data ranges overlap")
+
+  start_pc = start_lo | (start_hi << 32)
+  if start_pc % 4 or start_pc >> 2 >= (1 << 62): raise ValueError("GFX firmware start PC is not dword-aligned and representable")
+  # AMD's diagnostic CRC covers everything after the 32-byte common header. SHA-256 remains the integrity authority.
+  computed_crc = zlib.crc32(blob[32:size]) & 0xffffffff
+  return GFXFirmwareLoadPlan(ip_major, ip_minor, feature, code_offset, bytes(blob[code_offset:code_offset+code_size]),
+    data_offset, bytes(blob[data_offset:data_offset+data_size]), start_pc, hashlib.sha256(blob).hexdigest(), declared_crc, computed_crc,
+    declared_crc == computed_crc)
+
+def strict_rlc_ready(cp_stat:int, bootload_complete:int) -> bool: return cp_stat == 0 and bootload_complete == 1
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -371,6 +418,60 @@ class AM_GFX(AM_IP):
 
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
+
+  def _load_unsigned_mec_firmware_pipe0(self, plan:GFXFirmwareLoadPlan, code_addr:int, data_addr:int, timeout_ms=10000):
+    """Experimental GFX11 pipe-0-only transaction. Payload allocation/copy intentionally remains the caller's responsibility."""
+    if not isinstance(plan, GFXFirmwareLoadPlan): raise TypeError("unsigned MEC load requires a validated GFX firmware plan")
+    if timeout_ms <= 0: raise ValueError("cache invalidation timeout must be positive")
+    dev_ip = self.adev.ip_ver[am.GC_HWIP]
+    if dev_ip != (11, 0, 0) or dev_ip[:2] != (plan.ip_version_major, plan.ip_version_minor) or self.xccs != 1:
+      raise ValueError(f"unsigned MEC plan IP does not match experimental device {dev_ip}")
+    for name, addr, payload in (("code", code_addr, plan.code), ("data", data_addr, plan.data)):
+      if addr <= 0 or addr & 0xffff or addr >= (1 << 48): raise ValueError(f"{name} base must be a nonzero representable 64-KiB-aligned address")
+      if len(payload) > (1 << 48) - addr: raise ValueError(f"{name} allocation exceeds the 48-bit address space")
+    if max(code_addr, data_addr) < min(code_addr + len(plan.code), data_addr + len(plan.data)):
+      raise ValueError("code and data allocations overlap")
+    if plan.start_pc & 3 or plan.start_pc >> 2 >= (1 << 62): raise ValueError("start PC is not dword-aligned and representable")
+    required = ('regCP_STAT', 'regRLC_RLCS_BOOTLOAD_STATUS', 'regGRBM_GFX_CNTL', 'regCP_MEC_RS64_CNTL', 'regCP_CPC_IC_BASE_CNTL',
+      'regCP_CPC_IC_BASE_LO', 'regCP_CPC_IC_BASE_HI', 'regCP_MEC_DC_BASE_CNTL', 'regCP_MEC_MDBASE_LO', 'regCP_MEC_MDBASE_HI',
+      'regCP_MEC_RS64_PRGRM_CNTR_START', 'regCP_MEC_RS64_PRGRM_CNTR_START_HI', 'regCP_MEC_DC_OP_CNTL', 'regCP_CPC_IC_OP_CNTL')
+    if (missing := [name for name in required if not hasattr(self.adev, name)]): raise RuntimeError(f"unsigned MEC registers unavailable: {missing}")
+    cp_stat = self.adev.regCP_STAT.read()
+    bootload_complete = self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete']
+    if not strict_rlc_ready(cp_stat, bootload_complete): raise RuntimeError("strict RLC preflight failed")
+    selector = self.adev.regGRBM_GFX_CNTL.read(inst=0)
+
+    # Treat the first attempted mutation as the commit point: an MMIO helper may fail after the write reached hardware.
+    try:
+      self.adev.regCP_MEC_RS64_CNTL.update(mec_halt=1, mec_pipe0_reset=1, mec_pipe0_active=0, inst=0)
+      self._grbm_select(me=1, pipe=0, inst=0)
+      self.adev.regCP_CPC_IC_BASE_CNTL.write(vmid=0, address_clamp=0, exe_disable=0, cache_policy=0, inst=0)
+      self.adev.regCP_CPC_IC_BASE_LO.write(lo32(code_addr), inst=0)
+      self.adev.regCP_CPC_IC_BASE_HI.write(hi32(code_addr), inst=0)
+      self.adev.regCP_MEC_DC_BASE_CNTL.write(vmid=0, cache_policy=0, inst=0)
+      self.adev.regCP_MEC_MDBASE_LO.write(lo32(data_addr), inst=0)
+      self.adev.regCP_MEC_MDBASE_HI.write(hi32(data_addr), inst=0)
+      start = plan.start_pc >> 2
+      self.adev.regCP_MEC_RS64_PRGRM_CNTR_START.write(lo32(start), inst=0)
+      self.adev.regCP_MEC_RS64_PRGRM_CNTR_START_HI.write(hi32(start), inst=0)
+      # Restore indexed-register selection while MEC is still halted; restoration failure is fail-stopped too.
+      self.adev.regGRBM_GFX_CNTL.write(selector, inst=0)
+
+      self.adev.regCP_MEC_DC_OP_CNTL.update(invalidate_dcache=1, inst=0)
+      wait_cond(lambda: self.adev.regCP_MEC_DC_OP_CNTL.read_bitfields(inst=0)['invalidate_dcache_complete'], value=1,
+                timeout_ms=timeout_ms, msg="MEC dcache invalidate timeout")
+      self.adev.regCP_MEC_DC_OP_CNTL.update(invalidate_dcache=0, inst=0)
+      self.adev.regCP_CPC_IC_OP_CNTL.update(invalidate_cache=1, inst=0)
+      wait_cond(lambda: self.adev.regCP_CPC_IC_OP_CNTL.read_bitfields(inst=0)['invalidate_cache_complete'], value=1,
+                timeout_ms=timeout_ms, msg="MEC icache invalidate timeout")
+      self.adev.regCP_CPC_IC_OP_CNTL.update(invalidate_cache=0, inst=0)
+      self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=0)
+    except Exception:
+      self.adev.is_err_state = True
+      with contextlib.suppress(Exception):
+        self.adev.regCP_MEC_RS64_CNTL.update(mec_halt=1, mec_pipe0_reset=1, mec_pipe0_active=0, inst=0)
+      with contextlib.suppress(Exception): self.adev.regGRBM_GFX_CNTL.write(selector, inst=0)
+      raise
 
   def _enable_mec(self):
     for xcc in range(self.xccs):
