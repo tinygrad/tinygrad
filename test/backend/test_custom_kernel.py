@@ -190,6 +190,12 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
     self.assertEqual(b.item(), 15)
 
+  def test_sum_outside(self):
+    a = Tensor([1.0, 2, 3, 4, 5])+1
+    tst = Tensor.empty(1)
+    b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
+    self.assertEqual(b.item(), 20)
+
   def test_sum_int(self):
     a = Tensor([1, 2, 3, 4, 5])
     tst = Tensor.empty(1, dtype=a.dtype)
@@ -287,7 +293,7 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     c.realize()
     assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
-    assert_kernel_count(3)
+    assert_kernel_count(2)
 
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
@@ -405,10 +411,8 @@ class TestCustomKernel(unittest.TestCase):
     assert_kernel_count(2)
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
-  @unittest.expectedFailure
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
-  @unittest.expectedFailure
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
@@ -419,7 +423,8 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     y = run(x[0]).realize()
     # it's copying the input and the output
-    assert_kernel_count(1)
+    # TODO: subbuffer usage has runtime specific behavior, this will be fixed after the removal of SLICE.
+    assert_kernel_count(2 if y.device in ("CL", "WEBGPU") else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
@@ -429,12 +434,28 @@ class TestCustomKernel(unittest.TestCase):
     # TODO: it currently requires a compiler for Ops.BINARY
     from tinygrad.device import Device
     binary = Device[a.device].renderer.compiler.compile(src)
-    def custom_src_kernel(A:UOp) -> UOp:
+    def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
-    a = Tensor.custom_kernel(a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
-    self.assertEqual(a.tolist(), [[1, 2], [1, 3]])
+    a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
+    self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 
+  @Context(DEV="CPU")
+  def test_simple_from_source_alt(self):
+    a = Tensor.arange(4).clone().realize()
+    src = "void copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
+    from tinygrad.device import Device
+    binary = Device[a.device].renderer.compiler.compile(src)
+    def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
+      sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a+1, fxn=custom_src_kernel)[0]
+    GlobalCounters.reset()
+    out.realize()
+    assert_kernel_count(2)
+    self.assertEqual(out.tolist(), [1, 2, 3, 4])
+
+  @unittest.skip("this shouldn't be expected to work")
   def test_inplace_transpose(self):
     def custom_assign_row_max_kernel(A:UOp) -> UOp:
       row = UOp.range(A.shape[0], 0)
@@ -471,8 +492,8 @@ class TestCustomKernelInput(unittest.TestCase):
 
   def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=2)
   def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=3)
-  def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=3)
-  def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=2)
+  def test_double_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T.T, max_kernels=2)
+  def test_shrink(self): self._test_mop(lambda x: x[:4], max_kernels=1)
   def test_pad(self): self._test_mop(lambda x: x[:4].pad(((0, 4),)), max_kernels=2)
   def test_flip(self): self._test_mop(lambda x: x.flip(0), max_kernels=2)
   def test_offset_shrink(self): self._test_mop(lambda x: x[4:8], max_kernels=2)

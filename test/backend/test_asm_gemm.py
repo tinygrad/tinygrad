@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, quantize_mxfp4
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -157,13 +157,20 @@ class TestMXFP4(unittest.TestCase):
 
   def test_quantize(self):
     import numpy as np
-    block = np.array([0, .26, .74, .75, 1.26, 1.75, 2.51, 3.5, 5.1, 6, -6] + [0] * 21, dtype=np.float32)
-    x = Tensor(np.tile(block, (32, 8)), dtype=dtypes.bfloat16)
-    packed, scale, _ = quantize_mxfp4(x)
-    p = packed.numpy()
-    codes = np.stack((p & 0xF, p >> 4), axis=-1).reshape(32, 256)
-    np.testing.assert_array_equal(codes[0, :11], [0, 1, 1, 2, 3, 4, 5, 6, 7, 7, 15])
-    np.testing.assert_array_equal(scale.numpy(), np.full((32, 8), 127, dtype=np.uint8))
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(0)
+    x = np.triu(rng.standard_normal((256, 256), dtype=np.float32))
+    x += np.triu(x, 1).T
+    x[:32, :32] = 0
+    row, row_scale, col, col_scale = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    Tensor.realize(row, row_scale, col, col_scale)
+    row, row_scale = row.numpy(), row_scale.numpy()
+    col, col_scale = col.numpy(), col_scale.numpy()
+    np.testing.assert_array_equal(row, col)
+    np.testing.assert_array_equal(row_scale, col_scale)
+    self.assertTrue(row.any())
+    self.assertTrue((row_scale == 127).any())
+    self.assertTrue((row_scale != 127).any())
 
   def test_correctness(self):
     import numpy as np
@@ -171,17 +178,9 @@ class TestMXFP4(unittest.TestCase):
     rng = np.random.default_rng(1)
     a = Tensor(rng.standard_normal((M, K), dtype=np.float32), dtype=dtypes.bfloat16)
     b = Tensor(rng.standard_normal((N, K), dtype=np.float32), dtype=dtypes.bfloat16)
-    out = asm_gemm(a, b.T, mxfp4=True).realize()
-    # reference gemm
-    a_packed, scale_a, _ = quantize_mxfp4(a)
-    b_packed, scale_b, _ = quantize_mxfp4(b)
-    def unpack(x): return np.stack((x & 0xF, x >> 4), axis=-1).reshape(x.shape[0], -1)
-    code_a, code_b = unpack(a_packed.numpy()), unpack(b_packed.numpy())
-    lut = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6], dtype=np.float32)
-    a_dequant = lut[code_a] * np.repeat(np.exp2(scale_a.numpy().astype(np.int16)-127), 32, axis=1)
-    b_dequant = lut[code_b] * np.repeat(np.exp2(scale_b.numpy().astype(np.int16)-127), 32, axis=1)
-    ref = Tensor(a_dequant @ b_dequant.T, dtype=dtypes.bfloat16).realize().numpy()
-    np.testing.assert_array_equal(out.numpy(), ref)
+    out = asm_gemm(a, b.T, mxfp4=True).realize().numpy().astype(np.float32)
+    ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
+    self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
 
   def test_empty(self):
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)

@@ -514,7 +514,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
     denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    return numerator.div(denominator).cast(output_dtype)  # type: ignore[arg-type]
+    return numerator.div(denominator).cast(output_dtype)
 
   def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
     """
@@ -538,12 +538,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.var(axis=1).numpy())
     ```
     """
+    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    reduced = squares.sum(axis=axis, keepdim=keepdim)
-    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
-    # TODO: remove relu?
-    return reduced.div(denominator.relu())
+    numerator = squares.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    return numerator.div(smax(n - correction, 0)).cast(output_dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
@@ -1057,14 +1056,16 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
     x, expand = self, list(self.shape)
     for i in range(-1,-len(size)-1,-1):
-      scale = (int(self.shape[i]) - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = type(self).arange(size[i], dtype=dtypes.float32), [1] * self.ndim
+      in_sz, reshape = int(self.shape[i]), [1] * self.ndim
       reshape[i] = expand[i] = size[i]
       if mode == "linear":
-        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
+        arr = type(self).arange(size[i])
+        num, den = (arr*(in_sz-1), size[i]-1) if align_corners else ((arr*2+1)*in_sz - size[i], size[i]*2)
+        num = num.clip(0, (in_sz-1)*den)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (num//den, (num+den-1)//den, (num % den).cast(dtypes.float32)/den)]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
+        scale, arr = in_sz / size[i], type(self).arange(size[i], dtype=dtypes.float32)
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
     return x.cast(self.dtype)
