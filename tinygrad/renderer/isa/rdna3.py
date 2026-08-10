@@ -175,8 +175,7 @@ def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
 
-# NOTE: look into sext semantics, d16 and d16_hi... maybe unecessary
-def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
+def load(ctx, x:UOp, idx:UOp):
   if idx.addrspace is AddrSpace.REG:
     return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
@@ -185,8 +184,7 @@ def load(ctx, x:UOp, idx:UOp, gate:UOp|None=None, alt:UOp|None=None):
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
-  if gate is None: return x.ins(opc, src=fold_address(idx), tag=(vp,))
-  else: return x.replace(src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), alt, gate), tag=(vp,))
+  return x.replace(src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), *x.src[1:]), tag=(vp,))
 
 def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
   init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
@@ -194,7 +192,7 @@ def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
   mif = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))
   return load, init + [mif, load, UOp(Ops.ENDIF, src=(mif,))]
 
-def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
+def store(ctx, x:UOp, idx:UOp, val:UOp):
   # NOTE: probably fails on 64 bit SHRINK
   if idx.addrspace is AddrSpace.REG:
     vregs = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)
@@ -207,13 +205,11 @@ def store(ctx, idx:UOp, val:UOp, gate:UOp|None=None):
       else: return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
       # else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
     else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
-
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_store_b{sz*8}")
-  if gate is None: return UOp(Ops.INS, dtypes.void, arg=opc, src=fold_address(idx) + (to_vgpr(val),))
-  else: return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), to_vgpr(val), gate))
+  return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), to_vgpr(val)) + x.src[2:])
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
@@ -461,10 +457,8 @@ pre_isel_matcher = PatternMatcher([
 
 isel_matcher = PatternMatcher([
   # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), UPat.var("gate")), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(UPat.var("alt"), UPat.var("gate")).named("x"), load),
-  (UPat.var("idx").store(UPat.var("val")), store),
-  (UPat.var("idx").load(name="x"), load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -510,12 +504,13 @@ isel_matcher = PatternMatcher([
 
 pre_regalloc_matcher = PatternMatcher([
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
-  (UPat(Ops.LOAD, src=(UPat.var("addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
+  (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
+  (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
+
+  (UPat(Ops.STORE, src=(UPat(Ops.NOOP, name="addr"), UPat.var("val")), name="x"), lambda addr,x,val: ((nx := x.ins(addr.arg).replace(src=addr.src + (val,))), [nx])),
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
     ((nx := UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))), [nx])),
-  (UPat(Ops.STORE, src=(UPat.var("addr"), UPat.var("val")), name="x"), lambda x,addr,val:
-    ((nx := UOp(Ops.INS, arg=addr.arg, src=addr.src + ((val,) if val.op is not Ops.NOOP else ()), tag=x.tag)), [nx])),
 ])
 
 post_regalloc_matcher = PatternMatcher([
