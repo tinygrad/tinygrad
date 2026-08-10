@@ -24,6 +24,7 @@ jobs:
 
   unittestmacos:
     name: MacOS (unit)
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -51,6 +52,7 @@ jobs:
 
   unittestmacosmock:
     name: MacOS (unit, mock)
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -88,6 +90,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: MacOS (DEV=METAL) (${{ matrix.group }})
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: macos-26
     timeout-minutes: 20
     env:
@@ -120,6 +123,7 @@ jobs:
           - 'WEBGPU'
 
     name: MacOS (DEV=${{ matrix.dev }})
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: macos-26
     timeout-minutes: 20
     steps:
@@ -156,6 +160,7 @@ jobs:
           - 'WEBGPU'
 
     name: Windows (DEV=${{ matrix.dev }})
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
@@ -182,6 +187,7 @@ jobs:
 
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
+    if: github.repository == 'tinygrad/tinygrad'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
