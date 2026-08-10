@@ -222,6 +222,12 @@ class TestAutoCastType(unittest.TestCase):
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
 
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
+  def test_var_half_precision_large_n(self):
+    # the element count (70000) exceeds half max (65504): the denominator must not be materialized in half
+    t = Tensor([[0.0, 1.0]], dtype=dtypes.half).expand(35000, 2).contiguous()
+    np.testing.assert_allclose(t.var().numpy(), 0.25, rtol=1e-3)
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_softmax_dtype(self):
