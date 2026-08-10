@@ -2,8 +2,9 @@ from __future__ import annotations
 import gc, json, pathlib
 from dataclasses import replace
 from collections import defaultdict
-from typing import Callable
+from typing import Callable, cast
 from tinygrad import Tensor, Device, nn
+from tinygrad.device import Buffer
 from tinygrad.nn.state import safe_load
 from tinygrad.llm.kimi import load_kimi_tokenizer_data
 from tinygrad.llm.model import SSMConfig, Transformer, TransformerConfig
@@ -127,6 +128,46 @@ def _replace(dst:Tensor, src:Tensor) -> None:
   dst.replace(src if isinstance(src.device, tuple) else src.shard(dst.device, dst.uop.axis) if isinstance(dst.device, tuple) else src.to(dst.device))
   dst.realize()
 
+def _load_stacked_experts(dst:Tensor, sources:list[Tensor]) -> None:
+  """Read expert tensors once into a transient GPU staging buffer, then redistribute TP slices over the GPU fabric."""
+  if not sources or not isinstance(dst.device, tuple) or dst.uop.axis is None: raise ValueError("expected a TP-sharded expert destination")
+  devices, axis = dst.device, dst.uop.axis
+  shape = (len(sources), *sources[0].shape)
+  if dst.shape != shape or any(x.shape != sources[0].shape or x.dtype != dst.dtype for x in sources):
+    raise ValueError(f"expert source shape/dtype does not match destination {dst.shape} {dst.dtype}")
+
+  # Each official expert tensor is contiguous in its safetensor file. Assemble it once on GPU 0;
+  # Buffer.copy_from uses the AMD driver's bounded DISK->GPU staging path and never allocates host-sized storage.
+  staging = Tensor.empty(*shape, dtype=dst.dtype, device=devices[0]).realize()
+  staging_buffer = cast(Buffer, staging.uop.buffer)
+  def free_staging_cache() -> None:
+    if (free_cache:=getattr(Device[devices[0]].allocator, "free_cache", None)) is not None: free_cache()
+  offset = 0
+  for source in sources:
+    source_buffer = cast(Buffer, source.uop.buffer)
+    staging_buffer.view(cast(int, source.numel()), source.dtype, offset).ensure_allocated().copy_from(source_buffer.ensure_allocated())
+    offset += source.nbytes()
+
+  # The full projection is at most the packed down-expert matrix. Materialize one TP slice at a time,
+  # transfer it peer-to-peer, and immediately release the GPU-0 gather temporary.
+  parts:list[Tensor] = []
+  for i,device in enumerate(devices):
+    bounds = [(0, int(s)) for s in shape]
+    shard_size = int(shape[axis])//len(devices)
+    bounds[axis] = (i*shard_size, (i+1)*shard_size)
+    local_part = staging.shrink(tuple(bounds)).contiguous().realize()
+    part = local_part if device == devices[0] else local_part.to(device).realize()
+    parts.append(part)
+    if part is not local_part:
+      del local_part
+      gc.collect()
+      free_staging_cache()
+
+  dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:])).unshard(axis)))
+  del staging, parts
+  gc.collect()
+  free_staging_cache()
+
 def _load_nonexperts(root:pathlib.Path, weight_map:dict[str, str], model:Transformer, progress:Callable[[str], None]) -> set[str]:
   model_state, mappings = nn.state.get_state_dict(model), {
     "language_model.model.embed_tokens.weight":"token_embd.weight", "language_model.model.norm.weight":"output_norm.weight",
@@ -165,8 +206,8 @@ def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transforme
       files = sorted({weight_map[k] for k in packed_keys+scale_keys})
       progress(f"loading layer {i}/92 {wid} routed experts from {', '.join(files)}")
       shards = {fn:safe_load(root / fn) for fn in files}
-      _replace(model_state[f"blk.{i}.{dst_name}.weight"], Tensor.stack(*(shards[weight_map[k]][k] for k in packed_keys)))
-      _replace(model_state[f"blk.{i}.{dst_name}.weight_scale"], Tensor.stack(*(shards[weight_map[k]][k] for k in scale_keys)))
+      _load_stacked_experts(model_state[f"blk.{i}.{dst_name}.weight"], [shards[weight_map[k]][k] for k in packed_keys])
+      _load_stacked_experts(model_state[f"blk.{i}.{dst_name}.weight_scale"], [shards[weight_map[k]][k] for k in scale_keys])
       consumed.update(packed_keys+scale_keys)
       del shards
       gc.collect()
@@ -176,8 +217,8 @@ def load_kimi_k3(model_dir:str|pathlib.Path, max_context:int=4096, devices:int=8
                  progress:Callable[[str], None]=print) -> Transformer:
   """Load the official native K3 checkpoint without ever materializing it in host RAM.
 
-  Safetensor shards remain disk-backed, each destination is TP-sharded before transfer, and source
-  mappings are discarded after every file/projection. Vision tensors are intentionally ignored.
+  Safetensor shards remain disk-backed. Expert tensors are read once into a bounded GPU staging
+  buffer, redistributed as TP slices, and discarded after every projection. Vision tensors are intentionally ignored.
   """
   root = pathlib.Path(model_dir)
   _validate_config(json.loads((root / "config.json").read_text()))

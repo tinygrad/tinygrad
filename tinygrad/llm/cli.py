@@ -173,7 +173,7 @@ from tinygrad.llm.serve import LLMServer, StreamRouter
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0],
-                      help=f"Model choice ({', '.join(models.keys())}), local GGUF file, or converted Kimi directory")
+                      help=f"Model choice ({', '.join(models.keys())}), local GGUF file, converted Kimi directory, or official Kimi K3 directory")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")

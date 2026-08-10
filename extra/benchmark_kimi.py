@@ -2,6 +2,7 @@
 """Benchmark Kimi-Linear load, prefill, and decode on its TP4 checkpoint."""
 import argparse, resource, time
 from tinygrad import Device, TinyJit
+from tinygrad.helpers import profile_marker
 from tinygrad.llm.kimi import load_kimi
 
 def sync(devices:int) -> None:
@@ -66,10 +67,12 @@ def main() -> None:
         f"({args.prompt_tokens/replay_prefill:.3f} tok/s), token={first}", flush=True)
   print(f"cold decode: {cold_decode:.3f}s", flush=True)
   print(f"capture decode: {capture_decode:.3f}s", flush=True)
+  profile_marker("kimi decode steady start")
   begin = time.perf_counter()
   output = [next(warm) for _ in range(args.decode_tokens)]
   sync(args.devices)
   decode = time.perf_counter()-begin
+  profile_marker("kimi decode steady end")
   print(f"decode: {decode:.3f}s ({args.decode_tokens/decode:.3f} tok/s, {decode/args.decode_tokens*1e3:.3f} ms/tok), output={output}", flush=True)
   print(f"peak RSS: {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024:.1f} MiB", flush=True)
 

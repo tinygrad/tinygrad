@@ -3,7 +3,7 @@ from dataclasses import replace
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.kimi_k3 import KIMI_K3_FULL_ATTN_LAYERS, KIMI_K3_SSM_LAYERS, KIMI_K3_TEXT_SIZE, KIMI_K3_TP8_BYTES_PER_GPU, \
-  _layer_sources, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
+  _layer_sources, _load_stacked_experts, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
 from tinygrad.llm.model import FFNBlock, Transformer
 
 def small_k3_config(max_context:int=4): return replace(kimi_k3_smoke_config(max_context), num_experts=8)
@@ -75,6 +75,16 @@ class TestKimiK3(unittest.TestCase):
       self.assertEqual(state[name].uop.axis, axis, name)
     self.assertIsNone(state["blk.1.attn_res_norm.weight"].uop.axis)
     self.assertIsNone(state["blk.1.ffn_routed_norm.weight"].uop.axis)
+
+  def test_direct_expert_staging(self):
+    devices = tuple(f"PYTHON:{i}" for i in range(4))
+    sources = [Tensor([[(e*40+r*4+c)&255 for c in range(4)] for r in range(8)], dtype=dtypes.uint8,
+                      device=devices[0]).realize() for e in range(8)]
+    expected = Tensor.stack(*sources).numpy()
+    for axis in (1, 2):
+      dst = Tensor.zeros(8, 8, 4, dtype=dtypes.uint8, device=devices[0]).shard(devices, axis=axis)
+      _load_stacked_experts(dst, sources)
+      np.testing.assert_equal(dst.numpy(), expected)
 
   def test_chunked_recurrent_generate(self):
     model = Transformer(small_k3_config(max_context=8))

@@ -6,8 +6,9 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.llm.quant import dequantize_mxfp4, quantize_dequantize_mxfp8
-from tinygrad.llm.kernels import amd_custom_kernels_supported, bf16_matvec, bf16_partial_linear, gated_delta_prefill, kda_qkv_linear, \
-  mxfp4_expert_linear, mxfp8_quantize_dequantize
+from tinygrad.llm.kernels import amd_custom_kernels_supported, amd_exact_bf16_custom_kernels_supported, amd_int32_item, \
+  amd_packed_mxfp4_supported, bf16_matvec, bf16_partial_linear, dual_bf16_matvec, dual_input_bf16_matvec, \
+  gated_delta_prefill, kda_fgb_linear, kda_qkv_linear, mxfp4_expert_linear, mxfp8_quantize_dequantize
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -39,7 +40,7 @@ class MXFP4ExpertWeights:
         quantize_dequantize_mxfp8(x.cast(dtypes.bfloat16))
     # gfx11 has no native FP4 instructions, but decoding nibbles inside the dot product still avoids
     # the much larger selected-expert BF16 temporary. Gate/up weights are output-sharded in TP.
-    if amd_custom_kernels_supported(self.weight.device):
+    if amd_packed_mxfp4_supported(self.weight.device):
       return mxfp4_expert_linear(sel, x, self.weight, self.weight_scale, partial=partial)
     weight = dequantize_mxfp4(self.weight[sel], self.weight_scale[sel], dtype=dtypes.bfloat16)
     return (x.unsqueeze(-2) @ weight.transpose(-1, -2)).contiguous().squeeze(-2)
@@ -188,8 +189,9 @@ class FFNBlock:
         probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       probs = probs * self.config.routed_scaling_factor
       if hasattr(self, 'ffn_routed_down'): h = self.ffn_routed_down(x).unsqueeze(2)
-      if isinstance(self.ffn_gate_exps, MXFP4ExpertWeights) and amd_custom_kernels_supported(h.device):
-        hq = mxfp8_quantize_dequantize(h.cast(dtypes.bfloat16))
+      if isinstance(self.ffn_gate_exps, MXFP4ExpertWeights) and amd_packed_mxfp4_supported(h.device):
+        hq = mxfp8_quantize_dequantize(h.cast(dtypes.bfloat16)) if amd_custom_kernels_supported(h.device) else \
+          quantize_dequantize_mxfp8(h.cast(dtypes.bfloat16))
         gate = self.ffn_gate_exps(sel, hq, quantized=True)
         up = cast(MXFP4ExpertWeights, self.ffn_up_exps)(sel, hq, quantized=True)
       else: gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
@@ -204,7 +206,11 @@ class FFNBlock:
         if hasattr(self, 'ffn_routed_norm'): out = self.ffn_routed_norm(out)
         out = self.ffn_routed_up(out)
       if hasattr(self, 'ffn_gate_shexp'):
-        shared_gate, shared_up = self.ffn_gate_shexp(x).contiguous(), self.ffn_up_shexp(x).contiguous()
+        if resolve(x.shape[1] == 1) and amd_exact_bf16_custom_kernels_supported(x.device) and \
+           self.ffn_gate_shexp.weight.shape == self.ffn_up_shexp.weight.shape:
+          shared_gate, shared_up = dual_bf16_matvec(x, self.ffn_gate_shexp.weight, self.ffn_up_shexp.weight,
+                                                    fast=amd_custom_kernels_supported(x.device))
+        else: shared_gate, shared_up = self.ffn_gate_shexp(x).contiguous(), self.ffn_up_shexp(x).contiguous()
         shared_activation = self._activation(shared_gate, shared_up).contiguous()
         if combine_down:
           out = (out + bf16_partial_linear(shared_activation, self.ffn_down_shexp.weight)).sum(3).cast(dtypes.bfloat16)
@@ -215,7 +221,15 @@ class FFNBlock:
           out = out + shexp
       return out
     # TODO: remove the need for this contiguous
-    return self.ffn_down(self._activation(self.ffn_gate(x).contiguous(), self.ffn_up(x).contiguous()).contiguous())
+    if resolve(x.shape[1] == 1) and amd_exact_bf16_custom_kernels_supported(x.device) and \
+       self.ffn_gate.weight.shape == self.ffn_up.weight.shape:
+      dense_gate, dense_up = dual_bf16_matvec(x, self.ffn_gate.weight, self.ffn_up.weight, fast=amd_custom_kernels_supported(x.device))
+    else: dense_gate, dense_up = self.ffn_gate(x).contiguous(), self.ffn_up(x).contiguous()
+    dense_activation = self._activation(dense_gate, dense_up).contiguous()
+    if resolve(x.shape[1] == 1) and isinstance(self.ffn_down.weight.device, tuple) and self.ffn_down.weight.uop.axis == 1 and \
+       amd_custom_kernels_supported(x.device):
+      return bf16_partial_linear(dense_activation, self.ffn_down.weight).sum(3).cast(dtypes.bfloat16)
+    return self.ffn_down(dense_activation)
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
@@ -363,6 +377,8 @@ class MLATransformerBlock(FFNBlock):
     attn = attn.softmax(-1, dtype=dtypes.float32).cast(q.dtype)
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     if hasattr(self, "attn_gate"): attn = attn * self.attn_gate(x).sigmoid()
+    if resolve(T == 1) and isinstance(self.attn_output.weight.device, tuple) and amd_custom_kernels_supported(attn.device):
+      return bf16_partial_linear(attn, self.attn_output.weight).sum(3).cast(dtypes.bfloat16)
     return self.attn_output(attn)
 
   def _init_state(self, x:Tensor):
@@ -405,9 +421,18 @@ class GatedDeltaNetBlock(FFNBlock):
     # input processing
     # Kimi-Linear is a BF16 model. Qwen 3.5 GGDN checkpoints historically use FP16 here.
     x = x.cast(dtypes.bfloat16) if self.config.ssm and self.config.ssm.kda else x.half()
-    out_gate = self.ssm_g_full(x) if hasattr(self, "ssm_g_full") else self.ssm_g_b(self.ssm_g_a(x)) if hasattr(self, "ssm_g_a") else self.attn_gate(x)
-    beta_logits = self.ssm_beta(x)
-    alpha_logits = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
+    fused_fg = hasattr(self, "ssm_g_a") and resolve(T == 1) and amd_custom_kernels_supported(x.device) and \
+      self.ssm_g_a.weight.shape == self.ssm_f_a.weight.shape
+    if hasattr(self, "ssm_g_full"): out_gate = self.ssm_g_full(x)
+    elif hasattr(self, "ssm_g_a"):
+      if fused_fg:
+        gate_a, alpha_a, beta_logits = kda_fgb_linear(x, self.ssm_g_a.weight, self.ssm_f_a.weight, self.ssm_beta.weight)
+        out_gate, alpha_logits = dual_input_bf16_matvec(gate_a, alpha_a, self.ssm_g_b.weight, self.ssm_f_b.weight)
+      else: out_gate = self.ssm_g_b(self.ssm_g_a(x))
+    else: out_gate = self.attn_gate(x)
+    if not fused_fg: beta_logits = self.ssm_beta(x)
+    if not fused_fg:
+      alpha_logits = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
 
     # Causal depthwise Q/K/V convolution. All tokens are projected together, then the recurrent
     # update is fused into one kernel so prefill doesn't build a Python-unrolled graph.
@@ -469,7 +494,9 @@ class GatedDeltaNetBlock(FFNBlock):
     gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     gate = gate.float().sigmoid().cast(core_attn_out.dtype) if hasattr(self, "ssm_g_a") else gate.silu()
     out = (core_attn_out * gate).reshape(B, T, -1)
-    ret = self.ssm_out(out.cast(x.dtype))
+    out = out.cast(x.dtype)
+    ret = bf16_partial_linear(out, self.ssm_out.weight).sum(3).cast(dtypes.bfloat16) if resolve(T == 1) and \
+      isinstance(self.ssm_out.weight.device, tuple) and amd_custom_kernels_supported(out.device) else self.ssm_out(out)
     return ret.realize(*state_updates)
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
@@ -659,6 +686,7 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     if start_pos < len(self._cached_tokens) and self.has_recurrent_block: self.reset_jit()
     out, prompt_len = None, len(tokens)
+    token_host = memoryview(bytearray(4)) if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device) else None
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       # Recurrent blocks execute an explicit recurrence over T. Give them a static chunk length so
@@ -676,6 +704,6 @@ class Transformer:
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
-      tokens.append(int(out.item()))
+      tokens.append(amd_int32_item(out, token_host) if token_host is not None else int(out.item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]

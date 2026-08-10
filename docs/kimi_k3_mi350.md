@@ -1,27 +1,26 @@
 # Kimi K3 on 8× MI350X
 
-This branch targets text generation from the official `moonshotai/Kimi-K3` checkpoint. It intentionally ignores the vision tower and multimodal projector. The checkpoint remains in its official 96-shard format; no conversion or second 1.56 TB copy is required.
+This branch targets text generation directly from the official `moonshotai/Kimi-K3` checkpoint at `/raid/weights/kimi-k3`. It intentionally ignores the vision tower and multimodal projector. The checkpoint remains in its official 96-shard format; the loader never converts, rewrites, or creates a second 1.56 TB copy.
 
 The checked TP8 layout consumes 196.78 GB (183.27 GiB) of text weights per GPU. The compressed MLA cache adds 28.99 GB (27 GiB) per GPU at the full 1,048,576-token context, leaving approximately 62.23 GB of each nominal 288 GB MI350X for execution buffers and allocator overhead. Start much smaller.
 
 ## Before renting the machine
 
-- Reserve at least 1.7 TB of local model storage. More headroom is preferable for download caches and logs.
+- Keep the existing 96 shards in `/raid/weights/kimi-k3`; no additional model-sized free space is required. Leave ordinary headroom for logs and temporary files.
 - The host should have roughly 3 TB RAM, in line with AMD's MI350X platform guidance. The loader itself is streaming and must not need checkpoint-sized RAM.
 - Use a recent kernel/ROCm stack supported by the host vendor, although tinygrad uses its own AMD userspace driver when `DEV=AMD`.
 - Clone this exact commit/branch and keep the official checkpoint directory separate from the repository.
 
-Download on a machine with the storage bandwidth and network allocation intended for the run:
+Validate the existing directory without modifying it:
 
 ```sh
-hf download moonshotai/Kimi-K3 --local-dir /models/Kimi-K3
-python examples/kimi_k3_prepare.py /models/Kimi-K3 --context 4096
+python examples/kimi_k3_prepare.py /raid/weights/kimi-k3 --context 4096
 ```
 
 For a metadata-only preflight, place the official `config.json` and `model.safetensors.index.json` in a directory and run:
 
 ```sh
-python examples/kimi_k3_prepare.py /models/Kimi-K3-metadata --metadata-only
+python examples/kimi_k3_prepare.py /raid/weights/kimi-k3 --metadata-only
 ```
 
 ## Hardware admission checks
@@ -56,7 +55,7 @@ Start at a short context so cache allocation and compilation are bounded. The lo
 
 ```sh
 /usr/bin/time -v env DEV=AMD DEBUG=1 python -m tinygrad.llm.cli \
-  --model /models/Kimi-K3 --devices 8 --max_context 128 </dev/null 2>&1 | tee kimi-k3-load.log
+  --model /raid/weights/kimi-k3 --devices 8 --max_context 128 </dev/null 2>&1 | tee kimi-k3-load.log
 ```
 
 Watch host RAM, swap, HBM, temperatures, and XGMI traffic from a second terminal. Do not start with a one-million-token cache. If loading fails, preserve the first exception and the last loader progress line; do not retry with a larger host-side cache.
@@ -73,17 +72,17 @@ Watch host RAM, swap, HBM, temperatures, and XGMI traffic from a second terminal
 Example decode benchmark:
 
 ```sh
-DEV=AMD DEBUG=1 python -m tinygrad.llm.cli --model /models/Kimi-K3 \
+DEV=AMD DEBUG=1 python -m tinygrad.llm.cli --model /raid/weights/kimi-k3 \
   --devices 8 --max_context 4096 --warmup --benchmark 20
 ```
 
 ## Known hardware-only gate
 
-The correctness path expands only selected MXFP4 expert weights and emulates MXFP8 activation quantization. tinygrad has gfx950/CDNA4 BF16 and FP8 matrix-core support, but this branch does not yet have a hardware-validated fused native MXFP4×MXFP8 expert GEMM. Expect the first run to be a correctness bring-up, not production throughput. Capture profiles on MI350X before changing the representation: native FP4 work cannot be validated faithfully on the available gfx1100 cards.
+The correctness path now consumes packed MXFP4 expert weights directly on gfx950 with a wave64 software-decode kernel, so it does not create selected-expert BF16 weight expansions. MXFP8 activation quantization is still emulated. tinygrad has gfx950/CDNA4 BF16 and FP8 matrix-core support, but this branch does not yet have a hardware-validated native MXFP4×MXFP8 expert GEMM. Expect the first run to be a correctness bring-up, not production throughput. Capture profiles on MI350X before changing the representation: native FP4 work cannot be validated faithfully on the available gfx1100 cards.
 
-Recurrent prefill is fused and defaults to 32-token chunks. The portable custom kernel compiles for gfx950, but the wave-parallel version is deliberately restricted to gfx11 because it uses RDNA3 wave32 swizzles. A gfx950-tuned wave64/MFMA recurrent kernel remains a performance task for the rented machine; do not enable the gfx11 kernel on CDNA without rewriting its lane reduction and validating every recurrent-state transition.
+Recurrent prefill is fused. Kimi Linear defaults to 32-token chunks; full K3 remains capped at eight tokens because its larger recurrent state makes that the safer pre-rental compile shape. The portable kernel compiles for gfx950, but the wave-parallel recurrent version is deliberately restricted to gfx11 because it uses RDNA3 wave32 swizzles. A gfx950-tuned wave64/MFMA recurrent kernel remains a performance task for the rented machine; do not enable the gfx11 recurrent kernel on CDNA without rewriting its lane reduction and validating every recurrent-state transition.
 
-The following serving changes are portable and therefore apply to the official K3 path: recurrent-state reset graph capture, correct fresh-prompt benchmark resets, 32-token recurrent chunks, materialized gate/up boundaries that prevent pathological fused reduction kernels, separate greedy decode JITs, and K3's uncorrected routed probability semantics. The new packed expert, software MXFP8, fused KDA Q/K/V, combined TP down-partial, and exact greedy output-head kernels are intentionally gated to gfx11. They improve the local 7900 XTX bring-up but will fall back to the generic implementation on gfx950.
+The following serving changes apply to the official K3 path: recurrent-state reset graph capture, direct AMD scalar readback without rebuilding a scheduler graph, materialized gate/up boundaries, separate greedy decode JITs, K3's uncorrected routed probability semantics, exact fused BF16 gate/up pairs, and the gfx950 wave64 packed-expert path. Software MXFP8, fused KDA Q/K/V, combined TP down-partial, and the greedy output-head kernel remain gfx11-only and fall back to the generic implementation on gfx950.
 
 After hardware admission on MI350X, profile before porting those kernels. The likely implementation order is:
 
@@ -92,7 +91,13 @@ After hardware admission on MI350X, profile before porting those kernels. The li
 3. Combined routed/shared down-projection TP partials so each layer performs one XGMI all-reduce.
 4. A CDNA4 output-head matvec and router matvec if they remain visible in the profile.
 
-Every port needs a direct numerical comparison with the generic graph and an end-to-end greedy-token comparison before performance measurements. None of the gfx11 custom kernels should be enabled on gfx950 by changing only the architecture guard.
+Every port needs a direct numerical comparison with the generic graph and an end-to-end greedy-token comparison before performance measurements. The wave64 packed-expert kernel has compile coverage through `NULL:HIP:gfx950`; numerical and performance validation still require real MI350X hardware. None of the remaining gfx11-only kernels should be enabled on gfx950 by changing only the architecture guard.
+
+## MI350X performance expectation
+
+Treat the first rental as bring-up, not a guaranteed throughput run. The loader reads every official expert tensor once into a transient GPU-0 staging buffer (at most one packed projection), then redistributes TP8 slices over the GPU fabric; it does not generate files or require checkpoint-sized host RAM. A reasonable planning range for the full text model on eight MI350X cards is 3–8 minutes to stream and TP-shard the 1.56 TB checkpoint, 150–400 tok/s for initial short/medium prefill, and 25–60 tok/s decode with the software packed-expert path. After a native CDNA4 MXFP4×MXFP8 grouped expert kernel, wave64/MFMA recurrent projections, and XGMI collective tuning, 500+ tok/s prefill and roughly 80–150 tok/s decode are plausible targets. These ranges are engineering estimates, not measurements.
+
+The nominal HBM bandwidth is not the main uncertainty: eight MI350X devices have enough aggregate bandwidth for K3's active weights. Utilization is limited by 93 sequential layers, small routed projections, and synchronization after TP input-sharded projections. Record actual HBM and XGMI counters before deciding whether the next port should target matrix instructions or collective count.
 
 The official checkpoint also contains MoonViT-V2 and multimodal projector weights. They are skipped by the text loader. Image input remains a separate implementation and validation task.
 
@@ -103,18 +108,18 @@ The pre-rental benchmark uses the converted `Kimi-Linear-48B-A3B-Instruct-MXFP4-
 ```sh
 DEV=AMD JIT_BATCH_SIZE=64 python extra/benchmark_kimi.py \
   /raid/models/Kimi-Linear-48B-A3B-Instruct-MXFP4-v2 \
-  --devices 4 --max-context 128 --prompt-tokens 32 --decode-tokens 8 --chunk-size 32
+  --devices 4 --max-context 128 --prompt-tokens 32 --decode-tokens 32 --chunk-size 32
 ```
 
 Results from 2026-08-10:
 
-- load from RAID: 43.9–44.4s for the 29.27 GB checkpoint
+- load from RAID: 44.28s for the 29.27 GB checkpoint
 - first 32-token prefill includes roughly 10s of compilation/capture
-- steady fresh-prompt prefill replay: 0.120s, 267.18 tok/s
-- steady decode replay: 66.19 tok/s, 15.11 ms/token
-- peak host RSS: 799.9 MiB; swap was not used
+- steady fresh-prompt prefill replay: 0.118s, 270.20 tok/s
+- steady context-32 decode replay: 101.82 tok/s, 9.82 ms/token
+- peak host RSS: 729.9 MiB; swap was not used
 
-The load and prefill targets of less than 60 seconds and more than 200 tok/s are met on this host. Decode improved from 23.03 tok/s to 66.19 tok/s but remains below the 100 tok/s target. The remaining local profile is dominated by many small router/shared projections, collective and graph-launch overhead, and the unavoidable active expert traffic; this result must not be reported as reaching the decode goal.
+The load, prefill, and decode targets are all met in the bounded prompt-32 run. Decode improved from 23.03 tok/s to 101.82 tok/s. The retained greedy output was checked across 32 decode steps; rejected half-wave and unrounded recurrent reductions were faster but diverged and eventually collapsed to a repeated token.
 
 Four 7900 XTX cards provide 96 GB aggregate VRAM and about 3.84 TB/s aggregate physical memory bandwidth. Their nominal aggregate vector FP16 rate is about 245.6 TFLOP/s, or about 492 TFLOP/s through matrix instructions. Kimi Linear activates roughly 3.107B parameters per token; a simple active-weight accounting gives approximately 4.05 GB/token and an optimistic bandwidth-only ceiling near 948 tok/s. The measured decode rate is much lower because this MoE decode workload is a collection of small matrix-vector operations plus PCIe collectives, not one ideal streaming kernel.
 
