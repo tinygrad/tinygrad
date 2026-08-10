@@ -9,7 +9,15 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
   use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   return use_all2all, use_ring
 
-def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
+def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
+  # Keep chunks as physical views so SDMA reads the stable allocation directly. Outside a precompiled function,
+  # retain the staging store as an explicit dependency; buf_uop alone carries the address but not its producer event.
+  chunks = [UOp(Ops.SLICE, buf.dtype, (buf.mselect(i).buf_uop, UOp.const(start, dtypes.weakint)), end-start,
+                tag=("allreduce",)) for i in range(len(buf.device))]
+  if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
+  return UOp.mstack(*chunks)
+
+def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=False) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
   op, device = red.arg
@@ -25,7 +33,10 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
   buf = buf.pad_to(buf.max_shape)
   # SDMA reads can outlive the compute allocation that produced them, so reduce-scatter needs stable storage.
-  buf = buf.contiguous()
+  # A precompiled allreduce's PARAM is already backed by the contiguous CALL argument below.
+  if not input_staged:
+    staged = buf.empty_like()
+    buf = staged.after(staged.store(buf))
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
@@ -41,11 +52,12 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   # reduce-scatter
   reduced_chunks:list[UOp] = []
   for i,(s,e) in enumerate(chunks):
+    chunk = _allreduce_chunk(buf, s, e, input_staged)
     if use_all2all:
-      chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
+      chunks_on_i = [chunk.mselect(j).copy_to_device(buf.device[i]) for j in range(ndev)]
       reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
     else:
-      chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
+      reduced = chunk
       for step in range(ndev-1):
         src, dest = (i+step)%ndev, (i+step+1)%ndev
         cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
@@ -93,7 +105,7 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  ret = handle_allreduce(src, red, to)
+  ret = handle_allreduce(src, red, to, input_staged=True)
   assert ret is not None
   body = ret if ret.op is Ops.AFTER and ret.src[0] is to else to.after(to.store(ret))
   return output.after(body.sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
