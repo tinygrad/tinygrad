@@ -105,7 +105,6 @@ class FallbackTemplate:
       if role == 'user': return "[INST]"
       if role == 'assistant': return ""
       raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.tok.preset}'")
-    if self.tok.preset == 'gpt-4o': return "<|start|>" + role + "<|message|>"
     return "<|start_header_id|>" + role + "<|end_header_id|>\n\n"
   def end_turn(self) -> str:
     if self.tok.preset == 'olmo': return "\n"
@@ -113,13 +112,11 @@ class FallbackTemplate:
     if self.tok.preset == 'qwen2': return self.tok.decode([self.tok.eos_id]) + "\n"
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
-    if self.tok.preset == 'gpt-4o': return "<|end|>"
     return self.tok.decode([self.tok.eos_id])
   def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
-      if self.tok.preset == 'gpt-4o' and msg["role"] == "assistant": out = out.removesuffix("<|message|>") + "<|channel|>final<|message|>"
       content = msg.get("content")
       if isinstance(content, str): out += content
       elif isinstance(content, list):
@@ -128,8 +125,7 @@ class FallbackTemplate:
           else: raise RuntimeError(f"unhandled type: {c['type']}")
       elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
       out += self.end_turn()
-    if add_generation_prompt: return out + ("<|start|>assistant" if self.tok.preset == 'gpt-4o' else self.role("assistant"))
-    return out
+    return out + self.role("assistant") if add_generation_prompt else out
 
 from tinygrad.llm.serve import LLMServer
 
