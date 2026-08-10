@@ -327,7 +327,7 @@ def cvt(ctx, y:UOp, x:UOp):
 
 def int_to_int64(y:UOp, tdt:DType):
   hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
-  return UOp.group(to_vgpr(y), hi, dtype=tdt)
+  return UOp.group(vmov(y), hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
@@ -589,7 +589,7 @@ def encode(ctx, x:UOp):
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
-  elif group is RDNA3Ops.SOPP: args = (0,)
+  elif group is RDNA3Ops.SOPP: args = (0,) if len(oprs) == 0 else (_immorreg(oprs[0]),)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
 
@@ -652,6 +652,7 @@ class RDNA3Renderer(ISARenderer):
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()
     nuops = []
+    # s_waitcnt
     for u in lin.src:
       if any(r in deps for s in u.src for r in rdefs(s)):
         nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
@@ -659,6 +660,27 @@ class RDNA3Renderer(ISARenderer):
       if (tp := CntType.get(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
         deps.update(rdefs(u))
       nuops.append(u)
+
+    # s_clause
+    loads: dict[int, UOp] = {}
+    stores: dict[int, UOp] = {}
+    for i,u in enumerate(nuops):
+      if u.arg.func is RDNA3Ops.GLOBAL:
+        if u.dtype is dtypes.void: stores[i] = u
+        else: loads[i] = u
+
+    def gather(instances:dict[int, UOp]) -> dict[int, int]:
+      clauses: dict[int, int] = {}
+      start, last = None, None
+      for k in sorted(instances.keys()):
+        if last is not None and k > last+1: last, start = None, None
+        if start is None: start = k
+        last = k
+        clauses[start] = clauses.setdefault(start, 0) + 1
+      return clauses
+
+    for i,(p,l) in enumerate((gather(loads) | gather(stores)).items()):
+      nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l),)))
 
     pc = 0
     targets: dict[str, int] = {}
@@ -674,3 +696,4 @@ class RDNA3Renderer(ISARenderer):
     lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
       u.replace(arg=RDNA3Ops.SOPP(u.arg.op, (targets[u.tag] - upc[u]) // 4)) for u in nuops]))
     return assemble_linear(prg, lin, self.target.arch, scratch_size=self.spill_size)
+
