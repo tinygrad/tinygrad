@@ -437,7 +437,8 @@ def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[],
+                               wanna_output=[], check_default_opt=True, sync_dev=False):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in real_bufs]
@@ -446,6 +447,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
     run_linear(UOp(Ops.LINEAR, src=(ast.call(*buf_uops),)))
+    if sync_dev: Device[Device.DEFAULT].synchronize()
 
   def check_opt(opts):
     reset_bufs(outbufs)
