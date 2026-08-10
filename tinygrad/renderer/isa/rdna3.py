@@ -404,6 +404,8 @@ class BiasMemoryCtx:
       for idx,v in uses:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
           self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
+        elif v is None: # dynamic base no ioffs
+          self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
 
 pm_bias_memory_addrs = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[x.src[1]], *x.src[2:])) if x.src[1] in ctx.normalized else None),
@@ -560,8 +562,6 @@ def encode(ctx, x:UOp):
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
   kw = args = None
-
-  # print("encodiong", opc, rdefs(x), [(s.op, s.arg, rdefs(s)) for s in oprs])
 
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
