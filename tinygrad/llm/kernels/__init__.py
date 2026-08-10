@@ -92,6 +92,30 @@ def bf16_matvec(x:Tensor, weight:Tensor) -> Tensor:
   else: out = Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=weight.device)
   return Tensor.custom_kernel(out, x.contiguous(), weight, fxn=_bf16_matvec_kernel)[0]
 
+def bf16_mfma_splitk(x:Tensor, weight:Tensor) -> Tensor:
+  """gfx950 decode matvec for replicated or output-sharded BF16 weights."""
+  from tinygrad.llm.kernels.amd import _bf16_mfma_splitk_kernel
+  batch, tokens, in_features = x.shape
+  out_features = weight.shape[0]
+  if batch != 1 or tokens != 1 or weight.shape[1] != in_features or in_features % 256:
+    raise ValueError(f"unsupported MFMA split-K shapes {x.shape} {weight.shape}")
+  if not amd_wave64_custom_kernels_supported(weight.device): raise ValueError("MFMA split-K requires gfx950")
+  if isinstance(weight.device, tuple):
+    devices = weight.device
+    if weight.uop.axis == 0:
+      if out_features % (16*len(devices)): raise ValueError("local MFMA output must be divisible by 16")
+      shape = (batch, tokens, out_features//len(devices))
+      parts = [Tensor.empty(*shape, dtype=dtypes.bfloat16, device=device).uop for device in devices]
+      out = Tensor(parts[0].mstack(*parts[1:]).unshard(2))
+    elif weight.uop.axis is None:
+      if out_features % 16: raise ValueError("MFMA output must be divisible by 16")
+      out = Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=devices)
+    else: raise ValueError("MFMA split-K requires replicated or output-sharded weight")
+  else:
+    if out_features % 16: raise ValueError("MFMA output must be divisible by 16")
+    out = Tensor.empty(batch, tokens, out_features, dtype=dtypes.bfloat16, device=weight.device)
+  return Tensor.custom_kernel(out, x.contiguous(), weight, fxn=_bf16_mfma_splitk_kernel)[0]
+
 def mxfp8_quantize_dequantize(x:Tensor) -> Tensor:
   """gfx11 software MXFP8 round trip without a multi-kernel reduction graph."""
   from tinygrad.llm.kernels.amd import _mxfp8_qdq_kernel

@@ -1,9 +1,29 @@
 from __future__ import annotations
 import functools
+import pathlib
 from typing import cast
 from tinygrad import UOp
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.dtype import AddrSpace, dtypes
+
+@functools.cache
+def _bf16_mfma_splitk_kernel(out:UOp, x:UOp, weight:UOp) -> UOp:
+  """CDNA4 BF16 matvec with eight waves splitting K per 16 output channels."""
+  from tinygrad.renderer import Estimates
+  from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+  out_features, in_features = cast(tuple[int, int], weight.shape)
+  assert out.numel() == out_features and x.numel() == in_features and out_features % 16 == 0 and in_features % 256 == 0
+  threads, workgroups = UOp.special(512, "lidx0"), UOp.special(out_features//16, "gidx0")
+  sink = UOp.sink(out.base, x.base, weight.base, threads, workgroups,
+                  arg=KernelInfo(name=f"bf16_mfma_splitk_{out_features}_{in_features}",
+                                 estimates=Estimates(ops=2*out_features*in_features,
+                                                     mem=(out_features*in_features+in_features+out_features)*2)))
+  root = pathlib.Path(__file__).parents[3]/"extra"/"thunder"/"amd"
+  src = (root/"matvec_bf16_splitk.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(root/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                   "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DMATVEC_N={out_features}",
+                                   f"-DMATVEC_K={in_features}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def warp_reduce(val:UOp, full_wave:bool=False, maximum:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):

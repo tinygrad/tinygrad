@@ -3,6 +3,8 @@ from pathlib import Path
 from dataclasses import replace
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
+from tinygrad.helpers import getenv
+from tinygrad.llm.kernels import bf16_mfma_splitk
 from tinygrad.llm.kimi_k3 import KIMI_K3_FULL_ATTN_LAYERS, KIMI_K3_SSM_LAYERS, KIMI_K3_TEXT_SIZE, KIMI_K3_TP8_BYTES_PER_GPU, \
   _layer_sources, _load_stacked_experts, _replace, _safe_load_selected, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
 from tinygrad.llm.model import FFNBlock, Transformer
@@ -23,6 +25,12 @@ class TestKimiK3(unittest.TestCase):
     c = kimi_k3_smoke_config()
     self.assertEqual(c.routed_expert_dim % 64, 0)
     self.assertEqual((c.hidden_dim // 8) % 64, 0)
+
+  @unittest.skipUnless(getenv("DEV", "") == "NULL:HIP:gfx950", "gfx950 compile coverage")
+  def test_gfx950_mfma_splitk_compile(self):
+    x = Tensor.zeros(1, 1, 256, dtype=dtypes.bfloat16, device="NULL:HIP:gfx950")
+    weight = Tensor.zeros(16, 256, dtype=dtypes.bfloat16, device="NULL:HIP:gfx950")
+    self.assertEqual(bf16_mfma_splitk(x, weight).realize().shape, (1, 1, 16))
 
   def test_official_config(self):
     c = kimi_k3_config(1_048_576)

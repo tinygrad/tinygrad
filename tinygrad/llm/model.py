@@ -8,7 +8,8 @@ from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.llm.quant import dequantize_mxfp4, quantize_dequantize_mxfp8
 from tinygrad.llm.kernels import amd_custom_kernels_supported, amd_exact_bf16_custom_kernels_supported, amd_int32_item, \
-  amd_packed_mxfp4_supported, bf16_matvec, bf16_partial_linear, dual_bf16_matvec, dual_input_bf16_matvec, \
+  amd_packed_mxfp4_supported, amd_wave64_custom_kernels_supported, bf16_matvec, bf16_mfma_splitk, bf16_partial_linear, \
+  dual_bf16_matvec, dual_input_bf16_matvec, \
   gated_delta_prefill, kda_fgb_linear, kda_qkv_linear, mxfp4_expert_linear, mxfp8_quantize_dequantize
 from tinygrad.uop.ops import resolve
 
@@ -364,13 +365,18 @@ class MLATransformerBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
-    q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
+    mfma_decode = resolve(T == 1) and x.shape[-1] % 256 == 0 and amd_wave64_custom_kernels_supported(x.device)
+    q_a_mfma = self.config.q_lora_rank > 0 and mfma_decode and self.attn_q_a.weight.shape[0] % 16 == 0
+    q_a = bf16_mfma_splitk(x, self.attn_q_a.weight) if q_a_mfma else \
+      self.attn_q_a(x) if self.config.q_lora_rank > 0 else None
+    q_proj = self.attn_q_b(self.attn_q_a_norm(q_a)) if q_a is not None else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T])
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(q_rope, dim=-1)
 
-    kv_a = self.attn_kv_a_mqa(x)
+    kv_a_mfma = mfma_decode and self.attn_kv_a_mqa.weight.shape[0] % 16 == 0
+    kv_a = bf16_mfma_splitk(x, self.attn_kv_a_mqa.weight) if kv_a_mfma else self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
     if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T])
@@ -435,6 +441,7 @@ class GatedDeltaNetBlock(FFNBlock):
     x = x.cast(dtypes.bfloat16) if self.config.ssm and self.config.ssm.kda else x.half()
     fused_fg = hasattr(self, "ssm_g_a") and resolve(T == 1) and amd_custom_kernels_supported(x.device) and \
       self.ssm_g_a.weight.shape == self.ssm_f_a.weight.shape
+    mfma_decode = resolve(T == 1) and x.shape[-1] % 256 == 0 and amd_wave64_custom_kernels_supported(x.device)
     if hasattr(self, "ssm_g_full"): out_gate = self.ssm_g_full(x)
     elif hasattr(self, "ssm_g_a"):
       if fused_fg:
@@ -444,7 +451,10 @@ class GatedDeltaNetBlock(FFNBlock):
     else: out_gate = self.attn_gate(x)
     if not fused_fg: beta_logits = self.ssm_beta(x)
     if not fused_fg:
-      alpha_logits = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
+      if hasattr(self, "ssm_f_a"):
+        f_a = bf16_mfma_splitk(x, self.ssm_f_a.weight) if mfma_decode and self.ssm_f_a.weight.shape[0] % 16 == 0 else self.ssm_f_a(x)
+        alpha_logits = self.ssm_f_b(f_a)
+      else: alpha_logits = self.ssm_alpha(x)
 
     # Causal depthwise Q/K/V convolution. All tokens are projected together, then the recurrent
     # update is fused into one kernel so prefill doesn't build a Python-unrolled graph.
