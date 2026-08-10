@@ -5,6 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[pr]') && '1' || '0' }}
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
+  HCQ_RUNTIME_DEV: PYTHON
   CHECK_OOB: 1
 
 on:
@@ -55,7 +56,7 @@ jobs:
               'python docs/abstractions3.py' \
               $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' README.md | python' \
               $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' docs/quickstart.md | python' \
-              'DEV=CPU python examples/compile_efficientnet.py > recognize.c && clang -O2 recognize.c -lm -o recognize && cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock'
+              'HCQ2=0 DEV=CPU python examples/compile_efficientnet.py > recognize.c && clang -O2 recognize.c -lm -o recognize && cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock'
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
 
@@ -172,12 +173,14 @@ jobs:
         llvm: 'true'
         amd: 'true'
     - name: Run NULL backend tests
-      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
+      run: |
+        SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --ignore=test/null/test_multitensor.py --ignore=test/null/test_viz.py --durations=20
+        SPEC=2 HCQ2=0 DEV=NULL python -m pytest -n=auto test/null/test_multitensor.py test/null/test_viz.py --durations=20
     - name: Run targeted tests on NULL backend
       run: |
         DEV=NULL python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
-        DEV=NULL VIZ=1 python3 -m pytest -n=auto test/null/test_viz.py
-        DEBUG=7 python -m tinygrad.viz.cli --json | jq empty
+        HCQ2=0 DEV=NULL VIZ=1 python3 -m pytest -n=auto test/null/test_viz.py
+        HCQ2=0 DEBUG=7 python -m tinygrad.viz.cli --json | jq empty
     # TODO: too slow
     # - name: Run SDXL on NULL backend
     #   run: DEV=NULL DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
@@ -212,9 +215,11 @@ jobs:
     - name: Run unit tests
       run: |
         DEV=CPU python test/null/test_device.py TestRunAsModule.test_module_runs
-        DEV=CPU python -m pytest -n=auto test/unit/ --durations=20
+        DEV=CPU python -m pytest -n=auto test/unit/ --ignore=test/unit/test_multitensor.py --ignore=test/unit/test_assign.py \
+          --ignore=test/unit/test_disk_tensor.py --durations=20
+        HCQ2=0 DEV=CPU python -m pytest -n=auto test/unit/test_multitensor.py test/unit/test_assign.py test/unit/test_disk_tensor.py --durations=20
     - name: Run GC tests
-      run: python test/external/external_uop_gc.py
+      run: HCQ2=0 python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
       run: python3 test/external/external_benchmark_schedule.py
     - name: Run process replay tests
@@ -240,7 +245,7 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/unit test/backend test/opt --ignore test/backend/test_custom_kernel.py --ignore test/unit/test_hashing.py -k "not test_setitem_big" -k "not test_conv2d_ceildiv_edge_case" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 HCQ2=0 pytest --maxfail=10 -n auto --durations=30 test/unit test/backend test/opt --ignore test/backend/test_custom_kernel.py --ignore test/unit/test_hashing.py -k "not test_setitem_big" -k "not test_conv2d_ceildiv_edge_case" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -491,7 +496,7 @@ jobs:
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
-        run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
+        run: HCQ2=0 PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
@@ -509,6 +514,9 @@ jobs:
     name: hcq2
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 5
+    env:
+      DEV: MOCKKFD+AMD
+      FORWARD_ONLY: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -519,13 +527,13 @@ jobs:
           deps: testing_unit
           amd: 'true'
       - name: Run HCQ2 tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/test_tiny.py
+        run: python test/test_tiny.py
       - name: Run HCQ2 multi-device tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest -n=auto test/backend/test_multitensor.py
+        run: python -m pytest -n=auto test/backend/test_multitensor.py
       - name: Run HCQ2 JIT tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_jit.py
+        run: python test/unit/test_jit.py
       - name: Run HCQ2 unit tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest test/device/test_hcq2.py
+        run: python -m pytest test/device/test_hcq2.py
 
   testmockam:
     name: Linux (am)
@@ -547,15 +555,15 @@ jobs:
       - name: Run test_tiny on MOCKUSB
         run: GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
       - name: Run test_hcq on MOCKPCI
-        run: python -m pytest test/device/test_hcq.py
+        run: HCQ2=0 python -m pytest test/device/test_hcq.py
       - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run test_tiny on MOCKPCI Remote
         run: |
-          python extra/remote/serve.py 6667 &
+          HCQ2=0 python extra/remote/serve.py 6667 &
           sleep 2
-          REMOTE=127.0.0.1:6667 python test/test_tiny.py
-          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
+          HCQ2=0 REMOTE=127.0.0.1:6667 python test/test_tiny.py
+          HCQ2=0 REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
 
   testamd:
     strategy:
@@ -586,9 +594,13 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run MXFP4 Llama training on NULL backend
         if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
-        run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
+        run: PYTHONPATH=. HCQ2=0 DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_graph.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
+      - name: Run multi-device and legacy HCQ tests
+        env:
+          HCQ2: 0
+        run: python -m pytest -n=auto test/backend/test_jit.py test/backend/test_multitensor.py test/device/test_hcq.py --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math

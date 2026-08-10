@@ -5,6 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[pr]') && '1' || '0' }}
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
+  HCQ_RUNTIME_DEV: PYTHON
   CHECK_OOB: 1
 
 on:
@@ -64,13 +65,14 @@ jobs:
         amd: 'true'
         ocelot: 'true'
     - name: Run NULL backend tests
-      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
+      run: SPEC=2 HCQ2=0 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run pytest (amd)
       env:
         DEV: MOCKKFD+AMD
         FORWARD_ONLY: 1
       run: |
-        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
+        python3 -m pytest -n=auto test/test_tiny.py --durations=20
+        HCQ2=0 python3 -m pytest -n=auto test/device/test_hcq.py --durations=20
     - name: Run pytest (ptx)
       env:
         DEV: "MOCK+NV:PTX"

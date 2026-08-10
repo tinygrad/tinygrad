@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Generic, TypeVar, Iterator, Generator, Sequence, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
@@ -277,7 +277,7 @@ class DepsTracker:
   @staticmethod
   def _key(buf:Any) -> tuple[Any, int, int]: return id(buf.base), buf.offset, buf.offset + buf.nbytes
 
-  def access_resources(self, bufs:list[Any], write:list[int], new_dependency:Any):
+  def access_resources(self, bufs:list[Any], write:Sequence[int], new_dependency:Any):
     wait_nodes = []
     for i,buf in enumerate(bufs):
       key, s, e = self._key(buf)

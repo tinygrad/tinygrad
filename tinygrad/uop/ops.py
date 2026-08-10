@@ -1252,6 +1252,9 @@ class ProgramInfo:
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
+      if u.op is Ops.STORE:
+        for x in (v for s in u.src[1:] for v in s.toposort() if v.op in (Ops.INDEX, Ops.SHRINK)):
+          if (buf:=x.src[0].buf_uop).op is Ops.PARAM: ins.append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
