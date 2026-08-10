@@ -199,7 +199,7 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
-def replace_input_view(ctx:AlloctCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
+def replace_input_view(ctx:AllocCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
