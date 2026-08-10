@@ -26,8 +26,8 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      # four reductions, four final consumers, and two input/output kernels; source shards go directly to SDMA
-      self.assertEqual(len(sinks), 10)
+      # source shards are staged before SDMA: 16 staging kernels, four reductions, four final consumers, and two I/O kernels
+      self.assertEqual(len(sinks), 26)
 
   def test_correct_all2all_direct_slices(self):
     with Context(ALL2ALL=2):
