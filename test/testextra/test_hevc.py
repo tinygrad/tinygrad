@@ -85,7 +85,7 @@ class TestHevc(unittest.TestCase):
       self.assertEqual(f.dtype, dtypes.uint8)
       self.assertEqual(f.device, "NV")
 
-  @unittest.skipUnless(Device.DEFAULT == "NV" and DEV.interface.startswith("MOCK"), "MockNV only")
+  @unittest.skipUnless(Device.DEFAULT == "NV", "NV only")
   def test_hevc_decode_compile(self):
     url = "https://github.com/haraschax/filedump/raw/09a497959f7fa6fd8dba501a25f2cdb3a41ecb12/comma_video.hevc"
     dat = fetch(url, headers={"Range": f"bytes=0-{512<<10}"}).read_bytes()
