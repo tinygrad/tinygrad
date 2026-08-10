@@ -135,18 +135,20 @@ class FFNBlock:
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
       bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
-      # gating
-      if self.config.expert_gating_func == ExpertGating.SOFTMAX_WEIGHT or \
-         (self.config.expert_gating_func == ExpertGating.SOFTMAX and bias is None and self.config.norm_topk_prob):
-        _, sel = pairwise_topk(logits if bias is None else logits + bias, self.config.num_experts_per_tok)
-        probs = logits.gather(-1, sel).softmax(-1)
-      else:
-        if self.config.expert_gating_func == ExpertGating.SQRT_SOFTPLUS: probs = logits.softplus().sqrt()
-        else: probs = logits.sigmoid() if self.config.expert_gating_func == ExpertGating.SIGMOID else logits.softmax(-1)
-        _, sel = pairwise_topk(probs if bias is None else probs + bias, self.config.num_experts_per_tok)
-        probs = probs.gather(-1, sel)
-        if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
-      # scale
+      gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
+      # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
+      if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
+        gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False
+      if   gating == ExpertGating.SOFTMAX_WEIGHT: scores = logits
+      elif gating == ExpertGating.SOFTMAX:        scores = logits.softmax(-1)
+      elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
+      elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
+
+      _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
+      probs = scores.gather(-1, sel)
+      # SOFTMAX_WEIGHT applies softmax after top-k selection
+      if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
+      if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
       gate, up = self.ffn_gate_exps(sel, h), self.ffn_up_exps(sel, h)
       if self.config.oai_swiglu:  # gpt-oss clamps the projections before applying its SwiGLU variant
