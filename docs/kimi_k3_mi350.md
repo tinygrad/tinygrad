@@ -111,6 +111,10 @@ A subsequent gfx950 decode pass split the 7,168-wide replicated BF16 projections
 
 The final official context-128 validation loaded in 389.84 seconds with 2.71 GiB peak RSS and zero swap. Two replay trials produced the identical four-token sequence `[198, 59675, 9817, 12519]`; prefill remained 2.406 seconds (38.65 tok/s), while eight-token decode improved to 1.280 seconds (6.25 tok/s, 160.00 ms/token). A one-wave MFMA variant and a full-wave fused decode recurrence were both rejected: the former delivered 6.02 tok/s, and the latter 6.179 tok/s, while both changed the greedy sequence without a useful speed gain.
 
+A final load-first experiment increased the disk-to-HBM io_uring queue depth from one to the 32 existing bounded 2 MiB staging buffers. On a direct 1 GiB read from fragmented shard 28 it measured 6.834 GB/s versus 6.832 GB/s for the original path, so the change was rejected. The subsequent unmodified official 96-shard load completed in 389.48 seconds, confirming both the prior result and the single-NVMe lower bound. Peak RSS was 2.75 GiB with zero swap.
+
+Two direct packed-expert MFMA prototypes were also rejected after that load. A fused gate/up kernel was about 29% faster in isolation at the TP8-local shape, and a routed-down kernel which combined projection, probability weighting, and route reduction measured 1.45 ms versus 2.42 ms in isolation. End-to-end, however, stable replay produced `[198, 2338, 2127, 148297]`, prefill measured 38.87 tok/s, and decode measured 6.263 tok/s. That is indistinguishable from the retained 38.65/6.25 tok/s path while changing floating-point reduction order, so neither kernel was retained.
+
 | Maximum context | Load | Short-prompt replay | Result |
 |---:|---:|---:|---|
 | 128 | 489.59s | 14.32s | stable 8-token replay |
