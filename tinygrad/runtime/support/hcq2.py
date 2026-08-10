@@ -96,12 +96,24 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 
 def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS) and not all_devices_in(b.device, HCQ_P2P_DEVS)
 
+def hcq_call_devs(call:UOp) -> Any|None: return next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)
+
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
 
   stage = UOp.new_buffer("CPU", src.max_numel() * src.dtype.itemsize, dtypes.uint8)
   return UOp(Ops.LINEAR, src=(src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
-pm_insert_copy_staging = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy)])
+
+def kernel_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
+  if (devs:=hcq_call_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
+  d, s = (UOp.param(i, dst.dtype, (n:=dst.max_numel(),), device=devs) for i in range(2))
+  ast = d.index(r:=UOp.range(n, 0)).store(s.index(r).load()).end(r).sink(arg=KernelInfo(name="copy"), tag=1)
+  return call.replace(src=(to_program(ast, Device[dev].renderer), dst, src))
+
+pm_insert_copy_staging = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call"), kernel_copy)
+])
 
 # *****************
 # 2. deps
@@ -217,7 +229,7 @@ def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
   srcs:list[UOp] = []
   batch:list[tuple[UOp, tuple[str, ...]]] = []
   for call in l.src:
-    if (devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is not None: batch.append((call, to_tuple(devs)))
+    if (devs:=hcq_call_devs(call)) is not None: batch.append((call, to_tuple(devs)))
     else: srcs, batch = srcs + _finalize_batch(batch, profile) + [call], []
   return l.replace(src=tuple(srcs + _finalize_batch(batch, profile)))
 
