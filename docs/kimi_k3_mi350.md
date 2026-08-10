@@ -84,12 +84,16 @@ The preserved first full-checkpoint error was an `A_log` shape mismatch, `(128,)
 
 Load speed was fixed before generation. The original loader opened thousands of individual expert tensors and independently realized eight strided TP slices. The MI350 path now does the following without changing the checkpoint:
 
+- parses safetensor headers selectively, constructing disk-backed tensors only for the 2,460 non-expert entries consumed by that pass instead of materializing metadata objects for every expert entry twice;
 - copies contiguous axis-zero shards and replicas directly into their final device buffers;
+- reads a replicated tensor once and fans it out over XGMI instead of issuing eight identical direct reads (14.31 GB less RAID traffic);
 - stages an inner-axis tensor once and schedules all eight TP slices together;
 - reads each layer's contiguous 15.72 GB expert region once, reorders its lexicographically stored expert records on GPU 0, and realizes all six packed/scale destinations together;
 - retains only final MultiBuffer identities, drops the reorder graph, and flushes the 15.72 GB staging allocation before the next layer.
 
 One real expert layer leaves exactly 1,965,293,568 bytes resident on each GPU and zero bytes in the GPU-0 allocator cache. Complete context-128 loads measured 527.20 seconds before the final staging cleanup and 490.05/489.59 seconds afterward. Peak host RSS for the unprofiled correctness run was 2.11 GiB with zero swap. RAID variability produced later loads from 489.06 to 532.85 seconds.
+
+The selective-metadata and bounded-GC pass reduced non-expert loading from 125.77 to 57.77 seconds. A subsequent full official context-128 load completed in 411.49 seconds, 78.10 seconds (16.0%) faster than the 489.59-second baseline. It read the 96 shards in place with 1,049,688 KiB peak host RSS and zero swap; no weight payload was converted, copied, or modified. Direct-I/O probes measured approximately 6.9 GB/s aggregate for both one and eight concurrent 1 GiB reads. At that rate the 1.56 TB checkpoint has a roughly 227-second cold-read lower bound, so this RAID cannot meet a true cold sub-three-minute startup regardless of loader overhead.
 
 The fixed XTML prompt `Reply with exactly: OK` encodes to 93 tokens. After excluding the cold JIT capture from replay comparison, two greedy runs produced the identical eight-token sequence:
 

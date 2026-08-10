@@ -1,14 +1,24 @@
-import unittest
+import tempfile, unittest
+from pathlib import Path
 from dataclasses import replace
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.kimi_k3 import KIMI_K3_FULL_ATTN_LAYERS, KIMI_K3_SSM_LAYERS, KIMI_K3_TEXT_SIZE, KIMI_K3_TP8_BYTES_PER_GPU, \
-  _layer_sources, _load_stacked_experts, _replace, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
+  _layer_sources, _load_stacked_experts, _replace, _safe_load_selected, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
 from tinygrad.llm.model import FFNBlock, Transformer
 
 def small_k3_config(max_context:int=4): return replace(kimi_k3_smoke_config(max_context), num_experts=8)
 
 class TestKimiK3(unittest.TestCase):
+  def test_selective_safetensor_load(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      path = Path(tmp) / "weights.safetensors"
+      nn.state.safe_save({"keep":Tensor.arange(8), "skip":Tensor.arange(16)}, str(path))
+      selected = _safe_load_selected(path, ["keep"])
+      self.assertEqual(list(selected), ["keep"])
+      np.testing.assert_equal(selected["keep"].numpy(), np.arange(8))
+      with self.assertRaisesRegex(ValueError, "missing tensor absent"): _safe_load_selected(path, ["absent"])
+
   def test_smoke_config_preserves_gfx950_expert_alignment(self):
     c = kimi_k3_smoke_config()
     self.assertEqual(c.routed_expert_dim % 64, 0)

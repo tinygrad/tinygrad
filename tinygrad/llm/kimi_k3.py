@@ -6,7 +6,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp
-from tinygrad.nn.state import safe_load
+from tinygrad.nn.state import safe_dtypes, safe_load_metadata
 from tinygrad.llm.kimi import load_kimi_tokenizer_data
 from tinygrad.llm.model import SSMConfig, Transformer, TransformerConfig
 
@@ -144,13 +144,25 @@ def _replace(dst:Tensor, src:Tensor) -> None:
     src = src.clone().realize()
     src_buffer = cast(Buffer, src.uop.buffer)
 
-  if axis is None or axis == 0:
-    part_shape = shape if axis is None else (shape[0]//len(devices), *shape[1:])
+  if axis is None:
+    # Replicas are identical on every device. Read the disk tensor once, retain that allocation on
+    # GPU 0, and fan it out over XGMI instead of issuing eight identical direct reads.
+    staging = Tensor.empty(*shape, dtype=src.dtype, device=devices[0]).realize()
+    cast(Buffer, staging.uop.buffer).ensure_allocated().copy_from(src_buffer.ensure_allocated())
+    parts = [staging]
+    for device in devices[1:]:
+      part = Tensor.empty(*shape, dtype=src.dtype, device=device).realize()
+      cast(Buffer, part.uop.buffer).ensure_allocated().copy_from(cast(Buffer, staging.uop.buffer).ensure_allocated())
+      parts.append(part)
+    dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:]))))
+    return
+  if axis == 0:
+    part_shape = (shape[0]//len(devices), *shape[1:])
     part_numel = math.prod(part_shape)
     parts:list[Tensor] = []
     for i,device in enumerate(devices):
       part = Tensor.empty(*part_shape, dtype=src.dtype, device=device).realize()
-      source = src_buffer if axis is None else src_buffer.view(part_numel, src.dtype, i*part_numel*src.dtype.itemsize)
+      source = src_buffer.view(part_numel, src.dtype, i*part_numel*src.dtype.itemsize)
       cast(Buffer, part.uop.buffer).ensure_allocated().copy_from(source.ensure_allocated())
       parts.append(part)
   else:
@@ -160,8 +172,19 @@ def _replace(dst:Tensor, src:Tensor) -> None:
     cast(Buffer, staging.uop.buffer).ensure_allocated().copy_from(src_buffer.ensure_allocated())
     dst.replace(staging.shard(devices, axis=axis)).realize()
     return
-  dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:])).unshard(axis)) if axis is not None else
-              Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:]))))
+  dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:])).unshard(axis)))
+
+def _safe_load_selected(fn:pathlib.Path, keys:tuple[str, ...]|list[str]) -> dict[str, Tensor]:
+  """Create disk-backed tensors only for selected safetensor entries, without touching payload data."""
+  source, data_start, metadata = safe_load_metadata(fn)
+  data = source[data_start:]
+  missing = [key for key in keys if key not in metadata]
+  if missing: raise ValueError(f"missing tensor {missing[0]} from {fn.name}")
+  out:dict[str, Tensor] = {}
+  for key in keys:
+    entry = metadata[key]
+    out[key] = data[entry["data_offsets"][0]:entry["data_offsets"][1]].bitcast(safe_dtypes[entry["dtype"]]).reshape(entry["shape"])
+  return out
 
 def _load_stacked_experts(dst:Tensor, sources:list[Tensor]) -> None:
   """Read expert tensors once into a transient GPU staging buffer, then redistribute TP slices over the GPU fabric."""
@@ -203,7 +226,7 @@ def _load_nonexperts(root:pathlib.Path, weight_map:dict[str, str], model:Transfo
   consumed:set[str] = set()
   for filename, sources in sorted(by_file.items()):
     progress(f"loading non-expert tensors from {filename}")
-    shard = safe_load(root / filename)
+    shard = _safe_load_selected(root / filename, sources)
     for source in sources:
       value, targets = shard[source], mappings[source].split("|")
       # A_log is the only checkpoint tensor requiring arithmetic during load. Realize its 128
@@ -219,7 +242,7 @@ def _load_nonexperts(root:pathlib.Path, weight_map:dict[str, str], model:Transfo
       for target,tensor in zip(targets, values): _replace(model_state[target], tensor)
       consumed.add(source)
     del shard
-    gc.collect()
+  gc.collect()
   return consumed
 
 def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transformer, progress:Callable[[str], None]) -> set[str]:
@@ -231,7 +254,7 @@ def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transforme
     keys = {(e,wid,suffix):f"{base}.{e}.{wid}.{suffix}" for e in range(KIMI_K3_EXPERTS) for wid,suffix,_ in fields}
     files = sorted({weight_map[k] for k in keys.values()})
     progress(f"loading layer {i}/92 routed experts from {', '.join(files)}")
-    shards = {fn:safe_load(root / fn) for fn in files}
+    shards = {fn:_safe_load_selected(root / fn, [key for key in keys.values() if weight_map[key] == fn]) for fn in files}
 
     # Official K3 stores all six tensors for an expert contiguously and all 896 experts for a
     # layer in one contiguous shard region, ordered lexicographically by expert name. Read that
@@ -277,8 +300,8 @@ def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transforme
     # Drop the realized assignment graphs before flushing the allocator cache. Their final storage
     # UOps remain in model_state, while the graphs themselves still reference raw and permutation.
     del shards, raw, raw_buffer, permutation, outputs, value, final, storage, dst
-    gc.collect()
     if (free_cache:=getattr(Device[devices[0]].allocator, "free_cache", None)) is not None: free_cache()
+  gc.collect()
   return consumed
 
 def load_kimi_k3(model_dir:str|pathlib.Path, max_context:int=4096, devices:int=8,
