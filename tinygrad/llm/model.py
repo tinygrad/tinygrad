@@ -523,13 +523,13 @@ class GatedDeltaNetBlock(FFNBlock):
       amd_exact_bf16_custom_kernels_supported(out.device) else self.ssm_out(out)
     return ret.realize(*state_updates)
 
-  # Recurrent serving currently rebuilds each independently rendered request; attention-only blocks still reuse KV.
+  # Recurrent state can be reused only when the new prompt exactly extends all currently valid state.
   def _state_tensors(self) -> tuple[Tensor, ...]:
     if hasattr(self, "conv_state_q"):
       return self.conv_state_q, self.conv_state_k, self.conv_state_v, self.recurrent_state
     return (self.conv_state, self.recurrent_state) if hasattr(self, "conv_state") else ()
   def _state_reset_ops(self): return [s.assign(s.const_like(0)) for s in self._state_tensors()]
-  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len if prefix_len == cached_len else 0
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state") and not hasattr(self, "conv_state_q"):
@@ -698,9 +698,11 @@ class Transformer:
 
   def warmup(self):
     # Capture the only two shapes used by recurrent serving: a full prefill chunk and one-token rollout.
+    # Two chunks exercise both the initial and nonzero-position prefill paths before the server opens.
     recurrent_chunk = self.config.recurrent_prefill_chunk_size or 32
-    prompt = [0] * max(1, min(recurrent_chunk, self.max_context-2)) if self.has_recurrent_block else [0]
-    for _ in range(2): list(zip(range(2), self.generate(prompt)))
+    prompt = [0] * max(1, min(recurrent_chunk*2, self.max_context-2)) if self.has_recurrent_block else [0]
+    # Recurrent serving also executes one replay so graph creation/lowering cannot leak into request latency.
+    for _ in range(3 if self.has_recurrent_block else 2): list(zip(range(2), self.generate(prompt)))
 
   def _reset_amd_state(self) -> None:
     """Zero realized recurrent buffers without changing their UOp identities or invalidating captured graphs."""

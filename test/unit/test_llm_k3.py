@@ -128,9 +128,12 @@ class TestKimiK3(unittest.TestCase):
       fill = 127 if name.endswith("weight_scale") else 0
       value.replace(Tensor.full(value.shape, fill, dtype=value.dtype if value.dtype is dtypes.uint8 else dtypes.bfloat16, device="PYTHON"))
     self.assertIsInstance(next(model.generate([1], chunk_size=2)), int)
-    for _ in range(3): self.assertIsInstance(next(model.generate([1, 2, 3, 4], chunk_size=2)), int)
+    prompt = [1, 2, 3, 4]
+    for _ in range(3): self.assertIsInstance(next(model.generate(prompt.copy(), chunk_size=2)), int)
+    self.assertEqual(model.get_start_pos(model._cached_tokens + [42]), len(prompt))
+    self.assertEqual(model.get_start_pos([9, 2, 3, 4, 42]), 0)
     self.assertIsInstance(next(model.generate([1, 2, 3, 4, 5], chunk_size=3)), int)
-    self.assertEqual(set(model.recurrent_greedy_prefill_jits), {2, 3})
+    self.assertEqual(set(model.recurrent_greedy_prefill_jits), {2})
     self.assertEqual(model._cached_tokens[:4], [1, 2, 3, 4])
 
 if __name__ == "__main__": unittest.main()
