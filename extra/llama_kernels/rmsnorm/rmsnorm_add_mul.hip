@@ -1,5 +1,12 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_bf16.h>
+#if WRITE_MXFP4_ROW
+#include "quantize_mxfp4_device.h"
+#endif
+
+#ifndef WRITE_MXFP4_ROW
+#define WRITE_MXFP4_ROW 0
+#endif
 
 constexpr int VEC = 8;
 static_assert(HIDDEN % (THREADS * VEC) == 0);
@@ -8,8 +15,15 @@ constexpr int VECS_PER_THREAD = HIDDEN / (THREADS * VEC);
 extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_add_mul_fwd(
     __hip_bfloat16* __restrict__ out, __hip_bfloat16* __restrict__ h_out, float* __restrict__ rrms,
     const __hip_bfloat16* __restrict__ x, const __hip_bfloat16* __restrict__ residual,
-    const __hip_bfloat16* __restrict__ weight) {
+    const __hip_bfloat16* __restrict__ weight
+#if WRITE_MXFP4_ROW
+    , uint8_t* __restrict__ row_fp4, uint8_t* __restrict__ row_scale
+#endif
+    ) {
   __shared__ float sums[THREADS];
+#if WRITE_MXFP4_ROW
+  __shared__ uint16_t quant_row[HIDDEN];
+#endif
   const int tid = threadIdx.x;
   float w[VECS_PER_THREAD * VEC];
   #pragma unroll
@@ -49,7 +63,21 @@ extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_add_mul_fwd(
       #pragma unroll
       for (int i = 0; i < VEC; i++) y[i] = __hip_bfloat16(hv[v*VEC+i] * rs * w[v*VEC+i]);
       *reinterpret_cast<float4*>(&out[row*HIDDEN+h]) = *reinterpret_cast<float4*>(y);
+#if WRITE_MXFP4_ROW
+      *reinterpret_cast<float4*>(&quant_row[h]) = *reinterpret_cast<float4*>(y);
+#endif
     }
     __syncthreads();
+#if WRITE_MXFP4_ROW
+    #pragma unroll
+    for (int q = 0; q < HIDDEN / (THREADS * 4); q++) {
+      const int col = q * THREADS * 4 + tid * 4;
+      const int lane = tid & 7;
+      const auto result = mxfp4::quantize(mxfp4::load_bf16x4(quant_row + col), lane);
+      mxfp4::store_fp4<false>(row_fp4, row, col / 2, HIDDEN / 2, result.fp4);
+      if (lane == 0) mxfp4::store_scale(row_scale, row, col / 32, HIDDEN / 32, result.scale);
+    }
+    __syncthreads();
+#endif
   }
 }

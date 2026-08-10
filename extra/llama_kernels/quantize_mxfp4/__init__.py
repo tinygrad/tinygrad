@@ -6,16 +6,22 @@ from extra.llama_kernels import alloc_like, compile_hip
 
 # A backward producer may create the exact row/column representations consumed by
 # MXFP4 GEMM backward. The BF16 gradient remains the autograd value and is the key.
-_grad_mxfp4_mailbox:dict[UOp, tuple[UOp, UOp, UOp, UOp]] = {}
+_grad_mxfp4_mailbox:dict[UOp, tuple[UOp|None, UOp|None, UOp|None, UOp|None]] = {}
+
+def alloc_mxfp4_row_outputs(x:Tensor, *, flatten_row:bool=False) -> tuple[Tensor, Tensor]:
+  M, N = math.prod(x.shape[:-1]), x.shape[-1]
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  row_axis = 0 if flatten_row and axis is not None else axis
+  shape = (M, N//2) if flatten_row else (*x.shape[:-1], N//2)
+  scale_shape = (M, N//32) if flatten_row else (*x.shape[:-1], N//32)
+  return alloc_like(shape, dtypes.uint8, x.device, row_axis), alloc_like(scale_shape, dtypes.uint8, x.device, row_axis)
 
 def alloc_mxfp4_outputs(x:Tensor, *, flatten_row:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
   axis = x.uop.axis if isinstance(x.device, tuple) else None
-  row_axis = 0 if flatten_row and axis is not None else axis
   col_axis = None if axis is None else (0 if axis == x.ndim-1 else 1)
-  return (alloc_like((M, N//2) if flatten_row else (*x.shape[:-1], N//2), dtypes.uint8, x.device, row_axis),
-          alloc_like((M, N//32) if flatten_row else (*x.shape[:-1], N//32), dtypes.uint8, x.device, row_axis),
-          alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
+  row_fp4, row_scale = alloc_mxfp4_row_outputs(x, flatten_row=flatten_row)
+  return (row_fp4, row_scale, alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
           alloc_like((N, M//32), dtypes.uint8, x.device, col_axis))
 
 @functools.cache

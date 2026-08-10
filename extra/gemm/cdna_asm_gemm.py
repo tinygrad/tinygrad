@@ -395,7 +395,13 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp, save_original_input:bool=Fals
   gbase = gradient.base if hasattr(gradient, "base") else gradient
   prequant = _grad_mxfp4_mailbox.pop(gbase, None) or _grad_mxfp4_mailbox.pop(gradient, None)
   if prequant is None: g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
-  else: g_row, scale_g_row, g_col, scale_g_col = (Tensor(x, device=a.device) for x in prequant)
+  else:
+    assert prequant[0] is not None and prequant[1] is not None
+    g_row, scale_g_row = Tensor(prequant[0], device=a.device), Tensor(prequant[1], device=a.device)
+    if prequant[2] is None or prequant[3] is None:
+      assert prequant[2] is prequant[3] is None
+      _, _, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True, row=False)
+    else: g_col, scale_g_col = Tensor(prequant[2], device=a.device), Tensor(prequant[3], device=a.device)
   grad_a = _mxfp4_gemm_quantized(g_row, w_col, scale_g_row, scale_w_col).reshape(*a.shape[:-1], w.shape[-1])
   grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
   return (None, None, None, None, None, grad_a.uop, grad_w.uop) + (None,)*(len(inputs)-7)
@@ -407,7 +413,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None, mxfp4:bool=False,
              mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
-             mxfp4_x:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, save_original_input:bool=False,
+             mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None, save_original_input:bool=False,
              return_mxfp4_saves:bool=False) -> Tensor|tuple[Tensor, Tensor, Tensor]:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   assert not return_mxfp4_saves or (mxfp4 and not save_original_input)
@@ -449,7 +455,12 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
       fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       w = b.T
-      if mxfp4_x is not None: a_q, scale_a, a_col, scale_a_col = mxfp4_x
+      if mxfp4_x is not None:
+        a_q, scale_a, a_col, scale_a_col = mxfp4_x
+        assert a_q is not None and scale_a is not None
+        if a_col is None or scale_a_col is None:
+          assert a_col is scale_a_col is None
+          _, _, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True, row=False)
       elif save_original_input:
         a_q, scale_a, _, _ = quantize_mxfp4(a, shuffle_col=True, col=False)
         a_col = scale_a_col = None

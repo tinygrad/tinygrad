@@ -1,5 +1,12 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_bf16.h>
+#if WRITE_MXFP4_ROW
+#include "quantize_mxfp4_device.h"
+#endif
+
+#ifndef WRITE_MXFP4_ROW
+#define WRITE_MXFP4_ROW 0
+#endif
 
 constexpr int VEC = 8;
 static_assert(HIDDEN % (THREADS * VEC) == 0);
@@ -8,10 +15,16 @@ constexpr int VECS_PER_THREAD = ELEMS_PER_THREAD / VEC;
 
 extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_add_mul_bwd(
     __hip_bfloat16* __restrict__ dh, float* __restrict__ dweight_partial,
+#if WRITE_MXFP4_ROW
+    uint8_t* __restrict__ row_fp4, uint8_t* __restrict__ row_scale,
+#endif
     const __hip_bfloat16* __restrict__ dout, const __hip_bfloat16* __restrict__ dh_direct,
     const __hip_bfloat16* __restrict__ h_in, const float* __restrict__ rrms,
     const __hip_bfloat16* __restrict__ weight) {
   __shared__ float sums[THREADS];
+#if WRITE_MXFP4_ROW
+  __shared__ uint16_t quant_row[HIDDEN];
+#endif
   const int tid = threadIdx.x, wg = blockIdx.x;
   float w[ELEMS_PER_THREAD], dw[ELEMS_PER_THREAD] = {};
   #pragma unroll
@@ -52,8 +65,22 @@ extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_add_mul_bwd(
       #pragma unroll
       for (int i = 0; i < VEC; i++) { const int j=v*VEC+i; o[i]=__hip_bfloat16(rs*(dy[j]-y[j]*mean)+direct[j]); }
       *reinterpret_cast<float4*>(&dh[row*HIDDEN+h]) = *reinterpret_cast<float4*>(o);
+#if WRITE_MXFP4_ROW
+      *reinterpret_cast<float4*>(&quant_row[h]) = *reinterpret_cast<float4*>(o);
+#endif
     }
     __syncthreads();
+#if WRITE_MXFP4_ROW
+    #pragma unroll
+    for (int q = 0; q < HIDDEN / (THREADS * 4); q++) {
+      const int col = q * THREADS * 4 + tid * 4;
+      const int lane = tid & 7;
+      const auto result = mxfp4::quantize(mxfp4::load_bf16x4(quant_row + col), lane);
+      mxfp4::store_fp4<false>(row_fp4, row, col / 2, HIDDEN / 2, result.fp4);
+      if (lane == 0) mxfp4::store_scale(row_scale, row, col / 32, HIDDEN / 32, result.scale);
+    }
+    __syncthreads();
+#endif
   }
   #pragma unroll
   for (int v = 0; v < VECS_PER_THREAD; v++) {

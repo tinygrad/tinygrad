@@ -40,7 +40,7 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
            next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
-           x_prequant_mxfp4:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+           x_prequant_mxfp4:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None,
            save_original_input:bool=False, save_mxfp4_input:bool=False) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
@@ -97,10 +97,11 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
                        grad_amax_state=grad_amax_state, next_grad_amax_state=next_grad_amax_state)
     return out, x_normed, rrms, ret
   if MXFP4:
-    from extra.llama_kernels.rmsnorm import rmsnorm_mul
-    normed, rrms = rmsnorm_mul(x, norm, eps)
+    from extra.llama_kernels.rmsnorm import rmsnorm_mul_mxfp4
+    normed, rrms, normed_mxfp4 = rmsnorm_mul_mxfp4(x, norm, eps)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
-                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
+                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
+                       x_prequant_mxfp4=normed_mxfp4)
     return out, normed, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
@@ -116,10 +117,11 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
                        grad_amax_state=grad_amax_state, next_grad_amax_state=next_grad_amax_state)
     return out, h, x_normed, rrms, ret
   if MXFP4:
-    from extra.llama_kernels.rmsnorm import rmsnorm_add_mul
-    normed, h, rrms = rmsnorm_add_mul(x, residual, norm, eps)
+    from extra.llama_kernels.rmsnorm import rmsnorm_add_mul_mxfp4
+    normed, h, rrms, normed_mxfp4 = rmsnorm_add_mul_mxfp4(x, residual, norm, eps)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
-                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w)
+                       next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
+                       x_prequant_mxfp4=normed_mxfp4)
     return out, h, normed, rrms, ret
   h = x + residual
   x_normed, rrms = rmsnorm(h, eps)
