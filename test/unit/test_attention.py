@@ -5,7 +5,7 @@ from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.kimi import _shard_kimi
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
-  apply_rope as apply_rope_new, l2norm, precompute_freqs_cis, pairwise_topk,
+  apply_rope as apply_rope_new, iterative_topk, l2norm, precompute_freqs_cis, pairwise_topk,
 )
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -197,6 +197,23 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     alpha = np.exp(-self._softplus_np(np.arange(1, 5)).reshape(1, 2, 1, 2))
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha, rtol=1e-5, atol=1e-5)
 
+  def test_kda_safe_gate_decay(self):
+    config = self._make_config(n_heads=2, kda_full_rank_gate=True, kda_gate_lower_bound=-5.0,
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
+    block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.]]])
+    block.ssm_f_a.weight = Tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])
+    block.ssm_f_b.weight = Tensor([[1., 0.], [0., 1.], [1., 1.], [2., 1.]])
+    block.ssm_dt["bias"] = Tensor.zeros(4)
+    block.ssm_a = Tensor([[-2.], [-3.]])  # stores -exp(A_log)
+    block._init_state(x)
+    initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
+    block.recurrent_state.assign(initial_state).realize()
+    block._attention(x, 0).realize()
+    gate_logits = np.arange(1, 5, dtype=np.float32).reshape(1, 2, 2)
+    exp_a = np.array([2., 3.], dtype=np.float32).reshape(1, 2, 1)
+    alpha = np.exp(-5.0 / (1.0 + np.exp(-(exp_a * gate_logits)))).reshape(1, 2, 1, 2)
+    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha, rtol=2e-5, atol=2e-5)
+
   def test_kda_chunked_prefill_matches_decode(self):
     config = self._make_config(max_context=4, n_heads=2,
       ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True), kda_split_qkv=True)
@@ -266,6 +283,14 @@ class TestPairwiseTopk(unittest.TestCase):
         expected = set(np.argsort(-data[b, t])[:5].tolist())
         self.assertEqual(set(sel.numpy()[b, t].tolist()), expected)
         np.testing.assert_allclose(vals.numpy()[b, t], data[b, t][sel.numpy()[b, t]])
+
+  def test_iterative_matches_numpy(self):
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((2, 3, 896), dtype=np.float32)
+    vals, sel = iterative_topk(Tensor(data), 16)
+    expected = np.argsort(-data, axis=-1, stable=True)[..., :16]
+    np.testing.assert_equal(sel.numpy(), expected)
+    np.testing.assert_allclose(vals.numpy(), np.take_along_axis(data, expected, axis=-1))
 
 if __name__ == '__main__':
   unittest.main()

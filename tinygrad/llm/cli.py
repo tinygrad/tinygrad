@@ -127,7 +127,48 @@ class FallbackTemplate:
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
 
-from tinygrad.llm.serve import LLMServer
+class KimiK3Template:
+  """Official K3 XTML envelope for text-only system/user/assistant conversations."""
+  OPEN, CLOSE, SEP, END = "<|open|>", "<|close|>", "<|sep|>", "<|end_of_msg|>"
+  def _open(self, tag:str, attrs:tuple[tuple[str, str], ...]=()) -> str:
+    escaped = ((k, str(v).replace("&", "&amp;").replace('"', "&quot;")) for k,v in attrs)
+    return self.OPEN + tag + "".join(f' {k}="{v}"' for k,v in escaped) + self.SEP
+  def _close(self, tag:str) -> str: return self.CLOSE + tag + self.SEP
+  def _message(self, role:str, content:str, name:str|None=None) -> str:
+    attrs = (("role", role),) + (() if name is None else (("name", name),))
+    return self._open("message", attrs) + content + self._close("message") + self.END
+  @staticmethod
+  def _content(message:dict) -> str:
+    content = message.get("content")
+    if content is None: return ""
+    if isinstance(content, str): return content
+    if isinstance(content, list):
+      if any(part.get("type") != "text" for part in content): raise ValueError("Kimi K3 native loader is text-only; image content is not implemented")
+      return "".join(part["text"] for part in content)
+    raise ValueError(f"unsupported Kimi K3 content type {type(content).__name__}")
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False, **kwargs) -> str:
+    if tools or any(m.get("role") == "tool" or m.get("tool_calls") for m in messages):
+      raise ValueError("Kimi K3 XTML tool rendering is not implemented in the native text loader")
+    effort = kwargs.get("thinking_effort", "max")
+    if effort not in ("low", "high", "max"): raise ValueError(f"invalid Kimi K3 thinking_effort {effort!r}")
+    body = "`thinking_effort` guides on how much to think in your thinking channel (not including the response channel), " \
+           "supported values include `low`, `medium`, `high`, and `max`.\n" \
+           f"Now the system is invoked with `thinking_effort={effort}`."
+    out = self._open("message", (("role", "system"), ("type", "thinking-effort"))) + body + self._close("message") + self.END
+    for message in messages:
+      role = message["role"]
+      if role in ("user", "system"):
+        out += self._message(role, self._content(message), message.get("name"))
+      elif role == "assistant":
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+        content = self._open("think") + str(reasoning) + self._close("think")
+        content += self._open("response") + self._content(message) + self._close("response")
+        out += self._message(role, content, message.get("name"))
+      else: raise ValueError(f"unsupported Kimi K3 role {role!r}")
+    if add_generation_prompt: out += self._open("message", (("role", "assistant"),)) + self._open("think")
+    return out
+
+from tinygrad.llm.serve import LLMServer, StreamRouter
 
 def main():
   parser = argparse.ArgumentParser()
@@ -137,13 +178,25 @@ def main():
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
-  parser.add_argument("--devices", type=int, default=1, help="Tensor-parallel device count (Kimi MXFP4 requires 4)")
+  parser.add_argument("--devices", type=int, default=1, help="Tensor-parallel device count (Kimi-Linear requires 4, Kimi K3 requires 8)")
   args = parser.parse_args()
 
   # load the model
   model_path = pathlib.Path(args.model)
   kv:dict[str, typing.Any]
-  if model_path.is_dir() and (model_path / "tinygrad-kimi.json").exists():
+  is_k3 = False
+  if model_path.is_dir() and (model_path / "config.json").exists():
+    raw_config = json.loads((model_path / "config.json").read_text())
+    is_k3 = raw_config.get("model_type") == "kimi_k3"
+  if is_k3:
+    from tinygrad.llm.kimi_k3 import load_kimi_k3, load_kimi_tokenizer_data
+    model, kv = load_kimi_k3(model_path, args.max_context, args.devices), {}
+    normal, special, bos, eos = load_kimi_tokenizer_data(model_path)
+    tok = SimpleTokenizer(normal, special, "kimi-k2", bos_id=bos, eos_id=eos, eot_id=eos)
+    model_name = "Kimi-K3"
+    tok_cfg = json.loads((model_path / "tokenizer_config.json").read_text())
+    ct = tok_cfg.get("chat_template")
+  elif model_path.is_dir() and (model_path / "tinygrad-kimi.json").exists():
     from tinygrad.llm.kimi import load_kimi, load_kimi_tokenizer_data
     model, kv = load_kimi(model_path, args.max_context, args.devices), {}
     normal, special, bos, eos = load_kimi_tokenizer_data(model_path)
@@ -161,7 +214,7 @@ def main():
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
-  template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
+  template: jinja2.Template|FallbackTemplate|KimiK3Template = KimiK3Template() if is_k3 else FallbackTemplate(tok)
   if ct is not None:
     try:
       import jinja2
@@ -201,15 +254,26 @@ def main():
   while 1:
     try: messages.append({"role":"user", "content":input('>>> ')})
     except EOFError: break
-    ids = tok.encode(template.render(messages=messages, add_generation_prompt=True))
-    reply, dec = "", tok.stream_decoder()
+    rendered = template.render(messages=messages, add_generation_prompt=True)
+    ids = tok.encode(rendered)
+    reply, reasoning_reply, dec = "", "", tok.stream_decoder()
+    xtml = rendered.rstrip().endswith("<|open|>think<|sep|>")
+    router = StreamRouter(reasoning=xtml or rendered.rstrip().endswith("<think>"), xtml=xtml)
     for next_id in model.generate(ids):
       if tok.is_end(next_id):
-        sys.stdout.write(dec() + "\n\n")
+        for field,text in router.route(dec(), final=True):
+          if field == "content": reply += text
+          elif field == "reasoning_content": reasoning_reply += text
+          sys.stdout.write(text)
+        sys.stdout.write("\n\n")
         break
-      reply += (piece := dec(next_id))
-      sys.stdout.write(piece)
-      sys.stdout.flush()
-    messages.append({"role":"assistant", "content":reply})
+      for field,text in router.route(dec(next_id)):
+        if field == "content": reply += text
+        elif field == "reasoning_content": reasoning_reply += text
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    assistant = {"role":"assistant", "content":reply}
+    if reasoning_reply: assistant["reasoning_content"] = reasoning_reply
+    messages.append(assistant)
 
 if __name__ == "__main__": main()

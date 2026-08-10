@@ -34,9 +34,10 @@ def normalize_messages(messages:list[dict]) -> None:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  def __init__(self, reasoning:bool=False):
+  def __init__(self, reasoning:bool=False, xtml:bool=False):
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
+    self.xtml = xtml
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
     if tag in self.buf:
@@ -51,10 +52,20 @@ class StreamRouter:
       if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
       self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split("</think>", final)
+      emit, done = self.split("<|close|>think<|sep|>" if self.xtml else "</think>", final)
       if emit: yield "reasoning_content", emit
       if not done: return
+      self.mode = "content_open" if self.xtml else "content"
+    if self.mode == "content_open":
+      _, found = self.split("<|open|>response<|sep|>", final)
+      if not found: return
       self.mode = "content"
+    if self.mode == "done": return
+    if self.xtml and self.mode == "content":
+      emit, found = self.split("<|close|>response<|sep|>", final)
+      if emit: yield "content", emit
+      if found: self.mode = "done"
+      return
     if self.mode == "tool": return
     emit, found = self.split("<tool_call>", final)
     if emit: yield "content", emit
@@ -67,7 +78,7 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False):
+                reasoning:bool=False, xtml:bool=False):
     model, tok = self.server.model, self.server.tok
     prompt_tokens = len(ids)
     cache_start_pos = model.get_start_pos(ids)
@@ -78,7 +89,7 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = pt = time.perf_counter()
     dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
+    router = StreamRouter(reasoning, xtml)
     def log_stats(interrupted:bool=False):
       et = time.perf_counter()
       total = f"total:{et-st:6.2f}s"
@@ -139,9 +150,10 @@ class Handler(HTTPRequestHandler):
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      xtml = rendered.rstrip().endswith("<|open|>think<|sep|>")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=xtml or rendered.rstrip().endswith("<think>"), xtml=xtml)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
