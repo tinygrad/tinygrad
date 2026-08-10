@@ -406,7 +406,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
              a_pretranspose:Tensor|None=None, mxfp4:bool=False,
-             mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, save_original_input:bool=False,
+             mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+             mxfp4_x:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, save_original_input:bool=False,
              return_mxfp4_saves:bool=False) -> Tensor|tuple[Tensor, Tensor, Tensor]:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   assert not return_mxfp4_saves or (mxfp4 and not save_original_input)
@@ -444,10 +445,12 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     if mxfp4:
+      assert mxfp4_x is None or not save_original_input, "prequantized MXFP4 input already supplies its column representation"
       tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
       fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       w = b.T
-      if save_original_input:
+      if mxfp4_x is not None: a_q, scale_a, a_col, scale_a_col = mxfp4_x
+      elif save_original_input:
         a_q, scale_a, _, _ = quantize_mxfp4(a, shuffle_col=True, col=False)
         a_col = scale_a_col = None
       else: a_q, scale_a, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
